@@ -6,7 +6,8 @@ import type { WeavingWorker } from "./weaving";
 
 export function createDialogueApp(options: { databasePath: string; weavingWorker?: WeavingWorker }) {
   const app = new Hono();
-  const dialogues = new DialogueService(options.databasePath);
+  const worker = options.weavingWorker;
+  const dialogues = new DialogueService(options.databasePath, worker ? (runId) => worker.readPreview(runId) : undefined);
   app.onError((error, context) => {
     const code = error instanceof DialogueError ? error.code : "storage_error";
     const status = code === "not_found" ? 404 : code === "operation_conflict" || code === "turn_conflict" ? 409 : code === "invalid_input" || code === "invalid_selection" ? 400 : 503;

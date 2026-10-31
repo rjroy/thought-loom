@@ -272,6 +272,10 @@ remote-phone access. Keep the same database-path override if using one.
    that the native service is responding. Missing setup keeps input queued;
    configure your own service before expecting a response.
 3. **Latest exchange** separates your input from canonical AI response text.
+   When ordinary response text is available while the agent works, a transient
+   **Preview** appears through periodic updates; partial text is not saved to
+   SQLite. The final canonical reply replaces it. Without partial text, the
+   responding status remains visible until an outcome is confirmed.
    **Developed here** shows only confirmed domain changes, not a model’s prose
    claim that it saved something. A run can complete with no written reply or
    no useful changes. Long replies have a full-reply disclosure. Older saved

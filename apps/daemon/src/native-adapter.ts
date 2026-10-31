@@ -5,12 +5,13 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { loopbackOrigin, toolId, toolRecord, type ToolAction, type FollowUpContextLimits } from "@thoughtloom/contracts";
+import { loopbackOrigin, toolId, toolRecord, type ToolAction, type FollowUpContextLimits, type DialoguePreview } from "@thoughtloom/contracts";
 import { OwnedGrants, supportedToolActions } from "./tool-boundary";
 import { openDatabase } from "./storage";
 import { runScope, type RunScope } from "./run-scope";
 import { dialoguePrompt } from "./dialogue-data";
 import { followUpContextLimits, followUpPrompt } from "./follow-up-prompt";
+import { DialoguePreviewMonitor, previewLimits, type NativeTextEvent, type PreviewLimits, type SubscribeText, type TextSubscription } from "./dialogue-preview";
 
 // Port models only the application-used facts; production maps these to the
 // maintained client. It never creates or manages a native process.
@@ -23,7 +24,8 @@ export type NativeSession = {
   ownerDialogueId?: string; ownerTurnId?: string; ownerTurnSourceId?: string;
   ownerInputHash?: string;
 };
-type HistoryMessage = { id: string; parentId?: string; type?: "user" | "assistant" | "idle"; state: "pending" | "completed" | "failed" | "interrupted"; text?: string };
+type HistoryMessage = { id: string; parentId?: string; type?: "user" | "assistant" | "idle"; state: "pending" | "completed" | "failed" | "interrupted"; text?: string;
+  agent?: string; model?: NativeSession["model"]; textParts?: string[] };
 type Watch = { changed(): boolean; close(): Promise<void> };
 export interface NativeClientPort {
   discover(file: string, version: string): Promise<{ url: string; version: string; pid: number } | null>;
@@ -38,6 +40,7 @@ export interface NativeClientPort {
   // concrete connector returns ordered user/assistant records instead.
   history(sessionId: string, cursor?: string): Promise<{ messages: HistoryMessage[]; next?: string }>;
   watch?(sessionId: string): Promise<Watch>;
+  subscribeText?: SubscribeText;
   close?(): Promise<void>;
 }
 
@@ -46,6 +49,8 @@ export type NativeWeavingOptions = {
   model: { providerID: string; id: string; variant?: string }; operations?: ToolAction[];
   dialogueOperations?: ToolAction[];
   followUpContextLimits?: FollowUpContextLimits;
+  previewLimits?: PreviewLimits;
+  now?: () => number;
 };
 
 // Injection seam for exercising the concrete maintained-client mapping without
@@ -74,11 +79,18 @@ export class NativeWeavingAdapter implements WeavingAdapter {
   private readonly attempted = new Set<string>();
   private endpoint: { version: string; pid: number } | undefined;
   private closed = false;
+  // The worker admits only one active job globally. Never accumulate monitors
+  // for an index of past dialogues or for capture/follow-up jobs.
+  private preview: DialoguePreviewMonitor | undefined;
+  private readonly limits: PreviewLimits;
+  private readonly now: () => number;
 
   constructor(options: NativeWeavingOptions) {
     this.options = { ...options, model: { ...options.model }, operations: [...(options.operations ?? ["record_interpretation"])], ...(options.dialogueOperations ? { dialogueOperations: [...options.dialogueOperations] } : {}),
       ...(options.followUpContextLimits ? { followUpContextLimits: { ...options.followUpContextLimits } } : {}) };
     this.client = options.client ?? createMaintainedClient(this.options);
+    try { this.limits = previewLimits(options.previewLimits); } catch { throw new NativeAdapterError("invalid_configuration"); }
+    this.now = options.now ?? Date.now;
   }
 
   private validate() {
@@ -141,6 +153,7 @@ export class NativeWeavingAdapter implements WeavingAdapter {
       this.verify(await this.client.getSession(run.sessionId), run);
       if (this.options.databasePath) new OwnedGrants(this.options.databasePath).bind({ run, location: this.options.location,
         agent: this.options.agent, sourceIds: [...scope.sourceIds], operations: actionsForScope(this.options, scope) });
+      if (scope.kind === "dialogue") await this.ensurePreview(run);
     });
   }
 
@@ -195,6 +208,9 @@ export class NativeWeavingAdapter implements WeavingAdapter {
       const watch = await this.client.watch?.(run.sessionId);
       try {
         this.verify(await this.client.getSession(run.sessionId), run);
+        if (ownedScope(this.options, run).kind === "dialogue") await this.ensurePreview(run);
+        const monitor = this.preview?.matches(run) ? this.preview : undefined;
+        const checkpoint = monitor?.checkpoint();
         const before = await this.client.activity(run.sessionId);
         let cursor: string | undefined;
         const cursors = new Set<string>();
@@ -203,6 +219,8 @@ export class NativeWeavingAdapter implements WeavingAdapter {
         let canonical: HistoryMessage | undefined;
         let assistant: HistoryMessage | undefined;
         let foreignInput = false;
+        let previewAssistant: HistoryMessage | undefined;
+        let previewIdentityValid = true;
         for (let page = 0; ; page++) {
           if (page >= 100) throw new NativeAdapterError("history_unavailable");
           const result = await this.client.history(run.sessionId, cursor);
@@ -216,6 +234,12 @@ export class NativeWeavingAdapter implements WeavingAdapter {
                 (message.parentId === undefined || message.parentId === run.promptId)) {
               canonical = message;
               if (message.type === "assistant" && message.id.startsWith("msg_") && typeof message.text === "string") assistant = message;
+              if (message.type === "assistant" && currentPrompt === run.promptId) {
+                const identity = message.agent === this.options.agent && message.model?.providerID === this.options.model.providerID &&
+                  message.model.id === this.options.model.id && (message.model.variant ?? "default") === (this.options.model.variant ?? "default");
+                if (!identity) previewIdentityValid = false;
+                if (identity && message.id.startsWith("msg_")) previewAssistant = message;
+              }
             }
           }
           if (!result.next) break;
@@ -225,6 +249,10 @@ export class NativeWeavingAdapter implements WeavingAdapter {
         }
         const after = await this.client.activity(run.sessionId);
         this.verify(await this.client.getSession(run.sessionId), run);
+        if (monitor && checkpoint) {
+          if (foreignInput || !previewIdentityValid) monitor.reject(foreignInput ? "foreign_input" : "message_identity");
+          else monitor.correlate(previewAssistant?.id, previewAssistant?.textParts, checkpoint);
+        }
         if (watch?.changed() || foreignInput || before.active || after.active) return { kind: "pending" };
         if ((canonical?.state === "failed" || canonical?.state === "interrupted") && after.outcome === canonical.state) {
           this.attempted.delete(JSON.stringify([run.runId, run.sessionId, run.promptId]));
@@ -251,7 +279,36 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     });
   }
 
-  async close(): Promise<void> { this.closed = true; await this.client.close?.(); }
+  readPreview(runId: string): DialoguePreview | undefined {
+    return this.preview?.run.runId === runId ? this.preview.peek() : undefined;
+  }
+
+  async releasePreview(run: WeavingRun): Promise<void> {
+    if (!this.preview?.matches(run)) return;
+    const monitor = this.preview; this.preview = undefined;
+    await monitor.close();
+  }
+
+  private async ensurePreview(run: WeavingRun): Promise<void> {
+    const subscribe = this.client.subscribeText;
+    if (!subscribe || this.closed) return;
+    try {
+      if (this.preview && !this.preview.matches(run)) await this.releasePreview(this.preview.run);
+      this.preview ??= new DialoguePreviewMonitor(run, subscribe.bind(this.client), this.limits, this.now);
+      await this.preview.ensure();
+    } catch {
+      // Preview transport is optional. It never fails preparation/admission or
+      // changes the job outcome, and it never retries the prompt.
+      this.preview?.reject();
+      console.warn("dialogue.preview unavailable", { runId: run.runId });
+    }
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    const monitor = this.preview; this.preview = undefined;
+    try { await monitor?.close(); } finally { await this.client.close?.(); }
+  }
 
   private async boundary<T>(operation: string, run: WeavingRun, action: () => Promise<T>): Promise<T> {
     console.info("native.operation attempt", { operation, runId: run.runId });
@@ -262,6 +319,13 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     } catch (error) {
       const failure = error instanceof NativeAdapterError ? error : new NativeAdapterError("service_unavailable");
       console.error("native.operation failed", { operation, runId: run.runId, category: failure.code });
+      if (this.preview?.matches(run)) {
+        this.preview.reject(failure.code);
+        if (failure.code === "session_ownership_mismatch" || failure.code === "command_conflict") {
+          try { await this.releasePreview(run); }
+          catch { console.warn("dialogue.preview release unavailable", { runId: run.runId }); }
+        }
+      }
       if ((failure.code === "session_ownership_mismatch" || failure.code === "command_conflict") && this.options.databasePath) {
         try { new OwnedGrants(this.options.databasePath).revoke(run.sessionId); }
         catch { throw new NativeAdapterError("service_unavailable"); }
@@ -299,6 +363,7 @@ class MaintainedClient implements NativeClientPort {
   private native: OpenCodeClient | undefined;
   private readonly lifetime = new AbortController();
   private readonly watches = new Set<Watch>();
+  private readonly textSubscriptions = new Set<TextSubscription>();
   constructor(private readonly options: NativeWeavingOptions, private readonly hooks: MaintainedClientHooks) {}
 
   private get client(): OpenCodeClient {
@@ -450,19 +515,59 @@ class MaintainedClient implements NativeClientPort {
       if (message.type === "assistant") {
         if (message.agent !== this.options.agent || message.model.providerID !== this.options.model.providerID || message.model.id !== this.options.model.id ||
             (message.model.variant ?? "default") !== (this.options.model.variant ?? "default")) throw new NativeAdapterError("history_unavailable");
-        const text = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+        const textParts = message.content.filter((part) => part.type === "text").map((part) => part.text);
+        const text = textParts.join("\n");
         const toolsSettled = message.content.every((part) => part.type !== "tool" || (part.time.completed !== undefined && ["completed", "error"].includes(part.state.status)));
         const complete = message.time.completed !== undefined && message.finish === "stop" && !message.error && toolsSettled &&
           message.agent === this.options.agent && message.model.providerID === this.options.model.providerID && message.model.id === this.options.model.id &&
           (message.model.variant ?? "default") === (this.options.model.variant ?? "default");
         const failure = message.time.completed !== undefined && message.error;
-        messages.push({ id: message.id, type: "assistant", state: complete ? "completed" : failure ? (message.error?.type === "aborted" ? "interrupted" : "failed") : "pending", text });
+        messages.push({ id: message.id, type: "assistant", agent: message.agent, model: message.model, textParts,
+          state: complete ? "completed" : failure ? (message.error?.type === "aborted" ? "interrupted" : "failed") : "pending", text });
       }
       if (message.type === "idle" && (message.outcome === "failed" || message.outcome === "interrupted")) {
         messages.push({ id: message.id, type: "idle", state: message.outcome });
       }
     }
     return { messages, ...(page.cursor.next ? { next: page.cursor.next } : {}) };
+  }
+
+  async subscribeText(sessionId: string, onEvent: (event: NativeTextEvent) => void, onGap: () => void): Promise<TextSubscription> {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
+    const iterator = this.client.event.subscribe({ signal, types: ["session.text.started", "session.text.delta", "session.text.ended"] })[Symbol.asyncIterator]();
+    const deadline = setTimeout(() => controller.abort(), 5_000);
+    try {
+      for (;;) {
+        const item = await iterator.next();
+        if (item.done) throw new NativeAdapterError("service_unavailable");
+        if (item.value.type === "server.connected") break;
+      }
+    } catch (error) {
+      controller.abort(); await iterator.return?.(); throw error;
+    } finally { clearTimeout(deadline); }
+    const consumer = (async () => {
+      try {
+        for (;;) {
+          const item = await iterator.next();
+          if (item.done) { if (!signal.aborted) onGap(); break; }
+          const event = item.value;
+          if (event.type !== "session.text.started" && event.type !== "session.text.delta" && event.type !== "session.text.ended") continue;
+          if (event.data.sessionID !== sessionId) continue;
+          const common = { id: event.id, sessionID: event.data.sessionID, assistantMessageID: event.data.assistantMessageID, ordinal: event.data.ordinal };
+          if (event.type === "session.text.started") onEvent({ ...common, type: event.type });
+          if (event.type === "session.text.delta") onEvent({ ...common, type: event.type, delta: event.data.delta });
+          if (event.type === "session.text.ended") onEvent({ ...common, type: event.type, text: event.data.text });
+        }
+      } catch { if (!signal.aborted) onGap(); }
+    })();
+    let closing: Promise<void> | undefined;
+    const subscription: TextSubscription = { close: () => closing ??= (async () => {
+      controller.abort();
+      try { await consumer; await iterator.return?.(); } finally { this.textSubscriptions.delete(subscription); }
+    })() };
+    this.textSubscriptions.add(subscription);
+    return subscription;
   }
 
   async watch(sessionId: string): Promise<Watch> {
@@ -501,6 +606,6 @@ class MaintainedClient implements NativeClientPort {
 
   async close(): Promise<void> {
     this.lifetime.abort();
-    await Promise.all([...this.watches].map((watch) => watch.close()));
+    await Promise.all([...this.watches, ...this.textSubscriptions].map((watch) => watch.close()));
   }
 }

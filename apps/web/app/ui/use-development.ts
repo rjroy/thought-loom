@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseDialogueStopReceipt, parseDialogueTurnReceipt, parseDialogueView, type DialogueSelection, type DialogueView } from "@thoughtloom/contracts";
-import { creationKey, DevelopmentError, getDialogue, postDevelopment, selectionKey } from "../../lib/development-client";
+import { creationKey, DevelopmentError, getDialogue, postDevelopment, reconcileDialogue, selectionKey } from "../../lib/development-client";
 
 type Pending = { key: string; text: string };
 type Context = { selection: DialogueSelection; dialogue: DialogueView | null; draft: string; error: string; notice: string; loading: boolean; sending: boolean; pending: Pending | null; busyConflict: boolean; stopPending: boolean };
@@ -17,16 +17,51 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
   const [opening, setOpening] = useState(false);
   const [contexts, setContexts] = useState<Record<string, Context>>({ [firstKey]: context(initialSelection, initialDialogue) });
   const all = useRef(contexts), current = useRef(selected), callback = useRef(onSnapshot);
-  const creating = useRef(new Map<string, Promise<DialogueView>>()), reads = useRef(new Set<string>());
+  const creating = useRef(new Map<string, Promise<DialogueView>>()), reads = useRef(new Map<string, symbol>());
+  const requests = useRef(new Map<string, { controller: AbortController; promise: Promise<DialogueView> }>());
+  const controllers = useRef(new Set<AbortController>());
   const sends = useRef(new Set<string>()), stops = useRef(new Map<string, { key: string; expectedRunId: string | null }>());
   const mounted = useRef(true);
   const navigationIntent = useRef(0);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; for (const controller of controllers.current) controller.abort(); controllers.current.clear(); requests.current.clear(); }; }, []);
   useEffect(() => { callback.current = onSnapshot; }, [onSnapshot]);
   const patch = useCallback((key: string, values: Partial<Context>) => {
     const previous = all.current[key]; if (!previous) return;
     const next = { ...all.current, [key]: { ...previous, ...values } }; all.current = next; if (mounted.current) setContexts(next);
   }, []);
+  const accept = useCallback((key: string, view: DialogueView) => {
+    const entry = all.current[key];
+    if (!mounted.current || !entry || selectionKey(entry.selection) !== selectionKey(view.selection) || (entry.dialogue && entry.dialogue.id !== view.id)) return null;
+    const accepted = reconcileDialogue(entry.dialogue, view);
+    patch(key, { dialogue: accepted }); callback.current(accepted); return accepted;
+  }, [patch]);
+  const load = useCallback(async (id: string, signal?: AbortSignal, followLatest = false) => {
+    // Superseded transports may still deliver; request identity, not cancellation,
+    // decides authority. Every read remains cancellable and timeout-bounded.
+    const controller = new AbortController();
+    const request = { controller,
+      promise: getDialogue(id, root, signal ? AbortSignal.any([signal, controller.signal]) : controller.signal) };
+    requests.current.set(id, request); controllers.current.add(request.controller);
+    try {
+      let candidate = request;
+      while (true) {
+        try {
+          const view = await candidate.promise;
+          if (!mounted.current || request.controller.signal.aborted || signal?.aborted) return null;
+          const latest = requests.current.get(id);
+          if (latest === candidate && !candidate.controller.signal.aborted) return view;
+          if (!followLatest || !latest) return null;
+          candidate = latest;
+        } catch (error) {
+          if (!mounted.current || request.controller.signal.aborted || signal?.aborted) return null;
+          const latest = requests.current.get(id);
+          if (latest === candidate) { if (candidate.controller.signal.aborted) return null; throw error; }
+          if (!followLatest || !latest) return null;
+          candidate = latest;
+        }
+      }
+    } finally { controllers.current.delete(request.controller); }
+  }, [root]);
   const url = useCallback((id: string, key: string, explicit = false) => {
     if (!mounted.current || current.current !== key || window.location.pathname !== `/sources/${encodeURIComponent(root)}/inquiry`) return;
     const next = new URL(window.location.href);
@@ -35,19 +70,19 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
     window.history.replaceState(null, "", next);
   }, [root]);
   const read = useCallback(async (key: string, manual = false, signal?: AbortSignal) => {
-    const entry = all.current[key]; if (!entry?.dialogue || reads.current.has(key)) return;
-    reads.current.add(key);
+    const entry = all.current[key]; if (!entry?.dialogue || (reads.current.has(key) && !manual)) return;
+    const token = Symbol(); reads.current.set(key, token);
     try {
-      const view = await getDialogue(entry.dialogue.id, root, signal);
-      if (signal?.aborted) return;
-      const last = view.turns.at(-1), notice = all.current[key].notice;
-      patch(key, { dialogue: view, notice: last?.stopRequested || !last || !isActiveTurn(last.status) || notice.startsWith("Discussion could not refresh") ? "" : notice,
+      const view = await load(entry.dialogue.id, signal);
+      if (!view || reads.current.get(key) !== token) return;
+      const accepted = accept(key, view); if (!accepted) return;
+      const last = accepted.turns.at(-1), notice = all.current[key].notice;
+      patch(key, { notice: last?.stopRequested || !last || !isActiveTurn(last.status) || notice.startsWith("Discussion could not refresh") ? "" : notice,
         ...(manual ? { busyConflict: false, error: "" } : {}) });
-      callback.current(view);
     } catch {
-      if (!signal?.aborted) patch(key, { notice: "Discussion could not refresh. Saved input and the last confirmed response are kept. Check status to try again; nothing is resent." });
-    } finally { reads.current.delete(key); }
-  }, [root, patch]);
+      if (!signal?.aborted && reads.current.get(key) === token) patch(key, { notice: "Discussion could not refresh. Saved input and the last confirmed response are kept. Check status to try again; nothing is resent." });
+    } finally { if (reads.current.get(key) === token) reads.current.delete(key); }
+  }, [load, accept, patch]);
   const ensure = useCallback(async (key: string, explicit = false): Promise<DialogueView> => {
     const entry = all.current[key];
     if (entry.dialogue) { if (explicit || entry.dialogue.turns.length) url(entry.dialogue.id, key, explicit); return entry.dialogue; }
@@ -60,19 +95,21 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
         if (!receipt || receipt.sourceId !== root || selectionKey(receipt.selection) !== selectionKey(entry.selection)) throw new DevelopmentError(503, "invalid_receipt");
         // Creation receipts intentionally replay their original snapshot. Read
         // current history before showing a resumed context as empty/new.
-        const view = await getDialogue(receipt.id, root);
-        patch(key, { dialogue: view, error: "", loading: false });
+        const loaded = await load(receipt.id);
+        const view = loaded ? accept(key, loaded) : all.current[key]?.dialogue;
+        if (!view) throw new DevelopmentError(503, "discussion_unavailable");
+        patch(key, { error: "", loading: false });
         // Resolving an empty context is not navigation. Avoid replacing history
         // while someone is simply following another source or a results link.
         if (explicit || view.turns.length) url(view.id, key, explicit);
-        if (mounted.current) callback.current(view); return view;
+        return view;
       } catch (error) {
         patch(key, { loading: false, error: "The discussion could not be confirmed. Your draft is kept. Retry send will reuse the same context request." });
         throw error;
       } finally { creating.current.delete(key); }
     })();
     creating.current.set(key, task); return task;
-  }, [patch, root, url]);
+  }, [patch, root, url, load, accept]);
 
   useEffect(() => {
     // Query/derivation navigation changes the selected context, not the root
@@ -82,11 +119,11 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
     const key = initialDialogue && existing?.dialogue && existing.dialogue.id !== initialDialogue.id ? `${firstKey}@${initialDialogue.id}` : firstKey;
     if (!all.current[key]) {
       const next = { ...all.current, [key]: context(initialSelection, initialDialogue) }; all.current = next; setContexts(next);
-    } else if (initialDialogue && !all.current[key].dialogue) patch(key, { dialogue: initialDialogue });
+    } else if (initialDialogue) accept(key, initialDialogue);
     current.current = key; setSelected(key);
     if (initialDialogue) { callback.current(all.current[key].dialogue ?? initialDialogue); void read(key); }
     else void ensure(key).catch(() => {});
-  }, [ensure, firstKey, initialDialogue, initialSelection, patch, read]);
+  }, [ensure, firstKey, initialDialogue, initialSelection, accept, read]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setInterval(() => {
@@ -111,17 +148,20 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
   async function activateDialogue(id: string): Promise<DialogueView | null> {
     const intent = ++navigationIntent.current;
     const known = Object.entries(all.current).find(([, entry]) => entry.dialogue?.id === id);
-    if (known) { current.current = known[0]; setSelected(known[0]); void read(known[0]); return known[1].dialogue; }
+    if (known) { current.current = known[0]; setSelected(known[0]); void read(known[0], true); return known[1].dialogue; }
     setOpening(true);
     try {
-      const view = await getDialogue(id, root), basic = selectionKey(view.selection);
-      if (!mounted.current || intent !== navigationIntent.current) return null;
+      // Navigation may follow a newer background read, but never accept the
+      // superseded response itself. The intent fence still rejects later clicks.
+      const view = await load(id, undefined, true);
+      if (!view || !mounted.current || intent !== navigationIntent.current) return null;
+      const basic = selectionKey(view.selection);
       const existing = all.current[basic];
       const key = existing?.dialogue && existing.dialogue.id !== id ? `${basic}@${id}` : basic;
       if (!all.current[key]) { const next = { ...all.current, [key]: context(view.selection, view) }; all.current = next; setContexts(next); }
-      else patch(key, { dialogue: view });
-      current.current = key; setSelected(key); callback.current(view); return view;
-    } catch { patch(current.current, { notice: "That discussion could not be opened for this original. Your current draft remains here." }); return null; }
+      const accepted = accept(key, view); if (!accepted) return null;
+      current.current = key; setSelected(key); return accepted;
+    } catch { if (mounted.current && intent === navigationIntent.current) patch(current.current, { notice: "That discussion could not be opened for this original. Your current draft remains here." }); return null; }
     finally { setOpening(false); }
   }
   function edit(text: string) { patch(current.current, { draft: text }); }

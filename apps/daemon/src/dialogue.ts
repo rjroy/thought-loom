@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { DIALOGUE_LIMITS, isIdempotencyKey, isRecordId, parseDialogueInput, parseDialogueTurnInput, parseDialogueTurnReceipt, parseDialogueView,
   parseDialogueStopInput, parseDialogueStopReceipt, type DialogueStopInput, type DialogueStopReceipt,
-  type DialogueInput, type DialogueTurnInput, type DialogueTurnReceipt, type DialogueView } from "@thoughtloom/contracts";
+  type DialogueInput, type DialogueTurnInput, type DialogueTurnReceipt, type DialogueView, type DialoguePreview } from "@thoughtloom/contracts";
 import { openDatabase, sourceOrigin } from "./storage";
 import { dialogueHeader, snapshotContext, dialogueChanges } from "./dialogue-data";
 import { KnowledgeError } from "./knowledge";
@@ -17,7 +17,8 @@ type TurnRow = { id: string; dialogueId: string; sourceId: string; jobId: string
 type TurnResult = { kind: "created" | "replayed"; receipt: DialogueTurnReceipt };
 const turnColumns = `t.id,t.dialogue_id AS dialogueId,t.source_id AS sourceId,t.job_id AS jobId,t.created_at AS createdAt,s.text,s.provenance,j.status`;
 
-function view(db: Database, id: string): DialogueView | null {
+type PreviewReader = (runId: string) => DialoguePreview | undefined;
+function view(db: Database, id: string, readPreview?: PreviewReader): DialogueView | null {
   const row = dialogueHeader(db, id);
   if (!row) return null;
   const rows = db.query<TurnRow, [string]>(`SELECT ${turnColumns},o.assistant_text AS assistant,o.outcome,
@@ -25,11 +26,16 @@ function view(db: Database, id: string): DialogueView | null {
     EXISTS(SELECT 1 FROM dialogue_stop_requests stop WHERE stop.turn_id=t.id) AS stopRequested FROM dialogue_turns t JOIN sources s ON s.id=t.source_id
     JOIN jobs j ON j.id=t.job_id LEFT JOIN dialogue_outcomes o ON o.turn_id=t.id WHERE t.dialogue_id=? AND j.kind='dialogue' ORDER BY t.position DESC LIMIT ${DIALOGUE_LIMITS.turns + 1}`).all(id);
   const result = parseDialogueView({ ...row,
-    turns: rows.slice(0, DIALOGUE_LIMITS.turns).reverse().map((turn) => ({ id: turn.id, jobId: turn.jobId, createdAt: turn.createdAt, status: turn.status,
+    turns: rows.slice(0, DIALOGUE_LIMITS.turns).reverse().map((turn) => {
+      const preview = turn.assistant === null && turn.outcome === null && turn.runId && ["running", "uncertain"].includes(turn.status)
+        ? readPreview?.(turn.runId) : undefined;
+      return { id: turn.id, jobId: turn.jobId, createdAt: turn.createdAt, status: turn.status,
       stopRequested: !!turn.stopRequested, actions: { stop: { eligible: !turn.stopRequested && ["queued", "running", "uncertain"].includes(turn.status),
         expectedRunId: turn.status === "queued" ? null : turn.runId }, retry: false },
       source: { id: turn.sourceId, text: turn.text, provenance: turn.provenance, createdAt: turn.createdAt, origin: sourceOrigin(db, turn.sourceId) }, changes: dialogueChanges(db, turn.jobId),
-      ...(turn.assistant !== null ? { assistant: { text: turn.assistant } } : {}), ...(turn.outcome ? { outcome: turn.outcome } : {}) })), turnsTruncated: rows.length > DIALOGUE_LIMITS.turns });
+      ...(preview && preview.runId === turn.runId ? { preview } : {}),
+      ...(turn.assistant !== null ? { assistant: { text: turn.assistant } } : {}), ...(turn.outcome ? { outcome: turn.outcome } : {}) };
+    }), turnsTruncated: rows.length > DIALOGUE_LIMITS.turns });
   if (!result) throw new DialogueError("storage_error");
   return result;
 }
@@ -40,7 +46,7 @@ function receipt(turn: Pick<TurnRow, "id" | "dialogueId" | "sourceId" | "jobId" 
 }
 
 export class DialogueService {
-  constructor(private readonly databasePath: string) {}
+  constructor(private readonly databasePath: string, private readonly readPreview?: PreviewReader) {}
 
   create(sourceId: string, input: DialogueInput, key?: string): DialogueView {
     if (!isRecordId(sourceId) || !parseDialogueInput(input) || (key !== undefined && !isIdempotencyKey(key))) throw new DialogueError("invalid_input");
@@ -76,7 +82,7 @@ export class DialogueService {
 
   get(id: string): DialogueView | null {
     if (!isRecordId(id)) throw new DialogueError("invalid_input");
-    return this.storage("read", false, { dialogueId: id }, (db) => view(db, id));
+    return this.storage("read", false, { dialogueId: id }, (db) => view(db, id, this.readPreview));
   }
 
   stop(id: string, turnId: string, key: string, input: DialogueStopInput): DialogueStopReceipt {

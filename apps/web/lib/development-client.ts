@@ -23,10 +23,25 @@ export async function postDevelopment(path: string, input: object, key: string):
 }
 
 export async function getDialogue(id: string, root: string, signal?: AbortSignal) {
-  const response = await fetch(`/api/dialogues/${encodeURIComponent(id)}`, { cache: "no-store", signal: signal ?? AbortSignal.timeout(10_000) });
+  const timeout = AbortSignal.timeout(10_000);
+  const response = await fetch(`/api/dialogues/${encodeURIComponent(id)}`, { cache: "no-store", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   const view = response.ok ? parseDialogueView(await response.json()) : null;
   if (!view || view.id !== id || view.sourceId !== root) throw new DevelopmentError(response.status, "discussion_unavailable");
   return view;
+}
+
+// Canonical outcomes are immutable. A delayed live snapshot must not revive
+// their preview, or remove a later turn already observed in this discussion.
+export function reconcileDialogue(previous: ReturnType<typeof parseDialogueView>, incoming: NonNullable<ReturnType<typeof parseDialogueView>>) {
+  if (!previous) return incoming;
+  if (previous.id !== incoming.id || previous.sourceId !== incoming.sourceId || selectionKey(previous.selection) !== selectionKey(incoming.selection)) throw new DevelopmentError(503, "discussion_identity_changed");
+  const last = incoming.turns.at(-1), position = last ? previous.turns.findIndex((turn) => turn.id === last.id) : -1;
+  if ((!last && previous.turns.length) || (position >= 0 && position < previous.turns.length - 1)) return previous;
+  const known = new Map(previous.turns.map((turn) => [turn.id, turn]));
+  return { ...incoming, turns: incoming.turns.map((turn) => {
+    const prior = known.get(turn.id);
+    return prior && (prior.assistant !== undefined || ["completed", "failed", "interrupted"].includes(prior.status)) ? prior : turn;
+  }) };
 }
 
 export function selectionKey(selection: DialogueSelection): string {

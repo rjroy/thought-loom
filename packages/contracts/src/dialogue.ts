@@ -5,6 +5,8 @@ import { parseDialogueContext, parseDialogueSelection, type DialogueSelectedCont
 export * from "./dialogue-context";
 
 export const DIALOGUE_LIMITS = { turnText: 32_000, turns: 100, evidenceSources: 32, pastTurns: 4, pastCharacters: 16_000 } as const;
+export const DIALOGUE_PREVIEW_MAX_CHARACTERS = 64_000;
+export type DialoguePreview = { runId: string; messageId: string; text: string; truncated: boolean };
 export type DialogueInput = { selection: DialogueSelection };
 export type DialogueTurnInput = { text: string };
 export type DialogueTurnReceipt = { id: string; dialogueId: string; sourceId: string; jobId: string; createdAt: string; status: "queued" };
@@ -13,7 +15,7 @@ export type DialogueStopReceipt = DialogueStopInput & { id: string; dialogueId: 
 export type DialogueTurnActions = { stop: { eligible: boolean; expectedRunId: string | null }; retry: false };
 export type DialogueChange = { kind: "interpretation" | "developing-idea" | "relationship" | "alias"; id: string; versionId?: string };
 export type DialogueTurnView = { id: string; jobId: string; source: Source; createdAt: string; status: WeavingJobStatus; changes: DialogueChange[]; assistant?: { text: string }; outcome?: "succeeded" | "failed" | "interrupted";
-  stopRequested?: boolean; actions?: DialogueTurnActions };
+  stopRequested?: boolean; actions?: DialogueTurnActions; preview?: DialoguePreview };
 export type DialogueView = { id: string; sourceId: string; selection: DialogueSelection; selectedContext: DialogueSelectedContext;
   createdAt: string; turns: DialogueTurnView[]; turnsTruncated: boolean };
 
@@ -46,6 +48,11 @@ function actions(value: unknown): DialogueTurnActions | null {
       (value.stop.expectedRunId !== null && !isRecordId(value.stop.expectedRunId))) return null;
   return { stop: { eligible: value.stop.eligible, expectedRunId: value.stop.expectedRunId }, retry: false };
 }
+export function parseDialoguePreview(value: unknown): DialoguePreview | null {
+  return record(value) && isRecordId(value.runId) && typeof value.messageId === "string" && value.messageId.startsWith("msg_") &&
+    value.messageId.length <= 256 && typeof value.text === "string" && value.text.length <= DIALOGUE_PREVIEW_MAX_CHARACTERS && typeof value.truncated === "boolean"
+    ? { runId: value.runId, messageId: value.messageId, text: value.text, truncated: value.truncated } : null;
+}
 export function parseDialogueView(value: unknown): DialogueView | null {
   if (!record(value) || !isRecordId(value.id) || !isRecordId(value.sourceId) || !date(value.createdAt) || typeof value.turnsTruncated !== "boolean") return null;
   const selection = parseDialogueSelection(value.selection);
@@ -64,8 +71,13 @@ export function parseDialogueView(value: unknown): DialogueView | null {
     const turnActions = entry.actions === undefined ? undefined : actions(entry.actions);
     if (turnActions === null || (entry.stopRequested !== undefined && typeof entry.stopRequested !== "boolean") ||
         (turnActions?.stop.eligible && (entry.stopRequested || !["queued", "running", "uncertain"].includes(entry.status)))) return null;
+    // A transient field can never displace canonical evidence, including empty text.
+    const preview = entry.preview !== undefined && entry.assistant === undefined && entry.outcome === undefined && ["running", "uncertain"].includes(entry.status)
+      ? parseDialoguePreview(entry.preview) : undefined;
+    if (preview === null || (preview && turnActions && preview.runId !== turnActions.stop.expectedRunId)) return null;
     turns.push({ id: entry.id, jobId: entry.jobId, source, createdAt: entry.createdAt, status: entry.status, changes,
       ...(typeof entry.stopRequested === "boolean" ? { stopRequested: entry.stopRequested } : {}), ...(turnActions ? { actions: turnActions } : {}),
+      ...(preview ? { preview } : {}),
       ...(record(entry.assistant) && typeof entry.assistant.text === "string" ? { assistant: { text: entry.assistant.text } } : {}), ...(entry.outcome ? { outcome: entry.outcome } : {}) });
   }
   for (const key of ["id", "jobId"] as const) if (new Set(turns.map((turn) => turn[key])).size !== turns.length) return null;

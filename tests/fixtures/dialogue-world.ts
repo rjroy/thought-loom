@@ -14,7 +14,7 @@ import { followUpExample } from "./follow-up-content";
 type Outcome = "pending" | "succeeded" | "failed" | "interrupted";
 type ScriptedAnswer = { outcome: Outcome; text: string };
 const backgroundActions: ToolAction[] = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship"];
-type FollowUpFixtureOptions = { followUp?: boolean; followUpLimits?: Partial<FollowUpLimits> };
+type FollowUpFixtureOptions = { followUp?: boolean; followUpLimits?: Partial<FollowUpLimits>; previewLimit?: number };
 
 // Harness-only composition. The real native adapter uses a scripted port, never
 // Service.discover/OpenCode.make, a personal registration or a model endpoint.
@@ -58,6 +58,7 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
   const transportCredential = "browser-dialogue-fixture-only-not-a-real-secret";
   const tools = createToolApp({ databasePath, location, transportCredential });
   const sessions = new Map<string, NativeSession>(), answers = new Map<string, ScriptedAnswer>();
+  const textListeners = new Map<string, Parameters<NonNullable<NativeClientPort["subscribeText"]>>[1]>();
   const prompts: WeavingRun[] = [], stopCalls: string[] = [], written = new Set<string>();
   let now = 1_000, revision = 0;
   const operations: ToolAction[] = options.followUp ? [...backgroundActions, "record_idea"] : ["read_source", "read_item", "record_idea"];
@@ -81,6 +82,7 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
       sessions.set(run.sessionId, session); return session;
     },
     async getSession(id) { const session = sessions.get(id); if (!session) throw new Error("Unknown scripted session"); return session; },
+    async subscribeText(sessionId, onEvent) { textListeners.set(sessionId, onEvent); return { async close() { textListeners.delete(sessionId); } }; },
     async prompt(run) {
       prompts.push(run); answers.set(run.sessionId, { outcome: "pending", text: "" });
       if (scenario === "uncertain" || (uncertainFollowUp && scopeFor(run).kind === "follow_up")) throw new Error("Example uncertain prompt acknowledgement");
@@ -96,12 +98,14 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
       const run = prompts.find((entry) => entry.sessionId === sessionId), answer = answers.get(sessionId);
       if (!run || !answer) throw new Error("Unknown scripted history");
       return { messages: [{ id: run.promptId, type: "user", state: "completed" },
-        { id: `msg_example_${run.runId}`, type: "assistant", state: answer.outcome === "succeeded" ? "completed" : answer.outcome, text: answer.text }] };
+        { id: `msg_example_${run.runId}`, parentId: run.promptId, type: "assistant", agent, model: { providerID: "example", id: "scripted" },
+          state: answer.outcome === "succeeded" ? "completed" : answer.outcome, text: answer.text, textParts: answer.outcome === "pending" ? [] : [answer.text] }] };
     },
   };
   const makeWorker = () => new WeavingWorker({ databasePath, now: () => now, leaseMs: 100,
     adapter: new NativeWeavingAdapter({ client, databasePath, registrationFile: join(dirname(databasePath), "example-registration-unused.json"),
-      location, agent, model: { providerID: "example", id: "scripted" }, operations: captureOperations, dialogueOperations: [...operations] }) });
+      location, agent, model: { providerID: "example", id: "scripted" }, operations: captureOperations, dialogueOperations: [...operations],
+      ...(options.previewLimit ? { previewLimits: { maxCharacters: options.previewLimit, maxFragments: 8, maxEventIds: 32, ttlMs: 60_000 } } : {}) }) });
   let worker = makeWorker();
   const makeApp = () => createApp({ databasePath, weavingWorker: worker, weavingConfigured: availability !== "unconfigured", weavingStatus: () => availability === "available" ? "waiting" : "unavailable",
     ...(options.followUpLimits ? { followUpLimits: options.followUpLimits } : {}) });
@@ -149,6 +153,14 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
       answers.set(run.sessionId, { outcome, text }); now += 101; await worker.recover();
     },
     writeIdea,
+    async preview(text: string, start: boolean) {
+      const run = prompts.at(-1); if (!run || scopeFor(run).kind !== "dialogue") throw new Error("No admitted dialogue run");
+      const emit = textListeners.get(run.sessionId); if (!emit) throw new Error("Preview subscription unavailable");
+      const common = { sessionID: run.sessionId, assistantMessageID: `msg_example_${run.runId}`, ordinal: 0 };
+      if (start) emit({ ...common, id: `evt_start_${crypto.randomUUID()}`, type: "session.text.started" });
+      emit({ ...common, id: `evt_delta_${crypto.randomUUID()}`, type: "session.text.delta", delta: text });
+      now += 101; await worker.recover();
+    },
     async writeFollowUp(multiple = false) {
       const run = prompts.at(-1); if (!run || scopeFor(run).kind !== "follow_up") throw new Error("No admitted follow-up run");
       await tool(run, "read-source", "call_follow_up_root", { sourceId: root.id });
@@ -215,10 +227,10 @@ export function createBrowserDialogueControls(directory: string) {
       if (!path.startsWith("/__browser/dialogue")) return active ? active.fetch(request) : null;
       if (path === "/__browser/dialogue/reset" && request.method === "POST") { await active?.close(); active = null; return Response.json({ reset: true }); }
       if (path === "/__browser/dialogue/world" && request.method === "POST") {
-        const input = await request.json() as { scenario?: BrowserDialogueScenario; empty?: boolean; followUp?: boolean; limitedFollowUp?: boolean };
+        const input = await request.json() as { scenario?: BrowserDialogueScenario; empty?: boolean; followUp?: boolean; limitedFollowUp?: boolean; previewLimit?: number };
         if (input.scenario !== undefined && input.scenario !== "available" && input.scenario !== "uncertain") return Response.json({ error: "Invalid example scenario" }, { status: 400 });
         await active?.close(); active = await createDialogueWorld(join(directory, `dialogue-${crypto.randomUUID()}.sqlite`), input.scenario ?? "available", input.empty === true,
-          { followUp: input.followUp === true, ...(input.limitedFollowUp === true ? { followUpLimits: { jobs: 1, origins: 1, targets: 1, changes: 1 } } : {}) });
+          { followUp: input.followUp === true, ...(input.limitedFollowUp === true ? { followUpLimits: { jobs: 1, origins: 1, targets: 1, changes: 1 } } : {}), ...(input.previewLimit ? { previewLimit: input.previewLimit } : {}) });
         return Response.json(active.metadata);
       }
       if (!active) return Response.json({ error: "No example dialogue world" }, { status: 409 });
@@ -226,6 +238,7 @@ export function createBrowserDialogueControls(directory: string) {
       if (request.method !== "POST") return Response.json({ error: "Unknown example control" }, { status: 404 });
       if (path === "/__browser/dialogue/start") { const result = await active.start(); return Response.json({ result, ...active.metrics() }); }
       if (path === "/__browser/dialogue/write-idea") { await active.writeIdea(); return Response.json(active.metrics()); }
+      if (path === "/__browser/dialogue/preview") { const input = await request.json() as { text?: unknown; start?: unknown }; if (typeof input.text !== "string" || typeof input.start !== "boolean") return Response.json({ error: "Invalid preview fixture" }, { status: 400 }); await active.preview(input.text, input.start); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/write-follow-up") { const input = await request.json() as { multiple?: boolean }; await active.writeFollowUp(input.multiple === true); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/write-neighbor-follow-up") { await active.writeNeighborFollowUp(); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/write-alias") { await active.writeAlias(); return Response.json(active.metrics()); }

@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { parseDialogueView, parseDialogueTurnReceipt, type DialogueView, type DialogueTurnReceipt, type InquiryView } from "../../packages/contracts/src";
 import { dialogueExample as example, type BrowserDialogueScenario } from "../fixtures/dialogue-content";
 import type { BrowserDialogueMetadata } from "../fixtures/dialogue-world";
@@ -61,6 +62,160 @@ async function stop(page: Page, request: APIRequestContext, receipt: DialogueTur
 }
 
 test.afterEach(async ({ request }) => { await control(request, "reset"); });
+
+test("explicit discussion navigation wins over a later background resume read", async ({ page, request }) => {
+  const meta = await world(request);
+  // Seed A using the same deterministic creation key the actual page uses.
+  const selection = { kind: "source", id: meta.root.id };
+  const selectionIdentity = JSON.stringify(["source", meta.root.id]);
+  const key = `discussion_${createHash("sha256").update(JSON.stringify(["thoughtloom-context-v1", meta.root.id, selectionIdentity])).digest("hex")}`;
+  const created = await request.post(`${daemonURL}/sources/${meta.root.id}/dialogues`, { headers: { "idempotency-key": key }, data: { selection } });
+  expect(created.status()).toBe(201);
+  const a = parseDialogueView(await created.json()); expect(a).not.toBeNull();
+  if (!a) throw new Error("Expected source dialogue fixture");
+  const submitted = await request.post(`${daemonURL}/dialogues/${a.id}/turns`, { headers: { "idempotency-key": "navigation-race-turn" }, data: { text: example.thought } });
+  expect(submitted.status()).toBe(201);
+  const turn = parseDialogueTurnReceipt(await submitted.json()); expect(turn).not.toBeNull();
+  if (!turn) throw new Error("Expected saved fixture turn");
+  await control(request, "start"); await complete(request, example.reply, true);
+  const idea = (await inquiry(request, meta.root.id)).items.find((item) => item.current.text === example.idea);
+  expect(idea).toBeDefined();
+  if (!idea) throw new Error("Expected confirmed developing idea");
+
+  let receiptCaptured = () => {}, releaseReceipt = () => {}, receiptFinished = () => {};
+  const receiptReady = new Promise<void>((resolve) => { receiptCaptured = resolve; });
+  const receiptGate = new Promise<void>((resolve) => { releaseReceipt = resolve; });
+  const receiptDone = new Promise<void>((resolve) => { receiptFinished = resolve; });
+  let explicitCaptured = () => {}, releaseExplicit = () => {}, explicitFinished = () => {}, backgroundFinished = () => {};
+  const explicitReady = new Promise<void>((resolve) => { explicitCaptured = resolve; });
+  const explicitGate = new Promise<void>((resolve) => { releaseExplicit = resolve; });
+  const explicitDone = new Promise<void>((resolve) => { explicitFinished = resolve; });
+  const backgroundDone = new Promise<void>((resolve) => { backgroundFinished = resolve; });
+  let receiptHeld = false, getCount = 0;
+  const createPath = `**/api/sources/${meta.root.id}/dialogues`, getPath = `**/api/dialogues/${a.id}`;
+  await page.route(createPath, async (route) => {
+    if (route.request().method() !== "POST" || route.request().postDataJSON().selection.kind !== "source" || receiptHeld) return route.continue();
+    receiptHeld = true;
+    try { const response = await route.fetch(); receiptCaptured(); await receiptGate; await route.fulfill({ response }); }
+    finally { receiptFinished(); }
+  });
+  await page.route(getPath, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const count = ++getCount;
+    if (count > 2) return route.continue();
+    if (count === 1) {
+      try { const response = await route.fetch(); expect(response.status()).toBe(200); explicitCaptured(); await explicitGate; await route.fulfill({ response }); }
+      finally { explicitFinished(); }
+    } else {
+      try { const response = await route.fetch(); expect(response.status()).toBe(200); await route.fulfill({ response }); }
+      finally { backgroundFinished(); }
+    }
+  });
+  try {
+    await page.goto(`/sources/${meta.root.id}/inquiry?q=coordination#development`);
+    await receiptReady;
+    await reading(page, meta.item!.id).getByRole("button", { name: "Discuss this reading", exact: true }).click();
+    await expect(target(page).getByText(example.reading, { exact: true })).toBeVisible();
+    await reading(page, idea.id).getByRole("link", { name: "From this discussion", exact: true }).click();
+    await explicitReady;
+    releaseReceipt(); await receiptDone; await backgroundDone;
+    releaseExplicit(); await explicitDone;
+    // Both GETs succeeded; the earlier explicit navigation must still select A.
+    await expect(target(page).getByText(meta.root.text, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL((url) => url.searchParams.get("dialogue") === a.id && url.hash === `#turn-${turn.id}`);
+    await expect(latest(page).getByText(example.thought, { exact: true })).toBeVisible();
+  } finally {
+    releaseReceipt(); releaseExplicit();
+    if (receiptHeld) await receiptDone;
+    if (getCount >= 1) await explicitDone;
+    await page.unroute(createPath); await page.unroute(getPath);
+  }
+});
+
+test("live ordinary response preview grows in place before canonical text replaces it", async ({ page, request }) => {
+  const { root } = await world(request, true);
+  await page.goto(`/sources/${root.id}/inquiry#development`);
+  const turn = await send(page, example.thought);
+  await expect(progress(page).getByRole("heading", { name: "Waiting for agent", exact: true })).toBeVisible();
+  await control(request, "start");
+  await expect(progress(page).getByRole("heading", { name: "Agent responding", exact: true })).toBeVisible();
+  await composer(page).fill(example.draftOriginal); await composer(page).focus();
+  await control(request, "preview", { start: true, text: "First ordinary " });
+  expect((await dialogue(request, turn.dialogueId)).turns[0]).toMatchObject({ status: "running", preview: { text: "First ordinary " } });
+  const response = latest(page).getByRole("article", { name: "Agent response", exact: true });
+  await expect(response).toContainText("First ordinary ");
+  await expect(latest(page).getByText("Preview", { exact: true })).toBeVisible();
+  await control(request, "write-idea");
+  await expect(developed(page).getByText(example.idea, { exact: true })).toBeVisible();
+  await control(request, "preview", { start: false, text: "second chunk" });
+  await expect(response).toContainText("First ordinary second chunk");
+  await expect(composer(page)).toHaveValue(example.draftOriginal); await expect(composer(page)).toBeFocused();
+  await complete(request, "Corrected final.");
+  await expect(response).toHaveText("Corrected final.");
+  await expect(latest(page).getByText("Preview", { exact: true })).toHaveCount(0);
+  await expect(latest(page).getByRole("article", { name: "Agent response", exact: true })).toHaveCount(1);
+  expect((await metrics(request)).admissions).toHaveLength(1);
+});
+
+test("a bounded live response preview discloses truncation and yields to the complete canonical reply", async ({ page, request }) => {
+  const meta = await (await control(request, "world", { empty: true, previewLimit: 12 })).json() as BrowserDialogueMetadata;
+  await page.goto(`/sources/${meta.root.id}/inquiry#development`);
+  const turn = await send(page, example.thought); await control(request, "start");
+  await control(request, "preview", { start: true, text: "abcdefghijklmnopqrstuv" });
+  expect((await dialogue(request, turn.dialogueId)).turns[0]).toMatchObject({ preview: { text: "abcdefghijkl", truncated: true } });
+  await expect(latest(page).getByRole("article", { name: "Agent response", exact: true })).toHaveText("abcdefghijkl");
+  await expect(latest(page).getByText(/preview (?:shortened|truncated)/i)).toBeVisible();
+  await complete(request, "Complete canonical response.");
+  await expect(latest(page).getByRole("article", { name: "Agent response", exact: true })).toHaveText("Complete canonical response.");
+  await expect(latest(page).getByText(/preview (?:shortened|truncated)/i)).toHaveCount(0);
+  expect((await metrics(request)).admissions).toHaveLength(1);
+});
+
+for (const outcome of ["succeeded", "failed", "interrupted"] as const) {
+  test(`live response preview clears when the ${outcome} canonical outcome is empty`, async ({ page, request }) => {
+    const { root } = await world(request, true);
+    await page.goto(`/sources/${root.id}/inquiry#development`);
+    const turn = await send(page, example.thought); await control(request, "start");
+    await control(request, "preview", { start: true, text: "Transient preview only" });
+    expect((await dialogue(request, turn.dialogueId)).turns[0]).toMatchObject({ preview: { text: "Transient preview only" } });
+    await expect(latest(page).getByText("Transient preview only", { exact: true })).toBeVisible();
+    await control(request, "advance", { outcome, text: "" });
+    await expect(progress(page).getByRole("heading", { name: outcome === "succeeded" ? "Response complete" : `Response ${outcome}`, exact: true })).toBeVisible();
+    await expect(latest(page).getByText("Preview", { exact: true })).toHaveCount(0);
+    await expect(latest(page).getByText("Transient preview only", { exact: true })).toHaveCount(0);
+    await expect(latest(page).getByText(/no written reply/i)).toBeVisible();
+    expect((await metrics(request)).admissions).toHaveLength(1);
+  });
+}
+
+test("a held older live preview read cannot replace a newer canonical reply", async ({ page, request }) => {
+  const { root } = await world(request, true);
+  await page.goto(`/sources/${root.id}/inquiry#development`);
+  const turn = await send(page, example.thought); await control(request, "start");
+  await control(request, "preview", { start: true, text: "Old live preview" });
+  expect((await dialogue(request, turn.dialogueId)).turns[0]).toMatchObject({ preview: { text: "Old live preview" } });
+  await expect(latest(page).getByText("Old live preview", { exact: true })).toBeVisible();
+  let captured = () => {}, release = () => {}, finished = () => {}, failed: (error: unknown) => void = () => {};
+  const oldCaptured = new Promise<void>((resolve) => { captured = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const handlerFinished = new Promise<void>((resolve, reject) => { finished = resolve; failed = reject; });
+  let held = false;
+  await page.route(`**/api/dialogues/${turn.dialogueId}`, async (route) => {
+    if (held || route.request().method() !== "GET") return route.continue();
+    held = true;
+    try { const old = await route.fetch(); captured(); await gate; await route.fulfill({ response: old }); finished(); }
+    catch (error) { failed(error); throw error; }
+  });
+  try {
+    await oldCaptured;
+    await complete(request, "Short final.");
+    await progress(page).getByRole("button", { name: "Check status", exact: true }).click();
+    await expect(latest(page).getByRole("article", { name: "Agent response", exact: true })).toHaveText("Short final.", { timeout: 5_000 });
+  } finally { release(); if (held) await handlerFinished; await page.unroute(`**/api/dialogues/${turn.dialogueId}`); }
+  await expect(latest(page).getByRole("article", { name: "Agent response", exact: true })).toHaveText("Short final.");
+  await expect(latest(page).getByText("Preview", { exact: true })).toHaveCount(0);
+  expect((await metrics(request)).admissions).toHaveLength(1);
+});
 
 test("opening a confirmed developing idea focuses its formulation and derivation without losing the draft or history", async ({ page, request }) => {
   const meta = await world(request);

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { openDatabase } from "./storage";
-import { isIdempotencyKey, isRecordId, parseWeavingRetryReceipt, parseWeavingStatusView, parseWeavingWorkerView, weavingWorkerAvailable,
+import { isIdempotencyKey, isRecordId, parseDialoguePreview, parseWeavingRetryReceipt, parseWeavingStatusView, parseWeavingWorkerView, weavingWorkerAvailable, type DialoguePreview,
   type WeavingJobKind, type WeavingJobStatus, type WeavingRetryInput, type WeavingRetryReceipt, type WeavingStatusView, type WeavingWorkerView } from "@thoughtloom/contracts";
 import { enqueueDialogueFollowUp } from "./follow-up";
 import { freezeFollowUpInput, followUpOrigins, followUpTargets, followUpChanges, followUpChangeCount } from "./follow-up-data";
@@ -38,6 +38,8 @@ export interface WeavingAdapter {
   admit(run: WeavingRun): Promise<Admission>;
   inspect(run: WeavingRun): Promise<Observation>;
   stop?(run: WeavingRun): Promise<void>;
+  readPreview?(runId: string): DialoguePreview | undefined;
+  releasePreview?(run: WeavingRun): Promise<void>;
   close?(): Promise<void>;
 }
 
@@ -260,13 +262,14 @@ export class WeavingWorker {
       // Preparation cannot submit. Retain its receipt and bound future attempts;
       // an expired/replaced owner cannot requeue a newer owner's work.
       this.settle(claim, "not_admitted", claim.attempt < this.maxAttempts ? "queued" : "failed", "preparation_failed");
+      await this.releasePreview(run);
       return { kind: "unavailable" };
     }
     console.info("weaving.prepare succeeded", { runId: run.runId });
 
     // Commit the possible-admission marker before crossing the external boundary.
     // Losing a lease never authorizes another submission of these or fresh IDs.
-    if (!this.beginAdmission(claim)) return { kind: "started", run };
+    if (!this.beginAdmission(claim)) { await this.releasePreview(run); return { kind: "started", run }; }
     const admitting = { ...claim, state: "admitting" } satisfies Claim;
     let admission: Admission | undefined;
     let category: AttemptError | null = null;
@@ -279,7 +282,7 @@ export class WeavingWorker {
     const admitted = admission?.kind === "admitted";
     if (!admitted && admission?.kind !== "uncertain" && !category) category = "invalid_adapter_result";
     console.info("weaving.admit outcome", { runId: run.runId, outcome: admitted ? "admitted" : "uncertain", category });
-    this.settle(admitting, admitted ? "admitted" : "uncertain", admitted ? "running" : "uncertain", category);
+    if (!this.settle(admitting, admitted ? "admitted" : "uncertain", admitted ? "running" : "uncertain", category)) await this.releasePreview(run);
     return { kind: "started", run };
   }
 
@@ -312,9 +315,11 @@ export class WeavingWorker {
           (claim.kind !== "dialogue" || (typeof observation.assistant?.text === "string" && typeof observation.assistant.messageId === "string" && observation.assistant.messageId.startsWith("msg_")))) {
         console.info("weaving.inspect completed", { runId: claim.run.runId, recordedChanges: observation.recordedChanges });
         this.settle(claim, "completed", "completed", null, observation.recordedChanges, "succeeded", observation.assistant);
+        await this.releasePreview(claim.run);
       } else if ((observation?.kind === "failed" || observation?.kind === "interrupted") &&
           (observation.assistant === undefined || (typeof observation.assistant.text === "string" && typeof observation.assistant.messageId === "string" && observation.assistant.messageId.startsWith("msg_")))) {
         this.settle(claim, "admitted", observation.kind, null, null, observation.kind, observation.assistant);
+        await this.releasePreview(claim.run);
       } else {
         if (observation?.kind !== "pending" && !category) category = "invalid_adapter_result";
         console.info("weaving.inspect unresolved", { runId: claim.run.runId, category });
@@ -322,7 +327,7 @@ export class WeavingWorker {
         // acknowledged admission may stay running; interrupted preparation or
         // admission becomes uncertain and is never automatically resubmitted.
         const state = claim.state === "admitted" ? "admitted" : "uncertain";
-        this.settle(claim, state, state === "admitted" ? "running" : "uncertain", category);
+        if (!this.settle(claim, state, state === "admitted" ? "running" : "uncertain", category)) await this.releasePreview(claim.run);
       }
     }
   }
@@ -356,6 +361,21 @@ export class WeavingWorker {
   }
 
   async close(): Promise<void> { await this.adapter?.close?.(); }
+
+  readPreview(runId: string): DialoguePreview | undefined {
+    try {
+      const preview = parseDialoguePreview(this.adapter?.readPreview?.(runId));
+      return preview?.runId === runId ? preview : undefined;
+    } catch {
+      console.warn("weaving.preview unavailable", { runId });
+      return undefined;
+    }
+  }
+
+  private async releasePreview(run: WeavingRun): Promise<void> {
+    try { await this.adapter?.releasePreview?.(run); }
+    catch { console.warn("weaving.preview release unavailable", { runId: run.runId }); }
+  }
 
   async getJob(sourceId: string): Promise<WeavingJob | null> {
     return this.storage("job.read", false, (db) => {

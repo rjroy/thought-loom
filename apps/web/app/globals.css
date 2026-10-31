@@ -267,6 +267,12 @@ summary:hover { text-decoration: underline; }
 .turn-text { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 20px; line-height: 1.4; }
 .turn-date { margin-top: 12px; font-size: 14px; color: var(--supporting); font-variant-numeric: tabular-nums; }
 .exchange-response { margin: 0; padding: 12px 22px; border: 1px solid var(--role-border); border-radius: 6px; position: relative; }
+.exchange-input .dialogue-status { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); gap: 0 16px; }
+.exchange-input .dialogue-status .claim-actions { margin-left: 0; }
+.response-jump { font-size: 15px; min-height: 36px; }
+.exchange-response { scroll-margin-top: 24px; }
+.response-preview-label, .response-state { font-size: 15px; color: var(--supporting); }
+.response-state { margin-top: 8px; }
 .response-arrow { position: absolute; top: 20px; left: -32px; width: 31px; }
 .canonical-response, .response-excerpt { margin-top: 8px; max-width: 70ch; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.5; }
 .idea-branches { display: flex; flex-direction: column; gap: 20px; }
