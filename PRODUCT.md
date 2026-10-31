@@ -4,11 +4,11 @@
 
 ## Status
 
-Useful design experiments; no selected production design. The MVP is undefined and implementation is not authorized. The user approved exploration of the integrated inquiry description, then described the resulting screens as good experiments—not permission to build them.
+Useful design experiments; no selected production design. An MVP boundary has been discussed and recorded in `.lore/work/design/thoughtloom-mvp.md`; experiment criteria and implementation details remain open. Implementation is not authorized. The screens remain experiments, not permission to build them.
 
 ## Platform
 
-Not selected. Desktop is for deep work; phone is for quick thoughts and exploration. Desktop-web visual conventions were used for the experiments only. Native versus web delivery and any framework remain open.
+Desktop is for deep work; phone is for quick thoughts and exploration. The MVP starting direction is a Next.js web UX backed by a Hono daemon and an OpenCode-backed agent. SQLite is the starting storage choice under a single-user-daemon assumption. Deployment, phone connectivity, and the concrete agent integration remain open. The desktop mockups are experiments, not a production UI contract.
 
 ## Users
 
@@ -32,7 +32,7 @@ Desktop supports sustained thinking; phone supports quick capture and exploratio
 
 These are concept hypotheses, not existing application capabilities. Preserve original material and provenance; distinguish user claims from AI interpretations; make meaningful automated changes inspectable and reversible. Avoid gamified growth scores and equating recency, attention, or semantic similarity with value.
 
-Open: idea identity/splitting/merging, weaver autonomy and approval policy, agentic versus other search behavior, relationship semantics, conversation attachment, growth/dormancy, background triggers/cost, shipping platform, accessibility target, architecture, framework, storage, and Memory Loop integration. Nothing in a concept image resolves these.
+The MVP discussion establishes non-interactive capture-time weaving, useful basic search without requiring agentic search, contextual dialogue through constrained domain tools, and targeted follow-up weaving after discussion. Periodic aging and resurfacing are deferred. Open: idea identity/splitting/merging, precise AI revision authority and protection of user corrections, relationship semantics, conversation attachment, exact follow-up trigger scope and retry mechanics, cost bounds, deployment and access protection, accessibility target, concrete OpenCode integration, SQL schema, search implementation, and Memory Loop integration. See `.lore/work/design/thoughtloom-mvp.md`; concept images alone do not settle these decisions.
 
 ## Brand Commitments
 
@@ -52,4 +52,4 @@ Concept source: `.lore/work/concept/thoughtloom-concept.md`, including the agent
 
 The user confirmed the integrated-inquiry exploration description with “yes”: find the original thought and AI notes; develop through claim-attached dialogue; follow an emerging idea with intact derivation. The three desktop mockups illustrate successive moments of one experience, not competing features. Phone behavior was described, not image-rendered.
 
-The user subsequently authorized cleanup while retaining these useful experiments and minimal provenance. This does not select a production design or authorize application implementation, integration, architecture decisions, or an implementation plan. MVP definition has not begun and requires a separate instruction.
+The user subsequently authorized cleanup while retaining these useful experiments and minimal provenance, then discussed and requested documentation of an MVP boundary. See `.lore/work/design/thoughtloom-mvp.md` for that discussion, including the Hono/Next.js/OpenCode direction, SQLite starting choice, non-interactive weaving, useful basic search, contextual dialogue, and targeted follow-up weaving. This does not select a production design or authorize application implementation, integration, or an implementation plan.
