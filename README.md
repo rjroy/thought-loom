@@ -7,7 +7,8 @@ Automated weaving is available when explicitly connected to your own native
 agent service. Without that setup, originals remain saved and queued; capture
 does not invent AI annotations. Contextual dialogue can retain challenges, return
 canonical responses and record developing ideas through the same configured
-service. The concept mockups are guidelines,
+service. Meaningful saved changes can queue focused background follow-up;
+its status and confirmed findings stay separate from the discussion. The concept mockups are guidelines,
 not a pixel contract or a claim that the full experience is built.
 
 ## Run locally
@@ -30,6 +31,8 @@ Set `THOUGHTLOOM_DATABASE_PATH`, `THOUGHTLOOM_WEB_PORT`, or
 The responsive phone layout can be tried in desktop browser device emulation.
 **Do not expose either service to a network or use a public tunnel.** There is
 no authentication yet. Other local processes can access the loopback services.
+The services reject non-loopback or malformed request authorities and untrusted
+origins; this guard is not authentication or protection from local processes.
 Real phone access waits for a separate hosting/authentication decision.
 No OpenCode service, model, provider secret, or paid call is needed for capture
 and retrieval. Configured weaving uses your selected agent/provider/model.
@@ -199,7 +202,40 @@ the open page. Navigating away or reloading can lose **unsaved** drafts. Agent
 context contains bounded recent history, not the entire stored conversation;
 the current API does not report exact prompt-history truncation. The readable
 projection also has a finite saved-turn limit and no older-history pagination.
-Automatic targeted follow-up weaving is a later slice, not a current claim.
+
+### Inspect background follow-up
+
+1. With your own service configured, complete a discussion that actually records
+   a reading, developing idea or relationship change. A successful meaningful
+   turn can queue a **Background follow-up** pass. Prose claiming a change,
+   alias-only output, failed turns and explicitly stopped turns do not trigger
+   this path. Protected user corrections, rejection and restoration can also
+   queue a pass after their saved revision.
+2. The subordinate section below the inquiry shows what triggered each pass,
+   affected **exact versions**, worker availability and job outcome. Triggering
+   discussion/input links retain the retrieval query. Version links open known
+   history, not a silently substituted current reading. References outside the
+   bounded context are labelled rather than turned into fabricated links.
+3. Pending changes may share one unclaimed pass. Active/pending work is shown
+   before older outcomes; job/origin/target/change truncation is explicit. This
+   is a bounded projection, not a complete job dashboard or an approval inbox.
+4. Polling changes background status without taking focus, closing disclosures
+   or replacing the question draft. **View follow-up findings** explicitly loads
+   the current bounded reading snapshot. Confirmed updates retain AI attribution
+   and evidence; the discussion remains pinned to its chosen context revision.
+   Zero-change completion is valid. A new background interpretation is not a
+   developing idea merely because model prose calls it one.
+5. Missing setup and a configured-but-unavailable service are different states.
+   **Check status** only reads. Eligible definite failures/interruption may
+   offer **Retry follow-up**, fenced to that job and run. An unknown retry
+   acknowledgement retains its exact key/payload; another click replays that
+   command. A definite conflict refreshes state, and only a later explicit click
+   creates a fresh command for the current run. No source or turn is resubmitted.
+
+The native follow-up adapter is exercised with controlled scripted dependencies
+in tests; this does not establish compatibility with every live provider or
+operator policy. Provider charges and the loopback-only access boundary above
+still apply. Responsive phone layout does not enable remote phone hosting.
 
 Current setup generates separate capture/dialogue operation scopes and bundles
 the owned plugin. An older private setup does not automatically gain new tools.
@@ -214,6 +250,8 @@ Browser data requests use same-origin Next routes: `/api/captures`, `/api/search
 `/api/sources/<id>/weaving` (with a narrow `/retry` command). Dialogue routes
 create/read a pinned context, save turns and request Stop. Narrow item/relationship
 routes forward version-fenced user corrections and restore/reject commands.
+`/api/sources/<id>/follow-ups` reads background status; its narrow
+`/<jobId>/retry` command forwards only an idempotent, version-fenced retry.
 Only server code knows the internal `THOUGHTLOOM_DAEMON_URL`; it accepts only
 an operator-configured HTTP loopback base, never a URL from the browser. The
 source page also reads through that server-side boundary without caching.

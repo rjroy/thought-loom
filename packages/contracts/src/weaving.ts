@@ -2,6 +2,7 @@ import { isRecordId } from "./inspection";
 
 export type WeavingWorkerState = "starting" | "working" | "waiting" | "unavailable" | "failed" | "stopped";
 export type WeavingJobStatus = "queued" | "running" | "uncertain" | "completed" | "failed" | "interrupted";
+export type WeavingJobKind = "capture" | "dialogue" | "follow_up";
 export type WeavingWorkerView = { configured: boolean; state: WeavingWorkerState };
 export type WeavingStatusView = {
   sourceId: string;

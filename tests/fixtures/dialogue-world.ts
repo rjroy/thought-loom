@@ -7,15 +7,18 @@ import { runScope } from "../../apps/daemon/src/run-scope";
 import { openDatabase, saveCapture } from "../../apps/daemon/src/storage";
 import { createToolApp } from "../../apps/daemon/src/tool-boundary";
 import { WeavingWorker, type WeavingRun } from "../../apps/daemon/src/weaving";
-import type { Source } from "../../packages/contracts/src";
+import type { FollowUpLimits, Source, ToolAction } from "../../packages/contracts/src";
 import { dialogueExample as example, type BrowserDialogueScenario } from "./dialogue-content";
+import { followUpExample } from "./follow-up-content";
 
 type Outcome = "pending" | "succeeded" | "failed" | "interrupted";
 type ScriptedAnswer = { outcome: Outcome; text: string };
+const backgroundActions: ToolAction[] = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship"];
+type FollowUpFixtureOptions = { followUp?: boolean; followUpLimits?: Partial<FollowUpLimits> };
 
 // Harness-only composition. The real native adapter uses a scripted port, never
 // Service.discover/OpenCode.make, a personal registration or a model endpoint.
-export async function createDialogueWorld(databasePath: string, scenario: BrowserDialogueScenario, empty = false) {
+export async function createDialogueWorld(databasePath: string, scenario: BrowserDialogueScenario, empty = false, options: FollowUpFixtureOptions = {}) {
   const capture = (key: string, text: string): Source => {
     const result = saveCapture(databasePath, `dialogue-example-${key}`, { text, provenance: example.provenance });
     if (result.kind !== "created") throw new Error("Dialogue fixture requires a fresh database");
@@ -57,7 +60,9 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
   const sessions = new Map<string, NativeSession>(), answers = new Map<string, ScriptedAnswer>();
   const prompts: WeavingRun[] = [], stopCalls: string[] = [], written = new Set<string>();
   let now = 1_000, revision = 0;
-  const operations = ["read_source", "read_item", "record_idea"] as const;
+  const operations: ToolAction[] = options.followUp ? [...backgroundActions, "record_idea"] : ["read_source", "read_item", "record_idea"];
+  const captureOperations: ToolAction[] = options.followUp ? [...backgroundActions] : ["read_source"];
+  let availability: "available" | "unconfigured" | "unavailable" = "available", uncertainFollowUp = false;
   const scopeFor = (run: WeavingRun) => {
     const db = openDatabase(databasePath);
     try { const scope = runScope(db, run); if (!scope) throw new Error("Missing owned fixture scope"); return scope; }
@@ -70,14 +75,15 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
       const scope = scopeFor(run);
       const session: NativeSession = { id: run.sessionId, ownerRunId: run.runId, ownerJobId: run.jobId, ownerSourceId: run.sourceId, ownerPromptId: run.promptId,
         location, agent, model: { providerID: "example", id: "scripted", variant: "default" },
-        permissionActions: ["deny:*:*", ...(scope.kind === "dialogue" ? operations : ["read_source"]).map((action) => `allow:${action}`)],
-        ...(scope.kind === "dialogue" ? { ownerDialogueId: scope.dialogueId, ownerTurnId: scope.turnId, ownerTurnSourceId: scope.turnSourceId } : {}) };
+          permissionActions: ["deny:*:*", ...(scope.kind === "dialogue" ? operations : captureOperations).map((action) => `allow:${action}`)],
+          ...(scope.kind === "dialogue" ? { ownerDialogueId: scope.dialogueId, ownerTurnId: scope.turnId, ownerTurnSourceId: scope.turnSourceId } : {}),
+          ...(scope.kind === "follow_up" ? { ownerInputHash: scope.inputHash } : {}) };
       sessions.set(run.sessionId, session); return session;
     },
     async getSession(id) { const session = sessions.get(id); if (!session) throw new Error("Unknown scripted session"); return session; },
     async prompt(run) {
       prompts.push(run); answers.set(run.sessionId, { outcome: "pending", text: "" });
-      if (scenario === "uncertain") throw new Error("Example uncertain prompt acknowledgement");
+      if (scenario === "uncertain" || (uncertainFollowUp && scopeFor(run).kind === "follow_up")) throw new Error("Example uncertain prompt acknowledgement");
       return { promptId: run.promptId };
     },
     async cancelUndelivered(sessionId, promptId) { stopCalls.push(`cancel:${sessionId}:${promptId}`); },
@@ -95,27 +101,30 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
   };
   const makeWorker = () => new WeavingWorker({ databasePath, now: () => now, leaseMs: 100,
     adapter: new NativeWeavingAdapter({ client, databasePath, registrationFile: join(dirname(databasePath), "example-registration-unused.json"),
-      location, agent, model: { providerID: "example", id: "scripted" }, operations: ["read_source"], dialogueOperations: [...operations] }) });
+      location, agent, model: { providerID: "example", id: "scripted" }, operations: captureOperations, dialogueOperations: [...operations] }) });
   let worker = makeWorker();
-  const makeApp = () => createApp({ databasePath, weavingWorker: worker, weavingConfigured: true, weavingStatus: () => "waiting" });
+  const makeApp = () => createApp({ databasePath, weavingWorker: worker, weavingConfigured: availability !== "unconfigured", weavingStatus: () => availability === "available" ? "waiting" : "unavailable",
+    ...(options.followUpLimits ? { followUpLimits: options.followUpLimits } : {}) });
   let app = makeApp();
+
+  async function tool(run: WeavingRun, action: string, callID: string, input: object) {
+    const response = await tools.request(`/internal/tools/${action}`, { method: "POST", headers: { authorization: `Bearer ${transportCredential}`, "content-type": "application/json" },
+      body: JSON.stringify({ native: { sessionID: run.sessionId, agent, messageID: `msg_example_${run.runId}`, callID }, input }) });
+    if (response.status !== 200) throw new Error(`Scripted domain tool ${action} failed (${response.status})`);
+    return response;
+  }
 
   async function writeIdea() {
     const run = prompts.at(-1); if (!run) throw new Error("No admitted example turn");
     if (written.has(run.runId)) return;
     const scope = scopeFor(run); if (scope.kind !== "dialogue") throw new Error("Expected dialogue scope");
     const dialogue = new DialogueService(databasePath).get(scope.dialogueId); if (!dialogue) throw new Error("Missing dialogue");
-    const send = async (action: string, callID: string, input: object) => {
-      const response = await tools.request(`/internal/tools/${action}`, { method: "POST", headers: { authorization: `Bearer ${transportCredential}`, "content-type": "application/json" },
-        body: JSON.stringify({ native: { sessionID: run.sessionId, agent, messageID: `msg_example_${run.runId}`, callID }, input }) });
-      if (response.status !== 200) throw new Error(`Scripted domain tool ${action} failed (${response.status})`);
-      return response;
-    };
-    await send("read-source", "call_example_root", { sourceId: root.id });
+    const send = (action: string, callID: string, input: object) => tool(run, action, callID, input);
+    await send("read-source", "call_example_root", { sourceId: scope.rootSourceId });
     await send("read-source", "call_example_turn", { sourceId: scope.turnSourceId });
     if (dialogue.selection.kind === "item") await send("read-item", "call_example_reading", { itemId: dialogue.selection.id });
-    await send("record-idea", "call_example_develop", { rootSourceId: root.id, turnSourceId: scope.turnSourceId, dialogueId: scope.dialogueId, turnId: scope.turnId,
-      text: example.idea, evidenceSourceIds: [root.id, scope.turnSourceId],
+    await send("record-idea", "call_example_develop", { rootSourceId: scope.rootSourceId, turnSourceId: scope.turnSourceId, dialogueId: scope.dialogueId, turnId: scope.turnId,
+      text: example.idea, evidenceSourceIds: [scope.rootSourceId, scope.turnSourceId],
       ...(dialogue.selection.kind === "item" ? { derivedFrom: { itemId: dialogue.selection.id, versionId: dialogue.selection.versionId } } : {}) });
     written.add(run.runId);
   }
@@ -140,6 +149,37 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
       answers.set(run.sessionId, { outcome, text }); now += 101; await worker.recover();
     },
     writeIdea,
+    async writeFollowUp(multiple = false) {
+      const run = prompts.at(-1); if (!run || scopeFor(run).kind !== "follow_up") throw new Error("No admitted follow-up run");
+      await tool(run, "read-source", "call_follow_up_root", { sourceId: root.id });
+      await tool(run, "record-interpretation", "call_follow_up_interpretation", { sourceId: root.id, text: followUpExample.interpretation, evidenceSourceIds: [root.id] });
+      if (multiple) await tool(run, "record-interpretation", "call_follow_up_second", { sourceId: root.id, text: followUpExample.secondInterpretation, evidenceSourceIds: [root.id] });
+    },
+    async writeNeighborFollowUp() {
+      const run = prompts.at(-1);
+      if (!run || scopeFor(run).kind !== "follow_up" || run.sourceId !== counterpart.id || !item || !neighbor || !relationship) throw new Error("Expected counterpart-owned follow-up");
+      const currentItem = knowledge.getItem(neighbor.id), currentRelationship = knowledge.getRelationship(relationship.id);
+      await tool(run, "read-source", "call_neighbor_root", { sourceId: counterpart.id });
+      await tool(run, "read-source", "call_neighbor_other_source", { sourceId: root.id });
+      await tool(run, "read-item", "call_neighbor_other_item", { itemId: item.id });
+      await tool(run, "read-item", "call_neighbor_item", { itemId: neighbor.id });
+      await tool(run, "read-relationship", "call_neighbor_relationship", { relationshipId: relationship.id });
+      await tool(run, "revise-interpretation", "call_neighbor_revise", { itemId: neighbor.id, expectedVersionId: currentItem.current.id,
+        text: "Example neighbor follow-up: Explicit handoff contracts preserve context.", evidenceSourceIds: [counterpart.id] });
+      await tool(run, "read-item", "call_neighbor_item_current", { itemId: neighbor.id });
+      await tool(run, "revise-relationship", "call_neighbor_relationship_revise", { relationshipId: relationship.id, expectedVersionId: currentRelationship.current.id,
+        status: "active", rationale: "Example neighbor follow-up: A shared handoff contract needs a concrete fidelity check.", evidenceSourceIds: [root.id, counterpart.id] });
+    },
+    async writeAlias() {
+      const run = prompts.at(-1); if (!run || scopeFor(run).kind !== "dialogue") throw new Error("No admitted dialogue run");
+      await tool(run, "record-alias", "call_example_alias", { alias: followUpExample.alias, expansion: followUpExample.expansion, evidenceSourceIds: [root.id] });
+    },
+    configureFollowUp(input: { availability?: "available" | "unconfigured" | "unavailable"; uncertain?: boolean }) {
+      if (!options.followUp) throw new Error("Follow-up controls require the explicit fixture mode");
+      if (input.availability !== undefined) availability = input.availability;
+      if (input.uncertain !== undefined) uncertainFollowUp = input.uncertain;
+      app = makeApp();
+    },
     revise(target: "item" | "relationship" | "both") {
       revision++;
       if ((target === "item" || target === "both") && item) {
@@ -175,9 +215,10 @@ export function createBrowserDialogueControls(directory: string) {
       if (!path.startsWith("/__browser/dialogue")) return active ? active.fetch(request) : null;
       if (path === "/__browser/dialogue/reset" && request.method === "POST") { await active?.close(); active = null; return Response.json({ reset: true }); }
       if (path === "/__browser/dialogue/world" && request.method === "POST") {
-        const input = await request.json() as { scenario?: BrowserDialogueScenario; empty?: boolean };
+        const input = await request.json() as { scenario?: BrowserDialogueScenario; empty?: boolean; followUp?: boolean; limitedFollowUp?: boolean };
         if (input.scenario !== undefined && input.scenario !== "available" && input.scenario !== "uncertain") return Response.json({ error: "Invalid example scenario" }, { status: 400 });
-        await active?.close(); active = await createDialogueWorld(join(directory, `dialogue-${crypto.randomUUID()}.sqlite`), input.scenario ?? "available", input.empty === true);
+        await active?.close(); active = await createDialogueWorld(join(directory, `dialogue-${crypto.randomUUID()}.sqlite`), input.scenario ?? "available", input.empty === true,
+          { followUp: input.followUp === true, ...(input.limitedFollowUp === true ? { followUpLimits: { jobs: 1, origins: 1, targets: 1, changes: 1 } } : {}) });
         return Response.json(active.metadata);
       }
       if (!active) return Response.json({ error: "No example dialogue world" }, { status: 409 });
@@ -185,6 +226,14 @@ export function createBrowserDialogueControls(directory: string) {
       if (request.method !== "POST") return Response.json({ error: "Unknown example control" }, { status: 404 });
       if (path === "/__browser/dialogue/start") { const result = await active.start(); return Response.json({ result, ...active.metrics() }); }
       if (path === "/__browser/dialogue/write-idea") { await active.writeIdea(); return Response.json(active.metrics()); }
+      if (path === "/__browser/dialogue/write-follow-up") { const input = await request.json() as { multiple?: boolean }; await active.writeFollowUp(input.multiple === true); return Response.json(active.metrics()); }
+      if (path === "/__browser/dialogue/write-neighbor-follow-up") { await active.writeNeighborFollowUp(); return Response.json(active.metrics()); }
+      if (path === "/__browser/dialogue/write-alias") { await active.writeAlias(); return Response.json(active.metrics()); }
+      if (path === "/__browser/dialogue/configure-follow-up") {
+        const input = await request.json() as { availability?: "available" | "unconfigured" | "unavailable"; uncertain?: boolean };
+        if ((input.availability !== undefined && !["available", "unconfigured", "unavailable"].includes(input.availability)) || (input.uncertain !== undefined && typeof input.uncertain !== "boolean")) return Response.json({ error: "Invalid fixture availability" }, { status: 400 });
+        active.configureFollowUp(input); return Response.json(active.metrics());
+      }
       if (path === "/__browser/dialogue/advance") {
         const input = await request.json() as { outcome: Outcome; text?: string; idea?: boolean };
         if (!["pending", "succeeded", "failed", "interrupted"].includes(input.outcome) || (input.text !== undefined && typeof input.text !== "string")) return Response.json({ error: "Invalid scripted outcome" }, { status: 400 });

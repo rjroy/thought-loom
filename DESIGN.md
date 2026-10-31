@@ -138,7 +138,7 @@ components:
 
 A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.
 
-This records the built capture, retrieval, contextual dialogue, protected user revisions, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.
+This records the built capture, retrieval, contextual dialogue, protected user revisions, background follow-up, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.
 
 **Key Characteristics:**
 - Flat, high-contrast reading surfaces.
@@ -183,6 +183,7 @@ Controls have the smaller recorded radius; source reading areas, capture fields,
 - **Attribution and feedback:** distinguish your original, AI interpretations, user formulations, tentative/active hypotheses, and rejected relationships in text. Search match origin is not connection evidence. Saving/queued notices use status semantics; failures use alerts with recovery. Queued does not mean a worker is running. There is no approval inbox.
 - **Weaving status:** one shared, named region separates durable source saving, worker configuration/availability and job outcome. Quiet polling changes the status summary only when its content changes. Check status is read-only; retry appears only for eligible confirmed outcomes. Inquiry updates preserve source disclosures, stable reading keys and focus. The setup guide uses ordinary text, ordered steps and copyable commands, not a configuration editor.
 - **Development:** a quoted, pinned target precedes a Night plaintext composer and Lantern Send action. Latest saved input, canonical agent prose and confirmed developing ideas are separate semantic sections. Earlier exchanges use a native disclosure, not chat bubbles or a sidebar. Only deliberate target selection moves focus to the composer; polling never does. Stop requested is not a stopped/rolled-back claim. User correction/reversal actions stay beside the affected claim/history and report conflicts without automatic overwrites.
+- **Background follow-up:** a flat, subordinate section follows the inquiry, not a new dashboard. Worker availability, each pass’s outcome, triggering saved changes and exact affected versions are separate. Version links reveal known native history; unavailable references are labelled. New background findings enter the reading area only through an explicit View action. Quiet status updates keep the current question, focus and disclosures intact. Retry is fenced to the pass/run; uncertainty preserves the command, while a definite conflict requires another explicit click after refresh. Truncation and zero-change completion are ordinary readable states.
 
 ## Do's and Don'ts
 

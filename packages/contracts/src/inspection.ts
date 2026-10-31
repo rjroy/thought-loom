@@ -2,9 +2,11 @@ import type { SearchResult, Source, SourceOrigin } from "./index";
 import type { IdeaDerivation } from "./tools";
 
 export const INQUIRY_LIMITS = { rootItems: 64, relationships: 64, history: 32, evidencePerVersion: 32, evidenceSources: 512 } as const;
-export type FormulationView = { id: string; text: string; author: "user" | "ai"; evidenceSourceIds: string[] };
+// Receipt-backed display provenance, not authority to act on this job or source.
+export type FollowUpVersionOrigin = { jobId: string; sourceId: string };
+export type FormulationView = { id: string; text: string; author: "user" | "ai"; evidenceSourceIds: string[]; followUp?: FollowUpVersionOrigin };
 export type ItemView = { id: string; sourceId: string; kind: "interpretation" | "developing-idea"; current: FormulationView; history: FormulationView[]; historyTruncated: boolean; derivation?: IdeaDerivation };
-export type RelationshipVersionView = { id: string; status: "active" | "rejected"; rationale: string; author: "user" | "ai"; evidenceSourceIds: string[] };
+export type RelationshipVersionView = { id: string; status: "active" | "rejected"; rationale: string; author: "user" | "ai"; evidenceSourceIds: string[]; followUp?: FollowUpVersionOrigin };
 export type RelationshipView = { id: string; fromItemId: string; toItemId: string; type: "supports" | "challenges" | "suggests"; current: RelationshipVersionView; history: RelationshipVersionView[]; historyTruncated: boolean };
 export type EvidenceSource = { id: string; excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
 export type InquiryView = { source: Source; items: ItemView[]; relationships: RelationshipView[]; evidenceSources: EvidenceSource[]; truncated: boolean };
@@ -52,12 +54,17 @@ function sourceReference(value: unknown): EvidenceSource | null {
 export function parseFormulationView(value: unknown): FormulationView | null {
   if (!record(value) || !isRecordId(value.id) || !text(value.text) || !author(value.author)) return null;
   const ids = evidence(value.evidenceSourceIds);
-  return ids ? { id: value.id, text: value.text, author: value.author, evidenceSourceIds: ids } : null;
+  const followUp = value.followUp === undefined ? undefined : followUpOrigin(value.followUp);
+  return ids && followUp !== null && (!followUp || value.author === "ai") ? { id: value.id, text: value.text, author: value.author, evidenceSourceIds: ids, ...(followUp ? { followUp } : {}) } : null;
+}
+function followUpOrigin(value: unknown): FollowUpVersionOrigin | null {
+  return record(value) && isRecordId(value.jobId) && isRecordId(value.sourceId) ? { jobId: value.jobId, sourceId: value.sourceId } : null;
 }
 function relationshipVersion(value: unknown): RelationshipVersionView | null {
   if (!record(value) || !isRecordId(value.id) || !text(value.rationale) || !author(value.author) || (value.status !== "active" && value.status !== "rejected")) return null;
   const ids = evidence(value.evidenceSourceIds);
-  return ids ? { id: value.id, status: value.status, rationale: value.rationale, author: value.author, evidenceSourceIds: ids } : null;
+  const followUp = value.followUp === undefined ? undefined : followUpOrigin(value.followUp);
+  return ids && followUp !== null && (!followUp || value.author === "ai") ? { id: value.id, status: value.status, rationale: value.rationale, author: value.author, evidenceSourceIds: ids, ...(followUp ? { followUp } : {}) } : null;
 }
 function validHistory<T extends { id: string }>(current: T, history: T[]): boolean {
   return history.length > 0 && new Set(history.map((entry) => entry.id)).size === history.length && JSON.stringify(current) === JSON.stringify(history.at(-1));

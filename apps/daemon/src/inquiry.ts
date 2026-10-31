@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { INQUIRY_LIMITS as limits, parseInquiryView, type InquiryView, type Source, type ItemView, type RelationshipView, type FormulationView, type RelationshipVersionView, type EvidenceSource } from "@thoughtloom/contracts";
+import { INQUIRY_LIMITS as limits, parseInquiryView, type InquiryView, type Source, type ItemView, type RelationshipView, type FormulationView, type RelationshipVersionView, type EvidenceSource, type FollowUpVersionOrigin } from "@thoughtloom/contracts";
 import { openDatabase, sourceRecord, sourceOrigin } from "./storage";
 import { readIdeaDerivation } from "./knowledge";
 
@@ -9,11 +9,22 @@ function evidence(db: Database, table: "formulation_evidence" | "relationship_ev
   return rows.map((row) => row.id);
 }
 
+// Classify each projected version from its actual mutation receipt/run, including
+// neighboring roots. Source-local job lists are bounded status, not provenance.
+function followUpOrigin(db: Database, table: "formulations" | "relationship_revisions", id: string): { followUp?: FollowUpVersionOrigin } {
+  const entityColumn = table === "formulations" ? "item_id" : "relationship_id";
+  const origin = db.query<FollowUpVersionOrigin, [string]>(`SELECT j.id AS jobId,j.source_id AS sourceId FROM ${table} v
+    JOIN knowledge_receipts k ON k.operation_id=v.operation_id AND k.result_id=v.${entityColumn} AND k.revision_id=v.id
+    JOIN weaving_runs r ON r.id=v.run_id JOIN jobs j ON j.id=r.job_id
+    WHERE v.id=? AND v.author='ai' AND j.kind='follow_up'`).get(id);
+  return origin ? { followUp: origin } : {};
+}
+
 function readItem(db: Database, id: string): ItemView {
   const item = db.query<Pick<ItemView, "id" | "kind" | "sourceId">, [string]>("SELECT id,kind,source_id AS sourceId FROM knowledge_items WHERE id=?").get(id);
   if (!item) throw new Error("Missing inquiry item");
   const versions = db.query<Omit<FormulationView, "evidenceSourceIds">, [string]>(`SELECT id,text,author FROM formulations WHERE item_id=? ORDER BY rowid DESC LIMIT ${limits.history + 1}`).all(id);
-  const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "formulation_evidence", "formulation_id", version.id) }));
+  const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "formulation_evidence", "formulation_id", version.id), ...followUpOrigin(db, "formulations", version.id) }));
   const current = history.at(-1);
   if (!current) throw new Error("Missing inquiry formulation");
   const derivation = readIdeaDerivation(db, id);
@@ -24,7 +35,7 @@ function readRelationship(db: Database, id: string): RelationshipView {
   const relation = db.query<Pick<RelationshipView, "id" | "fromItemId" | "toItemId" | "type">, [string]>("SELECT id,from_item_id AS fromItemId,to_item_id AS toItemId,type FROM relationships WHERE id=?").get(id);
   if (!relation) throw new Error("Missing inquiry relationship");
   const versions = db.query<Omit<RelationshipVersionView, "evidenceSourceIds">, [string]>(`SELECT id,status,rationale,author FROM relationship_revisions WHERE relationship_id=? ORDER BY rowid DESC LIMIT ${limits.history + 1}`).all(id);
-  const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "relationship_evidence", "revision_id", version.id) }));
+  const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "relationship_evidence", "revision_id", version.id), ...followUpOrigin(db, "relationship_revisions", version.id) }));
   const current = history.at(-1);
   if (!current) throw new Error("Missing inquiry relationship revision");
   return { ...relation, current, history, historyTruncated: versions.length > limits.history };

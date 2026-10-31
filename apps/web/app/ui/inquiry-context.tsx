@@ -10,14 +10,19 @@ import WeavingStatus from "./weaving-status";
 import useDevelopment from "./use-development";
 import Development from "./development";
 import { DevelopmentNavigation, revealInquiryAnchor } from "./development-navigation";
+import FollowUpStatus from "./follow-up-status";
+import { pendingFollowUpVersions, stageFollowUpChanges, type PendingFollowUpVersion } from "../../lib/follow-up-client";
 
 export default function InquiryContext({ initial, weaving, query, selectedId, initialDialogue, dialogueError = "" }: { initial: InquiryView; weaving: WeavingStatusView | null; query: string; selectedId: string; initialDialogue: DialogueView | null; dialogueError?: string }) {
   const [model, setModel] = useState(initial), [refreshError, setRefreshError] = useState(false);
+  const [pendingFindings, setPendingFindings] = useState<PendingFollowUpVersion[]>([]);
   const [openedId, setOpenedId] = useState(selectedId);
   useEffect(() => { setOpenedId(selectedId); }, [selectedId]);
   // The two initial server reads are not one transaction. Reconcile once even
   // when status is unchanged, in case a run settled between those reads.
   const last = useRef(""), inFlight = useRef<Promise<boolean> | null>(null), reloadRequested = useRef(false), dialogueSignature = useRef("");
+  const acceptRequested = useRef(false), historyAnchor = useRef("");
+  const visibleVersions = useRef(new Set([...initial.items.flatMap((item) => item.history.map((version) => version.id)), ...initial.relationships.flatMap((relation) => relation.history.map((version) => version.id))]));
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const navigationIntent = useRef(0);
   useEffect(() => () => { navigationIntent.current++; }, []);
@@ -25,18 +30,25 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
   const [mutationError, setMutationError] = useState(""), [mutationBusy, setMutationBusy] = useState(false);
   const mutationRunning = useRef(false), mutationKeys = useRef(new Map<string, { signature: string; key: string }>());
   const source = initial.source;
-  const reloadKnowledge = useCallback(async () => {
+  const reloadKnowledge = useCallback(async (acceptFollowUps = false) => {
     reloadRequested.current = true;
+    if (acceptFollowUps) acceptRequested.current = true;
     if (inFlight.current) return inFlight.current;
     const task = (async () => {
       let loaded = false;
       do {
         reloadRequested.current = false;
+        const accept = acceptRequested.current; acceptRequested.current = false;
         try {
           const response = await fetch(`/api/sources/${source.id}/inquiry`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
           const next = response.ok ? parseInquiryView(await response.json()) : null;
           if (!next || next.source.id !== source.id || next.source.text !== source.text || next.source.createdAt !== source.createdAt || next.source.provenance !== source.provenance) throw new Error("Context unavailable");
-          setModel(next); setRefreshError(false); loaded = true;
+          if (accept) {
+            for (const item of next.items) for (const version of item.history) visibleVersions.current.add(version.id);
+            for (const relation of next.relationships) for (const version of relation.history) visibleVersions.current.add(version.id);
+          }
+          setPendingFindings(pendingFollowUpVersions(next, visibleVersions.current));
+          setModel((previous) => stageFollowUpChanges(previous, next, visibleVersions.current)); setRefreshError(false); loaded = true;
         } catch { setRefreshError(true); loaded = false; }
       } while (reloadRequested.current);
       return loaded;
@@ -51,10 +63,21 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
     if (await reloadKnowledge()) last.current = signature;
   }, [reloadKnowledge]);
   const snapshot = useCallback((view: DialogueView) => {
+    for (const turn of view.turns) for (const change of turn.changes) if (change.versionId) visibleVersions.current.add(change.versionId);
     const signature = JSON.stringify(view.turns.map((turn) => [turn.id, turn.status, turn.changes]));
     if (signature !== dialogueSignature.current) void reloadKnowledge().then((loaded) => { if (loaded) dialogueSignature.current = signature; });
   }, [reloadKnowledge]);
   useEffect(() => { void reloadKnowledge(); }, [initial, reloadKnowledge]);
+  useEffect(() => {
+    const reveal = () => {
+      const hash = window.location.hash;
+      if (!hash.startsWith("#version-")) { historyAnchor.current = ""; return; }
+      if (historyAnchor.current === hash || !document.getElementById(hash.slice(1))) return;
+      historyAnchor.current = hash; revealInquiryAnchor(hash.slice(1));
+    };
+    reveal(); window.addEventListener("hashchange", reveal);
+    return () => window.removeEventListener("hashchange", reveal);
+  }, [model]);
   const initialSelection = useMemo<DialogueSelection>(() => {
     const selected = initial.items.find((item) => item.id === selectedId && item.sourceId === source.id);
     return initialDialogue?.selection ?? (selected ? { kind: "item", id: selected.id, versionId: selected.current.id } : { kind: "source", id: source.id });
@@ -125,6 +148,6 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
           onReject={(reason) => mutate(`/api/relationships/${relation.id}/reject`, { expectedVersionId: relation.current.id, rationale: reason, evidenceSourceIds: relation.current.evidenceSourceIds })}
           onRestore={(version) => void mutate(`/api/relationships/${relation.id}/restore`, { expectedVersionId: relation.current.id, restoreVersionId: version })} />) : <p className="empty-reading">No connections recorded yet.</p>}</section>
       </div>
-    </div></DevelopmentNavigation.Provider>
+    </div><FollowUpStatus sourceId={source.id} query={query} initialModel={initial} pendingFindings={pendingFindings} onView={() => reloadKnowledge(true)} onWorker={setWorker} /></DevelopmentNavigation.Provider>
   </>;
 }

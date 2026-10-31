@@ -26,7 +26,7 @@ function parseSelection(value: unknown): Selection {
       !toolRecord(value.model) || !toolId(value.model.providerID) || !toolId(value.model.id) ||
       (value.model.variant !== undefined && !toolId(value.model.variant)) || !Array.isArray(value.operations) || !value.operations.length ||
       !value.operations.every((action): action is ToolAction => typeof action === "string" && DOMAIN_ACTIONS.some((allowed) => allowed === action)) ||
-      new Set(value.operations).size !== value.operations.length || (value.dialogueOperations !== undefined && (!Array.isArray(value.dialogueOperations) || !value.dialogueOperations.length || !value.dialogueOperations.every((action) => DOMAIN_ACTIONS.some((allowed) => allowed === action)) || new Set(value.dialogueOperations).size !== value.dialogueOperations.length)) || typeof value.maxSteps !== "number" || !Number.isSafeInteger(value.maxSteps) || value.maxSteps < 1 || value.maxSteps > 100) {
+      new Set(value.operations).size !== value.operations.length || value.operations.includes("record_idea") || (value.dialogueOperations !== undefined && (!Array.isArray(value.dialogueOperations) || !value.dialogueOperations.length || !value.dialogueOperations.every((action) => DOMAIN_ACTIONS.some((allowed) => allowed === action)) || new Set(value.dialogueOperations).size !== value.dialogueOperations.length)) || typeof value.maxSteps !== "number" || !Number.isSafeInteger(value.maxSteps) || value.maxSteps < 1 || value.maxSteps > 100) {
     throw new NativeSetupError("invalid_configuration");
   }
   return { registrationFile: value.registrationFile, agent: value.agent,

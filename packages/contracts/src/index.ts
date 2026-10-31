@@ -20,6 +20,8 @@ export * from "./tools";
 export * from "./weaving";
 export * from "./dialogue";
 export * from "./user-commands";
+export * from "./follow-up";
+export * from "./local-request";
 
 // Expanded search response contract; source text is an excerpt, not a replacement
 // for fetching the immutable original. Knowledge is present for formulation hits.

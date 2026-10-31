@@ -4,6 +4,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { openDatabase } from "./storage";
 import { parseIdea, parseIdeaDerivation, type IdeaInput, type IdeaDerivation } from "@thoughtloom/contracts";
+import { enqueueUserFollowUp } from "./follow-up";
 export type KnowledgeContext =
   | { actor: "user"; operationId: string }
   | { actor: "ai"; operationId: string; runId: string };
@@ -223,6 +224,9 @@ export class KnowledgeService {
       const result = action(db);
       const ref = reference(result);
       db.run("INSERT INTO knowledge_receipts(operation_id,payload_hash,result_id,revision_id) VALUES (?,?,?,?)", [context.operationId, hash, ref.resultId, ref.revisionId]);
+      if (context.actor === "user" && ["correct_item", "revise_item", "restore_item", "revise_relationship", "restore_relationship"].includes(name)) {
+        enqueueUserFollowUp(db, context.operationId);
+      }
       return result;
     });
   }

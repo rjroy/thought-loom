@@ -2,7 +2,11 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { openDatabase } from "./storage";
 import { isIdempotencyKey, isRecordId, parseWeavingRetryReceipt, parseWeavingStatusView, parseWeavingWorkerView, weavingWorkerAvailable,
-  type WeavingJobStatus, type WeavingRetryInput, type WeavingRetryReceipt, type WeavingStatusView, type WeavingWorkerView } from "@thoughtloom/contracts";
+  type WeavingJobKind, type WeavingJobStatus, type WeavingRetryInput, type WeavingRetryReceipt, type WeavingStatusView, type WeavingWorkerView } from "@thoughtloom/contracts";
+import { enqueueDialogueFollowUp } from "./follow-up";
+import { freezeFollowUpInput, followUpOrigins, followUpTargets, followUpChanges, followUpChangeCount } from "./follow-up-data";
+import { FOLLOW_UP_LIMITS, parseFollowUpStatusView, parseFollowUpRetryReceipt, type FollowUpLimits, type FollowUpStatusView,
+  type FollowUpRetryInput, type FollowUpRetryReceipt } from "@thoughtloom/contracts";
 
 export type WeavingRun = {
   readonly jobId: string;
@@ -10,6 +14,9 @@ export type WeavingRun = {
   readonly runId: string;
   readonly sessionId: string;
   readonly promptId: string;
+  // Worker-created identities always carry the database kind. Legacy scripted
+  // port inputs may omit it; domain authority still requires the immutable join.
+  readonly kind?: WeavingJobKind;
 };
 
 export type WeavingJob = {
@@ -37,17 +44,22 @@ export interface WeavingAdapter {
 type AttemptError = "preparation_failed" | "admission_unknown" | "inspection_failed" | "invalid_adapter_result";
 type RunState = "preparing" | "admitting" | "admitted" | "uncertain" | "completed" | "not_admitted";
 type OpenState = Exclude<RunState, "completed" | "not_admitted">;
-type RunRow = WeavingRun & { state: OpenState; attempt: number; jobKind: "capture" | "dialogue" };
-type Claim = { run: WeavingRun; state: OpenState; attempt: number; owner: string; kind: "capture" | "dialogue" };
+type RunRow = WeavingRun & { state: OpenState; attempt: number; jobKind: WeavingJobKind };
+type Claim = { run: WeavingRun; state: OpenState; attempt: number; owner: string; kind: WeavingJobKind };
 type StatusRun = { id: string; attempt: number; state: string; outcome: string | null; lastError: string | null;
   leaseOwner: string | null; leaseUntil: number | null; attempted: number | null };
-type StatusSnapshot = { job: { id: string; status: string }; run: StatusRun | null; attempts: number };
+type StatusJob = { id: string; status: string; kind: WeavingJobKind };
+type StatusSnapshot = { job: StatusJob; run: StatusRun | null; attempts: number };
 type RetryResult = { kind: "accepted"; receipt: WeavingRetryReceipt } | { kind: "conflict" | "unavailable" | "not_found" };
+type FollowUpRetryResult = { kind: "accepted"; receipt: FollowUpRetryReceipt } | { kind: "conflict" | "unavailable" | "not_found" };
 
 function snapshot(db: Database, sourceId: string): StatusSnapshot | null {
   if (!db.query("SELECT 1 FROM sources WHERE id=?").get(sourceId)) return null;
-  const job = db.query<{ id: string; status: string }, [string]>("SELECT id,status FROM jobs WHERE source_id=? AND kind='capture' ORDER BY rowid DESC LIMIT 1").get(sourceId);
+  const job = db.query<StatusJob, [string]>("SELECT id,status,kind FROM jobs WHERE source_id=? AND kind='capture' ORDER BY rowid DESC LIMIT 1").get(sourceId);
   if (!job) return null;
+  return jobSnapshot(db, job);
+}
+function jobSnapshot(db: Database, job: StatusJob): StatusSnapshot {
   const run = db.query<StatusRun, [string]>(`SELECT r.id,r.attempt,r.state,r.outcome,r.last_error AS lastError,
     r.lease_owner AS leaseOwner,r.lease_until AS leaseUntil,c.attempted FROM weaving_runs r
     LEFT JOIN native_commands c ON c.run_id=r.id WHERE r.job_id=? ORDER BY r.attempt DESC LIMIT 1`).get(job.id);
@@ -83,9 +95,9 @@ export type WeavingWorkerOptions = {
 const runColumns = `r.id AS runId, r.job_id AS jobId, j.source_id AS sourceId,
   r.session_id AS sessionId, r.prompt_id AS promptId, r.state, r.attempt,j.kind AS jobKind`;
 
-function identity(row: WeavingRun): WeavingRun {
+function identity(row: WeavingRun, kind: WeavingJobKind): WeavingRun {
   return Object.freeze({ jobId: row.jobId, sourceId: row.sourceId, runId: row.runId,
-    sessionId: row.sessionId, promptId: row.promptId });
+    sessionId: row.sessionId, promptId: row.promptId, kind });
 }
 
 export class WeavingWorker {
@@ -124,7 +136,8 @@ export class WeavingWorker {
       (run.state === "not_admitted" && run.outcome === null && run.lastError === "preparation_failed" && run.attempted !== 1))) ||
       (job.status === "interrupted" && run.state === "admitted" && run.outcome === "interrupted");
     if (!definitive) return false;
-    if (db.query("SELECT 1 FROM weaving_retry_receipts WHERE expected_run_id=?").get(run.id)) return false;
+    const receipts = job.kind === "follow_up" ? "follow_up_retry_receipts" : "weaving_retry_receipts";
+    if (job.kind === "dialogue" || db.query(`SELECT 1 FROM ${receipts} WHERE expected_run_id=?`).get(run.id)) return false;
     return !db.query(`SELECT 1 FROM weaving_runs WHERE job_id=? AND outcome IS NULL
       AND state IN ('preparing','admitting','admitted','uncertain') LIMIT 1`).get(job.id);
   }
@@ -173,6 +186,58 @@ export class WeavingWorker {
       if (!changed) throw new WeavingError("invalid_state");
       db.run(`INSERT INTO weaving_retry_receipts(idempotency_key,payload_hash,id,source_id,job_id,expected_run_id) VALUES (?,?,?,?,?,?)`,
         [key, hash, receipt.id, sourceId, current.job.id, input.expectedRunId]);
+      return { kind: "accepted", receipt };
+    });
+  }
+
+  readFollowUps(sourceId: string, worker: WeavingWorkerView, overrides?: Partial<FollowUpLimits>): FollowUpStatusView | null {
+    if (!isRecordId(sourceId)) throw new WeavingError("invalid_configuration");
+    const availability = this.workerView(worker), limits = { ...FOLLOW_UP_LIMITS, ...overrides };
+    for (const value of Object.values(limits)) if (!Number.isSafeInteger(value) || value < 1 || value > 1024) throw new WeavingError("invalid_configuration");
+    return this.storage("follow_up.status", false, (db) => {
+      if (!db.query("SELECT 1 FROM sources WHERE id=?").get(sourceId)) return null;
+      // Active and pending intent cannot be pushed off-screen by recent history.
+      const rows = db.query<StatusJob, [string, number]>(`SELECT id,status,kind FROM jobs WHERE source_id=? AND kind='follow_up'
+        ORDER BY CASE WHEN status IN ('running','uncertain') THEN 0 WHEN status='queued' THEN 1 ELSE 2 END,rowid DESC LIMIT ?`).all(sourceId, limits.jobs + 1);
+      const jobs = rows.slice(0, limits.jobs).map((job) => {
+        const current = jobSnapshot(db, job), run = job.status === "queued" ? null : current.run;
+        const origins = followUpOrigins(db, job.id, limits.origins + 1), targets = followUpTargets(db, job.id, limits.targets + 1), changes = followUpChanges(db, job.id, limits.changes + 1);
+        return { id: job.id, status: job.status, attempts: current.attempts, run: run ? { id: run.id } : null, recordedChanges: followUpChangeCount(db, job.id),
+          origins: origins.slice(0, limits.origins), originsTruncated: origins.length > limits.origins,
+          targets: targets.slice(0, limits.targets), targetsTruncated: targets.length > limits.targets,
+          changes: changes.slice(0, limits.changes), changesTruncated: changes.length > limits.changes,
+          actions: { retry: weavingWorkerAvailable(availability) && this.retryEligible(db, current) } };
+      });
+      const view = parseFollowUpStatusView({ sourceId, worker: availability, jobs, truncated: rows.length > limits.jobs });
+      if (!view) throw new WeavingError("invalid_state");
+      return view;
+    });
+  }
+
+  retryFollowUp(sourceId: string, jobId: string, key: string, input: FollowUpRetryInput, worker: WeavingWorkerView): FollowUpRetryResult {
+    if (![sourceId, jobId, input.expectedRunId].every(isRecordId) || !isIdempotencyKey(key)) throw new WeavingError("invalid_configuration");
+    const hash = createHash("sha256").update(JSON.stringify(["follow_up_retry", sourceId, jobId, input.expectedRunId])).digest("hex");
+    return this.storage("follow_up.retry", true, (db) => {
+      // Replay acknowledgment before availability/current-state checks, including
+      // after restart, configuration loss, later attempts and exhausted budgets.
+      const prior = db.query<{ hash: string; id: string; sourceId: string; jobId: string; expectedRunId: string }, [string]>(
+        `SELECT payload_hash AS hash,id,source_id AS sourceId,job_id AS jobId,expected_run_id AS expectedRunId FROM follow_up_retry_receipts WHERE idempotency_key=?`).get(key);
+      if (prior) {
+        if (prior.hash !== hash) return { kind: "conflict" };
+        const receipt = parseFollowUpRetryReceipt({ ...prior, status: "queued" });
+        if (!receipt) throw new WeavingError("invalid_state");
+        return { kind: "accepted", receipt };
+      }
+      const job = db.query<StatusJob, [string, string]>("SELECT id,status,kind FROM jobs WHERE id=? AND source_id=? AND kind='follow_up'").get(jobId, sourceId);
+      if (!job) return { kind: "not_found" };
+      if (!weavingWorkerAvailable(this.workerView(worker))) return { kind: "unavailable" };
+      const current = jobSnapshot(db, job);
+      if (current.run?.id !== input.expectedRunId || !this.retryEligible(db, current)) return { kind: "conflict" };
+      const receipt = parseFollowUpRetryReceipt({ id: randomUUID(), sourceId, jobId, expectedRunId: input.expectedRunId, status: "queued" });
+      if (!receipt) throw new WeavingError("invalid_state");
+      const changed = db.query<{ id: string }, [string, string]>("UPDATE jobs SET status='queued' WHERE id=? AND status=? RETURNING id").get(jobId, job.status);
+      if (!changed) throw new WeavingError("invalid_state");
+      db.run("INSERT INTO follow_up_retry_receipts(idempotency_key,payload_hash,id,source_id,job_id,expected_run_id) VALUES (?,?,?,?,?,?)", [key, hash, receipt.id, sourceId, jobId, input.expectedRunId]);
       return { kind: "accepted", receipt };
     });
   }
@@ -227,7 +292,7 @@ export class WeavingWorker {
     await this.dispatchStops();
     const candidates = this.storage("recovery.list", false, (db) => db.query<{ id: string }, [number, number]>(
       `SELECT r.id FROM weaving_runs r JOIN jobs j ON j.id=r.job_id
-        WHERE j.status IN ('running','uncertain') AND r.outcome IS NULL AND r.state IN ('preparing','admitting','admitted','uncertain')
+        WHERE j.kind IN ('capture','dialogue','follow_up') AND j.status IN ('running','uncertain') AND r.outcome IS NULL AND r.state IN ('preparing','admitting','admitted','uncertain')
          AND (r.lease_owner IS NULL OR r.lease_until <= ?)
        ORDER BY r.updated_at, r.rowid LIMIT ?`,
     ).all(this.time(), this.recoveryLimit));
@@ -278,7 +343,7 @@ export class WeavingWorker {
           WHERE s.id=? AND d.state='queued' AND r.outcome IS NULL AND r.state IN ('admitting','admitted','uncertain') AND j.status IN ('running','uncertain')`).get(candidate.id);
         if (!row) return null;
         db.run("UPDATE dialogue_stop_dispatch SET state='attempted' WHERE stop_id=? AND state='queued'", [candidate.id]);
-        return identity(row);
+        return identity(row, "dialogue");
       });
       if (!run) continue;
       console.info("weaving.stop attempt", { runId: run.runId });
@@ -304,18 +369,19 @@ export class WeavingWorker {
          WHERE r.job_id=? ORDER BY r.attempt DESC LIMIT 1`,
       ).get(job.id);
       if (!row) throw new WeavingError("invalid_state");
-      return { sourceId, status: job.status, run: identity(row) };
+      return { sourceId, status: job.status, run: identity(row, "capture") };
     });
   }
 
   private claimNext(): Claim | null {
     return this.storage("job.claim", true, (db) => {
       if (db.query("SELECT 1 FROM jobs WHERE status IN ('running','uncertain') LIMIT 1").get()) return null;
-      const job = db.query<{ jobId: string; sourceId: string; kind: "capture" | "dialogue" }, []>(
-        `SELECT id AS jobId,source_id AS sourceId,kind FROM jobs WHERE status='queued'
+      const job = db.query<{ jobId: string; sourceId: string; kind: WeavingJobKind }, []>(
+        `SELECT id AS jobId,source_id AS sourceId,kind FROM jobs WHERE status='queued' AND kind IN ('capture','dialogue','follow_up')
           ORDER BY CASE kind WHEN 'dialogue' THEN 1 ELSE 0 END DESC,priority DESC,rowid LIMIT 1`,
       ).get();
       if (!job) return null;
+      if (job.kind !== "capture" && job.kind !== "dialogue" && job.kind !== "follow_up") throw new WeavingError("invalid_state");
       const previous = db.query<{ attempt: number }, [string]>(
         "SELECT COALESCE(MAX(attempt),0) AS attempt FROM weaving_runs WHERE job_id=?",
       ).get(job.jobId);
@@ -325,11 +391,12 @@ export class WeavingWorker {
         console.info("weaving.job exhausted", { jobId: job.jobId, attempts: previous.attempt });
         return null;
       }
+      if (job.kind === "follow_up") freezeFollowUpInput(db, job.jobId);
       const now = this.time();
       const owner = randomUUID();
       const run = identity({ ...job, runId: randomUUID(),
         sessionId: `ses_thoughtloom_${randomBytes(12).toString("hex")}`,
-        promptId: `msg_thoughtloom_${randomBytes(12).toString("hex")}` });
+        promptId: `msg_thoughtloom_${randomBytes(12).toString("hex")}` }, job.kind);
       const attempt = previous.attempt + 1;
       const changed = db.query<{ id: string }, [string]>("UPDATE jobs SET status='running' WHERE id=? AND status='queued' RETURNING id").get(job.jobId);
       if (!changed) throw new WeavingError("invalid_state");
@@ -345,7 +412,7 @@ export class WeavingWorker {
       const now = this.time();
       return !!db.query<{ id: string }, [number, number, string, string, number]>(`UPDATE weaving_runs SET state='admitting',lease_until=?,updated_at=?
         WHERE id=? AND state='preparing' AND lease_owner=? AND lease_until>?
-          AND EXISTS (SELECT 1 FROM jobs j WHERE j.id=weaving_runs.job_id AND j.status='running')
+          AND EXISTS (SELECT 1 FROM jobs j WHERE j.id=weaving_runs.job_id AND j.status='running' AND j.kind IN ('capture','dialogue','follow_up'))
           AND NOT EXISTS (SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=weaving_runs.job_id) RETURNING id`,
       ).get(now + this.leaseMs, now, claim.run.runId, claim.owner, now);
     });
@@ -359,13 +426,13 @@ export class WeavingWorker {
       const row = db.query<RunRow, [string, number]>(
         `SELECT ${runColumns} FROM weaving_runs r JOIN jobs j ON j.id=r.job_id
          WHERE r.id=? AND r.outcome IS NULL AND r.state IN ('preparing','admitting','admitted','uncertain')
-           AND j.status IN ('running','uncertain') AND (r.lease_owner IS NULL OR r.lease_until<=?)`,
+             AND j.kind IN ('capture','dialogue','follow_up') AND j.status IN ('running','uncertain') AND (r.lease_owner IS NULL OR r.lease_until<=?)`,
       ).get(runId, now);
-      if (!row) return null;
+      if (!row || (row.jobKind !== "capture" && row.jobKind !== "dialogue" && row.jobKind !== "follow_up")) return null;
       const owner = randomUUID();
       db.run("UPDATE weaving_runs SET lease_owner=?,lease_until=?,updated_at=? WHERE id=?",
         [owner, now + this.leaseMs, now, runId]);
-      return { run: identity(row), state: row.state, attempt: row.attempt, owner, kind: row.jobKind };
+      return { run: identity(row, row.jobKind), state: row.state, attempt: row.attempt, owner, kind: row.jobKind };
     });
   }
 
@@ -378,7 +445,7 @@ export class WeavingWorker {
       const result = db.query<{ id: string }, [string, number, AttemptError | null, number | null, string | null, string, string, string, number]>(
         `UPDATE weaving_runs SET state=?,lease_owner=NULL,lease_until=NULL,updated_at=?,last_error=?,recorded_changes=?,outcome=?
          WHERE id=? AND state=? AND outcome IS NULL AND lease_owner=? AND lease_until>? RETURNING id`,
-      ).get(state, now, error, state === "completed" && claim.kind === "dialogue" ? recordedChanges(db, claim.run.runId) : changes, outcome, claim.run.runId, claim.state, claim.owner, now);
+      ).get(state, now, error, state === "completed" ? recordedChanges(db, claim.run.runId) : changes, outcome, claim.run.runId, claim.state, claim.owner, now);
       if (!result) return false;
       const job = db.query<{ id: string }, [string, string]>(
         "UPDATE jobs SET status=? WHERE id=? AND status IN ('running','uncertain') RETURNING id",
@@ -389,6 +456,7 @@ export class WeavingWorker {
         if (!turn || (outcome === "succeeded" && (typeof assistant?.text !== "string" || !assistant.messageId.startsWith("msg_")))) throw new WeavingError("invalid_state");
         db.run("INSERT INTO dialogue_outcomes(turn_id,run_id,outcome,assistant_message_id,assistant_text) VALUES (?,?,?,?,?)",
           [turn.id, claim.run.runId, outcome, assistant?.messageId ?? null, assistant?.text ?? null]);
+        if (outcome === "succeeded") enqueueDialogueFollowUp(db, claim.run);
       }
       return true;
     });

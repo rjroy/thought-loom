@@ -2,13 +2,35 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
 
+function migrateFollowUpJobs(db: Database) {
+  // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
+  // order), indexes and every existing trigger attached to/referencing jobs.
+  // Foreign keys are disabled on this migration connection and checked before
+  // commit; no other writer can observe the intermediate schema.
+  const triggers = db.query<{ name: string; sql: string; tableName: string }, []>(
+    "SELECT name,sql,tbl_name AS tableName FROM sqlite_schema WHERE type='trigger' AND sql IS NOT NULL",
+  ).all().filter((trigger) => trigger.tableName === "jobs" || /\bjobs\b/i.test(trigger.sql));
+  const indexes = db.query<{ sql: string }, []>("SELECT sql FROM sqlite_schema WHERE type='index' AND tbl_name='jobs' AND sql IS NOT NULL").all();
+  for (const trigger of triggers) db.run(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
+  db.run(`CREATE TABLE jobs_next (
+    id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL REFERENCES sources(id), status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0),
+    kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','dialogue','follow_up'))
+  )`);
+  db.run("INSERT INTO jobs_next(rowid,id,source_id,status,priority,kind) SELECT rowid,id,source_id,status,priority,kind FROM jobs");
+  db.run("DROP TABLE jobs");
+  db.run("ALTER TABLE jobs_next RENAME TO jobs");
+  for (const index of indexes) db.run(index.sql);
+  for (const trigger of triggers) db.run(trigger.sql);
+}
+
 export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
   try {
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA busy_timeout = 5000");
     db.run("PRAGMA journal_mode = WAL");
-    const migrating = (db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0) < 13;
+    const migrating = (db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0) < 15;
     if (migrating) db.run("PRAGMA foreign_keys = OFF");
     db.transaction(() => {
       const version = db.query<{ user_version: number }, []>("PRAGMA user_version").get();
@@ -25,7 +47,7 @@ export function openDatabase(path: string): Database {
           status TEXT NOT NULL
         )`);
         db.run("PRAGMA user_version = 1");
-      } else if (!version || version.user_version < 1 || version.user_version > 14) {
+      } else if (!version || version.user_version < 1 || version.user_version > 16) {
         throw new Error("Unsupported database schema version");
       }
       if (version?.user_version === 0 || version?.user_version === 1) {
@@ -367,6 +389,128 @@ export function openDatabase(path: string): Database {
         for (const table of ["dialogue_stop_requests", "dialogue_stop_dispatch"]) db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table}
           BEGIN SELECT RAISE(ABORT, 'retained stop command'); END`);
         db.run("PRAGMA user_version = 14");
+      }
+      if (version && version.user_version < 15) {
+        migrateFollowUpJobs(db);
+        db.run(`CREATE TABLE follow_up_origins (
+          run_id TEXT PRIMARY KEY NOT NULL REFERENCES weaving_runs(id), job_id TEXT NOT NULL REFERENCES jobs(id),
+          turn_id TEXT NOT NULL UNIQUE REFERENCES dialogue_turns(id)
+        )`);
+        db.run("CREATE INDEX follow_up_origin_job ON follow_up_origins(job_id)");
+        db.run(`CREATE TABLE follow_up_targets (
+          origin_run_id TEXT NOT NULL REFERENCES follow_up_origins(run_id),
+          item_id TEXT REFERENCES knowledge_items(id), formulation_id TEXT REFERENCES formulations(id),
+          relationship_id TEXT REFERENCES relationships(id), revision_id TEXT REFERENCES relationship_revisions(id),
+          CHECK((item_id IS NOT NULL AND formulation_id IS NOT NULL AND relationship_id IS NULL AND revision_id IS NULL)
+            OR (item_id IS NULL AND formulation_id IS NULL AND relationship_id IS NOT NULL AND revision_id IS NOT NULL)),
+          UNIQUE(origin_run_id,formulation_id), UNIQUE(origin_run_id,revision_id)
+        )`);
+        db.run(`CREATE TRIGGER follow_up_origin_scope BEFORE INSERT ON follow_up_origins WHEN NOT EXISTS (
+          SELECT 1 FROM jobs target JOIN weaving_runs r ON r.id=NEW.run_id JOIN jobs origin ON origin.id=r.job_id
+          JOIN dialogue_turns t ON t.job_id=origin.id JOIN dialogues d ON d.id=t.dialogue_id
+          JOIN dialogue_outcomes o ON o.turn_id=t.id AND o.run_id=r.id
+          WHERE target.id=NEW.job_id AND target.kind='follow_up' AND target.status='queued'
+            AND origin.kind='dialogue' AND origin.status='completed' AND target.source_id=origin.source_id AND d.source_id=origin.source_id
+            AND t.id=NEW.turn_id AND r.state='completed' AND r.outcome='succeeded' AND o.outcome='succeeded'
+            AND NOT EXISTS (SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=origin.id)
+            AND NOT EXISTS (SELECT 1 FROM weaving_runs claimed WHERE claimed.job_id=target.id)
+        ) BEGIN SELECT RAISE(ABORT, 'invalid follow-up origin'); END`);
+        db.run(`CREATE TRIGGER follow_up_target_scope BEFORE INSERT ON follow_up_targets WHEN NOT EXISTS (
+          SELECT 1 FROM follow_up_origins o JOIN jobs j ON j.id=o.job_id WHERE o.run_id=NEW.origin_run_id
+            AND j.kind='follow_up' AND j.status='queued' AND NOT EXISTS (SELECT 1 FROM weaving_runs r WHERE r.job_id=j.id)
+        ) OR (NEW.item_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM formulations f JOIN knowledge_items i ON i.id=f.item_id
+          JOIN knowledge_receipts k ON k.operation_id=f.operation_id AND k.result_id=i.id AND k.revision_id=f.id
+          JOIN follow_up_origins o ON o.run_id=f.run_id JOIN jobs j ON j.id=o.job_id
+          WHERE o.run_id=NEW.origin_run_id AND f.id=NEW.formulation_id AND i.id=NEW.item_id AND f.author='ai' AND i.source_id=j.source_id
+        )) OR (NEW.relationship_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM relationship_revisions v JOIN relationships rel ON rel.id=v.relationship_id
+          JOIN knowledge_items a ON a.id=rel.from_item_id JOIN knowledge_items b ON b.id=rel.to_item_id
+          JOIN knowledge_receipts k ON k.operation_id=v.operation_id AND k.result_id=rel.id AND k.revision_id=v.id
+          JOIN follow_up_origins o ON o.run_id=v.run_id JOIN jobs j ON j.id=o.job_id
+          WHERE o.run_id=NEW.origin_run_id AND v.id=NEW.revision_id AND rel.id=NEW.relationship_id AND v.author='ai'
+            AND (a.source_id=j.source_id OR b.source_id=j.source_id)
+        )) BEGIN SELECT RAISE(ABORT, 'invalid follow-up target'); END`);
+        for (const table of ["follow_up_origins", "follow_up_targets"]) {
+          db.run(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'immutable follow-up input'); END`);
+          db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'retained follow-up input'); END`);
+        }
+        db.run("PRAGMA user_version = 15");
+      }
+      if (version && version.user_version < 16) {
+        // v15 dialogue origins/targets remain byte-for-byte historical facts.
+        // USER commands have receipt identity rather than a fictitious AI run.
+        db.run(`CREATE TABLE follow_up_user_origins (
+          job_id TEXT NOT NULL REFERENCES jobs(id), operation_id TEXT NOT NULL REFERENCES knowledge_receipts(operation_id),
+          PRIMARY KEY(job_id,operation_id)
+        )`);
+        db.run(`CREATE TABLE follow_up_user_targets (
+          job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+          item_id TEXT REFERENCES knowledge_items(id), formulation_id TEXT REFERENCES formulations(id),
+          relationship_id TEXT REFERENCES relationships(id), revision_id TEXT REFERENCES relationship_revisions(id),
+          FOREIGN KEY(job_id,operation_id) REFERENCES follow_up_user_origins(job_id,operation_id),
+          CHECK((item_id IS NOT NULL AND formulation_id IS NOT NULL AND relationship_id IS NULL AND revision_id IS NULL)
+            OR (item_id IS NULL AND formulation_id IS NULL AND relationship_id IS NOT NULL AND revision_id IS NOT NULL)),
+          UNIQUE(job_id,operation_id,formulation_id), UNIQUE(job_id,operation_id,revision_id)
+        )`);
+        db.run(`CREATE TABLE follow_up_inputs (
+          job_id TEXT PRIMARY KEY NOT NULL REFERENCES jobs(id), payload TEXT NOT NULL, payload_hash TEXT NOT NULL
+        )`);
+        db.run(`CREATE TRIGGER follow_up_input_scope BEFORE INSERT ON follow_up_inputs WHEN NOT EXISTS (
+          SELECT 1 FROM jobs j WHERE j.id=NEW.job_id AND j.kind='follow_up' AND j.status='queued'
+            AND NOT EXISTS (SELECT 1 FROM weaving_runs r WHERE r.job_id=j.id)
+        ) BEGIN SELECT RAISE(ABORT, 'invalid follow-up freeze'); END`);
+        db.run(`CREATE TRIGGER follow_up_user_origin_scope BEFORE INSERT ON follow_up_user_origins WHEN NOT EXISTS (
+          SELECT 1 FROM jobs j JOIN knowledge_receipts k ON k.operation_id=NEW.operation_id
+          WHERE j.id=NEW.job_id AND j.kind='follow_up' AND j.status='queued'
+            AND NOT EXISTS (SELECT 1 FROM weaving_runs r WHERE r.job_id=j.id)
+            AND NOT EXISTS (SELECT 1 FROM follow_up_inputs frozen WHERE frozen.job_id=j.id)
+            AND (EXISTS (SELECT 1 FROM formulations f JOIN knowledge_items i ON i.id=f.item_id
+              WHERE f.id=k.revision_id AND i.id=k.result_id AND f.operation_id=k.operation_id AND f.author='user' AND i.source_id=j.source_id)
+            OR EXISTS (SELECT 1 FROM relationship_revisions v JOIN relationships rel ON rel.id=v.relationship_id
+              JOIN knowledge_items a ON a.id=rel.from_item_id JOIN knowledge_items b ON b.id=rel.to_item_id
+              WHERE v.id=k.revision_id AND rel.id=k.result_id AND v.operation_id=k.operation_id AND v.author='user' AND (a.source_id=j.source_id OR b.source_id=j.source_id)))
+        ) BEGIN SELECT RAISE(ABORT, 'invalid user follow-up origin'); END`);
+        db.run(`CREATE TRIGGER follow_up_user_target_scope BEFORE INSERT ON follow_up_user_targets WHEN NOT EXISTS (
+          SELECT 1 FROM follow_up_user_origins o JOIN jobs j ON j.id=o.job_id JOIN knowledge_receipts k ON k.operation_id=o.operation_id
+          WHERE o.job_id=NEW.job_id AND o.operation_id=NEW.operation_id AND j.status='queued'
+            AND NOT EXISTS (SELECT 1 FROM weaving_runs r WHERE r.job_id=j.id)
+            AND NOT EXISTS (SELECT 1 FROM follow_up_inputs frozen WHERE frozen.job_id=j.id)
+            AND ((NEW.item_id IS NOT NULL AND EXISTS (SELECT 1 FROM formulations f JOIN knowledge_items i ON i.id=f.item_id
+              WHERE f.id=NEW.formulation_id AND i.id=NEW.item_id AND f.id=k.revision_id AND i.id=k.result_id AND f.author='user' AND f.operation_id=k.operation_id AND i.source_id=j.source_id))
+            OR (NEW.relationship_id IS NOT NULL AND EXISTS (SELECT 1 FROM relationship_revisions v JOIN relationships rel ON rel.id=v.relationship_id
+              JOIN knowledge_items a ON a.id=rel.from_item_id JOIN knowledge_items b ON b.id=rel.to_item_id
+              WHERE v.id=NEW.revision_id AND rel.id=NEW.relationship_id AND v.id=k.revision_id AND rel.id=k.result_id AND v.author='user' AND v.operation_id=k.operation_id AND (a.source_id=j.source_id OR b.source_id=j.source_id))))
+        ) BEGIN SELECT RAISE(ABORT, 'invalid user follow-up target'); END`);
+        for (const table of ["follow_up_origins", "follow_up_targets"]) {
+          const column = table === "follow_up_origins" ? "NEW.job_id" : "(SELECT job_id FROM follow_up_origins WHERE run_id=NEW.origin_run_id)";
+          db.run(`CREATE TRIGGER ${table}_frozen BEFORE INSERT ON ${table} WHEN EXISTS (SELECT 1 FROM follow_up_inputs WHERE job_id=${column})
+            BEGIN SELECT RAISE(ABORT, 'frozen follow-up input'); END`);
+        }
+        db.run(`CREATE VIEW follow_up_origin_refs AS
+          SELECT o.job_id,'dialogue' AS kind,o.run_id,t.dialogue_id,o.turn_id,t.source_id AS turn_source_id,NULL AS operation_id
+          FROM follow_up_origins o JOIN dialogue_turns t ON t.id=o.turn_id
+          UNION ALL SELECT job_id,'user',NULL,NULL,NULL,NULL,operation_id FROM follow_up_user_origins`);
+        db.run(`CREATE VIEW follow_up_target_refs AS
+          SELECT o.job_id,CASE WHEN t.item_id IS NOT NULL THEN 'item' ELSE 'relationship' END AS kind,
+            COALESCE(t.item_id,t.relationship_id) AS id,COALESCE(t.formulation_id,t.revision_id) AS version_id
+          FROM follow_up_targets t JOIN follow_up_origins o ON o.run_id=t.origin_run_id
+          UNION SELECT job_id,CASE WHEN item_id IS NOT NULL THEN 'item' ELSE 'relationship' END,
+            COALESCE(item_id,relationship_id),COALESCE(formulation_id,revision_id) FROM follow_up_user_targets`);
+        db.run(`CREATE TABLE follow_up_retry_receipts (
+          idempotency_key TEXT PRIMARY KEY NOT NULL, payload_hash TEXT NOT NULL, id TEXT NOT NULL UNIQUE,
+          source_id TEXT NOT NULL REFERENCES sources(id), job_id TEXT NOT NULL REFERENCES jobs(id),
+          expected_run_id TEXT NOT NULL UNIQUE REFERENCES weaving_runs(id)
+        )`);
+        db.run(`CREATE TRIGGER follow_up_retry_scope BEFORE INSERT ON follow_up_retry_receipts WHEN NOT EXISTS (
+          SELECT 1 FROM jobs j JOIN weaving_runs r ON r.job_id=j.id WHERE j.id=NEW.job_id AND j.source_id=NEW.source_id
+            AND j.kind='follow_up' AND r.id=NEW.expected_run_id
+        ) BEGIN SELECT RAISE(ABORT, 'invalid follow-up retry'); END`);
+        for (const table of ["follow_up_user_origins", "follow_up_user_targets", "follow_up_inputs", "follow_up_retry_receipts"]) {
+          db.run(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'immutable follow-up receipt'); END`);
+          db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'retained follow-up receipt'); END`);
+        }
+        db.run("PRAGMA user_version = 16");
       }
       if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();

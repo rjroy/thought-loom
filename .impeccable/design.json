@@ -77,7 +77,7 @@
   ],
   "narrative": {
     "northStar": "An original, kept intact.",
-    "overview": "A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.\n\nThis records the built capture, retrieval, contextual dialogue, protected user revisions, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.",
+    "overview": "A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.\n\nThis records the built capture, retrieval, contextual dialogue, protected user revisions, background follow-up, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.",
     "keyCharacteristics": ["Flat, high-contrast reading surfaces.", "One task-oriented font family.", "Original words distinct from attributed hypotheses.", "Temporary search results and connected reading, not permanent note management."],
     "rules": [{ "name": "The Source Distinction Rule", "body": "Keep original text distinct from tentative AI formulations; color never replaces the author or status label.", "section": "colors" }],
     "dos": ["Do preserve the exact core palette and self-hosted task font.", "Do keep author, source, status, and evidence readable without spatial gestures.", "Do use familiar semantic controls within inquiry-centered navigation."],

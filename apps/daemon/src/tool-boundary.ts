@@ -74,7 +74,7 @@ export class OwnedGrants {
             !["preparing", "admitting", "admitted", "uncertain"].includes(row.state)) throw new KnowledgeError("forbidden");
         const scope = runScope(db, run);
         if (!scope || !isAbsolute(grant.location) || normalize(grant.location) !== grant.location || !toolId(grant.agent) ||
-            JSON.stringify([...grant.sourceIds].sort()) !== JSON.stringify([...scope.sourceIds].sort()) || grant.operations.length < 1 || (scope.kind === "capture" && grant.operations.includes("record_idea")) ||
+            JSON.stringify([...grant.sourceIds].sort()) !== JSON.stringify([...scope.sourceIds].sort()) || grant.operations.length < 1 || (scope.kind !== "dialogue" && grant.operations.includes("record_idea")) ||
             new Set(grant.operations).size !== grant.operations.length || grant.operations.some((action) => !supportedToolActions.includes(action))) {
           throw new KnowledgeError("forbidden");
         }

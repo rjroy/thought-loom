@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { readSource, readWeaving } from "../../../lib/daemon";
+import { readInquiry, readSource, readWeaving } from "../../../lib/daemon";
 import StatusIcon from "../../ui/status-icon";
 import WeavingStatus from "../../ui/weaving-status";
 import { discussionHref, firstParameter } from "../../../lib/links";
 import { validSearchQuery } from "../../../lib/daemon";
+import FollowUpStatus from "../../ui/follow-up-status";
 
 export const metadata: Metadata = { title: "Original thought" };
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
   const rawQuery = firstParameter((await searchParams).q), query = validSearchQuery(rawQuery) ? rawQuery : "";
   const origin = source.origin, discussionInput = origin?.kind === "discussion-turn";
   const weaving = discussionInput ? null : await readWeaving(id);
+  const context = discussionInput ? null : await readInquiry(id);
   const date = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(source.createdAt));
   return (
     <main id="main" className="workspace source-workspace" tabIndex={-1}>
@@ -41,6 +43,7 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
       <article className="original-text" aria-label={discussionInput ? "Discussion input" : "Original thought"}>{source.text}</article>
       <p className="source-preservation">This is your unchanged source, not an AI interpretation. Bookmark this page to return to it.</p>
       {discussionInput ? <Link className="text-link" href={discussionHref(origin.rootSourceId, origin.dialogueId, query, origin.turnId)}>Return to discussion</Link> : <><Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link><WeavingStatus key={id} sourceId={id} initial={weaving?.kind === "found" ? weaving.value : null} /></>}
+      {!discussionInput && <FollowUpStatus key={`follow-up-${id}`} sourceId={id} query={query} initialModel={context?.kind === "found" ? context.value : null} />}
     </main>
   );
 }
