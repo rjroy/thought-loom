@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@opencode/client": "2.2.2",
+    "@opencode/schema": "2.2.2",
     "@thoughtloom/contracts": "workspace:*",
     "hono": "4.13.14"
   }

@@ -77,10 +77,10 @@
   ],
   "narrative": {
     "northStar": "An original, kept intact.",
-    "overview": "A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.\n\nThis records the built capture, retrieval, and read-only inquiry views. Automated weaving and dialogue are future work. Mockups remain guidelines, not pixel authority.",
+    "overview": "A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.\n\nThis records the built capture, retrieval, read-only inquiry, and configured weaving-status views. Weaving requires explicit operator setup; dialogue is future work. Mockups remain guidelines, not pixel authority.",
     "keyCharacteristics": ["Flat, high-contrast reading surfaces.", "One task-oriented font family.", "Original words distinct from attributed hypotheses.", "Temporary search results and connected reading, not permanent note management."],
     "rules": [{ "name": "The Source Distinction Rule", "body": "Keep original text distinct from tentative AI formulations; color never replaces the author or status label.", "section": "colors" }],
     "dos": ["Do preserve the exact core palette and self-hosted task font.", "Do keep author, source, status, and evidence readable without spatial gestures.", "Do use familiar semantic controls within inquiry-centered navigation."],
-    "donts": ["Don't imply that saved, queued, tentative, active, and user-endorsed mean the same thing.", "Don't add a permanent notes list, chat sidebar, new logo, or literal textile/fantasy ornament.", "Don't claim weaving or dialogue is implemented, or turn experiment images into production layout authority."]
+    "donts": ["Don't imply that saved, queued, tentative, active, and user-endorsed mean the same thing.", "Don't add a permanent notes list, chat sidebar, new logo, or literal textile/fantasy ornament.", "Don't imply an unconfigured worker is running, claim dialogue is implemented, or turn experiment images into production layout authority."]
   }
 }

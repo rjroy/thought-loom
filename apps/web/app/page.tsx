@@ -10,7 +10,7 @@ export default function HomePage() {
       <CaptureForm />
       <section className="scope-note" aria-labelledby="scope-heading">
         <h2 id="scope-heading">An original, kept intact.</h2>
-        <p>Save your words, then search for an original or explore its recorded notes. Automated weaving and dialogue are not available yet.</p>
+        <p>Save your words, then search for an original or explore its recorded notes. Weaving needs your own configured agent; dialogue is not available yet.</p>
       </section>
     </main>
   );

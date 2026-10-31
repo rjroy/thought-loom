@@ -31,7 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Suspense fallback={<SearchFields />}><SearchForm /></Suspense>
         </header>
         {children}
-        <footer className="site-footer">Your originals stay unchanged. No AI processing yet.</footer>
+        <footer className="site-footer">Your originals stay unchanged. AI readings are attributed, not established facts.</footer>
       </body>
     </html>
   );

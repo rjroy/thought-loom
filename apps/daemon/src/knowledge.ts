@@ -171,7 +171,10 @@ function readAlias(db: Database, ref: ReceiptRef): SearchAlias {
 }
 
 export class KnowledgeService {
-  constructor(readonly databasePath: string) {}
+  // Internal callers can fence authorization in the same write transaction as
+  // the mutation/receipt, including receipt replay. Never supplied by HTTP data.
+  constructor(readonly databasePath: string, private readonly authorize?: (db: Database) => void,
+    private readonly beforeMutation?: (db: Database) => void) {}
 
   recordAlias(context: KnowledgeContext, input: {
     alias: string; expansion: string; evidenceSourceIds: string[];
@@ -193,6 +196,7 @@ export class KnowledgeService {
   private mutate<T>(name: string, context: KnowledgeContext, input: unknown, action: (db: Database) => T,
     reference: (result: T) => ReceiptRef, restore: (db: Database, ref: ReceiptRef) => T): T {
     return this.execute(name, true, (db) => {
+      this.authorize?.(db);
       validateContext(context);
       const hash = createHash("sha256").update(canonical({ name, context, input })).digest("hex");
       const receipt = db.query<{ payloadHash: string; resultId: string; revisionId: string | null }, [string]>(
@@ -202,6 +206,7 @@ export class KnowledgeService {
         if (receipt.payloadHash !== hash) throw new KnowledgeError("operation_conflict");
         return restore(db, receipt);
       }
+      this.beforeMutation?.(db);
       const result = action(db);
       const ref = reference(result);
       db.run("INSERT INTO knowledge_receipts(operation_id,payload_hash,result_id,revision_id) VALUES (?,?,?,?)", [context.operationId, hash, ref.resultId, ref.revisionId]);
@@ -271,13 +276,16 @@ export class KnowledgeService {
   createRelationship(context: KnowledgeContext, input: {
     fromItemId: string; toItemId: string; type: Relationship["type"];
     rationale: string; evidenceSourceIds: string[];
+    fromVersionId?: string; toVersionId?: string;
   }): Relationship {
     return this.mutate("create_relationship", context, input, (db) => {
       validateContext(context);
       if (input.fromItemId === input.toItemId) throw new KnowledgeError("invalid_reference");
       if (!["supports", "challenges", "suggests"].includes(input.type)) throw new KnowledgeError("invalid_input");
-      readItem(db, input.fromItemId);
-      readItem(db, input.toItemId);
+      const from = readItem(db, input.fromItemId);
+      const to = readItem(db, input.toItemId);
+      if ((input.fromVersionId !== undefined && from.current.id !== input.fromVersionId) ||
+          (input.toVersionId !== undefined && to.current.id !== input.toVersionId)) throw new KnowledgeError("version_conflict");
       requireText(input.rationale);
       evidence(db, input.evidenceSourceIds);
       const existing = db.query<{ id: string }, [string, string, string]>(

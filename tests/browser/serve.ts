@@ -1,8 +1,9 @@
-// Browser-test composition only: no production hooks, model, or worker.
+// Browser-test composition only: no production hooks, native service or model.
 import { mkdtemp, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createApp } from "../../apps/daemon/src/app";
 import { seedInquiryExample } from "../fixtures/seed-inquiry";
+import { createBrowserWeavingControls } from "../fixtures/weaving-world";
 
 function portFromEnvironment(name: string, fallback: number): number {
   const port = Number(process.env[name] ?? fallback);
@@ -18,6 +19,7 @@ if (webPort === daemonPort) throw new Error("Browser-test service ports must dif
 
 const directory = await mkdtemp("/tmp/opencode/thoughtloom-browser-");
 const databasePath = join(directory, "capture.sqlite");
+const weaving = createBrowserWeavingControls(directory);
 let daemon: ReturnType<typeof Bun.serve> | undefined;
 let web: ReturnType<typeof Bun.spawn> | undefined;
 let stopping = false;
@@ -26,6 +28,7 @@ async function stop(exitCode: number) {
   if (stopping) return;
   stopping = true;
   console.info("browser.harness stopping");
+  await weaving.close();
   if (web && web.exitCode === null) {
     web.kill("SIGTERM");
     const deadline = setTimeout(() => web?.kill("SIGKILL"), 5_000);
@@ -43,11 +46,12 @@ process.on("SIGINT", () => void stop(0));
 
 try {
   seedInquiryExample(databasePath);
+  const baseline = createApp({ databasePath });
   console.info("browser.harness daemon starting", { databasePath, port: daemonPort });
   daemon = Bun.serve({
     hostname: "127.0.0.1",
     port: daemonPort,
-    fetch: createApp({ databasePath }).fetch,
+    fetch: async (request) => (await weaving.fetch(request)) ?? baseline.fetch(request),
   });
   console.info("browser.harness daemon listening", { port: daemon.port });
 

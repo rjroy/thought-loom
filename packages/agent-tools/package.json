@@ -1,0 +1,10 @@
+{
+  "name": "@thoughtloom/agent-tools",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/plugin.ts" },
+  "dependencies": {
+    "@opencode/plugin": "2.2.2",
+    "@opencode/schema": "2.2.2"
+  }
+}

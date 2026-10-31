@@ -23,7 +23,7 @@ export function openDatabase(path: string): Database {
           status TEXT NOT NULL
         )`);
         db.run("PRAGMA user_version = 1");
-      } else if (version?.user_version !== 1 && version?.user_version !== 2 && version?.user_version !== 3 && version?.user_version !== 4 && version?.user_version !== 5 && version?.user_version !== 6 && version?.user_version !== 7) {
+      } else if (!version || version.user_version < 1 || version.user_version > 11) {
         throw new Error("Unsupported database schema version");
       }
       if (version?.user_version === 0 || version?.user_version === 1) {
@@ -114,6 +114,110 @@ export function openDatabase(path: string): Database {
         if (duplicates) throw new Error("Cannot migrate: duplicate directed relationship claims require reconciliation");
         db.run("CREATE UNIQUE INDEX relationship_claim_identity ON relationships(from_item_id, to_item_id, type)");
         db.run("PRAGMA user_version = 7");
+      }
+      if (version && version.user_version < 8) {
+        db.run(`CREATE TABLE weaving_runs (
+          id TEXT PRIMARY KEY NOT NULL,
+          job_id TEXT NOT NULL REFERENCES jobs(id),
+          attempt INTEGER NOT NULL CHECK(attempt > 0),
+          session_id TEXT NOT NULL UNIQUE,
+          prompt_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK(state IN ('preparing','admitting','admitted','uncertain','completed','not_admitted')),
+          lease_owner TEXT,
+          lease_until INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          recorded_changes INTEGER CHECK(recorded_changes >= 0),
+          last_error TEXT CHECK(last_error IN ('preparation_failed','admission_unknown','inspection_failed','invalid_adapter_result')),
+          UNIQUE(job_id, attempt),
+          CHECK((lease_owner IS NULL) = (lease_until IS NULL)),
+          CHECK((state = 'completed') = (recorded_changes IS NOT NULL))
+        )`);
+        db.run(`CREATE UNIQUE INDEX weaving_active_job ON weaving_runs(job_id)
+          WHERE state IN ('preparing','admitting','admitted','uncertain')`);
+        db.run("CREATE INDEX weaving_recovery ON weaving_runs(state, lease_until, updated_at)");
+        db.run("CREATE INDEX jobs_queue ON jobs(status)");
+        db.run(`CREATE TRIGGER weaving_identity_immutable
+          BEFORE UPDATE OF id, job_id, attempt, session_id, prompt_id, created_at ON weaving_runs
+          BEGIN SELECT RAISE(ABORT, 'immutable weaving identity'); END`);
+        db.run(`CREATE TRIGGER weaving_receipt_retained BEFORE DELETE ON weaving_runs
+          BEGIN SELECT RAISE(ABORT, 'retained weaving attempt'); END`);
+        db.run(`CREATE TRIGGER jobs_identity_immutable BEFORE UPDATE OF id, source_id ON jobs
+          BEGIN SELECT RAISE(ABORT, 'immutable job identity'); END`);
+        db.run("PRAGMA user_version = 8");
+      }
+      if (version && version.user_version < 9) {
+        db.run(`CREATE TABLE owned_grants (
+          session_id TEXT PRIMARY KEY NOT NULL REFERENCES weaving_runs(session_id),
+          run_id TEXT NOT NULL UNIQUE REFERENCES weaving_runs(id),
+          location TEXT NOT NULL, agent TEXT NOT NULL,
+          source_ids TEXT NOT NULL, operations TEXT NOT NULL, scope_hash TEXT NOT NULL,
+          revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1))
+        )`);
+        db.run(`CREATE TRIGGER grant_identity_immutable BEFORE UPDATE OF
+          session_id,run_id,location,agent,source_ids,operations,scope_hash ON owned_grants
+          BEGIN SELECT RAISE(ABORT, 'immutable owned grant'); END`);
+        db.run(`CREATE TRIGGER grant_revocation_final BEFORE UPDATE OF revoked ON owned_grants
+          WHEN OLD.revoked=1 AND NEW.revoked<>1 BEGIN SELECT RAISE(ABORT, 'revoked owned grant'); END`);
+        db.run(`CREATE TRIGGER grant_receipt_retained BEFORE DELETE ON owned_grants
+          BEGIN SELECT RAISE(ABORT, 'retained owned grant'); END`);
+        db.run(`CREATE TRIGGER grant_run_settled AFTER UPDATE OF state ON weaving_runs
+          WHEN NEW.state IN ('completed','not_admitted') BEGIN
+            UPDATE owned_grants SET revoked=1 WHERE run_id=NEW.id;
+          END`);
+        db.run(`CREATE TRIGGER grant_job_inactive AFTER UPDATE OF status ON jobs
+          WHEN NEW.status NOT IN ('running','uncertain') BEGIN
+            UPDATE owned_grants SET revoked=1 WHERE run_id IN (SELECT id FROM weaving_runs WHERE job_id=NEW.id);
+          END`);
+        db.run(`CREATE TABLE native_commands (
+          run_id TEXT PRIMARY KEY NOT NULL REFERENCES weaving_runs(id),
+          payload TEXT NOT NULL, payload_hash TEXT NOT NULL,
+          attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1))
+        )`);
+        db.run(`CREATE TRIGGER native_command_immutable BEFORE UPDATE OF run_id,payload,payload_hash ON native_commands
+          BEGIN SELECT RAISE(ABORT, 'immutable native command'); END`);
+        db.run(`CREATE TRIGGER native_admission_final BEFORE UPDATE OF attempted ON native_commands
+          WHEN OLD.attempted=1 AND NEW.attempted<>1 BEGIN SELECT RAISE(ABORT, 'retained admission attempt'); END`);
+        db.run(`CREATE TRIGGER native_command_retained BEFORE DELETE ON native_commands
+          BEGIN SELECT RAISE(ABORT, 'retained native command'); END`);
+        db.run("PRAGMA user_version = 9");
+      }
+      if (version && version.user_version < 10) {
+        // Admission state and execution outcome are distinct facts. Failure or
+        // interruption does not undo admission or erase earlier domain writes.
+        db.run("ALTER TABLE weaving_runs ADD COLUMN outcome TEXT CHECK(outcome IN ('succeeded','failed','interrupted'))");
+        db.run("UPDATE weaving_runs SET outcome='succeeded' WHERE state='completed'");
+        db.run("DROP INDEX weaving_active_job");
+        db.run(`CREATE UNIQUE INDEX weaving_active_job ON weaving_runs(job_id)
+          WHERE outcome IS NULL AND state IN ('preparing','admitting','admitted','uncertain')`);
+        db.run(`CREATE TRIGGER grant_execution_settled AFTER UPDATE OF outcome ON weaving_runs WHEN NEW.outcome IS NOT NULL
+          BEGIN UPDATE owned_grants SET revoked=1 WHERE run_id=NEW.id; END`);
+        db.run(`CREATE TRIGGER weaving_outcome_final BEFORE UPDATE OF outcome ON weaving_runs
+          WHEN OLD.outcome IS NOT NULL AND NEW.outcome IS NOT OLD.outcome BEGIN SELECT RAISE(ABORT, 'settled execution outcome'); END`);
+        db.run("ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0)");
+        db.run("DROP INDEX jobs_queue");
+        db.run("CREATE INDEX jobs_queue ON jobs(status,priority)");
+        db.run(`CREATE TABLE tool_reads (
+          run_id TEXT NOT NULL REFERENCES weaving_runs(id), kind TEXT NOT NULL CHECK(kind IN ('source','item','relationship')),
+          record_id TEXT NOT NULL, version_id TEXT, PRIMARY KEY(run_id,kind,record_id)
+        )`);
+        db.run("PRAGMA user_version = 10");
+      }
+      if (version && version.user_version < 11) {
+        db.run(`CREATE TABLE weaving_retry_receipts (
+          idempotency_key TEXT PRIMARY KEY NOT NULL, payload_hash TEXT NOT NULL,
+          id TEXT NOT NULL UNIQUE, source_id TEXT NOT NULL REFERENCES sources(id),
+          job_id TEXT NOT NULL REFERENCES jobs(id), expected_run_id TEXT NOT NULL UNIQUE REFERENCES weaving_runs(id)
+        )`);
+        db.run(`CREATE TRIGGER weaving_retry_immutable BEFORE UPDATE ON weaving_retry_receipts
+          BEGIN SELECT RAISE(ABORT, 'immutable retry command'); END`);
+        db.run(`CREATE TRIGGER weaving_retry_retained BEFORE DELETE ON weaving_retry_receipts
+          BEGIN SELECT RAISE(ABORT, 'retained retry command'); END`);
+        db.run("CREATE INDEX formulation_run ON formulations(run_id)");
+        db.run("CREATE INDEX relationship_revision_run ON relationship_revisions(run_id)");
+        db.run("CREATE INDEX alias_run ON search_aliases(run_id)");
+        db.run("CREATE INDEX jobs_source ON jobs(source_id)");
+        db.run("PRAGMA user_version = 11");
       }
     }).immediate();
     return db;

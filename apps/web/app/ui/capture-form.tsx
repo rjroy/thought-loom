@@ -96,7 +96,7 @@ export default function CaptureForm() {
       {error && <div className="notice error-notice" role="alert" id="save-error"><StatusIcon kind="error" /><p>{error}</p></div>}
       {editedAfterFailure && <p className="edited-warning" id="edited-warning">You changed the draft. Saving now creates a new original; the earlier attempt may already be saved.</p>}
       <div className="capture-actions">
-        <p className="draft-state" role="status">{saving ? "Saving original…" : text ? "Not saved yet. Save before leaving this page." : "Saves stay local. No AI processing yet."}</p>
+        <p className="draft-state" role="status">{saving ? "Saving original…" : text ? "Not saved yet. Save before leaving this page." : "Your original is saved before weaving begins."}</p>
         <button className="button primary" type="submit" disabled={saving || !text.trim()}>{saving ? "Saving…" : error ? "Retry save" : "Save original"}</button>
       </div>
       {saved && <div className="notice" role="status"><StatusIcon kind="saved" /><p><strong>Original saved</strong>. <Link href={`/sources/${saved.id}`}>Open your saved original</Link>.</p></div>}

@@ -1,0 +1,306 @@
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import type { Database } from "bun:sqlite";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { isAbsolute, normalize } from "node:path";
+import { DOMAIN_ACTIONS, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
+import { KnowledgeError, KnowledgeService, type KnowledgeContext } from "./knowledge";
+import { findSource, openDatabase, searchSources } from "./storage";
+import type { WeavingRun } from "./weaving";
+
+export type OwnedGrant = {
+  run: WeavingRun;
+  location: string;
+  agent: string;
+  sourceIds: string[];
+  operations: ToolAction[];
+};
+
+// Only implemented domain operations can be granted. No generic SQL/file tool.
+export const supportedToolActions: readonly ToolAction[] = DOMAIN_ACTIONS;
+type GrantRow = { runId: string; location: string; agent: string; sourceIds: string; operations: string; revoked: number };
+
+function storage<T>(path: string, write: boolean, action: (db: Database) => T): T {
+  let db: Database | undefined;
+  try {
+    db = openDatabase(path);
+    const connection = db;
+    const transaction = connection.transaction(() => action(connection));
+    return write ? transaction.immediate() : transaction.deferred();
+  } catch (error) {
+    throw error instanceof KnowledgeError ? error : new KnowledgeError("storage_error");
+  } finally { db?.close(); }
+}
+
+function strings(value: string): string[] {
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || !parsed.every(toolId)) throw new KnowledgeError("storage_error");
+  return parsed;
+}
+
+function authorize(db: Database, native: NativeIdentity, location: string, action: ToolAction): GrantRow {
+  const row = db.query<GrantRow, [string]>(`SELECT g.run_id AS runId,g.location,g.agent,
+    g.source_ids AS sourceIds,g.operations,g.revoked FROM owned_grants g
+    JOIN weaving_runs r ON r.id=g.run_id AND r.session_id=g.session_id JOIN jobs j ON j.id=r.job_id
+    WHERE g.session_id=? AND r.outcome IS NULL AND r.state IN ('admitting','admitted','uncertain') AND j.status IN ('running','uncertain')`,
+  ).get(native.sessionID);
+  if (!row || row.revoked || row.location !== location || row.agent !== native.agent || !strings(row.operations).includes(action)) {
+    throw new KnowledgeError("forbidden");
+  }
+  return row;
+}
+
+// These administrative operations are daemon-internal, not model-facing APIs.
+export class OwnedGrants {
+  constructor(private readonly databasePath: string) {}
+
+  bind(grant: OwnedGrant): void {
+    console.info("tools.grant bind attempt", { runId: grant.run.runId });
+    try {
+      storage(this.databasePath, true, (db) => {
+        const { run } = grant;
+        const row = db.query<{ jobId: string; sourceId: string; sessionId: string; promptId: string; state: string }, [string]>(
+          `SELECT r.job_id AS jobId,j.source_id AS sourceId,r.session_id AS sessionId,r.prompt_id AS promptId,r.state
+           FROM weaving_runs r JOIN jobs j ON j.id=r.job_id WHERE r.id=? AND r.outcome IS NULL AND j.status IN ('running','uncertain')`,
+        ).get(run.runId);
+        if (!row || row.jobId !== run.jobId || row.sourceId !== run.sourceId || row.sessionId !== run.sessionId || row.promptId !== run.promptId ||
+            !["preparing", "admitting", "admitted", "uncertain"].includes(row.state)) throw new KnowledgeError("forbidden");
+        if (!isAbsolute(grant.location) || normalize(grant.location) !== grant.location || !toolId(grant.agent) ||
+            grant.sourceIds.length !== 1 || grant.sourceIds[0] !== row.sourceId || grant.operations.length < 1 ||
+            new Set(grant.operations).size !== grant.operations.length || grant.operations.some((action) => !supportedToolActions.includes(action))) {
+          throw new KnowledgeError("forbidden");
+        }
+        const sourceIds = JSON.stringify([...grant.sourceIds].sort());
+        const operations = JSON.stringify([...grant.operations].sort());
+        const hash = createHash("sha256").update(JSON.stringify([
+          run.runId, run.jobId, run.sourceId, run.sessionId, run.promptId, grant.location, grant.agent, sourceIds, operations,
+        ])).digest("hex");
+        const existing = db.query<{ scopeHash: string; revoked: number }, [string]>(
+          "SELECT scope_hash AS scopeHash,revoked FROM owned_grants WHERE session_id=?",
+        ).get(run.sessionId);
+        if (existing) {
+          if (existing.revoked || existing.scopeHash !== hash) throw new KnowledgeError("forbidden");
+          return;
+        }
+        // A new grant must precede admission; recovery can read an existing one,
+        // but cannot manufacture authority for an already-running native session.
+        if (row.state !== "preparing") throw new KnowledgeError("forbidden");
+        db.run("INSERT INTO owned_grants(session_id,run_id,location,agent,source_ids,operations,scope_hash) VALUES (?,?,?,?,?,?,?)",
+          [run.sessionId, run.runId, grant.location, grant.agent, sourceIds, operations, hash]);
+      });
+      console.info("tools.grant bind succeeded", { runId: grant.run.runId });
+    } catch (error) {
+      console.error("tools.grant bind failed", { category: error instanceof KnowledgeError ? error.code : "invalid_input" });
+      throw error;
+    }
+  }
+
+  revoke(sessionId: string): void {
+    console.info("tools.grant revoke attempt", { sessionId });
+    try {
+      storage(this.databasePath, true, (db) => db.run("UPDATE owned_grants SET revoked=1 WHERE session_id=?", [sessionId]));
+      console.info("tools.grant revoke succeeded", { sessionId });
+    } catch (error) {
+      console.error("tools.grant revoke failed", { sessionId, category: "storage_error" });
+      throw error;
+    }
+  }
+}
+
+type ItemAnchor = { sourceId: string; versionId: string };
+function itemAnchor(db: Database, itemId: string): ItemAnchor {
+  const row = db.query<ItemAnchor, [string]>(`SELECT i.source_id AS sourceId,f.id AS versionId FROM knowledge_items i
+    JOIN formulations f ON f.item_id=i.id WHERE i.id=? ORDER BY f.rowid DESC LIMIT 1`).get(itemId);
+  if (!row) throw new KnowledgeError("invalid_reference");
+  return row;
+}
+function readWitness(db: Database, grant: GrantRow, kind: "source" | "item" | "relationship", id: string, version?: string) {
+  const row = db.query<{ versionId: string | null }, [string, string, string]>(
+    "SELECT version_id AS versionId FROM tool_reads WHERE run_id=? AND kind=? AND record_id=?",
+  ).get(grant.runId, kind, id);
+  if (!row) throw new KnowledgeError("forbidden");
+  if (version !== undefined && row.versionId !== version) throw new KnowledgeError("version_conflict");
+}
+function rootEvidence(grant: GrantRow, ids: string[]) {
+  const roots = strings(grant.sourceIds);
+  if (ids.some((id) => !roots.includes(id))) throw new KnowledgeError("forbidden");
+}
+function relationshipScope(db: Database, grant: GrantRow, fromId: string, toId: string, ids: string[]) {
+  const from = itemAnchor(db, fromId), to = itemAnchor(db, toId);
+  const roots = strings(grant.sourceIds);
+  if (!roots.includes(from.sourceId) && !roots.includes(to.sourceId)) throw new KnowledgeError("forbidden");
+  for (const [id, item] of [[fromId, from], [toId, to]] as const) {
+    if (!roots.includes(item.sourceId)) {
+      readWitness(db, grant, "item", id);
+      readWitness(db, grant, "source", item.sourceId);
+    }
+  }
+  const allowed = new Set([...roots, from.sourceId, to.sourceId]);
+  for (const item of [from, to]) for (const evidence of db.query<{ id: string }, [string]>(
+    "SELECT source_id AS id FROM formulation_evidence WHERE formulation_id=?",
+  ).all(item.versionId)) allowed.add(evidence.id);
+  for (const id of ids) {
+    if (!allowed.has(id)) throw new KnowledgeError("forbidden");
+    if (!roots.includes(id)) readWitness(db, grant, "source", id);
+  }
+  return { from, to };
+}
+
+export function createToolApp(options: { databasePath: string; transportCredential: string; location: string }) {
+  if (!options.transportCredential || !isAbsolute(options.location) || normalize(options.location) !== options.location) {
+    throw new Error("Invalid internal tool configuration");
+  }
+  const app = new Hono();
+  const credential = createHash("sha256").update(`Bearer ${options.transportCredential}`).digest();
+  app.use("/internal/tools/*", async (context, next) => {
+    console.info("tools.request attempt");
+    const actual = createHash("sha256").update(context.req.header("authorization") ?? "").digest();
+    if (!timingSafeEqual(credential, actual)) {
+      console.info("tools.request rejected", { category: "unauthorized" });
+      return context.json({ error: "Unauthorized" }, 401);
+    }
+    if (context.req.header("origin")) {
+      console.info("tools.request rejected", { category: "browser_origin" });
+      return context.json({ error: "Forbidden" }, 403);
+    }
+    await next();
+    console.info("tools.request outcome", { status: context.res.status });
+  });
+  app.use("/internal/tools/*", bodyLimit({ maxSize: 65_536, onError: (context) => context.json({ error: "Tool request too large" }, 413) }));
+  app.onError((error, context) => {
+    const code = error instanceof KnowledgeError ? error.code : "storage_error";
+    console.error("tools.request failed", { category: code });
+    const status = code === "forbidden" ? 403 : code === "operation_conflict" || code === "version_conflict" ? 409 : code === "invalid_input" || code === "invalid_reference" ? 400 : 503;
+    return context.json({ error: code }, status);
+  });
+
+  async function envelope(request: Request, action: ToolAction) {
+    let body: unknown;
+    try { body = await request.json(); } catch { throw new KnowledgeError("invalid_input"); }
+    if (!toolRecord(body) || !toolKeys(body, ["native", "input", "action"]) || (body.action !== undefined && body.action !== action)) {
+      throw new KnowledgeError("invalid_input");
+    }
+    const native = parseNativeIdentity(body.native);
+    if (!native) throw new KnowledgeError("invalid_input");
+    return { native, input: body.input };
+  }
+
+  function mutate<T>(native: NativeIdentity, action: ToolAction, scope: (db: Database, grant: GrantRow) => void,
+    change: (knowledge: KnowledgeService, actor: KnowledgeContext) => T,
+    before?: (db: Database, grant: GrantRow) => void): T {
+    const check = (db: Database) => {
+      const grant = authorize(db, native, options.location, action);
+      scope(db, grant);
+      return grant;
+    };
+    const grant = storage(options.databasePath, false, check);
+    const operationId = `tool_${createHash("sha256").update(JSON.stringify([native.sessionID, native.messageID, native.callID])).digest("hex")}`;
+    const knowledge = new KnowledgeService(options.databasePath, (db) => { check(db); }, before ? (db) => before(db, check(db)) : undefined);
+    return change(knowledge, { actor: "ai", operationId, runId: grant.runId });
+  }
+  function witness(native: NativeIdentity, action: ToolAction, kind: "source" | "item" | "relationship", id: string, version: string | null) {
+    storage(options.databasePath, true, (db) => {
+      const grant = authorize(db, native, options.location, action);
+      db.run(`INSERT INTO tool_reads(run_id,kind,record_id,version_id) VALUES (?,?,?,?)
+        ON CONFLICT(run_id,kind,record_id) DO UPDATE SET version_id=excluded.version_id`, [grant.runId, kind, id, version]);
+    });
+  }
+
+  app.post("/internal/tools/record-interpretation", async (context) => {
+    const body = await envelope(context.req.raw, "record_interpretation");
+    const input = parseInterpretation(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    console.info("tools.interpretation attempt", { sessionId: body.native.sessionID, messageId: body.native.messageID });
+    const check = (db: Database) => {
+      const grant = authorize(db, body.native, options.location, "record_interpretation");
+      const sources = strings(grant.sourceIds);
+      if (!sources.includes(input.sourceId) || input.evidenceSourceIds.some((id) => !sources.includes(id))) throw new KnowledgeError("forbidden");
+      return grant;
+    };
+    const grant = storage(options.databasePath, false, check);
+    const operationId = `tool_${createHash("sha256").update(JSON.stringify([body.native.sessionID, body.native.messageID, body.native.callID])).digest("hex")}`;
+    // The guard runs again under the knowledge mutation's IMMEDIATE transaction,
+    // fencing revocation/completion even when the operation is a receipt replay.
+    const knowledge = new KnowledgeService(options.databasePath, (db) => { check(db); });
+    const result = knowledge.createItem({ actor: "ai", operationId, runId: grant.runId }, { ...input, kind: "interpretation" });
+    console.info("tools.interpretation succeeded", { runId: grant.runId, operationId, itemId: result.id });
+    return context.json(result);
+  });
+
+  app.post("/internal/tools/record-alias", async (context) => {
+    const body = await envelope(context.req.raw, "record_alias"), input = parseAlias(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    return context.json(mutate(body.native, "record_alias", (_db, grant) => rootEvidence(grant, input.evidenceSourceIds),
+      (service, actor) => service.recordAlias(actor, input)));
+  });
+  app.post("/internal/tools/record-relationship", async (context) => {
+    const body = await envelope(context.req.raw, "record_relationship"), input = parseRelationship(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    return context.json(mutate(body.native, "record_relationship", (db, grant) => {
+      relationshipScope(db, grant, input.fromItemId, input.toItemId, input.evidenceSourceIds);
+    }, (service, actor) => service.createRelationship(actor, input), (db, grant) => {
+      for (const [id, version] of [[input.fromItemId, input.fromVersionId], [input.toItemId, input.toVersionId]]) {
+        const anchor = itemAnchor(db, id);
+        if (anchor.versionId !== version) throw new KnowledgeError("version_conflict");
+        if (!strings(grant.sourceIds).includes(anchor.sourceId)) readWitness(db, grant, "item", id, version);
+      }
+    }));
+  });
+  app.post("/internal/tools/revise-interpretation", async (context) => {
+    const body = await envelope(context.req.raw, "revise_interpretation"), input = parseInterpretationRevision(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    return context.json(mutate(body.native, "revise_interpretation", (db, grant) => {
+      if (!strings(grant.sourceIds).includes(itemAnchor(db, input.itemId).sourceId)) throw new KnowledgeError("forbidden");
+      rootEvidence(grant, input.evidenceSourceIds);
+    }, (service, actor) => service.reviseItem(actor, input)));
+  });
+  app.post("/internal/tools/revise-relationship", async (context) => {
+    const body = await envelope(context.req.raw, "revise_relationship"), input = parseRelationshipRevision(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    return context.json(mutate(body.native, "revise_relationship", (db, grant) => {
+      const relation = db.query<{ fromId: string; toId: string }, [string]>(
+        "SELECT from_item_id AS fromId,to_item_id AS toId FROM relationships WHERE id=?",
+      ).get(input.relationshipId);
+      if (!relation) throw new KnowledgeError("invalid_reference");
+      relationshipScope(db, grant, relation.fromId, relation.toId, input.evidenceSourceIds);
+      readWitness(db, grant, "relationship", input.relationshipId);
+    }, (service, actor) => service.reviseRelationship(actor, input), (db, grant) => {
+      readWitness(db, grant, "relationship", input.relationshipId, input.expectedVersionId);
+      const relation = db.query<{ fromId: string; toId: string }, [string]>(
+        "SELECT from_item_id AS fromId,to_item_id AS toId FROM relationships WHERE id=?",
+      ).get(input.relationshipId);
+      if (!relation) throw new KnowledgeError("invalid_reference");
+      for (const id of [relation.fromId, relation.toId]) readWitness(db, grant, "item", id, itemAnchor(db, id).versionId);
+    }));
+  });
+
+  app.post("/internal/tools/read-source", async (context) => {
+    const body = await envelope(context.req.raw, "read_source");
+    if (!toolRecord(body.input) || !toolKeys(body.input, ["sourceId"]) || !toolId(body.input.sourceId)) throw new KnowledgeError("invalid_input");
+    storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "read_source"));
+    const source = findSource(options.databasePath, body.input.sourceId);
+    if (source) witness(body.native, "read_source", "source", source.id, null);
+    return source ? context.json(source) : context.json({ error: "Source not found" }, 404);
+  });
+  for (const action of ["read_item", "read_relationship"] as const) {
+    app.post(action === "read_item" ? "/internal/tools/read-item" : "/internal/tools/read-relationship", async (context) => {
+      const body = await envelope(context.req.raw, action);
+      const field = action === "read_item" ? "itemId" : "relationshipId";
+      if (!toolRecord(body.input) || !toolKeys(body.input, [field]) || !toolId(body.input[field])) throw new KnowledgeError("invalid_input");
+      const id = body.input[field];
+      storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, action));
+      const service = new KnowledgeService(options.databasePath);
+      const result = action === "read_item" ? service.getItem(id) : service.getRelationship(id);
+      witness(body.native, action, action === "read_item" ? "item" : "relationship", id, result.current.id);
+      return context.json(result);
+    });
+  }
+  app.post("/internal/tools/search", async (context) => {
+    const body = await envelope(context.req.raw, "search");
+    if (!toolRecord(body.input) || !toolKeys(body.input, ["query"]) || typeof body.input.query !== "string" || body.input.query.length > 512 ||
+        (body.input.query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) > 16) throw new KnowledgeError("invalid_input");
+    storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "search"));
+    return context.json({ results: searchSources(options.databasePath, body.input.query) });
+  });
+  return app;
+}

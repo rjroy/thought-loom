@@ -14,6 +14,8 @@ export type SourceSearchResult = {
 };
 
 export * from "./inspection";
+export * from "./tools";
+export * from "./weaving";
 
 // Expanded search response contract; source text is an excerpt, not a replacement
 // for fetching the immutable original. Knowledge is present for formulation hits.

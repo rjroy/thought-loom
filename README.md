@@ -3,8 +3,9 @@
 The current MVP captures immutable originals, saves their provenance/date,
 queues weaving jobs, and searches originals plus any recorded interpretations.
 You can inspect recorded relationships, their evidence and revision history.
-**Automated weaving and dialogue are not implemented yet.** Normal capture
-does not invent or add AI annotations. The concept mockups are guidelines,
+Automated weaving is available when explicitly connected to your own native
+agent service. Without that setup, originals remain saved and queued; capture
+does not invent AI annotations. **Dialogue is not implemented yet.** The concept mockups are guidelines,
 not a pixel contract or a claim that the full experience is built.
 
 ## Run locally
@@ -28,7 +29,8 @@ The responsive phone layout can be tried in desktop browser device emulation.
 **Do not expose either service to a network or use a public tunnel.** There is
 no authentication yet. Other local processes can access the loopback services.
 Real phone access waits for a separate hosting/authentication decision.
-No OpenCode service, model, provider secret, or paid call is needed here.
+No OpenCode service, model, provider secret, or paid call is needed for capture
+and retrieval. Configured weaving uses your selected agent/provider/model.
 
 For a production-mode local launch, run `bun run build` then `bun start`.
 The build command must succeed first; it does not start either service.
@@ -67,7 +69,7 @@ to find your words later. There is deliberately no permanent all-notes list.
    and any recorded interpretations and connections distinct. Expand **Read
    full original** to inspect every character, or **Open saved original** for
    the existing standalone source URL.
-3. Ordinary captures have no AI notes yet. Empty states say so. When recorded
+3. Without configured weaving, ordinary captures have no AI notes. Empty states say so. When recorded
    notes exist, their author, tentative status, evidence links, connection
    direction/rationale, and **View history** are readable. There is no mandatory
    approval inbox. Read-only history does not provide rejection/restoration
@@ -94,14 +96,72 @@ Inspect the full source, alternate interpretations, historical versions,
 connection rationale, and evidence. Stop it with Ctrl+C. Plain `bun dev`
 returns to your normal database unless you have set a database-path override.
 
+### Connect weaving (explicit opt-in)
+
+Open **http://127.0.0.1:3000/setup/weaving** for the same in-app guide. The
+integration targets OpenCode **2.2.2**, attached to an operator-managed service.
+Thoughtloom does not install OpenCode, start a shared service, select a model,
+or modify a personal/global service configuration. Selected providers may
+receive source content and incur charges.
+
+Choose an existing absolute registration-file path and accessible agent,
+provider and model. From the repository root, replace **every** placeholder:
+
+```sh
+bun run scripts/setup-native.ts \
+  --runtime-directory /ABSOLUTE/FRESH/RUNTIME \
+  --location-directory /ABSOLUTE/FRESH/LOCATION \
+  --daemon-origin http://127.0.0.1:3001 \
+  --registration-file /ABSOLUTE/EXISTING/REGISTRATION \
+  --agent YOUR_AGENT \
+  --provider YOUR_PROVIDER \
+  --model YOUR_MODEL
+```
+
+The runtime and location directories must both be **fresh absolute paths
+outside this repository**. Do not substitute an existing project or a global
+configuration directory. This offline command prepares private configuration,
+the first-party plugin and its tool connection; it prints `nativeConfigFile`.
+It neither activates a service nor proves provider compatibility. Keep generated
+files private. See `scripts/setup-native.ts` for explicit optional variant and
+step-budget flags; do not add browser-held credentials.
+
+Independently start/manage your own matching OpenCode service for the exact
+prepared location and registration. Stop any existing Thoughtloom launcher,
+then use the actual printed configuration path:
+
+```sh
+THOUGHTLOOM_NATIVE_CONFIG_FILE='/ACTUAL/RUNTIME/native.json' bun dev
+```
+
+Keep both Thoughtloom services on loopback; there is no authentication or
+remote-phone access. Keep the same database-path override if using one.
+
+1. Capture a thought. **Original saved** acknowledges the durable source, not
+   an agent outcome. **Queued for weaving** means no run has started.
+2. Configured work can progress to **Weaving in progress**, then **Weaving
+   completed**. Zero recorded changes is a valid result, not a fabricated
+   connection. Explore recorded context to inspect tentative AI readings,
+   rationale and evidence. Open inquiries update without closing disclosures.
+3. Search your own words or a newly recorded formulation. Sources and AI-note
+   matches remain distinct. Example-only demo annotations are not live output.
+4. A confirmed failed/interrupted eligible run may offer **Retry weaving**:
+   it reuses the saved source/job, not a new capture. An uncertain admission
+   offers **Check status**, a read-only action, not blind resend. If the retry
+   acknowledgement itself is lost, **Confirm retry** replays its same command
+   key/payload. An unavailable service and missing configuration are distinct.
+   Recorded partial changes remain visible. No operator policy or arbitrary
+   provider/model compatibility is implied by this checkpoint.
+
 ## Boundaries and checks
 
 Browser data requests use same-origin Next routes: `/api/captures`, `/api/search`,
-`/api/sources/<id>`, and `/api/sources/<id>/inquiry`.
+`/api/sources/<id>`, `/api/sources/<id>/inquiry`, and
+`/api/sources/<id>/weaving` (with a narrow `/retry` command).
 Only server code knows the internal `THOUGHTLOOM_DAEMON_URL`; it accepts only
 an operator-configured HTTP loopback base, never a URL from the browser. The
 source page also reads through that server-side boundary without caching.
-Cross-origin capture requests are rejected, but this is not authentication.
+Cross-origin capture/retry requests are rejected, but this is not authentication.
 
 The daemon owns `GET /sources/<id>/inquiry`: a consistent read-only snapshot
 of the source, its items and direct neighbors, incident relationships, recent

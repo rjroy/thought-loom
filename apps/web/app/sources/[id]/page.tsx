@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { readSource } from "../../../lib/daemon";
+import { readSource, readWeaving } from "../../../lib/daemon";
 import StatusIcon from "../../ui/status-icon";
+import WeavingStatus from "../../ui/weaving-status";
 
 export const metadata: Metadata = { title: "Original thought" };
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
     );
   }
   const { source } = result;
+  const weaving = await readWeaving(id);
   const date = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(source.createdAt));
   return (
     <main id="main" className="workspace source-workspace" tabIndex={-1}>
@@ -35,10 +37,7 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
       <article className="original-text" aria-label="Original thought">{source.text}</article>
       <p className="source-preservation">This is your unchanged source, not an AI interpretation. Bookmark this page to return to it.</p>
       <Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link>
-      <section className="notice queue-notice" role="status" aria-labelledby="queue-heading">
-        <StatusIcon kind="queued" />
-        <div><h2 id="queue-heading">Queued for weaving</h2><p>The weaving worker is not available in this phase. Your original is saved. Any recorded notes can be inspected in its context view.</p></div>
-      </section>
+      <WeavingStatus key={id} sourceId={id} initial={weaving.kind === "found" ? weaving.value : null} />
     </main>
   );
 }

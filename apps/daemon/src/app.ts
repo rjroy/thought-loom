@@ -1,11 +1,16 @@
 import { Hono } from "hono";
-import { isRecordId, parseCaptureInput } from "@thoughtloom/contracts";
+import { isIdempotencyKey, isRecordId, parseCaptureInput } from "@thoughtloom/contracts";
 import { readInquiry } from "./inquiry";
 import { findSource, saveCapture, searchSources } from "./storage";
 import type { SearchLimits } from "./storage";
+import { createToolApp } from "./tool-boundary";
+import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
 
-export function createApp(options: { databasePath: string; searchLimits?: Partial<SearchLimits> }) {
+export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
+  if (options.tools) app.route("/", createToolApp({ databasePath: options.databasePath, ...options.tools }));
+  else app.all("/internal/tools/*", (context) => context.json({ error: "Unauthorized" }, 401));
+  app.route("/", createWeavingHttpApp(options));
 
   app.post("/captures", async (context) => {
     let body: unknown;
@@ -17,7 +22,7 @@ export function createApp(options: { databasePath: string; searchLimits?: Partia
     const input = parseCaptureInput(body);
     if (!input) return context.json({ error: "Invalid capture" }, 400);
     const key = context.req.header("idempotency-key");
-    if (!key || !/^[A-Za-z0-9._~-]{1,128}$/.test(key)) {
+    if (!isIdempotencyKey(key)) {
       return context.json({ error: "Invalid Idempotency-Key" }, 400);
     }
 

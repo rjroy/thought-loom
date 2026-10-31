@@ -11,6 +11,7 @@ export type InquiryView = { source: Source; items: ItemView[]; relationships: Re
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function text(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 export function isRecordId(value: unknown): value is string { return typeof value === "string" && /^[A-Za-z0-9._~-]{1,128}$/.test(value); }
+export function isIdempotencyKey(value: unknown): value is string { return isRecordId(value); }
 function date(value: unknown): value is string { return typeof value === "string" && !Number.isNaN(Date.parse(value)); }
 function author(value: unknown): value is "user" | "ai" { return value === "user" || value === "ai"; }
 function list<T>(value: unknown, parse: (entry: unknown) => T | null, maximum: number): T[] | null {
