@@ -101,7 +101,10 @@ textarea:read-only { opacity: .9; cursor: wait; }
 .inquiry-heading h1 { font-size: 38px; }
 .inquiry-heading .text-link { flex-shrink: 0; color: var(--supporting); }
 .inquiry-intro { margin: 14px 0 40px; color: var(--supporting); font-size: 20px; }
-.inquiry-grid { display: grid; grid-template-columns: minmax(0, .78fr) minmax(0, 1.22fr); gap: 56px; align-items: start; }
+.inquiry-grid { display: grid; grid-template-columns: minmax(0, .78fr) minmax(0, 1.22fr); grid-template-areas: "source development" "source readings"; gap: 48px 56px; align-items: start; }
+.inquiry-source { grid-area: source; }
+.inquiry-source > .button { display: flex; width: fit-content; margin-top: 12px; }
+.recorded-context { grid-area: readings; }
 .recorded-context, .inquiry-source { min-width: 0; }
 .inquiry-source { border-top: 1px solid var(--line); padding-top: 24px; }
 .record-identity { margin-top: 6px; color: var(--supporting); font-size: 16px; }
@@ -156,8 +159,44 @@ summary:hover { text-decoration: underline; }
 .setup-steps p { margin-top: 10px; color: var(--supporting); }
 .setup-workspace pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.65; padding: 20px; border: 1px solid var(--line); border-radius: 6px; }
 .setup-workspace code { overflow-wrap: anywhere; }
+.development-area { grid-area: development; min-width: 0; border-top: 1px solid var(--line); padding-top: 24px; scroll-margin-top: 24px; }
+.development-area h3 { margin: 0; font-size: 18px; line-height: 1.4; font-weight: 600; }
+.discussion-target { margin: 24px 0; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.discussion-target h3 { font-size: 16px; color: var(--supporting); }
+.discussion-target blockquote { margin: 12px 0 0; font-size: 20px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.target-endpoint { margin-top: 12px; color: var(--supporting); font-size: 16px; overflow-wrap: anywhere; }
+.context-change { margin-top: 16px; color: var(--lantern); font-size: 16px; }
+.development-form label, .rejection-form label { display: block; font-size: 19px; font-weight: 600; }
+.development-form textarea, .rejection-form textarea { min-height: 160px; padding: 18px; font-size: 19px; line-height: 1.6; background: var(--night); color: var(--parchment); caret-color: var(--parchment); scrollbar-color: var(--horizon) var(--night); }
+.development-form textarea:read-only, .rejection-form textarea:read-only { cursor: default; }
+.development-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-top: 18px; }
+.development-actions .draft-state { max-width: 36ch; }
+.dialogue-status { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+.dialogue-status p { color: var(--supporting); font-size: 16px; margin-top: 8px; }
+.dialogue-status .stop-request { color: var(--lantern); }
+.claim-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-top: 16px; }
+.claim-actions .button { font-size: 16px; padding: 10px 16px; min-height: 44px; }
+.text-button { display: inline-block; min-height: 44px; border: 0; padding: 8px 0; font-size: 16px; line-height: 1.4; background: transparent; color: var(--parchment); text-decoration: underline; text-underline-offset: .2em; }
+.text-button:hover:not(:disabled) { color: var(--lantern); }
+.text-button:disabled { color: var(--supporting); cursor: not-allowed; }
+.rejection-form { margin-top: 22px; }
+.rejection-form label { font-size: 17px; margin-bottom: 12px; }
+.rejection-form textarea { min-height: 120px; }
+.latest-exchange, .developed-here { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.exchange { margin-top: 22px; scroll-margin-top: 24px; min-width: 0; }
+.exchange-input h3, .exchange-response h3 { font-size: 16px; }
+.exchange-input .attribution { margin-top: 6px; }
+.turn-text { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 19px; }
+.turn-date { margin-top: 12px; font-size: 14px; color: var(--supporting); font-variant-numeric: tabular-nums; }
+.exchange-response { margin-top: 24px; }
+.canonical-response { margin-top: 12px; max-width: 70ch; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.65; }
+.developed-idea { padding: 22px 0 0; }
+.developed-idea .text-link { margin-right: 20px; font-size: 16px; }
+.earlier-exchanges { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 16px; }
+.earlier-exchanges .exchange { border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+.discussion-budget { margin-top: 28px; max-width: 70ch; color: var(--supporting); font-size: 15px; }
 @media (max-width: 800px) {
-  .inquiry-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .inquiry-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "development" "source" "readings"; gap: 36px; }
   .inquiry-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
   .inquiry-intro { margin-top: 8px; margin-bottom: 28px; }
 }
@@ -182,6 +221,9 @@ summary:hover { text-decoration: underline; }
   .source-meta { gap: 16px 28px; }
   .original-text { padding: 20px; font-size: 20px; min-height: 200px; }
   .notice { gap: 12px; }
+  .development-actions { flex-direction: column; align-items: stretch; }
+  .development-actions .button { width: 100%; }
+  .discussion-target blockquote { font-size: 19px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 @media (forced-colors: active) { .button, textarea, .original-text { border: 1px solid CanvasText; } :focus-visible { outline-color: Highlight; } }

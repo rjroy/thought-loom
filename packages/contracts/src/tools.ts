@@ -1,5 +1,8 @@
-export type ToolAction = "read_source" | "read_item" | "read_relationship" | "search" | "record_interpretation" | "record_alias" | "record_relationship" | "revise_interpretation" | "revise_relationship";
-export const DOMAIN_ACTIONS: readonly ToolAction[] = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship"];
+export type ToolAction = "read_source" | "read_item" | "read_relationship" | "search" | "record_interpretation" | "record_alias" | "record_relationship" | "revise_interpretation" | "revise_relationship" | "record_idea";
+export const DOMAIN_ACTIONS: readonly ToolAction[] = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship", "record_idea"];
+export const CAPTURE_ACTIONS = DOMAIN_ACTIONS.filter((action) => action !== "record_idea");
+export type IdeaInput = { rootSourceId: string; turnSourceId: string; dialogueId: string; turnId: string; text: string; evidenceSourceIds: string[]; derivedFrom?: { itemId: string; versionId: string } };
+export type IdeaDerivation = { dialogueId: string; turnId: string; turnSourceId: string; itemId?: string; versionId?: string };
 export type NativeIdentity = { sessionID: string; agent: string; messageID: string; callID: string };
 export type InterpretationInput = { sourceId: string; text: string; evidenceSourceIds: string[] };
 export type AliasInput = { alias: string; expansion: string; evidenceSourceIds: string[] };
@@ -72,4 +75,15 @@ export function parseRelationshipRevision(value: unknown, strict = true): Relati
   if (!toolId(value.relationshipId) || !toolId(value.expectedVersionId) || (value.status !== "active" && value.status !== "rejected") ||
       !text(value.rationale) || !evidenceIds(value.evidenceSourceIds)) return null;
   return { relationshipId: value.relationshipId, expectedVersionId: value.expectedVersionId, status: value.status, rationale: value.rationale, evidenceSourceIds: [...value.evidenceSourceIds] };
+}
+export function parseIdea(value: unknown, strict = true): IdeaInput | null {
+  if (!toolRecord(value) || (strict && !toolKeys(value, ["rootSourceId", "turnSourceId", "dialogueId", "turnId", "text", "evidenceSourceIds", "derivedFrom"]))) return null;
+  if (!toolId(value.rootSourceId) || !toolId(value.turnSourceId) || !toolId(value.dialogueId) || !toolId(value.turnId) || !text(value.text) || !evidenceIds(value.evidenceSourceIds)) return null;
+  let derivedFrom: IdeaInput["derivedFrom"];
+  if (value.derivedFrom !== undefined) {
+    if (!toolRecord(value.derivedFrom) || !toolKeys(value.derivedFrom, ["itemId", "versionId"]) || !toolId(value.derivedFrom.itemId) || !toolId(value.derivedFrom.versionId)) return null;
+    derivedFrom = { itemId: value.derivedFrom.itemId, versionId: value.derivedFrom.versionId };
+  }
+  return { rootSourceId: value.rootSourceId, turnSourceId: value.turnSourceId, dialogueId: value.dialogueId, turnId: value.turnId, text: value.text,
+    evidenceSourceIds: [...value.evidenceSourceIds], ...(derivedFrom ? { derivedFrom } : {}) };
 }

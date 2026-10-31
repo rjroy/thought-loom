@@ -1,20 +1,45 @@
 # Opt-in Thoughtloom plugin witness
 
-**Authored, not executed.** Security review must precede the independent tester's
-native run. Ordinary `bun test` does not discover `plugin-witness.ts`. This is one
-new first-party-plugin fixture, not a rerun of the three baseline profiles or an
-operator-service check. It changes no production configuration.
+**Historical capture-only witness passed on 2026-10-31** after security review and independent
+execution; results and limits are recorded in the [research note](../../.lore/work/research/opencode-2.2.2-owned-tools.md#2026-10-31--isolated-application-witness).
+This does not certify personal policies, operator-service compatibility, dialogue
+execution or later code changes. Ordinary `bun test` does not discover
+`plugin-witness.ts`. This is one first-party-plugin fixture, not a rerun of the
+three baseline profiles or an operator-service check. It changes no production
+configuration. Any rerun remains explicit opt-in and subject to security review.
+
+**Phase-4 capture+dialogue witness passed on 2026-10-31** after fresh review.
+An independent tester ran the exact command below **once**, with the current
+reviewed source/bundle pins: exit **0**. This is separate from the historical
+capture-only result; the existing baseline's three profiles were not rerun.
+
+Receipt: **2.2.2**, plugin **active**, capture job and dialogue **completed**,
+**2 owned sessions**, **4 native calls** (`read_source`, `record_interpretation`,
+`record_idea`), **2 domain receipts**, **6 daemon replay refusals**, **8 fake-provider
+requests** (**4 capture + 4 dialogue**), cleanup **completed**. Native context
+matched history; originals/turn context, canonical reply and the developing
+idea's two-source evidence/derivation were retained; grants were revoked.
+The refusals were daemon replays, not extra native prompts. No paid-model or
+personal/operator-service calls occurred. Post-run inspection found no owned
+process or fixture directory; ephemeral ports were not reported or independently
+port-checked. This is **not** live Stop or operator-policy certification. See the
+[dated research result](../../.lore/work/research/opencode-2.2.2-owned-tools.md#2026-10-31--refreshed-capture-and-dialogue-witness).
 
 ## Pure checks (safe without native opt-in)
 
 From the repository root, using the already installed runtime:
 
 ```sh
-/home/rjroy/.local/share/mise/installs/bun/1.4.3/bin/bun --no-env-file test apps/daemon/tests/native-plugin-isolation.test.ts
+/home/rjroy/.local/share/mise/installs/bun/1.4.3/bin/bun --no-env-file test apps/daemon/tests/native-plugin-isolation.test.ts apps/daemon/tests/native-fixture-provider.test.ts
 /home/rjroy/.local/share/mise/installs/bun/1.4.3/bin/bun --no-env-file node_modules/typescript/bin/tsc --noEmit -p tsconfig.native-tests.json
 ```
 
-Package scripts: `test:native:guards`, `typecheck:native-tests`.
+Package scripts: `test:native:guards` (isolation/bundle checks), `typecheck:native-tests`.
+The provider tests exercise only the pure fixed-flow state machine: no server,
+native process or provider/model call. The real-source bundle check uses
+`Bun.build` in memory, not an installer or native loader. An offline-generator
+test writes only a fresh private temporary fixture and removes it afterward;
+it checks that production setup and the exact guarded documents agree.
 
 ## Native execution — independent tester only, after review
 
@@ -35,6 +60,10 @@ witness failure is a failure, not permission to relax isolation or retry a promp
 * `plugin-isolation.ts` defines a single exact configuration/environment profile.
   `node-io.ts` supplies metadata/hash checks. `owned-native.ts` is the only spawn
   site, reached through `guardedLaunch` after all guards.
+* `plugin-provenance.ts` pins exactly the first-party plugin and its only runtime
+  source import, `contracts/src/tools.ts`. `plugin-bundle.ts` checks canonical
+  source paths/hashes and reproduces the pinned in-memory bundle. The harness
+  never learns a hash from current files and then approves it automatically.
 * Require Linux x64, Bun 1.4.3, canonical repository cwd and the exact existing
   canonical ELF/package pair at 2.2.2. Both binary files must be executable; sibling
   inode or digest must match. Expected SHA256 is
@@ -62,8 +91,12 @@ witness failure is a failure, not permission to relax isolation or retry a promp
 * Disable model catalog fetch, free providers, updates, file watching, sharing,
   snapshots, warming and automatic compaction. The only enabled chat model must
   be the test-owned loopback provider. Default-deny permissions allow only exact
-  `read_source` and `record_interpretation` actions; no wildcard action allow,
-  shell, file, delegation, MCP, browser or network tool grants.
+  actions. The agent ceiling is exactly `read_source`, `record_interpretation`
+  and `record_idea`. Each newly owned session receives a default-deny narrower
+  policy: capture allows only `read_source`/`record_interpretation`; dialogue
+  allows only `read_source`/`record_idea`. No wildcard action allow, shell, file,
+  delegation, MCP, browser or network tool grants. Native session readback and
+  each actual provider catalog must match its exact two-action policy.
 
 ## What the real run must witness
 
@@ -75,25 +108,44 @@ containment and the enabled fixture model are checked before submission. A priva
 test-owned registration is then used by the **production default maintained-client
 connector**, not a scripted client port.
 
-The production worker submits once. The fake provider has a nine-request cap,
-1 MiB request cap, exactly three domain turns, and rejects any advertised tool
-set other than the two allowed actions. It requests `read_source`, verifies that
-the tool result contains the controlled original, requests one interpretation,
-verifies its result, then returns a canonical final answer. Auxiliary no-tool
-requests get a bounded fixture answer, never a real provider.
+The production worker submits exactly once for capture, then exactly once for
+one retained dialogue turn. These use **two distinct owned native sessions**,
+run/job IDs and prompt IDs; neither adopts a TUI or mutable current-turn context.
+The fake provider keeps the existing **nine-request capture cap** and adds at
+most **five dialogue requests**: **14 total**, each at most 1 MiB. Each flow has
+exactly three domain steps (six total); no-tool auxiliary replies consume the
+same phase/total budgets and never call a real provider.
+
+Capture still requests `read_source`, verifies the controlled original, records
+one interpretation and verifies its result before returning a canonical final.
+Only after capture settles does the fixture create a dialogue through the real
+Hono routes, pinned to that actual interpretation/version, and save one user
+turn. The provider verifies that the native dialogue prompt contains the original,
+exact current input and pinned context/IDs; it reads the retained turn, records
+one developing idea with both source IDs and the pinned interpretation derivation,
+verifies the result and returns a canonical final. Any wrong/extra advertised
+tool, missing result, unexpected phase, extra domain step or exceeded cap fails.
 
 Accepted HTTP envelopes are matched to ordinary native assistant history:
 session, configured agent, engine-owned assistant message ID and native call ID
 must agree. Assistant message ID must differ from the single admitted prompt ID.
 The worker's production event-handshake/history reconciliation must reach canonical
-completion with the same run IDs. The fixture verifies original bytes unchanged,
-one AI-attributed interpretation, original evidence, native-context-derived domain
-receipt, one attempted native command, one recorded change and revoked grant.
+completion for each particular prompt. The fixture verifies original bytes
+unchanged; one AI interpretation plus one actual `developing-idea`; **two**
+native-context-derived domain receipts; and one attempted command, one recorded
+change and revoked grant **per run**. The dialogue grant contains exactly the
+original and retained user-turn source IDs. SQLite and the public dialogue view
+must retain the canonical assistant text; the outcome's native assistant ID must
+match ordinary history. Idea evidence and derivation must point to that original,
+dialogue, turn, retained turn source and exact selected interpretation/version.
 
 Separately, authenticated HTTP **replay-policy checks**, not additional native
 prompts, require refusal of unknown-session and settled/revoked-session envelopes;
-a wrong transport credential must return 401. These do not claim a second native
-tool-execution witness or hostile-plugin isolation.
+a wrong transport credential must return 401. Repeat these three checks for the
+dialogue idea endpoint: **six daemon replay refusals**, not six additional native
+tool calls. Expected successful output counts are two sessions, four native tool
+calls, two domain receipts, six refusals, and the bounded actual provider counts.
+These negatives do not prove native permission denial or hostile-plugin isolation.
 
 ## Cleanup, output and limits
 
@@ -109,7 +161,7 @@ kill is permitted. SIGKILL/host failure cannot guarantee cleanup.
 
 Native output is bounded in memory and never echoed. Production logs are suppressed
 within the executable entrypoint. The final JSON contains only fixed categories,
-states, counts, tool names and version; no prompt, original, interpretation,
+states, counts, tool names and version; no prompt, original, interpretation, user turn, idea,
 credentials, native output, exception object or stack is printed. Private runtime
 files are deleted on successful cleanup; on uncertainty they remain mode-protected.
 
@@ -119,9 +171,26 @@ same-account process/plugin could read credentials or change files between check
 The transport credential authenticates forwarding, not cryptographic native
 identity. Native model permissions do not constrain arbitrary plugin code. This
 fixture does not certify personal plugins, shared-service setup, real provider
-behavior, all domain tools, failures/stream gaps, or UI status.
+behavior, all domain tools, Stop, failures/stream gaps, or UI status.
 
 ## Source provenance
+
+### Phase-4 bundle refresh (executed 2026-10-31)
+
+| Artifact | SHA256 |
+| --- | --- |
+| `packages/agent-tools/src/plugin.ts` | `4e5f62a7806cf9a1a49f3edaa1a9f2b6c846d641ef910d0b9e699d2dffc04153` |
+| `packages/contracts/src/tools.ts` | `ad18dc44175e900d98d07a89f44481141aab08c946d3a95999c45ff2cf638fef` |
+| Bun 1.4.3 bundle | `eb68510bdc3d1989683a8b6c5ae3caab47c6785a626c3c63f6a79517ab71f04c` |
+
+The pure commands above reproduce the bundle with entrypoint
+`packages/agent-tools/src/plugin.ts`, `target: "bun"`, `format: "esm"`,
+`packages: "bundle"`, no output directory. Any changed sources, fixture or pins
+require review before another opt-in run. The earlier capture-only bundle hash
+`b2e9e9de7545f79ab565710c7c248537bc9e98e2ac29482b65544f79f343b2e6`
+is historical and now explicitly refused, not an alternate allowlist entry.
+
+### Reused baseline (not rerun)
 
 Reused committed memory-loop checkpoint:
 `0b2343c94f4313ed6e86440031e15ee8cc7d459c`, at
@@ -151,5 +220,6 @@ New source-only plugin adaptation uses exact public OpenCode revision
 Native Tool.Context, permission.assert, activation and ownership evidence remain
 in `.lore/work/research/opencode-2.2.2-owned-tools.md`; the existing integration
 report remains the reused baseline. Installed 2.2.2 client/schema types verify
-the actual SDK and registry shapes used here. Source support and passing pure
-guards are **not** a claim that this fixture or production setup has loaded live.
+the actual SDK and registry shapes used here. Source support and pure guards alone
+do not prove execution; the dated result above supplies isolated fixture proof,
+not validation of the operator's production setup or personal policies.

@@ -5,7 +5,9 @@ queues weaving jobs, and searches originals plus any recorded interpretations.
 You can inspect recorded relationships, their evidence and revision history.
 Automated weaving is available when explicitly connected to your own native
 agent service. Without that setup, originals remain saved and queued; capture
-does not invent AI annotations. **Dialogue is not implemented yet.** The concept mockups are guidelines,
+does not invent AI annotations. Contextual dialogue can retain challenges, return
+canonical responses and record developing ideas through the same configured
+service. The concept mockups are guidelines,
 not a pixel contract or a claim that the full experience is built.
 
 ## Run locally
@@ -72,8 +74,8 @@ to find your words later. There is deliberately no permanent all-notes list.
 3. Without configured weaving, ordinary captures have no AI notes. Empty states say so. When recorded
    notes exist, their author, tentative status, evidence links, connection
    direction/rationale, and **View history** are readable. There is no mandatory
-   approval inbox. Read-only history does not provide rejection/restoration
-   controls yet; those arrive with contextual development.
+   approval inbox. User correction and reject/restore controls append attributed
+   versions without removing earlier evidence or history.
 4. **Back to results** retains the query, including after following a connected
    thought. Browser Back also returns to the query. An empty query does not
    become a listing of every note. No-match and unavailable states explain a
@@ -153,15 +155,69 @@ remote-phone access. Keep the same database-path override if using one.
    Recorded partial changes remain visible. No operator policy or arbitrary
    provider/model compatibility is implied by this checkpoint.
 
+### Develop a thought through dialogue
+
+1. Open a thought’s inquiry. **Discuss original** works even with no AI notes.
+   **Discuss this reading** or **Discuss this connection** attaches discussion
+   to that exact formulation/revision (including directed endpoints), not a
+   silently changing latest version. The quoted target stays visible.
+2. Enter a challenge in **Develop this thought**, then **Send thought**. Your
+   exact input becomes a retained, searchable source before the dialogue job
+   is admitted. **Your thought saved** and **Waiting for agent** are not claims
+   that the native service is responding. Missing setup keeps input queued;
+   configure your own service before expecting a response.
+3. **Latest exchange** separates your input from canonical AI response text.
+   **Developed here** shows only confirmed domain changes, not a model’s prose
+   claim that it saved something. A run can complete with no written reply or
+   no useful changes. Long replies have a full-reply disclosure. Older saved
+   exchanges are folded, not turned into a permanent chat feed.
+4. Open a developing idea and **From this discussion** to follow its derivation.
+   Source/evidence links to your discussion input show its exact text/date and
+   **Return to discussion**, rather than a fictitious capture-weaving status.
+   Search distinguishes your discussion input from originals and AI notes.
+5. Reload/bookmark the `?dialogue=<id>` inquiry URL. Reopening the same exact
+   target from search resolves its existing context through an idempotent
+   creation key and then reads current history. A changed target version is a
+   different context. There is no global conversation index or chat-room system.
+6. **Check status** only reads. An uncertain save acknowledgement preserves the
+   exact draft/key for **Retry send**; this replays the save command, not a new
+   agent prompt. One active turn per original prevents overlapping discussions.
+   If another context is busy, the draft stays intact; the current API does not
+   identify that other discussion, so the UI does not invent a link to it.
+7. **Stop response** requests cancellation/interrupt for the fenced turn. It
+   does not prove settlement or undo already recorded changes. Completion may
+   win; uncertain outcomes remain uncertain. There is no dialogue-run Retry
+   command. After a definite failure/interruption you may send a new thought.
+8. For an item discussion, **Use my saved thought as formulation** explicitly
+   applies your latest saved input as a protected user correction. Relationships
+   can be rejected with a reason and restored. **Restore this version** appends
+   a user-authored revision; it does not erase intervening versions. A stale
+   revision returns a conflict for review, never an automatic overwrite.
+
+Switching discussion targets with their buttons preserves separate drafts in
+the open page. Navigating away or reloading can lose **unsaved** drafts. Agent
+context contains bounded recent history, not the entire stored conversation;
+the current API does not report exact prompt-history truncation. The readable
+projection also has a finite saved-turn limit and no older-history pagination.
+Automatic targeted follow-up weaving is a later slice, not a current claim.
+
+Current setup generates separate capture/dialogue operation scopes and bundles
+the owned plugin. An older private setup does not automatically gain new tools.
+Use a fresh isolated setup if upgrading that configuration; do not modify a
+personal/shared service silently. Model/provider charges and operator-policy
+responsibilities still apply. No example agent or annotations are auto-seeded.
+
 ## Boundaries and checks
 
 Browser data requests use same-origin Next routes: `/api/captures`, `/api/search`,
 `/api/sources/<id>`, `/api/sources/<id>/inquiry`, and
-`/api/sources/<id>/weaving` (with a narrow `/retry` command).
+`/api/sources/<id>/weaving` (with a narrow `/retry` command). Dialogue routes
+create/read a pinned context, save turns and request Stop. Narrow item/relationship
+routes forward version-fenced user corrections and restore/reject commands.
 Only server code knows the internal `THOUGHTLOOM_DAEMON_URL`; it accepts only
 an operator-configured HTTP loopback base, never a URL from the browser. The
 source page also reads through that server-side boundary without caching.
-Cross-origin capture/retry requests are rejected, but this is not authentication.
+Cross-origin mutations are rejected, but this is not authentication.
 
 The daemon owns `GET /sources/<id>/inquiry`: a consistent read-only snapshot
 of the source, its items and direct neighbors, incident relationships, recent
@@ -169,7 +225,8 @@ attributed histories, and evidence-source references. It does not traverse the
 whole graph. Indexed reads cap fan-out/history and show truncation honestly;
 oversized evidence closure or missing references return unavailable rather than
 fabricated links. Next runtime-validates the shared contract, including endpoint
-and evidence closure. No new public knowledge-write endpoints are exposed.
+and evidence closure. Hono assigns user authority for the narrow UI commands;
+browser/model-provided actor fields are not accepted.
 
 The Hono `POST /captures` contract requires an `Idempotency-Key` of 1–128 ASCII
 letters, digits, or `._~-` characters. Reuse it for the exact same parsed text

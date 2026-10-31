@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { createApp } from "../../apps/daemon/src/app";
 import { seedInquiryExample } from "../fixtures/seed-inquiry";
 import { createBrowserWeavingControls } from "../fixtures/weaving-world";
+import { createBrowserDialogueControls } from "../fixtures/dialogue-world";
 
 function portFromEnvironment(name: string, fallback: number): number {
   const port = Number(process.env[name] ?? fallback);
@@ -20,6 +21,7 @@ if (webPort === daemonPort) throw new Error("Browser-test service ports must dif
 const directory = await mkdtemp("/tmp/opencode/thoughtloom-browser-");
 const databasePath = join(directory, "capture.sqlite");
 const weaving = createBrowserWeavingControls(directory);
+const dialogue = createBrowserDialogueControls(directory);
 let daemon: ReturnType<typeof Bun.serve> | undefined;
 let web: ReturnType<typeof Bun.spawn> | undefined;
 let stopping = false;
@@ -29,6 +31,7 @@ async function stop(exitCode: number) {
   stopping = true;
   console.info("browser.harness stopping");
   await weaving.close();
+  await dialogue.close();
   if (web && web.exitCode === null) {
     web.kill("SIGTERM");
     const deadline = setTimeout(() => web?.kill("SIGKILL"), 5_000);
@@ -51,7 +54,12 @@ try {
   daemon = Bun.serve({
     hostname: "127.0.0.1",
     port: daemonPort,
-    fetch: async (request) => (await weaving.fetch(request)) ?? baseline.fetch(request),
+    fetch: async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path.startsWith("/__browser/dialogue")) return (await dialogue.fetch(request))!;
+      if (path.startsWith("/__browser/weaving")) return (await weaving.fetch(request))!;
+      return (await dialogue.fetch(request)) ?? (await weaving.fetch(request)) ?? baseline.fetch(request);
+    },
   });
   console.info("browser.harness daemon listening", { port: daemon.port });
 

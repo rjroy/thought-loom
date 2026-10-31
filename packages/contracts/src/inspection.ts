@@ -1,11 +1,12 @@
-import type { SearchResult, Source } from "./index";
+import type { SearchResult, Source, SourceOrigin } from "./index";
+import type { IdeaDerivation } from "./tools";
 
 export const INQUIRY_LIMITS = { rootItems: 64, relationships: 64, history: 32, evidencePerVersion: 32, evidenceSources: 512 } as const;
 export type FormulationView = { id: string; text: string; author: "user" | "ai"; evidenceSourceIds: string[] };
-export type ItemView = { id: string; sourceId: string; kind: "interpretation" | "developing-idea"; current: FormulationView; history: FormulationView[]; historyTruncated: boolean };
+export type ItemView = { id: string; sourceId: string; kind: "interpretation" | "developing-idea"; current: FormulationView; history: FormulationView[]; historyTruncated: boolean; derivation?: IdeaDerivation };
 export type RelationshipVersionView = { id: string; status: "active" | "rejected"; rationale: string; author: "user" | "ai"; evidenceSourceIds: string[] };
 export type RelationshipView = { id: string; fromItemId: string; toItemId: string; type: "supports" | "challenges" | "suggests"; current: RelationshipVersionView; history: RelationshipVersionView[]; historyTruncated: boolean };
-export type EvidenceSource = { id: string; excerpt: string; provenance: string; createdAt: string };
+export type EvidenceSource = { id: string; excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
 export type InquiryView = { source: Source; items: ItemView[]; relationships: RelationshipView[]; evidenceSources: EvidenceSource[]; truncated: boolean };
 
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -26,13 +27,29 @@ function evidence(value: unknown): string[] | null {
 }
 export function parseSourceRecord(value: unknown): Source | null {
   if (!record(value) || !isRecordId(value.id) || !text(value.text) || !text(value.provenance) || !date(value.createdAt)) return null;
-  return { id: value.id, text: value.text, provenance: value.provenance, createdAt: value.createdAt };
+  const origin = value.origin === undefined ? undefined : parseSourceOrigin(value.origin);
+  if (origin === null) return null;
+  return { id: value.id, text: value.text, provenance: value.provenance, createdAt: value.createdAt, ...(origin ? { origin } : {}) };
+}
+export function parseSourceOrigin(value: unknown): SourceOrigin | null {
+  if (!record(value)) return null;
+  if (value.kind === "capture") return { kind: "capture" };
+  return value.kind === "discussion-turn" && isRecordId(value.dialogueId) && isRecordId(value.turnId) && isRecordId(value.rootSourceId)
+    ? { kind: "discussion-turn", dialogueId: value.dialogueId, turnId: value.turnId, rootSourceId: value.rootSourceId } : null;
+}
+export function parseIdeaDerivation(value: unknown): IdeaDerivation | null {
+  if (!record(value) || !isRecordId(value.dialogueId) || !isRecordId(value.turnId) || !isRecordId(value.turnSourceId)) return null;
+  if ((value.itemId !== undefined || value.versionId !== undefined) && (!isRecordId(value.itemId) || !isRecordId(value.versionId))) return null;
+  return { dialogueId: value.dialogueId, turnId: value.turnId, turnSourceId: value.turnSourceId,
+    ...(isRecordId(value.itemId) && isRecordId(value.versionId) ? { itemId: value.itemId, versionId: value.versionId } : {}) };
 }
 function sourceReference(value: unknown): EvidenceSource | null {
   if (!record(value) || !isRecordId(value.id) || typeof value.excerpt !== "string" || !text(value.provenance) || !date(value.createdAt)) return null;
-  return { id: value.id, excerpt: value.excerpt, provenance: value.provenance, createdAt: value.createdAt };
+  const origin = value.origin === undefined ? undefined : parseSourceOrigin(value.origin);
+  if (origin === null) return null;
+  return { id: value.id, excerpt: value.excerpt, provenance: value.provenance, createdAt: value.createdAt, ...(origin ? { origin } : {}) };
 }
-function formulation(value: unknown): FormulationView | null {
+export function parseFormulationView(value: unknown): FormulationView | null {
   if (!record(value) || !isRecordId(value.id) || !text(value.text) || !author(value.author)) return null;
   const ids = evidence(value.evidenceSourceIds);
   return ids ? { id: value.id, text: value.text, author: value.author, evidenceSourceIds: ids } : null;
@@ -45,13 +62,15 @@ function relationshipVersion(value: unknown): RelationshipVersionView | null {
 function validHistory<T extends { id: string }>(current: T, history: T[]): boolean {
   return history.length > 0 && new Set(history.map((entry) => entry.id)).size === history.length && JSON.stringify(current) === JSON.stringify(history.at(-1));
 }
-function item(value: unknown): ItemView | null {
+export function parseItemView(value: unknown): ItemView | null {
   if (!record(value) || !isRecordId(value.id) || !isRecordId(value.sourceId) || (value.kind !== "interpretation" && value.kind !== "developing-idea") || typeof value.historyTruncated !== "boolean") return null;
-  const current = formulation(value.current), history = list(value.history, formulation, INQUIRY_LIMITS.history);
+  const current = parseFormulationView(value.current), history = list(value.history, parseFormulationView, INQUIRY_LIMITS.history);
   if (!current || !history || !validHistory(current, history)) return null;
-  return { id: value.id, sourceId: value.sourceId, kind: value.kind, current, history, historyTruncated: value.historyTruncated };
+  const derivation = value.derivation === undefined ? undefined : parseIdeaDerivation(value.derivation);
+  if (derivation === null) return null;
+  return { id: value.id, sourceId: value.sourceId, kind: value.kind, current, history, historyTruncated: value.historyTruncated, ...(derivation ? { derivation } : {}) };
 }
-function relationship(value: unknown): RelationshipView | null {
+export function parseRelationshipView(value: unknown): RelationshipView | null {
   if (!record(value) || !isRecordId(value.id) || !isRecordId(value.fromItemId) || !isRecordId(value.toItemId) || value.fromItemId === value.toItemId || typeof value.historyTruncated !== "boolean") return null;
   const type = value.type;
   if (type !== "supports" && type !== "challenges" && type !== "suggests") return null;
@@ -63,8 +82,8 @@ function relationship(value: unknown): RelationshipView | null {
 export function parseInquiryView(value: unknown): InquiryView | null {
   if (!record(value) || typeof value.truncated !== "boolean") return null;
   const source = parseSourceRecord(value.source);
-  const items = list(value.items, item, INQUIRY_LIMITS.rootItems + INQUIRY_LIMITS.relationships);
-  const relationships = list(value.relationships, relationship, INQUIRY_LIMITS.relationships);
+  const items = list(value.items, parseItemView, INQUIRY_LIMITS.rootItems + INQUIRY_LIMITS.relationships);
+  const relationships = list(value.relationships, parseRelationshipView, INQUIRY_LIMITS.relationships);
   const evidenceSources = list(value.evidenceSources, sourceReference, INQUIRY_LIMITS.evidenceSources);
   if (!source || !items || !relationships || !evidenceSources) return null;
   const itemIds = new Set(items.map((entry) => entry.id)), refIds = new Set(evidenceSources.map((entry) => entry.id));
@@ -98,7 +117,9 @@ function searchResult(value: unknown): SearchResult | null {
     foundItem = { id: entry.id, kind: entry.kind, formulationId: entry.formulationId, text: entry.text, author: entry.author };
   }
   if (value.matchOrigin === "interpretation" && !foundItem) return null;
-  return { sourceId: value.sourceId, matchOrigin: value.matchOrigin, source: { excerpt: value.source.excerpt, provenance: value.source.provenance, createdAt: value.source.createdAt }, ...(foundItem ? { item: foundItem } : {}) };
+  const origin = value.source.origin === undefined ? undefined : parseSourceOrigin(value.source.origin);
+  if (origin === null) return null;
+  return { sourceId: value.sourceId, matchOrigin: value.matchOrigin, source: { excerpt: value.source.excerpt, provenance: value.source.provenance, createdAt: value.source.createdAt, ...(origin ? { origin } : {}) }, ...(foundItem ? { item: foundItem } : {}) };
 }
 export function parseSearchResponse(value: unknown): { results: SearchResult[] } | null {
   if (!record(value)) return null;

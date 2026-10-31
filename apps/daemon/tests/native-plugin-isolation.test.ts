@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { AGENT, ANCHOR, BUNDLE_SHA256, MODEL, NATIVE_BINARY, NATIVE_SHA256, generatedConfig, guardedLaunch, pathsFor,
+import { fileURLToPath } from "node:url";
+import { AGENT, ANCHOR, ROOT_PREFIX, BUNDLE_SHA256, SOURCE_HASHES, DIALOGUE_OPERATIONS, OPERATIONS, MODEL, NATIVE_BINARY, NATIVE_SHA256, generatedConfig, guardedLaunch, pathsFor,
   preparePluginLaunch, readinessFromOutput, selection, validateBinary, validateLaunchSpec, validatePluginRegistry, witnessConfig,
   type BinaryFacts, type GuardIO, type GuardInput, type LaunchSpec, type Metadata } from "../../../tests/native/plugin-isolation";
+import { reviewedBundle, validateSourceHashes } from "../../../tests/native/plugin-bundle";
+import { provisionNativeSetup } from "../src/native-setup";
 
 const root = `${ANCHOR}/thoughtloom-plugin-witness-pure-owned`;
 const providerOrigin = "http://127.0.0.1:18491", daemonOrigin = "http://127.0.0.1:18492";
@@ -96,14 +101,46 @@ test("only the exact configured package, options, agent and fake provider are al
   ]) await denied({ ...input(), config: JSON.stringify(config) });
   expect(base.providers[MODEL.providerID].env).toEqual([]);
   expect(base.agents[AGENT].permissions.some((rule) => rule.effect === "allow" && rule.action === "*")).toBe(false);
+  expect(base.agents[AGENT].permissions.filter((rule) => rule.effect === "allow").map((rule) => rule.action)).toEqual(["read_source", "record_interpretation", "record_idea"]);
+  expect(selection(root).operations).toEqual([...OPERATIONS]);
+  expect(selection(root).dialogueOperations).toEqual([...DIALOGUE_OPERATIONS]);
 });
 test("plugin bytes, package entrypoints and generated documents are checked, not only paths", async () => {
   await denied(input(), io({ hash: async () => "0".repeat(64) }));
+  // The historical capture-only bundle is no longer an allowed native artifact.
+  await denied(input(), io({ hash: async () => "b2e9e9de7545f79ab565710c7c248537bc9e98e2ac29482b65544f79f343b2e6" }));
   const base = io();
   await denied(input(), io({ text: async (path) => path === p.package ? JSON.stringify({ scripts: { postinstall: "bad" } }) : base.text(path) }));
   await denied(input(), io({ text: async (path) => path === p.connection ? JSON.stringify({ url: "https://external.invalid", transportCredential: credential, location: p.cwd }) : base.text(path) }));
+  await denied(input(), io({ text: async (path) => path === p.selection ? JSON.stringify({ ...selection(root), operations: [...OPERATIONS, "record_idea"] }) : base.text(path) }));
+  await denied(input(), io({ text: async (path) => path === p.selection ? JSON.stringify({ ...selection(root), dialogueOperations: [...DIALOGUE_OPERATIONS, "bash"] }) : base.text(path) }));
   await denied(input(), io({ entries: async (path) => path === p.plugin ? ["index.js", "package.json", "extra.js"] : base.entries(path) }));
   await denied(input(), io({ entries: async (path) => path === p.HOME ? [".opencode"] : base.entries(path) }));
+});
+test("reviewed plugin provenance rejects historical hashes and unexpected source paths", () => {
+  expect(() => validateSourceHashes({ ...SOURCE_HASHES })).not.toThrow();
+  expect(() => validateSourceHashes({ ...SOURCE_HASHES, "packages/agent-tools/src/plugin.ts": "8bc121d9837ccf2b86451e0efd6c96d8ea558d3e8e58e447e73ac9cd72fb796d" })).toThrow();
+  expect(() => validateSourceHashes({ ...SOURCE_HASHES, "packages/contracts/src/tools.ts": "02a889a770122f3a2a2ddcd2afc56e8551fe39b71ec2e14c95c51e6bdf84f22d" })).toThrow();
+  expect(() => validateSourceHashes({ ...SOURCE_HASHES, "../external-plugin.ts": BUNDLE_SHA256 })).toThrow();
+  expect(() => validateSourceHashes({ "packages/agent-tools/src/plugin.ts": SOURCE_HASHES["packages/agent-tools/src/plugin.ts"] })).toThrow();
+});
+test("the current exact sources reproduce the reviewed bundle without native execution", async () => {
+  const repo = fileURLToPath(new URL("../../../", import.meta.url)).replace(/\/$/, "");
+  const text = await reviewedBundle(repo);
+  expect(createHash("sha256").update(text).digest("hex")).toBe(BUNDLE_SHA256);
+  await expect(reviewedBundle(`${repo}/other`)).rejects.toThrow();
+});
+test("production offline setup generates exactly the guarded two-scope fixture documents", async () => {
+  const ownedRoot = await mkdtemp(join(ANCHOR, ROOT_PREFIX));
+  try {
+    const repo = fileURLToPath(new URL("../../../", import.meta.url)).replace(/\/$/, "");
+    const p = pathsFor(ownedRoot);
+    await provisionNativeSetup({ runtimeDirectory: p.runtime, locationDirectory: p.cwd, daemonOrigin, transportCredential: credential,
+      pluginEntry: p.bundle, pluginBundle: await reviewedBundle(repo), native: { registrationFile: p.registration, agent: AGENT, model: MODEL,
+        operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6 } });
+    expect(JSON.parse(await readFile(p.projectConfig, "utf8"))).toEqual(generatedConfig(ownedRoot));
+    expect(JSON.parse(await readFile(p.selection, "utf8"))).toEqual(selection(ownedRoot));
+  } finally { await rm(ownedRoot, { recursive: true, force: true }); }
 });
 for (const path of [p.cwd, p.runtime, p.bundle, p.connection, join(root, "db"), p.GIT_CONFIG_GLOBAL]) {
   test(`rejects a link in owned path ${path.slice(root.length)}`, async () => {

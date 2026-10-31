@@ -6,7 +6,9 @@ export type CaptureInput = {
 export type Source = CaptureInput & {
   id: string;
   createdAt: string;
+  origin?: SourceOrigin;
 };
+export type SourceOrigin = { kind: "capture" } | { kind: "discussion-turn"; dialogueId: string; turnId: string; rootSourceId: string };
 
 export type SourceSearchResult = {
   sourceId: string;
@@ -16,13 +18,15 @@ export type SourceSearchResult = {
 export * from "./inspection";
 export * from "./tools";
 export * from "./weaving";
+export * from "./dialogue";
+export * from "./user-commands";
 
 // Expanded search response contract; source text is an excerpt, not a replacement
 // for fetching the immutable original. Knowledge is present for formulation hits.
 export type SearchResult = {
   sourceId: string;
   matchOrigin: "source" | "interpretation" | "alias";
-  source: { excerpt: string; provenance: string; createdAt: string };
+  source: { excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
   item?: { id: string; kind: "interpretation" | "developing-idea"; formulationId: string; text: string; author: "user" | "ai" };
 };
 

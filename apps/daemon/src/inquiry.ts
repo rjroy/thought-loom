@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { INQUIRY_LIMITS as limits, parseInquiryView, type InquiryView, type Source, type ItemView, type RelationshipView, type FormulationView, type RelationshipVersionView, type EvidenceSource } from "@thoughtloom/contracts";
-import { openDatabase } from "./storage";
+import { openDatabase, sourceRecord, sourceOrigin } from "./storage";
+import { readIdeaDerivation } from "./knowledge";
 
 function evidence(db: Database, table: "formulation_evidence" | "relationship_evidence", column: "formulation_id" | "revision_id", id: string): string[] {
   const rows = db.query<{ id: string }, [string]>(`SELECT source_id AS id FROM ${table} WHERE ${column}=? ORDER BY position LIMIT ${limits.evidencePerVersion + 1}`).all(id);
@@ -15,7 +16,8 @@ function readItem(db: Database, id: string): ItemView {
   const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "formulation_evidence", "formulation_id", version.id) }));
   const current = history.at(-1);
   if (!current) throw new Error("Missing inquiry formulation");
-  return { ...item, current, history, historyTruncated: versions.length > limits.history };
+  const derivation = readIdeaDerivation(db, id);
+  return { ...item, current, history, historyTruncated: versions.length > limits.history, ...(derivation ? { derivation } : {}) };
 }
 
 function readRelationship(db: Database, id: string): RelationshipView {
@@ -38,7 +40,7 @@ export function readInquiry(databasePath: string, sourceId: string): InquiryView
     const db = openDatabase(databasePath);
     connection = db;
     const result = db.transaction((): InquiryView | null => {
-      const source = db.query<Source, [string]>("SELECT id,text,provenance,created_at AS createdAt FROM sources WHERE id=?").get(sourceId);
+      const source = sourceRecord(db, sourceId);
       if (!source) return null;
       const rootRows = db.query<{ id: string }, [string]>(`SELECT id FROM knowledge_items WHERE source_id=? ORDER BY rowid LIMIT ${limits.rootItems + 1}`).all(sourceId);
       const rootIds = rootRows.slice(0, limits.rootItems).map((row) => row.id);
@@ -64,7 +66,7 @@ export function readInquiry(databasePath: string, sourceId: string): InquiryView
       const evidenceSources = [...sourceIds].map((id) => {
         const ref = reference.get(id);
         if (!ref) throw new Error("Missing inquiry evidence source");
-        return ref;
+        return { ...ref, origin: sourceOrigin(db, id) };
       });
       const view = parseInquiryView({ source, items, relationships, evidenceSources, truncated: rootRows.length > limits.rootItems || unique.length > limits.relationships });
       if (!view) throw new Error("Invalid inquiry closure");

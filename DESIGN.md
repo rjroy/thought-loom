@@ -138,7 +138,7 @@ components:
 
 A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.
 
-This records the built capture, retrieval, read-only inquiry, and configured weaving-status views. Weaving requires explicit operator setup; dialogue is future work. Mockups remain guidelines, not pixel authority.
+This records the built capture, retrieval, contextual dialogue, protected user revisions, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.
 
 **Key Characteristics:**
 - Flat, high-contrast reading surfaces.
@@ -162,7 +162,7 @@ Frontmatter records reused roles, not an exhaustive size scale. General capture/
 
 ## Layout
 
-Capture and retrieval use centered reading widths (820px maximum); the shell and inquiry use (1120px maximum). Desktop outer gutters are (48px). Inquiry has source/context columns in a (.78:1.22) ratio with a (56px) gap. At (800px) and below it stacks in source-first DOM order; at (600px) and below the shell search wraps and outer gutters become (20px).
+Capture and retrieval use centered reading widths (820px maximum); the shell and inquiry use (1120px maximum). Desktop outer gutters are (48px). Inquiry has source/context columns in a (.78:1.22) ratio with a (56px) horizontal gap. Development leads the DOM; on desktop the original sits beside it and recorded readings follow development. At (800px) and below it stacks development, original, then recorded readings; at (600px) and below the shell search wraps and outer gutters become (20px).
 
 Search results exist only for a query. Back links retain that query. The inquiry groups original source, interpretations, and directed relationships with rationale/evidence; it is not a graph canvas, permanent all-notes list, or chat sidebar. These describe the built surfaces, not a pixel template for future screens.
 
@@ -180,8 +180,9 @@ Controls have the smaller recorded radius; source reading areas, capture fields,
 - **Fields:** visible labels and associated help. Capture text sits on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
 - **Focus and navigation:** a Horizon outline (3px, offset 5px), underlined links, and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.
 - **Source and history:** native `details`/`summary` disclosures with explicit button roles and minimum (44px) summary targets. Expanding a source replaces its excerpt. Exact source whitespace is preserved. Histories show current/earlier versions, authors, evidence, and any truncation; no invented version dates.
-- **Attribution and feedback:** distinguish your original, AI interpretations, user formulations, tentative/active hypotheses, and rejected relationships in text. Search match origin is not connection evidence. Saving/queued notices use status semantics; failures use alerts with recovery. Queued does not mean a worker is running. No pretend dialogue composer or approval inbox is present.
+- **Attribution and feedback:** distinguish your original, AI interpretations, user formulations, tentative/active hypotheses, and rejected relationships in text. Search match origin is not connection evidence. Saving/queued notices use status semantics; failures use alerts with recovery. Queued does not mean a worker is running. There is no approval inbox.
 - **Weaving status:** one shared, named region separates durable source saving, worker configuration/availability and job outcome. Quiet polling changes the status summary only when its content changes. Check status is read-only; retry appears only for eligible confirmed outcomes. Inquiry updates preserve source disclosures, stable reading keys and focus. The setup guide uses ordinary text, ordered steps and copyable commands, not a configuration editor.
+- **Development:** a quoted, pinned target precedes a Night plaintext composer and Lantern Send action. Latest saved input, canonical agent prose and confirmed developing ideas are separate semantic sections. Earlier exchanges use a native disclosure, not chat bubbles or a sidebar. Only deliberate target selection moves focus to the composer; polling never does. Stop requested is not a stopped/rolled-back claim. User correction/reversal actions stay beside the affected claim/history and report conflicts without automatic overwrites.
 
 ## Do's and Don'ts
 
@@ -190,6 +191,6 @@ Controls have the smaller recorded radius; source reading areas, capture fields,
 - Do use familiar semantic controls within inquiry-centered navigation.
 - Don't imply that saved, queued, tentative, active, and user-endorsed mean the same thing.
 - Don't add a permanent notes list, chat sidebar, new logo, or literal textile/fantasy ornament.
-- Don't imply an unconfigured worker is running, claim dialogue is implemented, or turn experiment images into production layout authority.
+- Don't imply an unconfigured worker is running, mistake agent prose for a durable change, or turn experiment images into production layout authority.
 
 Implementation references: [global styles](apps/web/app/globals.css), [shell](apps/web/app/layout.tsx), [reading components](apps/web/app/ui/knowledge-reading.tsx), and [inquiry view](apps/web/app/sources/[id]/inquiry/page.tsx). `.impeccable/design.json` holds only extension metadata and small documentation specimens; it is not application code.

@@ -20,7 +20,7 @@ function count(value: unknown): value is number { return typeof value === "numbe
 export function isWeavingWorkerState(value: unknown): value is WeavingWorkerState {
   return value === "starting" || value === "working" || value === "waiting" || value === "unavailable" || value === "failed" || value === "stopped";
 }
-function status(value: unknown): value is WeavingJobStatus {
+export function isWeavingJobStatus(value: unknown): value is WeavingJobStatus {
   return value === "queued" || value === "running" || value === "uncertain" || value === "completed" || value === "failed" || value === "interrupted";
 }
 export function parseWeavingWorkerView(value: unknown): WeavingWorkerView | null {
@@ -33,7 +33,7 @@ export function weavingWorkerAvailable(worker: WeavingWorkerView): boolean {
 export function parseWeavingStatusView(value: unknown): WeavingStatusView | null {
   if (!record(value) || !isRecordId(value.sourceId) || !record(value.job) || !record(value.actions) || typeof value.actions.retry !== "boolean") return null;
   const worker = parseWeavingWorkerView(value.worker), job = value.job;
-  if (!worker || !isRecordId(job.id) || !status(job.status) || !count(job.attempts) || (job.recordedChanges !== null && !count(job.recordedChanges))) return null;
+  if (!worker || !isRecordId(job.id) || !isWeavingJobStatus(job.status) || !count(job.attempts) || (job.recordedChanges !== null && !count(job.recordedChanges))) return null;
   let run: { id: string } | null = null;
   if (value.run !== null) {
     if (!record(value.run) || !isRecordId(value.run.id) || job.attempts < 1) return null;

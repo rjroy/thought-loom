@@ -3,10 +3,12 @@ import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
-import { DOMAIN_ACTIONS, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
+import { DOMAIN_ACTIONS, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
 import { KnowledgeError, KnowledgeService, type KnowledgeContext } from "./knowledge";
 import { findSource, openDatabase, searchSources } from "./storage";
 import type { WeavingRun } from "./weaving";
+import { runScope, type RunScope } from "./run-scope";
+import { dialogueHeader } from "./dialogue-data";
 
 export type OwnedGrant = {
   run: WeavingRun;
@@ -18,7 +20,8 @@ export type OwnedGrant = {
 
 // Only implemented domain operations can be granted. No generic SQL/file tool.
 export const supportedToolActions: readonly ToolAction[] = DOMAIN_ACTIONS;
-type GrantRow = { runId: string; location: string; agent: string; sourceIds: string; operations: string; revoked: number };
+type GrantRecord = { runId: string; location: string; agent: string; sourceIds: string; operations: string; revoked: number; jobId: string; root: string; promptId: string };
+type GrantRow = GrantRecord & { scope: RunScope };
 
 function storage<T>(path: string, write: boolean, action: (db: Database) => T): T {
   let db: Database | undefined;
@@ -39,15 +42,18 @@ function strings(value: string): string[] {
 }
 
 function authorize(db: Database, native: NativeIdentity, location: string, action: ToolAction): GrantRow {
-  const row = db.query<GrantRow, [string]>(`SELECT g.run_id AS runId,g.location,g.agent,
-    g.source_ids AS sourceIds,g.operations,g.revoked FROM owned_grants g
+  const row = db.query<GrantRecord, [string]>(`SELECT g.run_id AS runId,g.location,g.agent,
+    g.source_ids AS sourceIds,g.operations,g.revoked,j.id AS jobId,j.source_id AS root,r.prompt_id AS promptId FROM owned_grants g
     JOIN weaving_runs r ON r.id=g.run_id AND r.session_id=g.session_id JOIN jobs j ON j.id=r.job_id
-    WHERE g.session_id=? AND r.outcome IS NULL AND r.state IN ('admitting','admitted','uncertain') AND j.status IN ('running','uncertain')`,
+    WHERE g.session_id=? AND r.outcome IS NULL AND r.state IN ('admitting','admitted','uncertain') AND j.status IN ('running','uncertain')
+      AND NOT EXISTS (SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=j.id)`,
   ).get(native.sessionID);
   if (!row || row.revoked || row.location !== location || row.agent !== native.agent || !strings(row.operations).includes(action)) {
     throw new KnowledgeError("forbidden");
   }
-  return row;
+  const scope = runScope(db, { runId: row.runId, jobId: row.jobId, sourceId: row.root, sessionId: native.sessionID, promptId: row.promptId });
+  if (!scope || (action === "record_idea" && scope.kind !== "dialogue") || JSON.stringify(strings(row.sourceIds)) !== JSON.stringify([...scope.sourceIds].sort())) throw new KnowledgeError("forbidden");
+  return { ...row, scope };
 }
 
 // These administrative operations are daemon-internal, not model-facing APIs.
@@ -61,12 +67,14 @@ export class OwnedGrants {
         const { run } = grant;
         const row = db.query<{ jobId: string; sourceId: string; sessionId: string; promptId: string; state: string }, [string]>(
           `SELECT r.job_id AS jobId,j.source_id AS sourceId,r.session_id AS sessionId,r.prompt_id AS promptId,r.state
-           FROM weaving_runs r JOIN jobs j ON j.id=r.job_id WHERE r.id=? AND r.outcome IS NULL AND j.status IN ('running','uncertain')`,
+           FROM weaving_runs r JOIN jobs j ON j.id=r.job_id WHERE r.id=? AND r.outcome IS NULL AND j.status IN ('running','uncertain')
+             AND NOT EXISTS (SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=j.id)`,
         ).get(run.runId);
         if (!row || row.jobId !== run.jobId || row.sourceId !== run.sourceId || row.sessionId !== run.sessionId || row.promptId !== run.promptId ||
             !["preparing", "admitting", "admitted", "uncertain"].includes(row.state)) throw new KnowledgeError("forbidden");
-        if (!isAbsolute(grant.location) || normalize(grant.location) !== grant.location || !toolId(grant.agent) ||
-            grant.sourceIds.length !== 1 || grant.sourceIds[0] !== row.sourceId || grant.operations.length < 1 ||
+        const scope = runScope(db, run);
+        if (!scope || !isAbsolute(grant.location) || normalize(grant.location) !== grant.location || !toolId(grant.agent) ||
+            JSON.stringify([...grant.sourceIds].sort()) !== JSON.stringify([...scope.sourceIds].sort()) || grant.operations.length < 1 || (scope.kind === "capture" && grant.operations.includes("record_idea")) ||
             new Set(grant.operations).size !== grant.operations.length || grant.operations.some((action) => !supportedToolActions.includes(action))) {
           throw new KnowledgeError("forbidden");
         }
@@ -128,7 +136,7 @@ function rootEvidence(grant: GrantRow, ids: string[]) {
 function relationshipScope(db: Database, grant: GrantRow, fromId: string, toId: string, ids: string[]) {
   const from = itemAnchor(db, fromId), to = itemAnchor(db, toId);
   const roots = strings(grant.sourceIds);
-  if (!roots.includes(from.sourceId) && !roots.includes(to.sourceId)) throw new KnowledgeError("forbidden");
+  if (from.sourceId !== grant.scope.rootSourceId && to.sourceId !== grant.scope.rootSourceId) throw new KnowledgeError("forbidden");
   for (const [id, item] of [[fromId, from], [toId, to]] as const) {
     if (!roots.includes(item.sourceId)) {
       readWitness(db, grant, "item", id);
@@ -214,7 +222,7 @@ export function createToolApp(options: { databasePath: string; transportCredenti
     const check = (db: Database) => {
       const grant = authorize(db, body.native, options.location, "record_interpretation");
       const sources = strings(grant.sourceIds);
-      if (!sources.includes(input.sourceId) || input.evidenceSourceIds.some((id) => !sources.includes(id))) throw new KnowledgeError("forbidden");
+      if (input.sourceId !== grant.scope.rootSourceId || input.evidenceSourceIds.some((id) => !sources.includes(id))) throw new KnowledgeError("forbidden");
       return grant;
     };
     const grant = storage(options.databasePath, false, check);
@@ -233,6 +241,34 @@ export function createToolApp(options: { databasePath: string; transportCredenti
     return context.json(mutate(body.native, "record_alias", (_db, grant) => rootEvidence(grant, input.evidenceSourceIds),
       (service, actor) => service.recordAlias(actor, input)));
   });
+  app.post("/internal/tools/record-idea", async (context) => {
+    const body = await envelope(context.req.raw, "record_idea");
+    // Reject absent dialogue authority before parsing model-supplied origin data.
+    const authorized = storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "record_idea"));
+    const input = parseIdea(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
+    console.info("tools.idea attempt", { runId: authorized.runId, messageId: body.native.messageID, callId: body.native.callID });
+    const result = mutate(body.native, "record_idea", (db, grant) => {
+      const scope = grant.scope;
+      if (scope.kind !== "dialogue" || input.rootSourceId !== scope.rootSourceId || input.turnSourceId !== scope.turnSourceId || input.dialogueId !== scope.dialogueId || input.turnId !== scope.turnId ||
+          !input.evidenceSourceIds.includes(scope.rootSourceId) || !input.evidenceSourceIds.includes(scope.turnSourceId)) throw new KnowledgeError("forbidden");
+      for (const id of input.evidenceSourceIds) if (!scope.sourceIds.includes(id)) readWitness(db, grant, "source", id);
+      if (input.derivedFrom) {
+        const dialogue = dialogueHeader(db, scope.dialogueId), from = input.derivedFrom;
+        if (!dialogue) throw new KnowledgeError("forbidden");
+        const selected = dialogue.selection.kind === "item" && dialogue.selection.id === from.itemId && dialogue.selection.versionId === from.versionId;
+        const endpoint = dialogue.selectedContext.kind === "relationship" && [dialogue.selectedContext.from, dialogue.selectedContext.to].some((item) => item.id === from.itemId && item.version.id === from.versionId);
+        if (!selected && !endpoint) {
+          readWitness(db, grant, "item", from.itemId, from.versionId);
+          const anchor = itemAnchor(db, from.itemId);
+          if (anchor.versionId !== from.versionId) throw new KnowledgeError("version_conflict");
+          if (!scope.sourceIds.includes(anchor.sourceId)) readWitness(db, grant, "source", anchor.sourceId);
+        }
+      }
+    }, (service, actor) => service.recordIdea(actor, input));
+    console.info("tools.idea succeeded", { runId: authorized.runId, itemId: result.id, versionId: result.current.id });
+    return context.json(result);
+  });
   app.post("/internal/tools/record-relationship", async (context) => {
     const body = await envelope(context.req.raw, "record_relationship"), input = parseRelationship(body.input);
     if (!input) throw new KnowledgeError("invalid_input");
@@ -250,7 +286,7 @@ export function createToolApp(options: { databasePath: string; transportCredenti
     const body = await envelope(context.req.raw, "revise_interpretation"), input = parseInterpretationRevision(body.input);
     if (!input) throw new KnowledgeError("invalid_input");
     return context.json(mutate(body.native, "revise_interpretation", (db, grant) => {
-      if (!strings(grant.sourceIds).includes(itemAnchor(db, input.itemId).sourceId)) throw new KnowledgeError("forbidden");
+      if (itemAnchor(db, input.itemId).sourceId !== grant.scope.rootSourceId) throw new KnowledgeError("forbidden");
       rootEvidence(grant, input.evidenceSourceIds);
     }, (service, actor) => service.reviseItem(actor, input)));
   });

@@ -13,7 +13,7 @@ related: [.lore/work/research/opencode-2.2.2-validation.md, .lore/work/design/th
 
 Use a small first-party, project-local **V2 server plugin** to expose Thoughtloom domain tools. Supported native tool execution supplies session identity separately from model arguments; the plugin forwards it to Hono, which owns authorization and persistence. This replaces the unresolved MCP bridge registration/binding path without embedding an engine, launching a replacement service, or weakening constrained tools.
 
-**Evidence status:** the original 2026-10-30 source investigation is completed. Its findings below use exact public revision **`098aa7fd6e02b03d6fc410f0b052038c7d4c5e81`** (OpenCode 2.2.2), not upstream main or V1 plugin examples. The 2026-10-31 isolated application witness recorded below adds actual fixture execution evidence; compatibility with the operator's personal service/configuration remains unverified. The existing [integration report](opencode-2.2.2-validation.md) remains the reused baseline for `@opencode/client@2.2.2`, attaching to an operator-managed service, admission, ordinary-history recovery and previously tested permissions/MCP behavior. None of that broad characterization was rerun.
+**Evidence status:** the original 2026-10-30 source investigation is completed. Its findings below use exact public revision **`098aa7fd6e02b03d6fc410f0b052038c7d4c5e81`** (OpenCode 2.2.2), not upstream main or V1 plugin examples. The separate 2026-10-31 capture-only and refreshed capture+dialogue witnesses below add actual isolated fixture evidence; compatibility with the operator's personal service/configuration remains unverified. The existing [integration report](opencode-2.2.2-validation.md) remains the reused baseline for `@opencode/client@2.2.2`, attaching to an operator-managed service, admission, ordinary-history recovery and previously tested permissions/MCP behavior. None of that broad characterization was rerun.
 
 ## Supported boundary
 
@@ -50,7 +50,7 @@ Each custom executor must also call **`ctx.permission.assert`** using its native
 - Default-deny model tools constrain agent access, not arbitrary plugin code. Location is context/configuration scope, not filesystem confinement. The plugin must not write SQLite directly; Hono remains the domain authority.
 - This first-party transport replacement fits the approved constrained-tools direction: it preserves service ownership and authorization requirements rather than relaxing them. If the selected service disables project discovery, blocks the plugin, or cannot enforce required restrictions, **stop and obtain operator resolution**. Do not edit global configuration, bypass policies, install silently, or substitute a weaker mechanism.
 
-## Focused verification still required
+## Focused verification scope
 
 Reuse the baseline report; do not repeat its broad native profiles or introduce an MCP startup sleep/refresh probe for this plugin path.
 
@@ -64,12 +64,24 @@ Reuse the baseline report; do not repeat its broad native profiles or introduce 
 
 Independent execution of the single opt-in command documented in [`tests/native/README.md`](../../../tests/native/README.md) passed using the isolated app-owned fixture, maintained client and first-party plugin. The existing operator integration report was reused, not rerun.
 
+This earlier run was capture-only; it does not attest the later dialogue/plugin changes.
+
 - Native **2.2.2**; plugin **active**; job **completed**.
 - **2 native tool calls:** `read_source` and `record_interpretation`; **1 durable domain receipt**. The original remained unchanged and the owned grant was revoked on settlement.
 - **3 daemon replay refusals** exercised unknown-session, settled/revoked-session and bad-transport requests. These were daemon-boundary checks, **not additional native prompts**.
 - **4 fake-provider requests**; cleanup **completed**. No paid model or operator-service calls were made.
 
 This proves the isolated fixture's actual tool boundary, not personal-policy compatibility, an OS sandbox, every completion case, or a completed review of the current application. The original source-investigation date and pinned references remain unchanged.
+
+## 2026-10-31 — refreshed capture and dialogue witness
+
+After fresh review, an independent tester executed the exact [README command](../../../tests/native/README.md#native-execution--independent-tester-only-after-review) **once**, using the current reviewed source/bundle pins: exit **0**, state **passed**.
+
+- Native **2.2.2**, plugin **active**, capture job and dialogue **completed**, **2 owned sessions**.
+- **4 native tool calls** across `read_source`, `record_interpretation`, `record_idea`; **2 domain receipts**. Native context matched ordinary history; original and retained turn context survived, canonical reply persisted, and the developing idea's evidence/derivation referenced both sources. Grants were revoked on settlement.
+- **6 daemon replay refusals**, not additional native prompts; **8 fake-provider requests** (**4 capture + 4 dialogue**); cleanup **completed**.
+
+Post-run inspection found no owned process or fixture directory. Ephemeral ports were not reported or independently port-checked. No paid-model or personal/operator-service calls occurred; the existing baseline, including its three profiles, was reused without repetition. This does **not** certify live Stop behavior, personal policies, operator-service compatibility or an OS sandbox.
 
 ## Pinned source references
 

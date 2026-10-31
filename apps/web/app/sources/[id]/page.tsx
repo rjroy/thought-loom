@@ -4,11 +4,13 @@ import { notFound } from "next/navigation";
 import { readSource, readWeaving } from "../../../lib/daemon";
 import StatusIcon from "../../ui/status-icon";
 import WeavingStatus from "../../ui/weaving-status";
+import { discussionHref, firstParameter } from "../../../lib/links";
+import { validSearchQuery } from "../../../lib/daemon";
 
 export const metadata: Metadata = { title: "Original thought" };
 export const dynamic = "force-dynamic";
 
-export default async function SourcePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SourcePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
   const result = await readSource(id);
   if (result.kind === "not-found") notFound();
@@ -22,22 +24,23 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
     );
   }
   const { source } = result;
-  const weaving = await readWeaving(id);
+  const rawQuery = firstParameter((await searchParams).q), query = validSearchQuery(rawQuery) ? rawQuery : "";
+  const origin = source.origin, discussionInput = origin?.kind === "discussion-turn";
+  const weaving = discussionInput ? null : await readWeaving(id);
   const date = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(source.createdAt));
   return (
     <main id="main" className="workspace source-workspace" tabIndex={-1}>
       <div className="source-heading">
-        <div><h1>Original thought</h1><p className="saved-receipt"><StatusIcon kind="saved" /><span>Original saved</span></p></div>
+        <div><h1>{discussionInput ? "Discussion input" : "Original thought"}</h1><p className="saved-receipt"><StatusIcon kind="saved" /><span>{discussionInput ? "Discussion input saved · Your words" : "Original saved"}</span></p></div>
         <Link className="button secondary" href="/">Capture another</Link>
       </div>
       <dl className="source-meta">
         <div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{date} UTC</time></dd></div>
-        <div><dt>Origin</dt><dd>{source.provenance}</dd></div>
+        <div><dt>Origin</dt><dd>{discussionInput ? "Your discussion input" : source.provenance}</dd></div>
       </dl>
-      <article className="original-text" aria-label="Original thought">{source.text}</article>
+      <article className="original-text" aria-label={discussionInput ? "Discussion input" : "Original thought"}>{source.text}</article>
       <p className="source-preservation">This is your unchanged source, not an AI interpretation. Bookmark this page to return to it.</p>
-      <Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link>
-      <WeavingStatus key={id} sourceId={id} initial={weaving.kind === "found" ? weaving.value : null} />
+      {discussionInput ? <Link className="text-link" href={discussionHref(origin.rootSourceId, origin.dialogueId, query, origin.turnId)}>Return to discussion</Link> : <><Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link><WeavingStatus key={id} sourceId={id} initial={weaving?.kind === "found" ? weaving.value : null} /></>}
     </main>
   );
 }

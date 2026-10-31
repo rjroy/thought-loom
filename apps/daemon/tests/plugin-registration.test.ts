@@ -27,18 +27,18 @@ test("V2 setup registers direct domain tools with native runtime permission chec
     tool: { async transform(callback: (value: Editor) => void) { callback(editor); return { async dispose() {} }; } },
   };
   await Reflect.apply(plugin.setup, undefined, [context]);
-  const expected = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship"];
+  const expected = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship", "record_idea"];
   expect(registered.map((tool) => tool.name).sort()).toEqual([...expected].sort());
   const native: NativeToolContext = { sessionID: Session.ID.make("ses_fixture_plugin"), agent: Agent.ID.make("weaver"), messageID: SessionMessage.ID.make("msg_fixture_plugin"), id: Tool.CallID.make("call_fixture_plugin"), signal: new AbortController().signal, async progress() {} };
-  for (const action of ["record_alias", "record_relationship"]) {
+  for (const action of ["record_alias", "record_relationship", "record_idea"]) {
     const tool = registered.find((entry) => entry.name === action);
     expect(tool).toBeDefined();
     if (!tool) throw new Error(`Missing ${action}`);
     expect(tool.options).toMatchObject({ codemode: false, permission: action });
     expect(tool.input).not.toHaveProperty("properties.runId");
     expect(tool.input).not.toHaveProperty("properties.transportCredential");
-    const input = action === "record_alias" ? { alias: "SDK", expansion: "software development kit", evidenceSourceIds: ["source-1"] } : { fromItemId: "item-1", toItemId: "item-2", fromVersionId: "version-1", toVersionId: "version-2", type: "suggests", rationale: "Evidence", evidenceSourceIds: ["source-1"] };
+    const input = action === "record_alias" ? { alias: "SDK", expansion: "software development kit", evidenceSourceIds: ["source-1"] } : action === "record_relationship" ? { fromItemId: "item-1", toItemId: "item-2", fromVersionId: "version-1", toVersionId: "version-2", type: "suggests", rationale: "Evidence", evidenceSourceIds: ["source-1"] } : { rootSourceId: "source-1", turnSourceId: "source-2", dialogueId: "dialogue-1", turnId: "turn-1", text: "Developed idea", evidenceSourceIds: ["source-1", "source-2"], derivedFrom: { itemId: "item-1", versionId: "version-1" } };
     await expect(tool.execute(input, native)).rejects.toThrow("fixture permission denied");
   }
-  expect(actions).toEqual(["record_alias", "record_relationship"]);
+  expect(actions).toEqual(["record_alias", "record_relationship", "record_idea"]);
 });

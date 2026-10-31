@@ -16,3 +16,14 @@ export function inquiryHref(sourceId: string, query = "", itemId?: string): stri
 export function readableDate(value: string): string {
   return `${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value))} UTC`;
 }
+
+export function sourceHref(id: string, query = ""): string {
+  return `/sources/${encodeURIComponent(id)}${query ? `?q=${encodeURIComponent(query)}` : ""}`;
+}
+
+export function discussionHref(root: string, dialogue: string, query = "", turnId?: string): string {
+  const parameters = new URLSearchParams();
+  if (query) parameters.set("q", query);
+  parameters.set("dialogue", dialogue);
+  return `/sources/${encodeURIComponent(root)}/inquiry?${parameters}#${turnId ? `turn-${encodeURIComponent(turnId)}` : "development"}`;
+}

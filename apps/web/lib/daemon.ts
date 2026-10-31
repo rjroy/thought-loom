@@ -4,7 +4,7 @@ import { isSourceId, parseSource } from "./source";
 import { isIdempotencyKey, parseWeavingRetryInput, parseWeavingRetryReceipt, parseWeavingStatusView, type WeavingStatusView } from "@thoughtloom/contracts";
 
 // An operator-controlled loopback destination, never a browser-supplied URL.
-function daemonURL(path: string): URL {
+export function daemonURL(path: string): URL {
   const base = new URL(process.env.THOUGHTLOOM_DAEMON_URL ?? "http://127.0.0.1:3001");
   if (base.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname) ||
       base.username || base.password || base.pathname !== "/" || base.search || base.hash) {
@@ -80,7 +80,7 @@ export async function forwardCapture(body: unknown, key: string | null): Promise
 
 type ProjectionRead<T> = { kind: "found"; value: T } | { kind: "not-found" } | { kind: "unavailable" };
 
-async function readProjection<T>(operation: string, path: string, parse: (value: unknown) => T | null): Promise<ProjectionRead<T>> {
+export async function readProjection<T>(operation: string, path: string, parse: (value: unknown) => T | null): Promise<ProjectionRead<T>> {
   console.info(`${operation} attempt`);
   try {
     const response = await fetch(daemonURL(path), { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(8_000) });

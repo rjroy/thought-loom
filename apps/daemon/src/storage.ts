@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import type { CaptureInput, Source, SearchResult } from "@thoughtloom/contracts";
+import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
 
 export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
@@ -8,6 +8,8 @@ export function openDatabase(path: string): Database {
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA busy_timeout = 5000");
     db.run("PRAGMA journal_mode = WAL");
+    const migrating = (db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0) < 13;
+    if (migrating) db.run("PRAGMA foreign_keys = OFF");
     db.transaction(() => {
       const version = db.query<{ user_version: number }, []>("PRAGMA user_version").get();
       if (version?.user_version === 0) {
@@ -23,7 +25,7 @@ export function openDatabase(path: string): Database {
           status TEXT NOT NULL
         )`);
         db.run("PRAGMA user_version = 1");
-      } else if (!version || version.user_version < 1 || version.user_version > 11) {
+      } else if (!version || version.user_version < 1 || version.user_version > 14) {
         throw new Error("Unsupported database schema version");
       }
       if (version?.user_version === 0 || version?.user_version === 1) {
@@ -219,7 +221,157 @@ export function openDatabase(path: string): Database {
         db.run("CREATE INDEX jobs_source ON jobs(source_id)");
         db.run("PRAGMA user_version = 11");
       }
+      if (version && version.user_version < 12) {
+        db.run("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','dialogue'))");
+        db.run(`CREATE TRIGGER jobs_kind_immutable BEFORE UPDATE OF kind ON jobs
+          BEGIN SELECT RAISE(ABORT, 'immutable job kind'); END`);
+        db.run("DROP INDEX jobs_source");
+        db.run("CREATE INDEX jobs_source ON jobs(source_id,kind)");
+        db.run(`CREATE TABLE dialogues (
+          id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL REFERENCES sources(id),
+          item_id TEXT NOT NULL REFERENCES knowledge_items(id), version_id TEXT NOT NULL REFERENCES formulations(id),
+          context TEXT NOT NULL, created_at TEXT NOT NULL
+        )`);
+        db.run("CREATE INDEX dialogues_source ON dialogues(source_id)");
+        db.run(`CREATE TRIGGER dialogue_selection_scope BEFORE INSERT ON dialogues WHEN NOT EXISTS (
+          SELECT 1 FROM knowledge_items i JOIN formulations f ON f.item_id=i.id
+          WHERE i.id=NEW.item_id AND i.source_id=NEW.source_id AND f.id=NEW.version_id
+        ) BEGIN SELECT RAISE(ABORT, 'invalid dialogue selection'); END`);
+        db.run(`CREATE TABLE dialogue_turns (
+          id TEXT PRIMARY KEY NOT NULL, dialogue_id TEXT NOT NULL REFERENCES dialogues(id),
+          source_id TEXT NOT NULL UNIQUE REFERENCES sources(id), job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id),
+          position INTEGER NOT NULL CHECK(position > 0), created_at TEXT NOT NULL, UNIQUE(dialogue_id,position)
+        )`);
+        db.run(`CREATE TRIGGER dialogue_turn_scope BEFORE INSERT ON dialogue_turns WHEN NOT EXISTS (
+          SELECT 1 FROM dialogues d JOIN jobs j ON j.id=NEW.job_id JOIN sources s ON s.id=NEW.source_id
+          WHERE d.id=NEW.dialogue_id AND j.kind='dialogue' AND j.source_id=d.source_id
+            AND s.id<>d.source_id AND s.provenance='discussion-turn' AND s.created_at=NEW.created_at
+        ) BEGIN SELECT RAISE(ABORT, 'invalid dialogue turn scope'); END`);
+        db.run(`CREATE TABLE dialogue_turn_receipts (
+          idempotency_key TEXT PRIMARY KEY NOT NULL, payload_hash TEXT NOT NULL,
+          turn_id TEXT NOT NULL UNIQUE REFERENCES dialogue_turns(id), command TEXT NOT NULL
+        )`);
+        for (const table of ["dialogues", "dialogue_turns", "dialogue_turn_receipts"]) {
+          db.run(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table}
+            BEGIN SELECT RAISE(ABORT, 'immutable dialogue command context'); END`);
+          db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table}
+            BEGIN SELECT RAISE(ABORT, 'retained dialogue context'); END`);
+        }
+        db.run("PRAGMA user_version = 12");
+      }
+      if (version && version.user_version < 13) {
+        // Preserve the response shape of already-issued capture commands while
+        // new captures carry structured origin metadata on acknowledgment/read.
+        db.run("ALTER TABLE capture_receipts ADD COLUMN response_version INTEGER NOT NULL DEFAULT 1 CHECK(response_version IN (1,2))");
+        // Foreign keys are checked before commit and re-enabled below. Rebuild
+        // only this parent to allow source/relationship targets without fake items.
+        db.run("DROP TRIGGER dialogue_turn_scope");
+        db.run("DROP TRIGGER dialogue_selection_scope");
+        db.run("DROP TRIGGER dialogues_immutable"); db.run("DROP TRIGGER dialogues_retained");
+        db.run(`CREATE TABLE dialogues_next (
+          id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL REFERENCES sources(id),
+          selection_kind TEXT NOT NULL CHECK(selection_kind IN ('source','item','relationship')),
+          item_id TEXT REFERENCES knowledge_items(id), version_id TEXT REFERENCES formulations(id),
+          relationship_id TEXT REFERENCES relationships(id), relationship_version_id TEXT REFERENCES relationship_revisions(id),
+          from_version_id TEXT REFERENCES formulations(id), to_version_id TEXT REFERENCES formulations(id),
+          context TEXT NOT NULL, created_at TEXT NOT NULL,
+          CHECK((selection_kind='source' AND item_id IS NULL AND version_id IS NULL AND relationship_id IS NULL AND relationship_version_id IS NULL AND from_version_id IS NULL AND to_version_id IS NULL)
+            OR (selection_kind='item' AND item_id IS NOT NULL AND version_id IS NOT NULL AND relationship_id IS NULL AND relationship_version_id IS NULL AND from_version_id IS NULL AND to_version_id IS NULL)
+            OR (selection_kind='relationship' AND item_id IS NULL AND version_id IS NULL AND relationship_id IS NOT NULL AND relationship_version_id IS NOT NULL AND from_version_id IS NOT NULL AND to_version_id IS NOT NULL))
+        )`);
+        db.run(`INSERT INTO dialogues_next(id,source_id,selection_kind,item_id,version_id,context,created_at)
+          SELECT id,source_id,'item',item_id,version_id,context,created_at FROM dialogues`);
+        db.run("DROP TABLE dialogues"); db.run("ALTER TABLE dialogues_next RENAME TO dialogues");
+        db.run("CREATE INDEX dialogues_source ON dialogues(source_id)");
+        db.run(`CREATE TRIGGER dialogue_selection_scope BEFORE INSERT ON dialogues WHEN
+          (NEW.selection_kind='item' AND NOT EXISTS (SELECT 1 FROM knowledge_items i JOIN formulations f ON f.item_id=i.id
+            WHERE i.id=NEW.item_id AND i.source_id=NEW.source_id AND f.id=NEW.version_id)) OR
+          (NEW.selection_kind='relationship' AND NOT EXISTS (SELECT 1 FROM relationships r
+            JOIN relationship_revisions v ON v.relationship_id=r.id JOIN knowledge_items a ON a.id=r.from_item_id JOIN knowledge_items b ON b.id=r.to_item_id
+            JOIN formulations af ON af.item_id=a.id JOIN formulations bf ON bf.item_id=b.id
+            WHERE r.id=NEW.relationship_id AND v.id=NEW.relationship_version_id AND af.id=NEW.from_version_id AND bf.id=NEW.to_version_id
+              AND (a.source_id=NEW.source_id OR b.source_id=NEW.source_id)))
+          BEGIN SELECT RAISE(ABORT, 'invalid dialogue selection'); END`);
+        db.run(`CREATE TRIGGER dialogue_turn_scope BEFORE INSERT ON dialogue_turns WHEN NOT EXISTS (
+          SELECT 1 FROM dialogues d JOIN jobs j ON j.id=NEW.job_id JOIN sources s ON s.id=NEW.source_id
+          WHERE d.id=NEW.dialogue_id AND j.kind='dialogue' AND j.source_id=d.source_id
+            AND s.id<>d.source_id AND s.provenance='discussion-turn' AND s.created_at=NEW.created_at
+        ) BEGIN SELECT RAISE(ABORT, 'invalid dialogue turn scope'); END`);
+        db.run(`CREATE TABLE dialogue_creation_receipts (
+          idempotency_key TEXT PRIMARY KEY NOT NULL, payload_hash TEXT NOT NULL,
+          dialogue_id TEXT NOT NULL UNIQUE REFERENCES dialogues(id), response TEXT NOT NULL
+        )`);
+        db.run(`CREATE TABLE dialogue_outcomes (
+          turn_id TEXT PRIMARY KEY NOT NULL REFERENCES dialogue_turns(id), run_id TEXT NOT NULL UNIQUE REFERENCES weaving_runs(id),
+          outcome TEXT NOT NULL CHECK(outcome IN ('succeeded','failed','interrupted')),
+          assistant_message_id TEXT, assistant_text TEXT,
+          CHECK((assistant_message_id IS NULL)=(assistant_text IS NULL)),
+          CHECK(outcome<>'succeeded' OR assistant_text IS NOT NULL)
+        )`);
+        db.run(`CREATE TRIGGER dialogue_outcome_scope BEFORE INSERT ON dialogue_outcomes WHEN NOT EXISTS (
+          SELECT 1 FROM dialogue_turns t JOIN weaving_runs r ON r.job_id=t.job_id
+          WHERE t.id=NEW.turn_id AND r.id=NEW.run_id AND r.outcome=NEW.outcome
+        ) BEGIN SELECT RAISE(ABORT, 'invalid dialogue outcome'); END`);
+        db.run(`CREATE TABLE idea_derivations (
+          item_id TEXT PRIMARY KEY NOT NULL REFERENCES knowledge_items(id),
+          dialogue_id TEXT NOT NULL REFERENCES dialogues(id), turn_id TEXT NOT NULL REFERENCES dialogue_turns(id),
+          root_source_id TEXT NOT NULL REFERENCES sources(id), turn_source_id TEXT NOT NULL REFERENCES sources(id),
+          from_item_id TEXT REFERENCES knowledge_items(id), from_version_id TEXT REFERENCES formulations(id),
+          CHECK((from_item_id IS NULL)=(from_version_id IS NULL))
+        )`);
+        db.run(`CREATE TRIGGER idea_derivation_scope BEFORE INSERT ON idea_derivations WHEN NOT EXISTS (
+          SELECT 1 FROM dialogue_turns t JOIN dialogues d ON d.id=t.dialogue_id JOIN knowledge_items i ON i.id=NEW.item_id
+          WHERE t.id=NEW.turn_id AND d.id=NEW.dialogue_id AND d.source_id=NEW.root_source_id AND t.source_id=NEW.turn_source_id
+            AND i.source_id=d.source_id AND i.kind='developing-idea'
+        ) OR (NEW.from_item_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM formulations f WHERE f.id=NEW.from_version_id AND f.item_id=NEW.from_item_id))
+          BEGIN SELECT RAISE(ABORT, 'invalid idea derivation'); END`);
+        for (const table of ["dialogues", "dialogue_creation_receipts", "dialogue_outcomes", "idea_derivations"]) {
+          db.run(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'immutable dialogue evidence'); END`);
+          db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'retained dialogue evidence'); END`);
+        }
+        db.run("PRAGMA user_version = 13");
+      }
+      if (version && version.user_version < 14) {
+        db.run(`CREATE TABLE dialogue_stop_requests (
+          id TEXT PRIMARY KEY NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, payload_hash TEXT NOT NULL,
+          dialogue_id TEXT NOT NULL REFERENCES dialogues(id), turn_id TEXT NOT NULL UNIQUE REFERENCES dialogue_turns(id),
+          job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id), expected_run_id TEXT REFERENCES weaving_runs(id), created_at TEXT NOT NULL
+        )`);
+        db.run(`CREATE TRIGGER dialogue_stop_scope BEFORE INSERT ON dialogue_stop_requests WHEN NOT EXISTS (
+          SELECT 1 FROM dialogue_turns t WHERE t.id=NEW.turn_id AND t.dialogue_id=NEW.dialogue_id AND t.job_id=NEW.job_id
+        ) OR (NEW.expected_run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM weaving_runs r WHERE r.id=NEW.expected_run_id AND r.job_id=NEW.job_id))
+          BEGIN SELECT RAISE(ABORT, 'invalid dialogue stop scope'); END`);
+        db.run(`CREATE TABLE dialogue_stop_dispatch (
+          stop_id TEXT PRIMARY KEY NOT NULL REFERENCES dialogue_stop_requests(id),
+          state TEXT NOT NULL CHECK(state IN ('queued','attempted','requested','uncertain'))
+        )`);
+        db.run(`CREATE TRIGGER dialogue_stop_dispatch_identity BEFORE UPDATE OF stop_id ON dialogue_stop_dispatch
+          BEGIN SELECT RAISE(ABORT, 'immutable stop identity'); END`);
+        db.run(`CREATE TRIGGER dialogue_stop_dispatch_forward BEFORE UPDATE OF state ON dialogue_stop_dispatch WHEN NOT
+          ((OLD.state='queued' AND NEW.state='attempted') OR (OLD.state='attempted' AND NEW.state IN ('requested','uncertain')))
+          BEGIN SELECT RAISE(ABORT, 'retained stop attempt'); END`);
+        db.run(`CREATE TRIGGER dialogue_stop_revoke AFTER INSERT ON dialogue_stop_requests BEGIN
+          UPDATE owned_grants SET revoked=1 WHERE run_id IN (SELECT id FROM weaving_runs WHERE job_id=NEW.job_id);
+        END`);
+        db.run(`CREATE TRIGGER dialogue_stopped_grant BEFORE INSERT ON owned_grants WHEN EXISTS (
+          SELECT 1 FROM dialogue_stop_requests s JOIN weaving_runs r ON r.job_id=s.job_id WHERE r.id=NEW.run_id
+        ) BEGIN SELECT RAISE(ABORT, 'stopped dialogue grant'); END`);
+        db.run(`CREATE TRIGGER dialogue_stopped_requeue BEFORE UPDATE OF status ON jobs WHEN NEW.status='queued' AND EXISTS (
+          SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=NEW.id
+        ) BEGIN SELECT RAISE(ABORT, 'stopped dialogue job'); END`);
+        db.run(`CREATE TRIGGER dialogue_stopped_run BEFORE INSERT ON weaving_runs WHEN EXISTS (
+          SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=NEW.job_id
+        ) BEGIN SELECT RAISE(ABORT, 'stopped dialogue run'); END`);
+        db.run(`CREATE TRIGGER dialogue_stop_immutable BEFORE UPDATE ON dialogue_stop_requests
+          BEGIN SELECT RAISE(ABORT, 'immutable stop command'); END`);
+        for (const table of ["dialogue_stop_requests", "dialogue_stop_dispatch"]) db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table}
+          BEGIN SELECT RAISE(ABORT, 'retained stop command'); END`);
+        db.run("PRAGMA user_version = 14");
+      }
+      if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();
+    db.run("PRAGMA foreign_keys = ON");
+    if (db.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1) throw new Error("Foreign keys unavailable");
     return db;
   } catch (error) {
     db.close();
@@ -238,8 +390,8 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
   const db = openDatabase(path);
   try {
     return db.transaction((): CaptureResult => {
-      const receipt = db.query<{ payload_hash: string; source_id: string }, [string]>(
-        "SELECT payload_hash, source_id FROM capture_receipts WHERE idempotency_key = ?",
+      const receipt = db.query<{ payload_hash: string; source_id: string; response_version: number }, [string]>(
+        "SELECT payload_hash, source_id,response_version FROM capture_receipts WHERE idempotency_key = ?",
       ).get(key);
       if (receipt) {
         if (receipt.payload_hash !== payloadHash) return { kind: "conflict" };
@@ -247,20 +399,21 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
           "SELECT id, text, provenance, created_at AS createdAt FROM sources WHERE id = ?",
         ).get(receipt.source_id);
         if (!source) throw new Error("Capture receipt references a missing source");
-        return { kind: "replayed", source };
+        return { kind: "replayed", source: receipt.response_version === 1 ? source : { ...source, origin: sourceOrigin(db, source.id) } };
       }
       const source: Source = {
         id: crypto.randomUUID(),
         text: input.text,
         provenance: input.provenance,
         createdAt: new Date().toISOString(),
+        origin: { kind: "capture" },
       };
       db.run("INSERT INTO sources (id, text, provenance, created_at) VALUES (?, ?, ?, ?)",
         [source.id, source.text, source.provenance, source.createdAt]);
       db.run("INSERT INTO source_search (source_id, text) VALUES (?, ?)", [source.id, source.text]);
       db.run("INSERT INTO jobs (id, source_id, status) VALUES (?, ?, ?)",
         [crypto.randomUUID(), source.id, "queued"]);
-      db.run("INSERT INTO capture_receipts (idempotency_key, payload_hash, source_id) VALUES (?, ?, ?)",
+      db.run("INSERT INTO capture_receipts (idempotency_key, payload_hash, source_id,response_version) VALUES (?, ?, ?,2)",
         [key, payloadHash, source.id]);
       return { kind: "created", source };
     }).immediate();
@@ -328,7 +481,7 @@ export function searchSources(path: string, query: string, overrides: Partial<Se
       ).all(word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, limits.typoCandidates);
       for (const { term } of candidates) if (oneEditAway(word, term)) add([term], false, false);
     }
-    return results;
+    return results.map((result) => ({ ...result, source: { ...result.source, origin: sourceOrigin(db, result.sourceId) } }));
   } finally {
     db.close();
   }
@@ -369,10 +522,27 @@ export function rebuildSearchIndex(path: string): void {
 export function findSource(path: string, id: string): Source | null {
   const db = openDatabase(path);
   try {
-    return db.query<Source, [string]>(
-      "SELECT id, text, provenance, created_at AS createdAt FROM sources WHERE id = ?",
-    ).get(id);
+    return sourceRecord(db, id);
   } finally {
     db.close();
   }
+}
+
+// Origin is authoritative relational context, never inferred from a client-set
+// provenance label. Legacy capture receipts retain their earlier wire shape.
+export function sourceOrigin(db: Database, id: string): SourceOrigin {
+  const turn = db.query<{ dialogueId: string; turnId: string; rootSourceId: string }, [string]>(`SELECT t.dialogue_id AS dialogueId,t.id AS turnId,d.source_id AS rootSourceId
+    FROM dialogue_turns t JOIN dialogues d ON d.id=t.dialogue_id WHERE t.source_id=?`).get(id);
+  const origin = parseSourceOrigin(turn ? { kind: "discussion-turn", ...turn } : { kind: "capture" });
+  if (!origin) throw new Error("Invalid source origin");
+  return origin;
+}
+export function sourceRecord(db: Database, id: string): Source | null {
+  const row = db.query<Source, [string]>("SELECT id,text,provenance,created_at AS createdAt FROM sources WHERE id=?").get(id);
+  if (!row) return null;
+  const origin = sourceOrigin(db, id);
+  const legacy = origin.kind === "capture" && db.query<{ version: number }, [string]>("SELECT response_version AS version FROM capture_receipts WHERE source_id=?").get(id)?.version === 1;
+  const source = parseSourceRecord({ ...row, ...(legacy ? {} : { origin }) });
+  if (!source) throw new Error("Invalid source record");
+  return source;
 }

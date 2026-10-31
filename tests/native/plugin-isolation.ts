@@ -4,19 +4,18 @@
 // tests/opencode/readiness.ts (blob 0c4a4023558362b3f5ee754ac50d8547c1804ef2).
 // This single profile permits exactly one reviewed first-party local bundle.
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { BUNDLE_SHA256 } from "./plugin-provenance";
+export { BUNDLE_SHA256, SOURCE_HASHES } from "./plugin-provenance";
 
 export const ANCHOR = "/tmp/opencode";
 export const ROOT_PREFIX = "thoughtloom-plugin-witness-";
 export const NATIVE_BINARY = "/home/rjroy/.local/share/mise/installs/npm-opencode-cli/2.2.2/node_modules/.mise/@opencode+cli@2.2.2/node_modules/@opencode/cli/bin/opencode.exe";
 // Operator-supplied installation digest, not a publisher-signature claim.
 export const NATIVE_SHA256 = "4452778e23fbda075eb2f83c2574b1d7452af8e347c52b8d9e016838b9c530d9";
-export const BUNDLE_SHA256 = "b2e9e9de7545f79ab565710c7c248537bc9e98e2ac29482b65544f79f343b2e6";
-export const SOURCE_HASHES = {
-  "packages/agent-tools/src/plugin.ts": "8bc121d9837ccf2b86451e0efd6c96d8ea558d3e8e58e447e73ac9cd72fb796d",
-  "packages/contracts/src/tools.ts": "02a889a770122f3a2a2ddcd2afc56e8551fe39b71ec2e14c95c51e6bdf84f22d",
-} as const;
 export const AGENT = "fixture_weaver";
 export const OPERATIONS = ["read_source", "record_interpretation"] as const;
+export const DIALOGUE_OPERATIONS = ["read_source", "record_idea"] as const;
+const agentOperations = ["read_source", "record_interpretation", "record_idea"] as const;
 export const MODEL = { providerID: "fixture-provider", id: "fixture-model" } as const;
 const forbiddenPorts = new Set([3000, 3001, 9443, 4173, 4317, 48763]);
 
@@ -57,7 +56,9 @@ export function pathsFor(root: string) {
 }
 const directories = ["HOME", "OPENCODE_TEST_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "TMPDIR", "OPENCODE_CONFIG_DIR"] as const;
 export function permissions() {
-  return [{ action: "*", resource: "*", effect: "deny" }, ...OPERATIONS.map((action) => ({ action, resource: "*", effect: "allow" }))];
+  // Agent ceiling only. Each fresh session receives its narrower capture or
+  // dialogue rules from the production adapter; capture must not advertise idea.
+  return [{ action: "*", resource: "*", effect: "deny" }, ...agentOperations.map((action) => ({ action, resource: "*", effect: "allow" }))];
 }
 export function generatedConfig(root: string) {
   const p = pathsFor(root);
@@ -66,7 +67,7 @@ export function generatedConfig(root: string) {
 }
 export function selection(root: string) {
   const p = pathsFor(root);
-  return { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], maxSteps: 6,
+  return { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6,
     location: p.cwd, connectionFile: p.connection };
 }
 export function witnessConfig(root: string, providerOrigin: string) {

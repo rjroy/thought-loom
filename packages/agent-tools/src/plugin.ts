@@ -3,7 +3,7 @@ import type { Plugin } from "@opencode/plugin";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
-import { loopbackOrigin, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, toolId, toolRecord, type ToolAction } from "../../contracts/src/tools";
+import { loopbackOrigin, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, toolId, toolRecord, type ToolAction } from "../../contracts/src/tools";
 
 export type NativeToolContext = ToolContext;
 export type NativePluginContext = Plugin.Context;
@@ -95,6 +95,7 @@ export default plugin;
 function project(action: ToolAction, value: unknown) {
   switch (action) {
     case "record_interpretation": return parseInterpretation(value, false);
+    case "record_idea": return parseIdea(value, false);
     case "record_alias": return parseAlias(value, false);
     case "record_relationship": return parseRelationship(value, false);
     case "revise_interpretation": return parseInterpretationRevision(value, false);
@@ -112,7 +113,7 @@ async function forward(action: ToolAction, value: unknown, native: NativeToolCon
   if (!input) throw new Error("Invalid domain tool input");
   const fields: Record<string, unknown> = { ...input };
   const resources: string[] = [];
-  for (const key of ["sourceId", "itemId", "relationshipId", "fromItemId", "toItemId"]) {
+  for (const key of ["sourceId", "rootSourceId", "turnSourceId", "itemId", "relationshipId", "fromItemId", "toItemId"]) {
     if (typeof fields[key] === "string") resources.push(fields[key]);
   }
   if (resources.length === 0 && "evidenceSourceIds" in input && Array.isArray(input.evidenceSourceIds)) {
@@ -128,7 +129,7 @@ async function forward(action: ToolAction, value: unknown, native: NativeToolCon
 
 const string = { type: "string" as const };
 const evidence = { type: "array" as const, items: string, minItems: 1, maxItems: 16 };
-type Property = typeof string | typeof evidence | { type: "string"; enum: string[] };
+type Property = typeof string | typeof evidence | { type: "string"; enum: string[] } | { type: "object"; properties: Record<string, Property>; required: string[]; additionalProperties: boolean };
 function schema(properties: Record<string, Property>) {
   return { type: "object" as const, properties, required: Object.keys(properties), additionalProperties: false };
 }
@@ -138,6 +139,9 @@ const definitions: Array<{ name: ToolAction; description: string; input: ReturnT
   { name: "read_relationship", description: "Read a relationship's endpoints, current version, rationale and evidence.", input: schema({ relationshipId: string }) },
   { name: "search", description: "Search sources and attributable annotations for candidate connections; similarity is not evidence.", input: schema({ query: string }) },
   { name: "record_interpretation", description: "Record a tentative interpretation anchored to this run's original source.", input: schema({ sourceId: string, text: string, evidenceSourceIds: evidence }) },
+  { name: "record_idea", description: "During dialogue only, record a developing idea with original/user-turn evidence and explicit derivation. Saved immediately; no Keep approval.",
+    input: { ...schema({ rootSourceId: string, turnSourceId: string, dialogueId: string, turnId: string, text: string, evidenceSourceIds: evidence, derivedFrom: schema({ itemId: string, versionId: string }) }),
+      required: ["rootSourceId", "turnSourceId", "dialogueId", "turnId", "text", "evidenceSourceIds"] } },
   { name: "record_alias", description: "Record an attributable search alias supported by this run's original source.", input: schema({ alias: string, expansion: string, evidenceSourceIds: evidence }) },
   { name: "record_relationship", description: "Record an evidenced directed connection with a root endpoint and current endpoint versions; read candidate items and original evidence first.", input: schema({ fromItemId: string, toItemId: string, fromVersionId: string, toVersionId: string, type: { type: "string", enum: ["supports", "challenges", "suggests"] }, rationale: string, evidenceSourceIds: evidence }) },
   { name: "revise_interpretation", description: "Append a revision to root-scoped AI material at its expected version. User corrections cannot be rewritten.", input: schema({ itemId: string, expectedVersionId: string, text: string, evidenceSourceIds: evidence }) },

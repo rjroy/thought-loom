@@ -5,12 +5,16 @@ import { findSource, saveCapture, searchSources } from "./storage";
 import type { SearchLimits } from "./storage";
 import { createToolApp } from "./tool-boundary";
 import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
+import { createDialogueApp } from "./dialogue-http";
+import { createKnowledgeHttpApp } from "./knowledge-http";
 
 export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
   if (options.tools) app.route("/", createToolApp({ databasePath: options.databasePath, ...options.tools }));
   else app.all("/internal/tools/*", (context) => context.json({ error: "Unauthorized" }, 401));
   app.route("/", createWeavingHttpApp(options));
+  app.route("/", createDialogueApp({ databasePath: options.databasePath, weavingWorker: options.weavingWorker }));
+  app.route("/", createKnowledgeHttpApp({ databasePath: options.databasePath }));
 
   app.post("/captures", async (context) => {
     let body: unknown;

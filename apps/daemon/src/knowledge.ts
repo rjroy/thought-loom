@@ -3,6 +3,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { openDatabase } from "./storage";
+import { parseIdea, parseIdeaDerivation, type IdeaInput, type IdeaDerivation } from "@thoughtloom/contracts";
 export type KnowledgeContext =
   | { actor: "user"; operationId: string }
   | { actor: "ai"; operationId: string; runId: string };
@@ -21,6 +22,7 @@ export type KnowledgeItem = {
   sourceId: string;
   current: Formulation;
   history: Formulation[];
+  derivation?: IdeaDerivation;
 };
 
 export type RelationshipRevision = {
@@ -84,7 +86,18 @@ function readItem(db: Database, id: string): KnowledgeItem {
   const history = versions.map((version) => ({ ...version, evidenceSourceIds: getEvidence.all(version.id).map((row) => row.sourceId) }));
   const current = history.at(-1);
   if (!current) throw new KnowledgeError("storage_error");
-  return { ...item, current, history };
+  const derivation = readIdeaDerivation(db, id);
+  return { ...item, current, history, ...(derivation ? { derivation } : {}) };
+}
+export function readIdeaDerivation(db: Database, id: string): IdeaDerivation | undefined {
+  const derived = db.query<{ dialogueId: string; turnId: string; turnSourceId: string; itemId: string | null; versionId: string | null }, [string]>(
+    "SELECT dialogue_id AS dialogueId,turn_id AS turnId,turn_source_id AS turnSourceId,from_item_id AS itemId,from_version_id AS versionId FROM idea_derivations WHERE item_id=?",
+  ).get(id);
+  if (!derived) return undefined;
+  const derivation = parseIdeaDerivation({ dialogueId: derived.dialogueId, turnId: derived.turnId, turnSourceId: derived.turnSourceId,
+    ...(derived.itemId && derived.versionId ? { itemId: derived.itemId, versionId: derived.versionId } : {}) });
+  if (!derivation) throw new KnowledgeError("storage_error");
+  return derivation;
 }
 
 function readRelationship(db: Database, id: string): Relationship {
@@ -246,6 +259,23 @@ export class KnowledgeService {
 
   getItem(id: string): KnowledgeItem { return this.execute("read_item", false, (db) => readItem(db, id)); }
 
+  recordIdea(context: KnowledgeContext, input: IdeaInput): KnowledgeItem {
+    return this.mutate("record_idea", context, input, (db) => {
+      if (context.actor !== "ai" || !parseIdea(input)) throw new KnowledgeError("forbidden");
+      const origin = db.query(`SELECT 1 FROM dialogue_turns t JOIN dialogues d ON d.id=t.dialogue_id JOIN weaving_runs r ON r.job_id=t.job_id
+        WHERE t.id=? AND d.id=? AND d.source_id=? AND t.source_id=? AND r.id=?`).get(input.turnId, input.dialogueId, input.rootSourceId, input.turnSourceId, context.runId);
+      if (!origin || !input.evidenceSourceIds.includes(input.rootSourceId) || !input.evidenceSourceIds.includes(input.turnSourceId)) throw new KnowledgeError("forbidden");
+      evidence(db, input.evidenceSourceIds);
+      if (input.derivedFrom && !db.query("SELECT 1 FROM formulations WHERE id=? AND item_id=?").get(input.derivedFrom.versionId, input.derivedFrom.itemId)) throw new KnowledgeError("invalid_reference");
+      const id = crypto.randomUUID();
+      db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES (?,'developing-idea',?)", [id, input.rootSourceId]);
+      appendFormulation(db, context, id, input.text, input.evidenceSourceIds);
+      db.run("INSERT INTO idea_derivations(item_id,dialogue_id,turn_id,root_source_id,turn_source_id,from_item_id,from_version_id) VALUES (?,?,?,?,?,?,?)",
+        [id, input.dialogueId, input.turnId, input.rootSourceId, input.turnSourceId, input.derivedFrom?.itemId ?? null, input.derivedFrom?.versionId ?? null]);
+      return readItem(db, id);
+    }, (result) => ({ resultId: result.id, revisionId: result.current.id }), itemAt);
+  }
+
   reviseItem(context: KnowledgeContext, input: {
     itemId: string; expectedVersionId: string; text: string; evidenceSourceIds: string[];
   }): KnowledgeItem {
@@ -254,6 +284,24 @@ export class KnowledgeService {
       const item = readItem(db, input.itemId);
       checkVersion(item.current, input.expectedVersionId, context);
       appendFormulation(db, context, item.id, input.text, input.evidenceSourceIds);
+      return readItem(db, item.id);
+    }, (result) => ({ resultId: result.id, revisionId: result.current.id }), itemAt);
+  }
+
+  correctItem(context: KnowledgeContext, input: {
+    itemId: string; expectedVersionId: string; sourceId: string; text: string;
+  }): KnowledgeItem {
+    return this.mutate("correct_item", context, input, (db) => {
+      if (context.actor !== "user") throw new KnowledgeError("forbidden");
+      const item = readItem(db, input.itemId);
+      checkVersion(item.current, input.expectedVersionId, context);
+      // A correction cites the actual retained user input, not arbitrary text
+      // relabelled as user evidence or a source from another inquiry root.
+      const source = db.query<{ text: string }, [string, string]>(`SELECT s.text FROM sources s
+        JOIN dialogue_turns t ON t.source_id=s.id JOIN dialogues d ON d.id=t.dialogue_id
+        WHERE s.id=? AND d.source_id=?`).get(input.sourceId, item.sourceId);
+      if (!source || source.text !== input.text) throw new KnowledgeError("invalid_reference");
+      appendFormulation(db, context, item.id, source.text, [input.sourceId]);
       return readItem(db, item.id);
     }, (result) => ({ resultId: result.id, revisionId: result.current.id }), itemAt);
   }

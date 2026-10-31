@@ -111,7 +111,6 @@ test("an inquiry keeps the original, attributed AI interpretations, evidence and
   await relationship.getByRole("button", { name: "View history", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(relationship.getByRole("region", { name: "Connection history", exact: true }).getByText(example.initialRationale, { exact: true })).toBeVisible();
-  await expect(page.getByText("Dialogue is not available yet.", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: /discuss|reply|message/i })).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
 

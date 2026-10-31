@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { DOMAIN_ACTIONS } from "../packages/contracts/src/tools";
+import { DOMAIN_ACTIONS, CAPTURE_ACTIONS } from "../packages/contracts/src/tools";
 import { provisionNativeSetup } from "../apps/daemon/src/native-setup";
 
 if (import.meta.main) {
@@ -24,7 +24,7 @@ if (import.meta.main) {
     const setup = await provisionNativeSetup({ runtimeDirectory, locationDirectory, daemonOrigin,
       transportCredential: randomBytes(32).toString("base64url"), pluginEntry: resolve(entry), pluginBundle: await output.text(),
       native: { registrationFile, agent, model: { providerID, id, ...(values.variant ? { variant: values.variant } : {}) },
-        operations: [...DOMAIN_ACTIONS], maxSteps: Number(values["max-steps"]) } });
+         operations: [...CAPTURE_ACTIONS], dialogueOperations: [...DOMAIN_ACTIONS], maxSteps: Number(values["max-steps"]) } });
     console.info("Native configuration generated; not activated or live-validated.", { nativeConfigFile: setup.nativeConfigFile });
   } catch {
     console.error("Native setup failed: supply explicit new runtime/location paths, daemon origin, registration file, agent, provider and model. Existing or linked targets are not overwritten.");
