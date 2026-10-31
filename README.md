@@ -40,6 +40,108 @@ and retrieval. Configured weaving uses your selected agent/provider/model.
 For a production-mode local launch, run `bun run build` then `bun start`.
 The build command must succeed first; it does not start either service.
 
+### Back up and inspect a restored copy
+
+These commands back up **only the Thoughtloom application SQLite database**,
+not OpenCode's database, service registration, generated native configuration,
+provider credentials, or other files. Arrange separate secure backups for those
+only if you own them and understand their recovery requirements. Database copies
+contain private originals and discussion text; keep them in private storage.
+
+Stop the Thoughtloom launcher first and wait for shutdown. Do not copy only the
+main `.sqlite` file: committed data may still be in its WAL. SQLite's online
+backup API, used by the `sqlite3` CLI `.backup` command below, reads a consistent
+database including committed WAL contents. The repository does not currently
+provide a backup command; install nothing automatically. These instructions
+require an existing `sqlite3` executable with `.backup` and `mktemp`.
+
+Replace both placeholders with **absolute paths** to the actual application
+database and an existing private parent directory. The default application path
+is the repository's absolute `.data/thoughtloom.sqlite` path, unless you set
+`THOUGHTLOOM_DATABASE_PATH`. For this shell recipe paths must contain only ASCII
+letters, digits, `_`, `.`, `/`, and `-`; choose safe paths rather than editing
+the quoting. It creates a new private directory, never an existing destination.
+
+```sh
+SOURCE_DB='/ABSOLUTE/PATH/TO/thoughtloom.sqlite'
+BACKUP_PARENT='/ABSOLUTE/PATH/TO/PRIVATE/BACKUPS'
+SNAPSHOT=$(
+  set -u
+  umask 077 || exit 1
+  for p in "$SOURCE_DB" "$BACKUP_PARENT"; do
+    case "$p" in /*) ;; *) exit 1 ;; esac
+    case "$p" in *[!A-Za-z0-9_./-]*) exit 1 ;; esac
+  done
+  [ -f "$SOURCE_DB" ] && [ -s "$SOURCE_DB" ] && [ -d "$BACKUP_PARENT" ] || exit 1
+  dir=$(mktemp -d "$BACKUP_PARENT/thoughtloom-backup.XXXXXXXX") || exit 1
+  printf 'Working directory (retain on failure): %s\n' "$dir" >&2 || exit 1
+  sqlite3 -readonly "$SOURCE_DB" ".backup '$dir/snapshot.sqlite'" || exit 1
+  [ -s "$dir/snapshot.sqlite" ] || exit 1
+  check=$(sqlite3 -readonly "$dir/snapshot.sqlite" 'PRAGMA integrity_check;') || exit 1
+  [ "$check" = ok ] || exit 1
+  printf '%s\n' "$dir/snapshot.sqlite"
+) && printf 'Verified snapshot: %s\n' "$SNAPSHOT"
+```
+
+If the command fails or does not print the verified path, **stop**; do not use
+the incomplete directory as a backup. Its printed working directory is retained
+for diagnosis and can be removed deliberately after inspection. The check detects SQLite structural
+corruption, not missing business content. Reopen and inspect a restored copy as
+below; keep the original and backup unchanged. Do not run this command against a
+personal OpenCode database.
+
+To restore, set `SNAPSHOT` to the printed absolute path and `RESTORE_PARENT` to
+another existing private directory. The same path-character restriction applies.
+This creates a *new* directory and database; it never overwrites the original or
+the snapshot. Stop if any command fails or no verified path is printed; retain
+the printed working directory for diagnosis before deliberately removing it.
+
+```sh
+SNAPSHOT='/ABSOLUTE/PATH/TO/VERIFIED/snapshot.sqlite'
+RESTORE_PARENT='/ABSOLUTE/PATH/TO/PRIVATE/RESTORES'
+RESTORE_DB=$(
+  set -u
+  umask 077 || exit 1
+  for p in "$SNAPSHOT" "$RESTORE_PARENT"; do
+    case "$p" in /*) ;; *) exit 1 ;; esac
+    case "$p" in *[!A-Za-z0-9_./-]*) exit 1 ;; esac
+  done
+  [ -f "$SNAPSHOT" ] && [ -s "$SNAPSHOT" ] && [ -d "$RESTORE_PARENT" ] || exit 1
+  dir=$(mktemp -d "$RESTORE_PARENT/thoughtloom-restore.XXXXXXXX") || exit 1
+  printf 'Working directory (retain on failure): %s\n' "$dir" >&2 || exit 1
+  sqlite3 -readonly "$SNAPSHOT" ".backup '$dir/restored.sqlite'" || exit 1
+  [ -s "$dir/restored.sqlite" ] || exit 1
+  check=$(sqlite3 -readonly "$dir/restored.sqlite" 'PRAGMA integrity_check;') || exit 1
+  [ "$check" = ok ] || exit 1
+  printf '%s\n' "$dir/restored.sqlite"
+) && printf 'Verified restored copy: %s\n' "$RESTORE_DB"
+```
+
+First inspect the restored copy **without native configuration**. With all
+Thoughtloom launchers stopped and from the repository root, replace the path
+with the verified restored path if using a new shell:
+
+```sh
+env -u THOUGHTLOOM_NATIVE_CONFIG_FILE -u THOUGHTLOOM_TOOL_CONNECTION_FILE \
+  THOUGHTLOOM_DATABASE_PATH="$RESTORE_DB" \
+  bun --no-env-file run apps/daemon/src/index.ts
+```
+
+This starts only the loopback daemon, not Next, and disables automatic `.env`
+loading for that process. Stop it with Ctrl+C after inspecting known source IDs
+through the local API. The database-path override is for this process only;
+ordinary `bun dev` otherwise uses its configured/default path, **not** the
+restored copy. Do not overwrite the original to switch databases.
+
+A backup can contain queued, active or uncertain jobs and run/session IDs from
+its capture time. With the worker unconfigured, jobs cannot be admitted or
+reconciled with a native service. Do not blindly reconnect native configuration
+or retry work from a restored copy: it may duplicate external effects or refer
+to sessions whose real state has since changed. Inspect status and reconcile
+with the operator-owned service and current original database first; no automatic
+safe-merge or replay procedure is claimed. The user-led evaluation procedure is
+in `.lore/work/validation/thoughtloom-real-corpus-experiment.md`.
+
 ### Try this checkpoint
 
 1. Capture a few lines, including deliberate leading spaces and line breaks.
