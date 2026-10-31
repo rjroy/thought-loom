@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "thought_loom",
+  "project_id": "30da365c-95c6-4f1d-a8a6-995b83577bdf"
+}
