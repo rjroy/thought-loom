@@ -8,6 +8,7 @@
     "node": "26.13.0"
   },
   "scripts": {
+    "demo": "bun run scripts/demo.ts",
     "dev": "bun run scripts/run.ts dev",
     "build": "node apps/web/node_modules/next/dist/bin/next build apps/web",
     "start": "bun run scripts/run.ts start",

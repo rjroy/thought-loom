@@ -1,5 +1,5 @@
 import "server-only";
-import { parseCaptureInput, type CaptureInput, type Source } from "@thoughtloom/contracts";
+import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
 import { isSourceId, parseSource } from "./source";
 
 // An operator-controlled loopback destination, never a browser-supplied URL.
@@ -75,4 +75,40 @@ export async function forwardCapture(body: unknown, key: string | null): Promise
     console.error("bff.capture.save failed", { category: "unconfirmed_save" });
     return privateJSON({ error: "Save could not be confirmed" }, 503);
   }
+}
+
+type ProjectionRead<T> = { kind: "found"; value: T } | { kind: "not-found" } | { kind: "unavailable" };
+
+async function readProjection<T>(operation: string, path: string, parse: (value: unknown) => T | null): Promise<ProjectionRead<T>> {
+  console.info(`${operation} attempt`);
+  try {
+    const response = await fetch(daemonURL(path), { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(8_000) });
+    if (response.status === 404) { console.info(`${operation} not_found`); return { kind: "not-found" }; }
+    if (response.status !== 200) throw new Error("Read not acknowledged");
+    const value = parse(await response.json());
+    if (!value) throw new Error("Invalid read response");
+    console.info(`${operation} succeeded`);
+    return { kind: "found", value };
+  } catch {
+    console.warn(`${operation} failed`, { category: "read_unavailable" });
+    return { kind: "unavailable" };
+  }
+}
+
+export function validSearchQuery(query: string): boolean {
+  return query.length <= 512 && (query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) <= 16;
+}
+
+export async function readSearch(query: string): Promise<{ kind: "found"; results: SearchResult[] } | { kind: "invalid" } | { kind: "unavailable" }> {
+  if (!validSearchQuery(query)) return { kind: "invalid" };
+  const response = await readProjection("bff.search.read", `/search?q=${encodeURIComponent(query)}`, parseSearchResponse);
+  return response.kind === "found" ? { kind: "found", results: response.value.results } : { kind: "unavailable" };
+}
+
+export async function readInquiry(id: string): Promise<ProjectionRead<InquiryView>> {
+  if (!isRecordId(id)) return { kind: "not-found" };
+  return readProjection("bff.inquiry.read", `/sources/${encodeURIComponent(id)}/inquiry`, (value) => {
+    const parsed = parseInquiryView(value);
+    return parsed?.source.id === id ? parsed : null;
+  });
 }

@@ -1,8 +1,10 @@
 import { Hono } from "hono";
-import { parseCaptureInput } from "@thoughtloom/contracts";
-import { findSource, saveCapture } from "./storage";
+import { isRecordId, parseCaptureInput } from "@thoughtloom/contracts";
+import { readInquiry } from "./inquiry";
+import { findSource, saveCapture, searchSources } from "./storage";
+import type { SearchLimits } from "./storage";
 
-export function createApp(options: { databasePath: string }) {
+export function createApp(options: { databasePath: string; searchLimits?: Partial<SearchLimits> }) {
   const app = new Hono();
 
   app.post("/captures", async (context) => {
@@ -46,6 +48,33 @@ export function createApp(options: { databasePath: string }) {
     } catch {
       console.error("source.read failed", { category: "storage_error" });
       return context.json({ error: "Source could not be read" }, 500);
+    }
+  });
+
+  app.get("/search", (context) => {
+    const query = context.req.query("q") ?? "";
+    if (query.length > 512 || (query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) > 16) {
+      return context.json({ error: "Search query is too long" }, 400);
+    }
+    console.info("source.search attempt");
+    try {
+      const results = searchSources(options.databasePath, query, options.searchLimits);
+      console.info("source.search completed", { count: results.length });
+      return context.json({ results }, 200);
+    } catch {
+      console.error("source.search failed", { category: "storage_error" });
+      return context.json({ error: "Search unavailable" }, 500);
+    }
+  });
+
+  app.get("/sources/:id/inquiry", (context) => {
+    const id = context.req.param("id");
+    if (!isRecordId(id)) return context.json({ error: "Source not found" }, 404);
+    try {
+      const view = readInquiry(options.databasePath, id);
+      return view ? context.json(view, 200) : context.json({ error: "Source not found" }, 404);
+    } catch {
+      return context.json({ error: "Inquiry could not be read" }, 503);
     }
   });
 

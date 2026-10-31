@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import localFont from "next/font/local";
 import Link from "next/link";
+import SearchForm, { SearchFields } from "./ui/search-form";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -27,7 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <a className="skip-link" href="#main">Skip to content</a>
         <header className="site-header">
           <Link className="site-name" href="/">Thoughtloom</Link>
-          <span className="local-context">Local workspace</span>
+          <Suspense fallback={<SearchFields />}><SearchForm /></Suspense>
         </header>
         {children}
         <footer className="site-footer">Your originals stay unchanged. No AI processing yet.</footer>

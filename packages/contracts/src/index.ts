@@ -8,6 +8,22 @@ export type Source = CaptureInput & {
   createdAt: string;
 };
 
+export type SourceSearchResult = {
+  sourceId: string;
+  matchOrigin: "source";
+};
+
+export * from "./inspection";
+
+// Expanded search response contract; source text is an excerpt, not a replacement
+// for fetching the immutable original. Knowledge is present for formulation hits.
+export type SearchResult = {
+  sourceId: string;
+  matchOrigin: "source" | "interpretation" | "alias";
+  source: { excerpt: string; provenance: string; createdAt: string };
+  item?: { id: string; kind: "interpretation" | "developing-idea"; formulationId: string; text: string; author: "user" | "ai" };
+};
+
 export function parseCaptureInput(value: unknown): CaptureInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;

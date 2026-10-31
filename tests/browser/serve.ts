@@ -2,6 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createApp } from "../../apps/daemon/src/app";
+import { seedInquiryExample } from "../fixtures/seed-inquiry";
 
 function portFromEnvironment(name: string, fallback: number): number {
   const port = Number(process.env[name] ?? fallback);
@@ -41,6 +42,7 @@ process.on("SIGTERM", () => void stop(0));
 process.on("SIGINT", () => void stop(0));
 
 try {
+  seedInquiryExample(databasePath);
   console.info("browser.harness daemon starting", { databasePath, port: daemonPort });
   daemon = Bun.serve({
     hostname: "127.0.0.1",
