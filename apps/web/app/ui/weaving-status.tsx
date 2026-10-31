@@ -10,16 +10,16 @@ type Command = { key: string; expectedRunId: string };
 function statusCopy(view: WeavingStatusView | null): { title: string; detail: string } {
   if (!view) return { title: "Status unavailable", detail: "Your original remains saved. Check status to reconnect; this does not start a run." };
   switch (view.job.status) {
-    case "queued": return { title: "Queued for weaving", detail: "Your original is saved. A queued job has not started an agent run." };
-    case "running": return { title: "Weaving in progress", detail: "The agent is exploring possible readings and connections. Your original stays unchanged." };
-    case "completed": return { title: "Weaving completed", detail: view.job.recordedChanges === 0 ? "No new changes or connections were recorded. A completed run does not have to find a connection." : "Recorded changes are available in this thought’s context. AI readings remain tentative, with their evidence attached." };
-    case "failed": return { title: "Weaving failed", detail: "The run ended with a confirmed failure. Any changes already recorded remain available; your original is intact." };
-    case "interrupted": return { title: "Run interrupted", detail: "The run stopped before finishing. Any recorded readings and connections are kept, not rolled back." };
-    case "uncertain": return { title: "Outcome uncertain", detail: "The service may have accepted or started this run, but its outcome cannot be confirmed. Check status rather than resend it." };
+    case "queued": return { title: "Queued for weaving", detail: "Original saved · Agent run not started." };
+    case "running": return { title: "Weaving in progress", detail: "Exploring readings and connections." };
+    case "completed": return { title: "Weaving completed", detail: view.job.recordedChanges === 0 ? "No new changes or connections recorded." : "Recorded readings and connections are ready to explore." };
+    case "failed": return { title: "Weaving failed", detail: "Original and recorded changes are kept." };
+    case "interrupted": return { title: "Run interrupted", detail: "Recorded readings and connections are kept." };
+    case "uncertain": return { title: "Outcome uncertain", detail: "The service may have accepted this run. Check status; do not resend." };
   }
 }
 
-export default function WeavingStatus({ sourceId, initial, onSnapshot }: { sourceId: string; initial: WeavingStatusView | null; onSnapshot?: (view: WeavingStatusView) => void }) {
+export default function WeavingStatus({ sourceId, initial, onSnapshot, compact = false }: { sourceId: string; initial: WeavingStatusView | null; onSnapshot?: (view: WeavingStatusView) => void; compact?: boolean }) {
   const [view, setView] = useState(initial);
   const [readError, setReadError] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -89,13 +89,13 @@ export default function WeavingStatus({ sourceId, initial, onSnapshot }: { sourc
   const copy = statusCopy(view);
   const blocked = view && !view.worker.configured;
   const unavailable = view?.worker.configured && ["unavailable", "failed", "stopped"].includes(view.worker.state);
-  return <section className="weaving-status queue-notice" aria-label="Weaving status">
+  return <section className={`weaving-status queue-notice${compact ? " compact-status" : ""}`} aria-label="Weaving status" data-quiet-complete={view?.job.status === "completed" && !blocked && !unavailable && !readError && !message && !pending}>
     <div className="notice weaving-summary" role="status" aria-live="polite" aria-atomic="true">
       <StatusIcon kind={view?.job.status === "completed" ? "saved" : ["failed", "interrupted", "uncertain"].includes(view?.job.status ?? "") ? "error" : "queued"} />
       <div><h2>{copy.title}</h2><p>{copy.detail}</p></div>
     </div>
-    {blocked && <div className="worker-availability"><p>Weaving is not configured.</p><p>The weaving worker is not available until you configure your own agent and service. Your original remains saved; queued work waits for setup.</p><Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
-    {unavailable && <div className="worker-availability"><p>Weaving service unavailable</p><p>Configuration exists, but the worker cannot currently use it. Check the operator-managed service and registration; this is separate from the saved job’s outcome.</p><Link className="text-link" href="/setup/weaving">Review weaving setup</Link></div>}
+    {blocked && <div className="worker-availability"><p>Weaving is not configured.</p><p>Original saved · Queued work waits for your agent service.</p><Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
+    {unavailable && <div className="worker-availability"><p>Weaving service unavailable</p><p>Saved job retained · Check your agent service.</p><Link className="text-link" href="/setup/weaving">Review weaving setup</Link></div>}
     {readError && <p className="status-recovery" role="status">Could not refresh status. The last confirmed state is shown; your original has not been resubmitted.</p>}
     <div className="weaving-actions">
       <button className="button secondary" type="button" onClick={() => void check()} aria-disabled={checking}>Check status</button>

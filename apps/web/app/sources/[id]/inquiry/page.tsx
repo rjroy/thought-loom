@@ -27,8 +27,7 @@ export default async function InquiryPage({ params, searchParams }: { params: Pr
   const initialDialogue = discussion?.kind === "found" && discussion.value.sourceId === id ? discussion.value : null;
   const dialogueError = rawDialogue && !initialDialogue ? "That discussion could not be opened for this original. It may belong to another thought or be unavailable. Your original and its recorded context remain below." : "";
   return <main id="main" className="workspace inquiry-workspace" tabIndex={-1}>
-    <div className="inquiry-heading"><h1>Explore this thought</h1><Link className="text-link" href={searchHref(query)}>{query ? "Back to results" : "Find another thought"}</Link></div>
-    <p className="inquiry-intro">An unchanged original. Possible readings. Connections you can inspect.</p>
+    <nav className="inquiry-heading" aria-label="Inquiry trail"><Link className="text-link" href={searchHref(query)}>{query ? `Search: ${query}` : "Find a thought"}</Link><span>Original thought</span></nav>
     <InquiryContext key={id} initial={result.value} weaving={weaving.kind === "found" ? weaving.value : null} query={query} selectedId={selectedId} initialDialogue={initialDialogue} dialogueError={dialogueError} />
   </main>;
 }

@@ -80,7 +80,7 @@ export default function CaptureForm() {
   return (
     <form onSubmit={save} className="capture-form" aria-busy={saving}>
       <label htmlFor="thought">Your thought</label>
-      <p className="field-help" id="thought-help">No title or polished question needed. Your words will be saved exactly as written.</p>
+      <p className="field-help" id="thought-help">Saved exactly as written. No title needed.</p>
       <textarea
         ref={editor}
         id="thought"
@@ -96,7 +96,7 @@ export default function CaptureForm() {
       {error && <div className="notice error-notice" role="alert" id="save-error"><StatusIcon kind="error" /><p>{error}</p></div>}
       {editedAfterFailure && <p className="edited-warning" id="edited-warning">You changed the draft. Saving now creates a new original; the earlier attempt may already be saved.</p>}
       <div className="capture-actions">
-        <p className="draft-state" role="status">{saving ? "Saving original…" : text ? "Not saved yet. Save before leaving this page." : "Your original is saved before weaving begins."}</p>
+        <p className="draft-state" role="status">{saving ? "Saving original…" : error ? "Save unconfirmed · Draft kept" : text ? "Draft · Not saved" : ""}</p>
         <button className="button primary" type="submit" disabled={saving || !text.trim()}>{saving ? "Saving…" : error ? "Retry save" : "Save original"}</button>
       </div>
       {saved && <div className="notice" role="status"><StatusIcon kind="saved" /><p><strong>Original saved</strong>. <Link href={`/sources/${saved.id}`}>Open your saved original</Link>.</p></div>}

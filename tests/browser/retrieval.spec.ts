@@ -52,7 +52,7 @@ test("an inquiry keeps the original, attributed AI interpretations, evidence and
   const results = await search(page, "intent preservation");
   const hit = results.getByRole("article").filter({ hasText: example.currentInterpretation });
   await expect(hit.getByText("Matched AI note", { exact: true })).toBeVisible();
-  await expect(hit.getByText("AI interpretation", { exact: true })).toBeVisible();
+  await expect(hit.getByText("AI interpretation · Tentative", { exact: true })).toBeVisible();
   const open = hit.getByRole("link", { name: /^Open thought/ });
   await open.focus();
   await page.keyboard.press("Enter");
@@ -75,24 +75,25 @@ test("an inquiry keeps the original, attributed AI interpretations, evidence and
   });
 
   const original = page.getByRole("region", { name: "Original source", exact: true });
-  await expect(original.getByText(example.provenance, { exact: true })).toBeVisible();
   const fullOriginal = original.getByRole("article", { name: "Original thought", exact: true });
   await expect(fullOriginal).not.toBeVisible();
   await original.getByRole("button", { name: "Read full original", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(fullOriginal).toBeVisible();
+  await expect(original.getByText(example.provenance, { exact: true })).toBeVisible();
   expect(await fullOriginal.textContent()).toBe(example.original);
   const savedOriginal = await request.get(`${daemonURL}/sources/${sourceId}`);
   expect(savedOriginal.status()).toBe(200);
   const source = await savedOriginal.json() as Source;
   await expect(original.locator("time")).toHaveAttribute("datetime", source.createdAt);
-  await expect(original.getByRole("link", { name: "Open saved original", exact: true })).toHaveAttribute("href", `/sources/${sourceId}`);
+  await expect(original.getByRole("link", { name: "Open source", exact: true })).toHaveAttribute("href", `/sources/${sourceId}`);
 
   const interpretations = page.getByRole("region", { name: "Interpretations", exact: true });
   const interpretation = interpretations.getByRole("article").filter({ hasText: example.currentInterpretation });
   await expect(interpretation.getByText("AI interpretation", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(interpretation.getByText("Tentative", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(interpretations.getByText(example.alternateInterpretation, { exact: true }).filter({ visible: true })).toBeVisible();
+  await interpretation.getByRole("button", { name: "Evidence", exact: true }).click();
   await expect(interpretation.getByRole("link", { name: /^Evidence:/ })).toHaveAttribute("href", `/sources/${sourceId}`);
   await interpretation.getByRole("button", { name: "View history", exact: true }).focus();
   await page.keyboard.press("Enter");
@@ -105,19 +106,20 @@ test("an inquiry keeps the original, attributed AI interpretations, evidence and
   await expect(relationship.getByText("AI suggestion", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(relationship.getByText("Active hypothesis", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(relationship.getByText(example.currentRationale, { exact: true }).filter({ visible: true })).toBeVisible();
+  await relationship.getByRole("button", { name: "Evidence", exact: true }).click();
   const evidence = relationship.getByRole("link", { name: /^Evidence:/ });
   await expect(evidence).toHaveCount(2);
   for (const link of await evidence.all()) await expect(link).toHaveAttribute("href", /^\/sources\/[^/?#]+$/);
   await relationship.getByRole("button", { name: "View history", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(relationship.getByRole("region", { name: "Connection history", exact: true }).getByText(example.initialRationale, { exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: /discuss|reply|message/i })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Develop this thought", exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
   await relationship.getByRole("link", { name: "Open connected thought", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("region", { name: "Interpretations", exact: true }).getByText(example.connectedInterpretation, { exact: true }).filter({ visible: true })).toBeVisible();
-  const back = page.getByRole("link", { name: "Back to results", exact: true });
+  const back = page.getByRole("link", { name: "Search: intent preservation", exact: true });
   const backURL = new URL((await back.getAttribute("href"))!, page.url());
   expect(backURL.pathname).toBe("/search");
   expect(backURL.searchParams.get("q")).toBe("intent preservation");
@@ -131,13 +133,13 @@ test("empty and no-match search states do not turn into an all-notes list", asyn
   await page.goto("/search");
   const field = page.getByRole("searchbox", { name: "Search thoughts", exact: true });
   await expect(field).toBeVisible();
-  await expect(page.getByText("Search your originals and recorded interpretations.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Search a word, a fragment, or an idea. No question needed.", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Search results", exact: true })).toHaveCount(0);
   await field.fill("zzquuxnothinglikethis");
   await field.press("Enter");
   await expect(page).toHaveURL((url) => url.pathname === "/search" && url.searchParams.get("q") === "zzquuxnothinglikethis");
   await expect(page.getByRole("status").filter({ hasText: "No thoughts found" })).toBeVisible();
-  await expect(page.getByText(/try a different word/i)).toBeVisible();
+  await expect(page.getByText(/try a shorter fragment or wording from an original/i)).toBeVisible();
   await expect(page.getByRole("region", { name: "Search results", exact: true }).getByRole("article")).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
 });

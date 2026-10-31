@@ -4,83 +4,90 @@
   "title": "Design System: Thoughtloom",
   "extensions": {
     "colorMeta": {
-      "night": { "role": "neutral", "displayName": "Night" },
-      "parchment": { "role": "neutral", "displayName": "Parchment" },
-      "lantern": { "role": "primary", "displayName": "Lantern" },
-      "horizon": { "role": "secondary", "displayName": "Horizon" },
-      "supporting": { "role": "neutral", "displayName": "Supporting text mixture" },
-      "line": { "role": "neutral", "displayName": "Hairline mixture" }
+      "night": {
+        "role": "neutral",
+        "displayName": "Night"
+      },
+      "parchment": {
+        "role": "neutral",
+        "displayName": "Parchment"
+      },
+      "lantern": {
+        "role": "primary",
+        "displayName": "Lantern"
+      },
+      "horizon": {
+        "role": "secondary",
+        "displayName": "Horizon"
+      },
+      "supporting": {
+        "role": "neutral",
+        "displayName": "Supporting text mixture"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline mixture"
+      }
     },
     "typographyMeta": {
-      "page-title-max": { "displayName": "Wide page title", "purpose": "The observed maximum of the existing capture/search clamp, not a fixed size across viewports." },
-      "inquiry-title": { "displayName": "Inquiry title", "purpose": "The built inquiry heading; phone override is documented in DESIGN.md." },
-      "formulation": { "displayName": "Current formulation", "purpose": "An attributed reading, visually distinct from original source text." }
+      "page-title-max": {
+        "displayName": "Page title",
+        "purpose": "Fixed capture/search heading; phone override is documented in DESIGN.md."
+      },
+      "inquiry-title": {
+        "displayName": "Selected formulation",
+        "purpose": "Actual pinned source, reading or connection text, not an invented AI title."
+      },
+      "formulation": {
+        "displayName": "Current formulation",
+        "purpose": "An attributed reading, visually distinct from original source text."
+      }
     },
     "shadows": [],
     "motion": [
-      { "name": "button-state", "value": "background-color 140ms ease-out, color 140ms ease-out", "purpose": "Existing action-state transitions; removed under prefers-reduced-motion." }
+      {
+        "name": "button-state",
+        "value": "background-color 140ms ease-out, color 140ms ease-out",
+        "purpose": "Existing action-state transitions; removed under prefers-reduced-motion."
+      }
     ],
     "breakpoints": [
-      { "name": "inquiry-stack", "value": "800px" },
-      { "name": "phone-shell", "value": "600px" }
+      {
+        "name": "inquiry-stack",
+        "value": "800px"
+      },
+      {
+        "name": "phone-shell",
+        "value": "600px"
+      }
     ]
   },
-  "components": [
-    {
-      "name": "Primary action",
-      "kind": "button",
-      "refersTo": "button-primary",
-      "description": "The existing capture/save action. Documentation specimen only.",
-      "html": "<button class=\"ds-primary\" type=\"button\">Save original</button>",
-      "css": ".ds-primary{font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:18px;font-weight:600;line-height:1.25;min-height:48px;padding:11px 22px;border:1px solid var(--lantern,#EFB83F);border-radius:6px;background:var(--lantern,#EFB83F);color:var(--night,#031315);cursor:pointer;transition:background-color 140ms ease-out,color 140ms ease-out}.ds-primary:hover:not(:disabled){background:var(--parchment,#FEF6E1);border-color:var(--parchment,#FEF6E1)}.ds-primary:active:not(:disabled){background:var(--horizon,#5E8BD6);border-color:var(--horizon,#5E8BD6)}.ds-primary:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}.ds-primary:disabled{background:transparent;color:var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315));border-color:var(--line,color-mix(in srgb,#FEF6E1 30%,#031315));cursor:not-allowed}@media(prefers-reduced-motion:reduce){.ds-primary{transition:none}}"
-    },
-    {
-      "name": "Secondary action",
-      "kind": "button",
-      "refersTo": "button-secondary",
-      "description": "The outlined action treatment; the shell search uses its compact sizing.",
-      "html": "<button class=\"ds-secondary\" type=\"button\">Capture another</button>",
-      "css": ".ds-secondary{font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:18px;font-weight:600;line-height:1.25;min-height:48px;padding:11px 22px;border:1px solid var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315));border-radius:6px;background:transparent;color:var(--parchment,#FEF6E1);cursor:pointer;transition:background-color 140ms ease-out,color 140ms ease-out}.ds-secondary:hover{background:var(--parchment,#FEF6E1);color:var(--night,#031315);border-color:var(--parchment,#FEF6E1)}.ds-secondary:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}@media(prefers-reduced-motion:reduce){.ds-secondary{transition:none}}"
-    },
-    {
-      "name": "Capture field",
-      "kind": "input",
-      "refersTo": "capture-field",
-      "description": "Visible label and Parchment textarea; not a rich-text editor.",
-      "html": "<label class=\"ds-capture-label\" for=\"ds-capture\">Your thought</label><textarea class=\"ds-capture\" id=\"ds-capture\" rows=\"8\" placeholder=\"An observation, an unfinished question…\"></textarea>",
-      "css": ".ds-capture-label{display:block;margin-bottom:16px;font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:19px;font-weight:600;color:var(--parchment,#FEF6E1)}.ds-capture{box-sizing:border-box;width:100%;min-height:272px;padding:24px;border:1px solid var(--parchment,#FEF6E1);border-radius:12px;background:var(--parchment,#FEF6E1);color:var(--night,#031315);caret-color:var(--night,#031315);resize:vertical;font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:20px;line-height:1.6}.ds-capture::placeholder{color:color-mix(in srgb,#031315 72%,#FEF6E1);opacity:1}.ds-capture:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}.ds-capture:read-only{opacity:.9;cursor:wait}@media(max-width:600px){.ds-capture{padding:18px;min-height:256px;font-size:19px}}"
-    },
-    {
-      "name": "Search field",
-      "kind": "input",
-      "refersTo": "search-field",
-      "description": "The compact, labelled query field used by shell navigation.",
-      "html": "<label class=\"ds-search-label\" for=\"ds-search\">Search thoughts</label><input class=\"ds-search\" id=\"ds-search\" type=\"search\" placeholder=\"A word, a fragment, an idea\">",
-      "css": ".ds-search-label{display:block;margin-bottom:5px;font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:15px;color:var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315))}.ds-search{box-sizing:border-box;width:100%;min-height:46px;padding:9px 12px;border:1px solid var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315));border-radius:6px;background:var(--night,#031315);color:var(--parchment,#FEF6E1);caret-color:var(--parchment,#FEF6E1);font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:17px}.ds-search::placeholder{color:var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315));opacity:1}.ds-search:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}"
-    },
-    {
-      "name": "Query return",
-      "kind": "nav",
-      "refersTo": "query-return",
-      "description": "A real query-preserving link, not permanent notes navigation.",
-      "html": "<a class=\"ds-query-return\" href=\"/search?q=example\">Back to results</a>",
-      "css": ".ds-query-return{display:inline-flex;align-items:center;min-height:48px;color:var(--supporting,color-mix(in srgb,#FEF6E1 76%,#031315));font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:18px;line-height:1.5;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.2em}.ds-query-return:hover{text-decoration-thickness:2px}.ds-query-return:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}"
-    },
-    {
-      "name": "Source disclosure",
-      "kind": "custom",
-      "refersTo": "source-disclosure",
-      "description": "The built native disclosure and unchanged-source treatment; sample text is explicitly illustrative.",
-      "html": "<details class=\"ds-disclosure\"><summary role=\"button\">Read full original</summary><article class=\"ds-original\" aria-label=\"Original thought\">Example source, not user material.\nOriginal line breaks remain visible.</article></details>",
-      "css": ".ds-disclosure{font-family:var(--font-source-sans,'Source Sans 3'),sans-serif;font-size:18px;line-height:1.5;color:var(--parchment,#FEF6E1)}.ds-disclosure summary{cursor:pointer;min-height:44px;padding:9px 0;text-underline-offset:.2em;box-sizing:border-box}.ds-disclosure summary:hover{text-decoration:underline}.ds-disclosure summary:focus-visible{outline:3px solid var(--horizon,#5E8BD6);outline-offset:5px}.ds-original{margin-top:8px;padding:22px;border-radius:12px;background:var(--parchment,#FEF6E1);color:var(--night,#031315);white-space:break-spaces;overflow-wrap:anywhere;font-size:19px;line-height:1.65}"
-    }
-  ],
+  "components": [],
   "narrative": {
-    "northStar": "An original, kept intact.",
-    "overview": "A restrained task interface: a dark working surface, warm light source text, and clear standard controls. Attribution and evidence carry the hierarchy; ornament does not.\n\nThis records the built capture, retrieval, contextual dialogue, protected user revisions, background follow-up, and configured agent-status views. Agent execution requires explicit operator setup. Mockups remain guidelines, not pixel authority.",
-    "keyCharacteristics": ["Flat, high-contrast reading surfaces.", "One task-oriented font family.", "Original words distinct from attributed hypotheses.", "Temporary search results and connected reading, not permanent note management."],
-    "rules": [{ "name": "The Source Distinction Rule", "body": "Keep original text distinct from tentative AI formulations; color never replaces the author or status label.", "section": "colors" }],
-    "dos": ["Do preserve the exact core palette and self-hosted task font.", "Do keep author, source, status, and evidence readable without spatial gestures.", "Do use familiar semantic controls within inquiry-centered navigation."],
-    "donts": ["Don't imply that saved, queued, tentative, active, and user-endorsed mean the same thing.", "Don't add a permanent notes list, chat sidebar, new logo, or literal textile/fantasy ornament.", "Don't imply an unconfigured worker is running, mistake agent prose for a durable change, or turn experiment images into production layout authority."]
+    "northStar": "A thought, challenged and developed.",
+    "overview": "Parchment thinking space framed by compact Night navigation and an unchanged-original band. Selected formulations, saved user contributions, canonical responses and confirmed developing ideas lead. The retained inquiry-flow mockups guide composition, not raster coordinates or fabricated relationships. The web presentation correction awaits independent behavior and visual review. DESIGN.md and application CSS describe the current result; obsolete dark-workspace documentation specimens have been removed.",
+    "keyCharacteristics": [
+      "Flat, high-contrast reading surfaces.",
+      "One task-oriented font family.",
+      "Original words distinct from attributed hypotheses.",
+      "Temporary search results and connected reading, not permanent note management."
+    ],
+    "rules": [
+      {
+        "name": "The Source Distinction Rule",
+        "body": "Keep original text distinct from tentative AI formulations; color never replaces the author or status label.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do preserve the exact core palette and self-hosted task font.",
+      "Do keep author, source, status, and evidence readable without spatial gestures.",
+      "Do use familiar semantic controls within inquiry-centered navigation."
+    ],
+    "donts": [
+      "Don't imply that saved, queued, tentative, active, and user-endorsed mean the same thing.",
+      "Don't add a permanent notes list, chat sidebar, new logo, or literal textile/fantasy ornament.",
+      "Don't imply an unconfigured worker is running or mistake agent prose for a durable change. Follow the retained mockups' composition without inventing their illustrative relationships, headlines or approval actions."
+    ]
   }
 }

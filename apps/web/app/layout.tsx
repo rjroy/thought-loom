@@ -29,9 +29,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <header className="site-header">
           <Link className="site-name" href="/">Thoughtloom</Link>
           <Suspense fallback={<SearchFields />}><SearchForm /></Suspense>
+          <Link className="button secondary capture-link" href="/">Capture</Link>
         </header>
         {children}
-        <footer className="site-footer">Your originals stay unchanged. AI readings are attributed, not established facts.</footer>
       </body>
     </html>
   );

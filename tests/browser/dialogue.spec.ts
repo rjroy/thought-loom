@@ -62,10 +62,41 @@ async function stop(page: Page, request: APIRequestContext, receipt: DialogueTur
 
 test.afterEach(async ({ request }) => { await control(request, "reset"); });
 
+test("opening a confirmed developing idea focuses its formulation and derivation without losing the draft or history", async ({ page, request }) => {
+  const meta = await world(request);
+  await page.goto(`/sources/${meta.root.id}/inquiry?q=coordination#development`);
+  const history = reading(page, meta.item!.id).getByRole("button", { name: "View history", exact: true });
+  await history.click();
+  await expect(reading(page, meta.item!.id).getByRole("region", { name: "Formulation history", exact: true })).toBeVisible();
+  const turn = await send(page, example.thought);
+  await control(request, "start"); await complete(request, example.reply, true);
+  await expect(progress(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible();
+  const view = await dialogue(request, turn.dialogueId);
+  const change = view.turns[0]?.changes.find((entry) => entry.kind === "developing-idea");
+  expect(change).toBeDefined();
+  await composer(page).fill(example.draftOriginal);
+  const link = developed(page).getByRole("link", { name: "Open developing idea", exact: true });
+  await link.focus(); await page.keyboard.press("Enter");
+  const heading = target(page).getByRole("heading", { name: example.idea, exact: true });
+  const derivation = page.getByRole("region", { name: "Idea derivation", exact: true });
+  await expect(heading).toBeVisible();
+  await expect(heading).toBeInViewport();
+  await expect(derivation.getByRole("heading", { name: "How this idea emerged", exact: true })).toBeInViewport();
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[aria-label="Discussion target"], [aria-label="Idea derivation"]'))).toBe(true);
+  expect(new URL(page.url()).searchParams.get("item")).toBe(change?.id);
+  await expect(derivation.getByRole("link", { name: "Your discussion input", exact: true })).toHaveAttribute("href", new RegExp(`/sources/${turn.sourceId}`));
+  await expect(reading(page, meta.item!.id).getByRole("region", { name: "Formulation history", exact: true })).toBeVisible();
+  await composer(page).focus();
+  await expect(composer(page)).toBeInViewport();
+  await derivation.getByRole("link", { name: "From this discussion", exact: true }).click();
+  await expect(composer(page)).toHaveValue(example.draftOriginal);
+  await noOverflow(page);
+});
+
 test("an unannotated original can develop through a saved challenge into a persistent attributed idea", async ({ page, request }) => {
   const { root } = await world(request, true);
   await page.goto(`/sources/${root.id}/inquiry?q=coordination#development`);
-  await expect(page.getByRole("heading", { name: "Explore this thought", exact: true })).toBeVisible();
+  await expect(target(page).getByRole("heading", { name: root.text, exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Interpretations", exact: true }).getByText("No interpretations recorded yet.", { exact: true })).toBeVisible();
   // Intended first RED: the real phase-3 inquiry renders, but has no composer.
   await expect(composer(page)).toBeVisible();
@@ -310,11 +341,45 @@ test("queued Stop prevents admission while completion can win a later Stop with 
   await expect(progress(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible();
   await expect(progress(page).getByRole("heading", { name: "Response interrupted", exact: true })).toHaveCount(0);
   await expect(latest(page).getByText(/finished without a written reply|no written reply/i)).toBeVisible();
-  await expect(developed(page).getByText(/no confirmed changes/i)).toBeVisible();
+  await expect(progress(page).getByText(/no confirmed changes/i)).toBeVisible();
   expect((await dialogue(request, raced.dialogueId)).turns.at(-1)).toMatchObject({ status: "completed", assistant: { text: "" }, changes: [] });
   expect((await metrics(request)).admissions).toHaveLength(1);
   await noOverflow(page);
 });
+
+for (const outcome of ["failed", "interrupted"] as const) {
+  test(`an empty ${outcome} reply is not presented as successful completion`, async ({ page, request }) => {
+    const { root } = await world(request, true);
+    await page.goto(`/sources/${root.id}/inquiry#development`);
+    const turn = await send(page, example.thought);
+    await control(request, "start");
+    await control(request, "advance", { outcome, text: "" });
+    await expect(progress(page).getByRole("heading", { name: `Response ${outcome}`, exact: true })).toBeVisible();
+    expect((await dialogue(request, turn.dialogueId)).turns[0]).toMatchObject({ status: outcome, assistant: { text: "" } });
+    await expect(latest(page).getByText(/response complete/i)).toHaveCount(0);
+    await expect(latest(page).getByText(example.thought, { exact: true })).toBeVisible();
+  });
+
+  test(`an earlier empty ${outcome} reply retains its true outcome in history`, async ({ page, request }) => {
+    const { root } = await world(request, true);
+    await page.goto(`/sources/${root.id}/inquiry#development`);
+    const first = await send(page, example.thought);
+    await control(request, "start"); await control(request, "advance", { outcome, text: "" });
+    await expect(progress(page).getByRole("heading", { name: `Response ${outcome}`, exact: true })).toBeVisible();
+    const second = await send(page, example.secondThought);
+    expect(second.dialogueId).toBe(first.dialogueId);
+    await control(request, "start"); await complete(request, "");
+    await expect(progress(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible();
+    await expect(latest(page).getByText(/response complete.*no written reply/i)).toBeVisible();
+    await page.getByRole("button", { name: "Earlier exchanges", exact: true }).click();
+    const earlier = page.getByRole("region", { name: "Earlier exchanges", exact: true }).locator(`#turn-${first.id}`);
+    await expect(earlier.getByText(example.thought, { exact: true })).toBeVisible();
+    await expect(earlier.getByText(/response complete/i)).toHaveCount(0);
+    await expect(earlier.getByText(new RegExp(`response ${outcome}`, "i"))).toBeVisible();
+    const saved = await dialogue(request, first.dialogueId);
+    expect(saved.turns.map((turn) => ({ status: turn.status, text: turn.assistant?.text }))).toEqual([{ status: outcome, text: "" }, { status: "completed", text: "" }]);
+  });
+}
 
 test("a definitively rejected queued Stop refreshes its fence and a later explicit Stop uses a fresh command", async ({ page, request }) => {
   const { root } = await world(request, true);
@@ -423,7 +488,7 @@ test("canonical prose is not a saved offshoot, long replies stay readable, and a
   await original.getByRole("button", { name: "Read full original", exact: true }).click();
   const draftPage = await context.newPage(); await draftPage.goto("/");
   await draftPage.getByRole("textbox", { name: "Your thought", exact: true }).fill(example.draftOriginal);
-  const anchor = original.getByRole("link", { name: "Open saved original", exact: true }); await anchor.focus();
+  const anchor = original.getByRole("link", { name: "Open source", exact: true }); await anchor.focus();
   const canonical = `${example.proseOnly}\n${"Example extended analysis of the handoff. ".repeat(2200)}\nEND_EXAMPLE_CANONICAL_REPLY`;
   await complete(request, canonical);
   await expect(progress(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible();
@@ -435,7 +500,7 @@ test("canonical prose is not a saved offshoot, long replies stay readable, and a
   const responseText = latest(page).getByRole("article", { name: "Agent response", exact: true });
   await expect(responseText).toBeVisible();
   expect(await responseText.textContent()).toBe(canonical);
-  await expect(developed(page).getByText(/no confirmed changes/i)).toBeVisible();
+  await expect(progress(page).getByText(/no confirmed changes/i)).toBeVisible();
   await expect(developed(page).getByRole("link", { name: "Open developing idea", exact: true })).toHaveCount(0);
   expect((await dialogue(request, turn.dialogueId)).turns[0]?.changes).toEqual([]);
   await noOverflow(page); await draftPage.close();

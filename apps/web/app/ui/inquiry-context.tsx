@@ -93,8 +93,8 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
     window.history.pushState(null, "", inquiryHref(source.id, query, item.id));
     await development.select({ kind: "item", id: item.id, versionId: item.current.id });
     if (intent !== navigationIntent.current || window.location.pathname !== `/sources/${source.id}/inquiry`) return;
-    const address = new URL(window.location.href); address.hash = `item-${item.id}`;
-    window.history.replaceState(null, "", address); revealInquiryAnchor(`item-${item.id}`);
+    const address = new URL(window.location.href); address.hash = "discussion-target";
+    window.history.replaceState(null, "", address); revealInquiryAnchor("discussion-target");
   }
   async function openDiscussion(id: string, turnId: string) {
     const intent = ++navigationIntent.current;
@@ -123,31 +123,33 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
     } finally { mutationRunning.current = false; setMutationBusy(false); }
   }
   const interpretations = model.items.filter((item) => item.sourceId === source.id);
+  // A reading can lead the overview without selecting it as the discussion target.
+  const overviewItem = development.selection.kind === "source" && !development.latest
+    ? interpretations.find((item) => item.kind === "interpretation") ?? interpretations[0] : undefined;
   return <>
     {model.truncated && <p className="context-limit" role="status">This view shows a bounded neighborhood. Some recorded context is not shown; your full original remains available.</p>}
     <DevelopmentNavigation.Provider value={{ root: source.id, openItem: (item) => void openItem(item), openDiscussion: (id, turnId) => void openDiscussion(id, turnId) }}><div className="inquiry-grid">
-      <Development state={development} model={model} query={query} worker={worker} composerRef={composerRef} initialError={dialogueError} />
       <section className="inquiry-source" id="original-source" aria-label="Original source">
-        <h2>Original source</h2><p className="record-identity">Your words · Unchanged</p>
-        <dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl>
+        <div className="source-band-heading"><h2>Original · Unchanged · Excerpt</h2><Link className="button secondary" href={`/sources/${source.id}`}>Open source</Link></div>
         <p className="source-preview">{source.text.slice(0, 240)}{source.text.length > 240 ? "…" : ""}</p>
-        <details className="source-disclosure"><summary role="button">Read full original</summary><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details>
-        <Link className="text-link" href={`/sources/${source.id}`}>Open saved original</Link>
-        <button type="button" className="button secondary" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button>
-        <WeavingStatus sourceId={source.id} initial={weaving} onSnapshot={refresh} />
+        <div className="source-band-actions"><details className="source-disclosure"><summary role="button">Read full original</summary><dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details><button type="button" className="text-button" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button></div>
       </section>
-      <div className="recorded-context">
-        {mutationError && <div className="notice error-notice" role="alert"><p>{mutationError}</p></div>}
-        {refreshError && <p className="status-recovery" role="status">Recorded context could not refresh. Existing readings are kept below; checking status will try loading updates again.</p>}
-        <section aria-label="Interpretations" className="interpretations-section"><h2>Interpretations</h2><p className="section-context">Recorded readings, not established facts or a statement of what you believe.</p>{interpretations.length ? interpretations.map((item) => <InterpretationReading key={item.id} item={item} sources={model.evidenceSources} selected={item.id === openedId} query={query} busy={mutationBusy}
-          onDiscuss={() => discuss({ kind: "item", id: item.id, versionId: item.current.id })}
-          onRestore={(version) => void mutate(`/api/items/${item.id}/restore`, { expectedVersionId: item.current.id, restoreVersionId: version })}
-          onCorrect={development.selection.kind === "item" && development.selection.id === item.id && development.latest ? () => void mutate(`/api/items/${item.id}/correct`, { expectedVersionId: item.current.id, sourceId: development.latest!.source.id, text: development.latest!.source.text }) : undefined} />) : <p className="empty-reading">No interpretations recorded yet.</p>}</section>
-        <section aria-label="Connections" className="connections-section"><h2>Connections</h2><p className="section-context">A recorded relationship needs a reason. Similar search wording alone is not evidence.</p>{model.relationships.length ? model.relationships.map((relation) => <ConnectionReading key={relation.id} relation={relation} items={model.items} sources={model.evidenceSources} sourceId={source.id} query={query} busy={mutationBusy}
+      <div className="original-progress"><WeavingStatus sourceId={source.id} initial={weaving} onSnapshot={refresh} compact /></div>
+      <Development state={development} model={model} query={query} worker={worker} composerRef={composerRef} initialError={dialogueError} overviewItem={overviewItem}
+        onDiscussOverview={overviewItem ? () => discuss({ kind: "item", id: overviewItem.id, versionId: overviewItem.current.id }) : undefined}
+        connections={<section aria-label="Connections" className="connections-section">{model.relationships.length > 0 && <h2>Connected thoughts</h2>}{model.relationships.length ? model.relationships.map((relation) => <ConnectionReading key={relation.id} relation={relation} items={model.items} sources={model.evidenceSources} sourceId={source.id} query={query} busy={mutationBusy} focalId={overviewItem?.id}
           onDiscuss={() => { const from = model.items.find((item) => item.id === relation.fromItemId), to = model.items.find((item) => item.id === relation.toItemId); if (from && to) discuss({ kind: "relationship", id: relation.id, versionId: relation.current.id, fromVersionId: from.current.id, toVersionId: to.current.id }); }}
           onReject={(reason) => mutate(`/api/relationships/${relation.id}/reject`, { expectedVersionId: relation.current.id, rationale: reason, evidenceSourceIds: relation.current.evidenceSourceIds })}
-          onRestore={(version) => void mutate(`/api/relationships/${relation.id}/restore`, { expectedVersionId: relation.current.id, restoreVersionId: version })} />) : <p className="empty-reading">No connections recorded yet.</p>}</section>
+          onRestore={(version) => void mutate(`/api/relationships/${relation.id}/restore`, { expectedVersionId: relation.current.id, restoreVersionId: version })} />) : <p className="empty-reading">No connections recorded yet.</p>}</section>}>
+      <div className="recorded-context" id="recorded-context">
+        {mutationError && <div className="notice error-notice" role="alert"><p>{mutationError}</p></div>}
+        {refreshError && <p className="status-recovery" role="status">Recorded context could not refresh. Existing readings are kept below; checking status will try loading updates again.</p>}
+        <section aria-label="Interpretations" className="interpretations-section">{interpretations.length > 0 && <h2>Readings and history</h2>}<div className="reading-branches">{interpretations.length ? interpretations.map((item) => <InterpretationReading key={item.id} item={item} sources={model.evidenceSources} selected={item.id === openedId} query={query} busy={mutationBusy}
+          onDiscuss={() => discuss({ kind: "item", id: item.id, versionId: item.current.id })}
+          onRestore={(version) => void mutate(`/api/items/${item.id}/restore`, { expectedVersionId: item.current.id, restoreVersionId: version })}
+          onCorrect={development.selection.kind === "item" && development.selection.id === item.id && development.latest ? () => void mutate(`/api/items/${item.id}/correct`, { expectedVersionId: item.current.id, sourceId: development.latest!.source.id, text: development.latest!.source.text }) : undefined} />) : <p className="empty-reading">No interpretations recorded yet.</p>}</div></section>
       </div>
+      </Development>
     </div><FollowUpStatus sourceId={source.id} query={query} initialModel={initial} pendingFindings={pendingFindings} onView={() => reloadKnowledge(true)} onWorker={setWorker} /></DevelopmentNavigation.Provider>
   </>;
 }

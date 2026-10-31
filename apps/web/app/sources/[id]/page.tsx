@@ -41,7 +41,7 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
         <div><dt>Origin</dt><dd>{discussionInput ? "Your discussion input" : source.provenance}</dd></div>
       </dl>
       <article className="original-text" aria-label={discussionInput ? "Discussion input" : "Original thought"}>{source.text}</article>
-      <p className="source-preservation">This is your unchanged source, not an AI interpretation. Bookmark this page to return to it.</p>
+      <p className="source-preservation">Your words · Unchanged</p>
       {discussionInput ? <Link className="text-link" href={discussionHref(origin.rootSourceId, origin.dialogueId, query, origin.turnId)}>Return to discussion</Link> : <><Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link><WeavingStatus key={id} sourceId={id} initial={weaving?.kind === "found" ? weaving.value : null} /></>}
       {!discussionInput && <FollowUpStatus key={`follow-up-${id}`} sourceId={id} query={query} initialModel={context?.kind === "found" ? context.value : null} />}
     </main>

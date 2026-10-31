@@ -130,6 +130,7 @@ test("a completed meaningful dialogue queues subordinate follow-up and confirmed
   await expect(panel(page)).toBeVisible();
   const pass = jobPanel(page, queued.id);
   await expect(pass.getByRole("heading", { name: "Follow-up queued", exact: true })).toBeVisible();
+  await pass.getByRole("button", { name: "Cause and affected versions", exact: true }).click();
   const cause = pass.getByRole("link", { name: "Triggering discussion", exact: true });
   const causeURL = new URL((await cause.getAttribute("href"))!, page.url());
   expect(causeURL.pathname).toBe(`/sources/${root.id}/inquiry`); expect(causeURL.searchParams.get("dialogue")).toBe(turn.dialogueId);
@@ -140,7 +141,7 @@ test("a completed meaningful dialogue queues subordinate follow-up and confirmed
   await original.getByRole("button", { name: "Read full original", exact: true }).click();
   await page.locator(`#item-${queued.targets[0]!.id}`).getByRole("button", { name: "View history", exact: true }).click();
   await composer(page).fill(example.draftReading);
-  const anchor = original.getByRole("link", { name: "Open saved original", exact: true }); await anchor.focus();
+  const anchor = original.getByRole("link", { name: "Open source", exact: true }); await anchor.focus();
   await start(request, "follow_up");
   await expect(pass.getByRole("heading", { name: "Follow-up running", exact: true })).toBeVisible();
   await control(request, "write-follow-up"); await advance(request, "succeeded");
@@ -158,6 +159,7 @@ test("a completed meaningful dialogue queues subordinate follow-up and confirmed
   await expect(finding.locator(":scope > .current-formulation")).toHaveText(background.interpretation);
   await expect(finding.getByText("AI interpretation", { exact: true })).toBeVisible();
   await expect(finding.getByText("Tentative", { exact: true })).toBeVisible();
+  await finding.getByRole("button", { name: "Evidence", exact: true }).click();
   await expect(finding.getByRole("link", { name: /^Evidence:/ })).toHaveAttribute("href", `/sources/${root.id}`);
   await expect(composer(page)).toHaveValue(example.draftReading);
   await unchanged(request, root, turn); await noOverflow(page);
@@ -186,6 +188,7 @@ test("trusted reading and connection revisions coalesce with honest bounded orig
   await page.goto(`/sources/${meta.root.id}/inquiry?q=coordination`);
   await expect(panel(page)).toBeVisible();
   const pass = jobPanel(page, queued.id);
+  await pass.getByRole("button", { name: "Cause and affected versions", exact: true }).click();
   await expect(pass.getByText("Your saved revision", { exact: true })).toBeVisible();
   await expect(pass.getByText("Some triggering changes are not shown.", { exact: true })).toBeVisible();
   await expect(pass.getByText("Some affected versions are not shown.", { exact: true })).toBeVisible();
@@ -218,7 +221,7 @@ test("saved-source follow-up distinguishes empty, unconfigured and configured-un
   await expect(page.getByText("Original saved", { exact: true })).toBeVisible();
   await expect(panel(page)).toBeVisible();
   await expect(panel(page).getByText("No background follow-up queued.", { exact: true })).toBeVisible();
-  await expect(panel(page).getByText("Background follow-up is not configured.", { exact: true })).toBeVisible();
+  await expect(panel(page).getByText("Background follow-up is not configured. Queued work waits.", { exact: true })).toBeVisible();
   await expect(panel(page).getByRole("link", { name: "Set up weaving", exact: true })).toHaveAttribute("href", "/setup/weaving");
   await control(request, "configure-follow-up", { availability: "available" });
   const { job, turn } = await origin(request, root);
@@ -228,11 +231,12 @@ test("saved-source follow-up distinguishes empty, unconfigured and configured-un
   await control(request, "configure-follow-up", { availability: "unavailable" });
   await panel(page).getByRole("button", { name: "Check status", exact: true }).click();
   await expect(jobPanel(page, job.id).getByRole("heading", { name: "Follow-up queued", exact: true })).toBeVisible();
-  await expect(panel(page).getByText("Background follow-up service unavailable", { exact: true })).toBeVisible();
-  await expect(panel(page).getByText("Background follow-up is not configured.", { exact: true })).toHaveCount(0);
+  await expect(panel(page).getByText("Background follow-up service unavailable · Saved changes kept.", { exact: true })).toBeVisible();
+  await expect(panel(page).getByText("Background follow-up is not configured. Queued work waits.", { exact: true })).toHaveCount(0);
   await expect(panel(page).getByRole("button", { name: "Retry follow-up", exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Weaving status", exact: true }).getByRole("heading", { name: "Weaving completed", exact: true })).toBeVisible();
   expect((await status(request, root.id)).worker).toEqual({ configured: true, state: "unavailable" });
+  await jobPanel(page, job.id).getByRole("button", { name: "Cause and affected versions", exact: true }).click();
   const target = jobPanel(page, job.id).locator(`a[href$="#version-${revision!.current.id}"]`);
   await expect(target).toBeVisible(); await target.click();
   await expect(page).toHaveURL((url) => url.pathname === `/sources/${root.id}/inquiry` && url.hash === `#version-${revision!.current.id}`);

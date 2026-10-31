@@ -30,7 +30,8 @@ async function assertOriginalView(page: Page, source: Source) {
   await expect(date).toBeVisible();
   expect((await date.innerText()).trim()).not.toBe("");
   await expect(page.getByRole("status").filter({ hasText: /queued/i })).toBeVisible();
-  await expect(page.getByText(/weaving worker is not (yet )?available/i)).toBeVisible();
+  await expect(page.getByText("Weaving is not configured.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Original saved · Queued work waits for your agent service.", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
@@ -100,6 +101,10 @@ test("a failed acknowledgement preserves the draft and retries the same capture 
   await expect(editor).toHaveValue(original);
   expect(savedBeforeAcknowledgement).toBeDefined();
   await assertPersisted(request, savedBeforeAcknowledgement!);
+  const draftStatus = page.locator(".capture-actions").getByRole("status");
+  await expect(draftStatus).toContainText(/save (?:unconfirmed|could not be confirmed)/i);
+  await expect(draftStatus).toContainText(/draft (?:kept|preserved|is still here)/i);
+  await expect(draftStatus).not.toContainText(/not saved/i);
   const retryResponse = page.waitForResponse((response) => isCaptureResponse(response, baseURL!) && response.status() === 200);
   await page.getByRole("button", { name: /^(retry save|save original)$/i }).click();
   const replay = await retryResponse;

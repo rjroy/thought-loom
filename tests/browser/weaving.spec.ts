@@ -182,7 +182,7 @@ test("supervised domain writes update an open inquiry without replacing focus, s
   await expect(panel(page).getByRole("heading", { name: "Weaving in progress", exact: true })).toBeVisible();
   const draftPage = await context.newPage(); await draftPage.goto("/");
   await draftPage.getByRole("textbox", { name: "Your thought", exact: true }).fill(example.draft);
-  const anchor = original.getByRole("link", { name: "Open saved original", exact: true }); await anchor.focus();
+  const anchor = original.getByRole("link", { name: "Open source", exact: true }); await anchor.focus();
   const before = await metrics(request);
   await control(request, "advance", "completed");
   await expect(panel(page).getByRole("heading", { name: "Weaving completed", exact: true })).toBeVisible();

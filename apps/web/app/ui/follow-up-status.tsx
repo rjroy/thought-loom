@@ -15,12 +15,12 @@ const titles: Record<FollowUpJobView["status"], string> = {
   failed: "Follow-up failed", interrupted: "Follow-up interrupted", uncertain: "Follow-up uncertain",
 };
 const explanations: Record<FollowUpJobView["status"], string> = {
-  queued: "A bounded pass is waiting. This is separate from your saved input and the discussion response.",
-  running: "The agent is checking the affected readings and connections. Your current question stays where it is.",
-  completed: "This pass has finished. Only confirmed saved changes count as findings.",
-  failed: "This pass ended with a confirmed failure. Already recorded changes remain available.",
-  interrupted: "This pass was interrupted. Saved input and already recorded changes are kept.",
-  uncertain: "The service may have accepted this pass. Check status rather than resend it.",
+  queued: "Waiting to check affected readings and connections.",
+  running: "Checking affected readings and connections.",
+  completed: "",
+  failed: "Recorded changes are kept.",
+  interrupted: "Saved input and recorded changes are kept.",
+  uncertain: "The service may have accepted this pass. Check status; do not resend.",
 };
 
 function HistoricalTarget({ target, model, root, query }: { target: FollowUpTargetView; model: InquiryView | null; root: string; query: string }) {
@@ -128,24 +128,23 @@ export default function FollowUpStatus({ sourceId, query = "", initialModel = nu
   const unlistedFindings = pendingFindings.some((finding) => finding.sourceId !== sourceId || !view?.jobs.some((job) => job.id === finding.jobId && job.changes.length > 0));
   return <section className="follow-up-status" aria-label="Background follow-up">
     <h2>Background follow-up</h2>
-    <p className="section-context">A focused check of readings and connections after a meaningful saved change. Separate from your current discussion.</p>
-    {unlistedFindings && <div className="follow-up-findings"><p className="section-context">Follow-up findings affect this neighborhood, including connected thoughts. Your current reading is kept until you choose to view them.</p><button className="button secondary" type="button" disabled={!!viewing} onClick={() => void showFindings()}>{viewing === "neighborhood" ? "Loading findings…" : "View follow-up findings"}</button></div>}
+    {unlistedFindings && <div className="follow-up-findings"><p className="section-context">New findings for this inquiry.</p><button className="button secondary" type="button" disabled={!!viewing} onClick={() => void showFindings()}>{viewing === "neighborhood" ? "Loading findings…" : "View follow-up findings"}</button></div>}
     {!view && <p className="status-recovery" role="status">{readError ? "Follow-up status is unavailable. Your saved input and current reading are kept." : "Checking background follow-up…"}</p>}
-    {view && !view.worker.configured && <div className="worker-availability"><p>Background follow-up is not configured.</p><p>Saved changes remain intact. Queued passes wait until you configure your own agent service.</p><Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
-    {view?.worker.configured && ["unavailable", "failed", "stopped"].includes(view.worker.state) && <div className="worker-availability"><p>Background follow-up service unavailable</p><p>The configured worker cannot currently use the service. This is not a completed pass.</p><Link className="text-link" href="/setup/weaving">Review weaving setup</Link></div>}
+    {view && !view.worker.configured && <div className="worker-availability"><p>Background follow-up is not configured. Queued work waits.</p><Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
+    {view?.worker.configured && ["unavailable", "failed", "stopped"].includes(view.worker.state) && <div className="worker-availability"><p>Background follow-up service unavailable · Saved changes kept.</p><Link className="text-link" href="/setup/weaving">Review weaving setup</Link></div>}
     {view?.jobs.length === 0 && <p className="empty-reading">No background follow-up queued.</p>}
     {view?.jobs.map((job) => <article className="follow-up-pass" id={`follow-up-${job.id}`} key={job.id}>
-      <div className="follow-up-summary" role="status" aria-live="polite" aria-atomic="true"><h3>{titles[job.status]}</h3><p>{explanations[job.status]}</p></div>
-      <div className="follow-up-context"><div><h4>What triggered this pass</h4>
+      <div className="follow-up-summary" role="status" aria-live="polite" aria-atomic="true"><h3>{titles[job.status]}</h3>{explanations[job.status] && <p>{explanations[job.status]}</p>}</div>
+      <details className="follow-up-details"><summary role="button">Cause and affected versions</summary><div className="follow-up-context"><div><h4>What triggered this pass</h4>
         {job.origins.some((origin) => origin.kind === "user") && <p>Your saved revision</p>}
         {job.origins.filter((origin) => origin.kind === "dialogue").map((origin) => <p key={origin.runId}><Link className="text-link" href={discussionHref(sourceId, origin.dialogueId, query, origin.turnId)} onNavigate={navigation?.root === sourceId ? (event) => { event.preventDefault(); navigation.openDiscussion(origin.dialogueId, origin.turnId); } : undefined}>Triggering discussion</Link><Link className="text-link follow-up-input" href={sourceHref(origin.turnSourceId, query)}>View triggering input</Link></p>)}
         {job.originsTruncated && <p className="history-limit">Some triggering changes are not shown.</p>}
       </div><div><h4>Affected versions</h4><ul className="follow-up-targets">{job.targets.map((target) => <HistoricalTarget key={`${target.kind}:${target.id}:${target.versionId}`} target={target} model={reference} root={sourceId} query={query} />)}</ul>
         {job.targetsTruncated && <p className="history-limit">Some affected versions are not shown.</p>}
-      </div></div>
+      </div></div></details>
       {job.recordedChanges === 0 && ["completed", "failed", "interrupted"].includes(job.status) && <p className="section-context">No confirmed changes were recorded.</p>}
       {job.changesTruncated && <p className="history-limit">Some confirmed changes are not shown.</p>}
-      {job.changes.length > 0 && viewed[job.id] !== JSON.stringify(job.changes) && <div className="follow-up-findings"><p className="section-context">Confirmed changes are available. Your reading above has not been rearranged.</p><button className="button secondary" type="button" disabled={!!viewing} onClick={() => void showFindings(job)}>{viewing === job.id ? "Loading findings…" : "View follow-up findings"}</button></div>}
+      {job.changes.length > 0 && viewed[job.id] !== JSON.stringify(job.changes) && <div className="follow-up-findings"><p className="section-context">New confirmed updates · Not yet shown above</p><button className="button secondary" type="button" disabled={!!viewing} onClick={() => void showFindings(job)}>{viewing === job.id ? "Loading findings…" : "View follow-up findings"}</button></div>}
       {viewed[job.id] === JSON.stringify(job.changes) && job.changes.length > 0 && <div className="follow-up-findings"><h4>Confirmed updates</h4>{job.changes.map((change) => {
         if (change.kind === "alias") return <p className="section-context" key={change.id}>A search alias was recorded. It is not a new idea or interpretation.</p>;
         if (!change.versionId) return <p className="section-context" key={change.id}>The confirmed version reference is unavailable in this view.</p>;
