@@ -1,0 +1,27 @@
+{
+  "name": "thoughtloom",
+  "private": true,
+  "packageManager": "bun@1.4.3",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": {
+    "bun": "1.4.3",
+    "node": "26.13.0"
+  },
+  "scripts": {
+    "dev": "bun run scripts/run.ts dev",
+    "build": "node apps/web/node_modules/next/dist/bin/next build apps/web",
+    "start": "bun run scripts/run.ts start",
+    "typecheck:daemon": "tsc --noEmit -p tsconfig.daemon.json",
+    "typecheck:web": "node apps/web/node_modules/next/dist/bin/next typegen apps/web && tsc --noEmit -p apps/web/tsconfig.json",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/bun": "1.4.3",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

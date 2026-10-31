@@ -10,6 +10,10 @@ node_modules
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+**/.next/
+/apps/web/next-env.d.ts
 
 # production
 /build
@@ -44,6 +48,7 @@ yarn-error.log*
 *.tsbuildinfo
 
 # local
+/.data/
 *.local.json
 *.local.md
 .env
@@ -53,3 +58,4 @@ yarn-error.log*
 *.db
 .beads-credential-key
 .beads/proxieddb/
+/.lore/local/

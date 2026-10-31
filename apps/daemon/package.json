@@ -1,0 +1,9 @@
+{
+  "name": "@thoughtloom/daemon",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@thoughtloom/contracts": "workspace:*",
+    "hono": "4.13.14"
+  }
+}
