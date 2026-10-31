@@ -6,6 +6,8 @@ colors:
   parchment: "#FEF6E1"
   lantern: "#EFB83F"
   horizon: "#5E8BD6"
+  ai-surface: "color-mix(in srgb, #5E8BD6 24%, #FEF6E1)"
+  user-surface: "color-mix(in srgb, #EFB83F 38%, #FEF6E1)"
   supporting: "color-mix(in srgb, #031315 76%, #FEF6E1)"
   line: "color-mix(in srgb, #031315 30%, #FEF6E1)"
 typography:
@@ -153,7 +155,7 @@ components:
 
 **Creative North Star: "A thought, challenged and developed."**
 
-A Parchment thinking surface framed by compact Night navigation and an unchanged-original band. Actual formulations, your contributions, canonical responses and confirmed developing ideas lead; operational explanation recedes. Thin connectors express stored relationships and derivation, not an invented graph.
+A Parchment thinking surface framed by compact Night navigation and an unchanged-original band. Actual formulations, your contributions, canonical responses and confirmed developing ideas lead; operational explanation recedes. Directed connectors express stored relationships and derivation, not an invented graph.
 
 This records the current web presentation correction for capture, retrieval, contextual dialogue, protected revisions, background follow-up and agent status. Independent behavior and visual review are still required. The three retained inquiry-flow mockups guide composition and hierarchy, not raster coordinates or invented data. Agent execution still requires operator setup.
 
@@ -165,11 +167,11 @@ This records the current web presentation correction for capture, retrieval, con
 
 ## Colors
 
-Primary action: **Lantern**, also used for the user-contribution outline and text selection. **Horizon** marks focus and AI claim outlines, not low-contrast small text. **Parchment** is the dominant thinking surface with **Night** text. The header and original band invert those neutrals and their supporting-text mixtures. No extra brand hues are introduced.
+Primary action: **Lantern**, also used for text selection. **Parchment** is the dominant thinking surface with **Night** text. Original words use **Night** with Parchment ink; AI readings and canonical replies use a 24% Horizon/Parchment tint; user contributions and user-authored formulations use a 38% Lantern/Parchment tint; AI developing ideas use solid **Horizon** with Night ink. Supporting text mixes each surface's own ink and fill. The exact pinned author controls a selected formulation's color, not a newer revision's author. **Horizon** also marks keyboard focus. No extra brand hues are introduced.
 
 **The Source Distinction Rule.** Keep original text distinct from tentative AI formulations; color never replaces the author or status label.
 
-No extra tonal scale is established by the implementation.
+These two surface tints are role colors, not an additional general-purpose tonal scale.
 
 ## Typography
 
@@ -181,7 +183,9 @@ Frontmatter records reused roles, not an exhaustive scale. Capture/search headin
 
 Capture and search use centered reading widths (820px maximum). A full-width Night header provides search and explicit Capture. Inquiry uses up to (1440px), with (32px) desktop gutters. The original is a horizontal Night anchor above the thinking area, not a sidebar. Its labelled excerpt is visually limited to two lines; the exact original, provenance and date remain available through native disclosure and the source URL.
 
-The selected source, formulation or connection leads the thinking area. A saved contribution and canonical response form a connected pair; confirmed ideas branch beneath. An opened developing idea shows its original, available pinned earlier formulation and discussion-input derivation immediately beneath it. Related readings precede the first desktop composer, then follow the working exchange once a discussion or derived idea is open. A sticky desktop composer remains attached to the thinking surface. At (800px) relationship/exchange columns stack; at (600px) phone gutters are (20px), the composer stays in normal flow, and related readings follow it. The phone is a sequential reader, not a small draggable graph.
+The selected source, formulation or connection leads the thinking area. A saved contribution and canonical response form a connected pair; confirmed ideas branch beneath their originating contribution. On phones that contribution and its confirmed ideas precede the canonical reply, without a misleading idea-to-reply arrow. An opened developing idea shows its original, available pinned earlier formulation and discussion-input derivation immediately beneath it. Related readings precede the first desktop composer, then follow the working exchange once a discussion or derived idea is open. A sticky desktop composer remains attached to the thinking surface. At (800px) relationship/exchange columns stack; at (600px) phone gutters are (20px), the composer stays in normal flow, and related readings follow it. The phone is a sequential reader, not a small draggable graph.
+
+Arrowheads make direction visible: typed relationships connect their actual From/To endpoints; source-to-reading routes require recorded source evidence; a discussion target connects to its saved contribution; contribution-to-idea branches require the exact matching dialogue, turn and input-source derivation. Opened-idea provenance converges from its recorded origins, never from one origin card into another. Source-to-reading arrows are omitted when an actionable worker-status block intervenes. SVG/CSS routes use the same semantic DOM layout anchors on desktop and phone, with no measurement layer or canvas. Connectors are decorative, non-focusable and pointer-transparent; endpoint text, relation labels, evidence and links remain the nonspatial interface. No arrows appear for an unannotated original.
 
 Search results exist only for a query. Back links retain that query. The inquiry groups original source, interpretations, and directed relationships with rationale/evidence; it is not a graph canvas, permanent all-notes list, or chat sidebar. These describe the built surfaces, not a pixel template for future screens.
 
@@ -191,13 +195,13 @@ Flat surfaces, neutral hairlines, spacing, and type create separation. There are
 
 ## Shapes
 
-Controls and claim nodes use restrained corners and thin (1px) borders. Claim outlines distinguish actual content roles; they are not a dashboard-card system. Status icons are simple stroked SVGs, not identity marks. Notices retain their existing larger radius.
+Controls and claim nodes use restrained corners and thin (1px) borders. Filled claim surfaces distinguish actual content roles; they are not a dashboard-card system. Directed paths use Night strokes and visible arrowheads. Status icons are simple stroked SVGs, not identity marks. Notices retain their existing larger radius.
 
 ## Components
 
 - **Actions:** Lantern-filled primary actions; outlined secondary actions invert on hover. Standard buttons have a minimum height of (48px); compact shell controls use (46px). Disabled actions retain legible text and a neutral border. Capture becomes read-only while saving and keeps its draft on failure.
 - **Fields:** capture and composer have visible labels; compact shell search has a programmatic label and explicit Search button. Capture and dialogue text sit on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
-- **Focus and navigation:** a Horizon outline (3px, offset 5px), underlined links, and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.
+- **Focus and navigation:** a Horizon outline (3px, offset 5px), switching to Night for controls within colored claim surfaces; underlined links and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.
 - **Source and history:** native `details`/`summary` disclosures, exact source whitespace and stable source URLs. Evidence and version histories attach to claims; full connection endpoints are inspectable in context. Histories retain author, current/earlier versions, evidence, reversal controls and truncation. No invented version dates.
 - **Attribution and feedback:** distinguish your original, AI interpretations, user formulations, tentative/active hypotheses, and rejected relationships in text. Search match origin is not connection evidence. Saving/queued notices use status semantics; failures use alerts with recovery. Queued does not mean a worker is running. There is no approval inbox.
 - **Weaving status:** one shared, named region separates durable source saving, worker configuration/availability and job outcome. Quiet polling changes the status summary only when its content changes. Check status is read-only; retry appears only for eligible confirmed outcomes. Inquiry updates preserve source disclosures, stable reading keys and focus. The setup guide uses ordinary text, ordered steps and copyable commands, not a configuration editor.

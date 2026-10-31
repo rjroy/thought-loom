@@ -6,11 +6,12 @@ import Link from "next/link";
 import { discussionHref, inquiryHref } from "../../lib/links";
 import EvidenceLinks from "./evidence-links";
 import { useDevelopmentNavigation } from "./development-navigation";
+import FlowArrow from "./flow-arrow";
 
 export function InterpretationReading({ item, sources, selected, query = "", onDiscuss, onRestore, onCorrect, busy = false }: { item: ItemView; sources: EvidenceSource[]; selected: boolean; query?: string; onDiscuss?: () => void; onRestore?: (version: string) => void; onCorrect?: () => void; busy?: boolean }) {
   const navigation = useDevelopmentNavigation();
   const attribution = item.current.author === "ai" ? item.kind === "interpretation" ? "AI interpretation" : "AI developing idea" : "Your recorded formulation";
-  return <article className={`interpretation-reading${selected ? " matched-reading" : ""}`} id={`item-${item.id}`} tabIndex={-1}>
+  return <article className={`interpretation-reading${selected ? " matched-reading" : ""}`} id={`item-${item.id}`} tabIndex={-1} data-role={item.current.author === "user" ? "user" : item.kind === "developing-idea" ? "idea" : "ai"}>
     <p className="attribution"><span>{attribution}</span>{item.current.author === "ai" && <span className="hypothesis-state">Tentative</span>}</p>
     <p className="current-formulation">{item.current.text}</p>
     {selected && <p className="selection-context">Current formulation</p>}
@@ -29,7 +30,7 @@ export function ConnectionReading({ relation, items, sources, sourceId, query, f
   const connected = from.sourceId === sourceId ? to : from;
   return <article className="connection-reading" data-from-focal={relation.fromItemId === focalId}>
     <p className="attribution"><span>{relation.current.author === "ai" ? "AI suggestion" : "Your recorded connection"}</span><span className="hypothesis-state">{relation.current.status === "rejected" ? "Rejected" : "Active hypothesis"}</span></p>
-    <div className="connection-direction"><p className="connection-from"><span>From</span> {from.current.text}</p><p className="relationship-verb"><strong>{relation.type === "supports" ? "Supports" : relation.type === "challenges" ? "Challenges" : "Suggests"}</strong></p><p>{to.current.text}</p></div>
+    <div className="connection-direction"><p className="connection-from relationship-endpoint" data-role={from.current.author === "user" ? "user" : from.kind === "developing-idea" ? "idea" : "ai"}><span>From</span> {from.current.text}</p><div className="relationship-verb"><strong>{relation.type === "supports" ? "Supports" : relation.type === "challenges" ? "Challenges" : "Suggests"}</strong><FlowArrow direction="across" /></div><p className="relationship-endpoint" data-role={to.current.author === "user" ? "user" : to.kind === "developing-idea" ? "idea" : "ai"}>{to.current.text}</p></div>
     <p className="connection-rationale">{relation.current.rationale}</p>
     <details className="evidence-disclosure"><summary role="button">Evidence</summary><EvidenceLinks ids={relation.current.evidenceSourceIds} sources={sources} query={query} /></details>
     <Link className="text-link" href={inquiryHref(connected.sourceId, query, connected.id)}>Open connected thought</Link>
