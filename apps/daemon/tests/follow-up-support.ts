@@ -143,7 +143,7 @@ export async function followUpFixture(register: (close: () => Promise<void>) => 
         sessions.set(value.id, value); return value;
       },
       async getSession(id) { if (maintained) return maintained.getSession(id); const value = sessions.get(id); if (!value) throw new Error("Unknown owned fixture session"); return value; },
-      async prompt(run) { owned(run); prompts.push(run); if (settings.uncertain) throw new Error("Controlled admission response loss"); return maintained ? maintained.prompt(run) : { promptId: run.promptId }; },
+      async prompt(run, claim) { owned(run); prompts.push(run); if (settings.uncertain) throw new Error("Controlled admission response loss"); return maintained ? maintained.prompt(run, claim) : { promptId: run.promptId }; },
       async activity(id) { const outcome = outcomes.get(id) ?? "pending"; return { active: outcome === "pending", outcome: outcome === "pending" ? null : outcome }; },
       async history(id) {
         const run = prompts.find((entry) => entry.sessionId === id); if (!run) throw new Error("Unknown fixture prompt");

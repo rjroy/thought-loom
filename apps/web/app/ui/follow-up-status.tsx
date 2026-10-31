@@ -13,6 +13,7 @@ type Command = { key: string; expectedRunId: string };
 const titles: Record<FollowUpJobView["status"], string> = {
   queued: "Follow-up queued", running: "Follow-up running", completed: "Follow-up complete",
   failed: "Follow-up failed", interrupted: "Follow-up interrupted", uncertain: "Follow-up uncertain",
+  abandoned: "Abandoned locally",
 };
 const explanations: Record<FollowUpJobView["status"], string> = {
   queued: "Waiting to check affected readings and connections.",
@@ -21,6 +22,7 @@ const explanations: Record<FollowUpJobView["status"], string> = {
   failed: "Recorded changes are kept.",
   interrupted: "Saved input and recorded changes are kept.",
   uncertain: "The service may have accepted this pass. Check status; do not resend.",
+  abandoned: "Native outcome unconfirmed. Saved input and recorded changes are kept.",
 };
 
 function HistoricalTarget({ target, model, root, query }: { target: FollowUpTargetView; model: InquiryView | null; root: string; query: string }) {
@@ -142,7 +144,7 @@ export default function FollowUpStatus({ sourceId, query = "", initialModel = nu
       </div><div><h4>Affected versions</h4><ul className="follow-up-targets">{job.targets.map((target) => <HistoricalTarget key={`${target.kind}:${target.id}:${target.versionId}`} target={target} model={reference} root={sourceId} query={query} />)}</ul>
         {job.targetsTruncated && <p className="history-limit">Some affected versions are not shown.</p>}
       </div></div></details>
-      {job.recordedChanges === 0 && ["completed", "failed", "interrupted"].includes(job.status) && <p className="section-context">No confirmed changes were recorded.</p>}
+      {job.recordedChanges === 0 && ["completed", "failed", "interrupted", "abandoned"].includes(job.status) && <p className="section-context">No confirmed changes were recorded.</p>}
       {job.changesTruncated && <p className="history-limit">Some confirmed changes are not shown.</p>}
       {job.changes.length > 0 && viewed[job.id] !== JSON.stringify(job.changes) && <div className="follow-up-findings"><p className="section-context">New confirmed updates · Not yet shown above</p><button className="button secondary" type="button" disabled={!!viewing} onClick={() => void showFindings(job)}>{viewing === job.id ? "Loading findings…" : "View follow-up findings"}</button></div>}
       {viewed[job.id] === JSON.stringify(job.changes) && job.changes.length > 0 && <div className="follow-up-findings"><h4>Confirmed updates</h4>{job.changes.map((change) => {
@@ -152,8 +154,8 @@ export default function FollowUpStatus({ sourceId, query = "", initialModel = nu
         const evidence = target.kind === "item" ? reference?.items.find((item) => item.id === target.id)?.history.find((version) => version.id === target.versionId)?.evidenceSourceIds : reference?.relationships.find((relation) => relation.id === target.id)?.history.find((version) => version.id === target.versionId)?.evidenceSourceIds;
         return <div key={`${change.id}:${change.versionId}`}><ul className="follow-up-targets"><HistoricalTarget target={target} model={reference} root={sourceId} query={query} /></ul>{reference && evidence && <EvidenceLinks ids={evidence} sources={reference.evidenceSources} query={query} />}</div>;
       })}</div>}
-      {(job.actions.retry && job.run || pending[job.id]) && <button className="text-button" type="button" disabled={!!sending[job.id]} onClick={() => void retry(job)}>{sending[job.id] ? "Requesting retry…" : "Retry follow-up"}</button>}
-      {errors[job.id] && <p className="notice error-notice" role="alert">{errors[job.id]}</p>}
+      {job.status !== "abandoned" && (job.actions.retry && job.run || pending[job.id]) && <button className="text-button" type="button" disabled={!!sending[job.id]} onClick={() => void retry(job)}>{sending[job.id] ? "Requesting retry…" : "Retry follow-up"}</button>}
+      {job.status !== "abandoned" && errors[job.id] && <p className="notice error-notice" role="alert">{errors[job.id]}</p>}
     </article>)}
     {view?.truncated && <p className="history-limit">Some follow-up passes are not shown.</p>}
     {view && readError && <p className="status-recovery" role="status">Could not refresh follow-up status. The last confirmed state is kept; nothing was resent.</p>}

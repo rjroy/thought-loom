@@ -4,6 +4,7 @@ import { isAbsolute, normalize, parse, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { DOMAIN_ACTIONS, loopbackOrigin, toolId, toolRecord, type ToolAction } from "@thoughtloom/contracts";
+import { parseAdmissionTimeoutMs } from "./native-admission";
 
 export class NativeSetupError extends Error {
   constructor(readonly code: "invalid_configuration" | "unsafe_path" | "setup_failed") { super(code); this.name = "NativeSetupError"; }
@@ -12,8 +13,10 @@ export type NativeSetupConfig = {
   registrationFile: string; location: string; connectionFile: string; agent: string;
   model: { providerID: string; id: string; variant?: string }; operations: ToolAction[]; maxSteps: number;
   dialogueOperations?: ToolAction[];
+  admissionTimeoutMs: number;
 };
-type Selection = Omit<NativeSetupConfig, "location" | "connectionFile">;
+type ResolvedSelection = Omit<NativeSetupConfig, "location" | "connectionFile">;
+type Selection = Omit<ResolvedSelection, "admissionTimeoutMs"> & { admissionTimeoutMs?: number };
 
 function contained(parent: string, child: string) {
   const part = relative(parent, child);
@@ -21,7 +24,7 @@ function contained(parent: string, child: string) {
 }
 function absolute(value: string) { return !!value && isAbsolute(value) && normalize(value) === value && !value.includes("\0"); }
 
-function parseSelection(value: unknown): Selection {
+function parseSelection(value: unknown): ResolvedSelection {
   if (!toolRecord(value) || typeof value.registrationFile !== "string" || !absolute(value.registrationFile) || !toolId(value.agent) ||
       !toolRecord(value.model) || !toolId(value.model.providerID) || !toolId(value.model.id) ||
       (value.model.variant !== undefined && !toolId(value.model.variant)) || !Array.isArray(value.operations) || !value.operations.length ||
@@ -29,9 +32,11 @@ function parseSelection(value: unknown): Selection {
       new Set(value.operations).size !== value.operations.length || value.operations.includes("record_idea") || (value.dialogueOperations !== undefined && (!Array.isArray(value.dialogueOperations) || !value.dialogueOperations.length || !value.dialogueOperations.every((action) => DOMAIN_ACTIONS.some((allowed) => allowed === action)) || new Set(value.dialogueOperations).size !== value.dialogueOperations.length)) || typeof value.maxSteps !== "number" || !Number.isSafeInteger(value.maxSteps) || value.maxSteps < 1 || value.maxSteps > 100) {
     throw new NativeSetupError("invalid_configuration");
   }
+  const admissionTimeoutMs = parseAdmissionTimeoutMs(value.admissionTimeoutMs);
+  if (admissionTimeoutMs === null) throw new NativeSetupError("invalid_configuration");
   return { registrationFile: value.registrationFile, agent: value.agent,
     model: { providerID: value.model.providerID, id: value.model.id, ...(value.model.variant ? { variant: value.model.variant } : {}) },
-    operations: [...value.operations], maxSteps: value.maxSteps,
+    operations: [...value.operations], maxSteps: value.maxSteps, admissionTimeoutMs,
     ...(Array.isArray(value.dialogueOperations) ? { dialogueOperations: value.dialogueOperations.filter((action): action is ToolAction => DOMAIN_ACTIONS.some((allowed) => allowed === action)) } : {}) };
 }
 

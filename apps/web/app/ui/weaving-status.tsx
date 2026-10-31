@@ -16,6 +16,7 @@ function statusCopy(view: WeavingStatusView | null): { title: string; detail: st
     case "failed": return { title: "Weaving failed", detail: "Original and recorded changes are kept." };
     case "interrupted": return { title: "Run interrupted", detail: "Recorded readings and connections are kept." };
     case "uncertain": return { title: "Outcome uncertain", detail: "The service may have accepted this run. Check status; do not resend." };
+    case "abandoned": return { title: "Abandoned locally", detail: "Native outcome unconfirmed. Original and recorded changes are kept." };
   }
 }
 
@@ -87,20 +88,21 @@ export default function WeavingStatus({ sourceId, initial, onSnapshot, compact =
   }
 
   const copy = statusCopy(view);
+  const abandoned = view?.job.status === "abandoned";
   const blocked = view && !view.worker.configured;
   const unavailable = view?.worker.configured && ["unavailable", "failed", "stopped"].includes(view.worker.state);
   return <section className={`weaving-status queue-notice${compact ? " compact-status" : ""}`} aria-label="Weaving status" data-quiet-complete={view?.job.status === "completed" && !blocked && !unavailable && !readError && !message && !pending}>
     <div className="notice weaving-summary" role="status" aria-live="polite" aria-atomic="true">
-      <StatusIcon kind={view?.job.status === "completed" ? "saved" : ["failed", "interrupted", "uncertain"].includes(view?.job.status ?? "") ? "error" : "queued"} />
+      <StatusIcon kind={view?.job.status === "completed" ? "saved" : ["failed", "interrupted", "uncertain", "abandoned"].includes(view?.job.status ?? "") ? "error" : "queued"} />
       <div><h2>{copy.title}</h2><p>{copy.detail}</p></div>
     </div>
-    {blocked && <div className="worker-availability"><p>Weaving is not configured.</p><p>Original saved · Queued work waits for your agent service.</p><Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
+    {blocked && <div className="worker-availability"><p>Weaving is not configured.</p>{!abandoned && <p>Original saved · Queued work waits for your agent service.</p>}<Link className="text-link" href="/setup/weaving">Set up weaving</Link></div>}
     {unavailable && <div className="worker-availability"><p>Weaving service unavailable</p><p>Saved job retained · Check your agent service.</p><Link className="text-link" href="/setup/weaving">Review weaving setup</Link></div>}
     {readError && <p className="status-recovery" role="status">Could not refresh status. The last confirmed state is shown; your original has not been resubmitted.</p>}
     <div className="weaving-actions">
       <button className="button secondary" type="button" onClick={() => void check()} aria-disabled={checking}>Check status</button>
-      {!acknowledged && (pending || (view?.actions.retry && view.run)) && <button className="button primary" type="button" disabled={sending} onClick={() => void retry()}>{sending ? "Requesting retry…" : pending ? "Confirm retry" : "Retry weaving"}</button>}
+      {!abandoned && !acknowledged && (pending || (view?.actions.retry && view.run)) && <button className="button primary" type="button" disabled={sending} onClick={() => void retry()}>{sending ? "Requesting retry…" : pending ? "Confirm retry" : "Retry weaving"}</button>}
     </div>
-    {message && <p className="status-recovery" role="status">{message}</p>}
+    {!abandoned && message && <p className="status-recovery" role="status">{message}</p>}
   </section>;
 }

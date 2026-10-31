@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
+import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
+
+export const CURRENT_DATABASE_VERSION = 17;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -47,7 +50,7 @@ export function openDatabase(path: string): Database {
           status TEXT NOT NULL
         )`);
         db.run("PRAGMA user_version = 1");
-      } else if (!version || version.user_version < 1 || version.user_version > 16) {
+      } else if (!version || version.user_version < 1 || version.user_version > CURRENT_DATABASE_VERSION) {
         throw new Error("Unsupported database schema version");
       }
       if (version?.user_version === 0 || version?.user_version === 1) {
@@ -511,6 +514,10 @@ export function openDatabase(path: string): Database {
           db.run(`CREATE TRIGGER ${table}_retained BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'retained follow-up receipt'); END`);
         }
         db.run("PRAGMA user_version = 16");
+      }
+      if (version && version.user_version < 17) {
+        migrateWeavingAbandonment(db);
+        db.run("PRAGMA user_version = 17");
       }
       if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();

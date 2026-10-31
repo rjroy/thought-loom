@@ -40,7 +40,7 @@ export function reconcileDialogue(previous: ReturnType<typeof parseDialogueView>
   const known = new Map(previous.turns.map((turn) => [turn.id, turn]));
   return { ...incoming, turns: incoming.turns.map((turn) => {
     const prior = known.get(turn.id);
-    return prior && (prior.assistant !== undefined || ["completed", "failed", "interrupted"].includes(prior.status)) ? prior : turn;
+    return prior && (prior.assistant !== undefined || ["completed", "failed", "interrupted", "abandoned"].includes(prior.status)) ? prior : turn;
   }) };
 }
 

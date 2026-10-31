@@ -13,7 +13,7 @@ import { WeavingWorker, type WeavingRun } from "../../apps/daemon/src/weaving";
 import { OpenCode, Service, type OpenCodeClient, type SessionMessageInfo } from "../../apps/daemon/tests/native-client-support";
 import { parseNativeIdentity, toolRecord, type NativeIdentity } from "../../packages/contracts/src/tools";
 import { parseDialogueTurnReceipt, parseDialogueView } from "../../packages/contracts/src/dialogue";
-import { AGENT, ANCHOR, DIALOGUE_OPERATIONS, MODEL, NATIVE_BINARY, OPERATIONS, ROOT_PREFIX,
+import { ADMISSION_TIMEOUT_MS, AGENT, ANCHOR, DIALOGUE_OPERATIONS, MODEL, NATIVE_BINARY, OPERATIONS, ROOT_PREFIX,
   WitnessGuardError, contained, guardedLaunch, pathsFor, requireOptIn, witnessConfig } from "./plugin-isolation";
 import { validatePluginRegistry } from "./plugin-isolation";
 import { inspectBinary, nodeIO } from "./node-io";
@@ -196,7 +196,7 @@ export async function runPluginWitness() {
     const sourceId = source.id, sourceBefore = JSON.stringify(findSource(databasePath, sourceId));
     provider = fixtureProvider(sourceId, lifetime.signal);
     await provisionNativeSetup({ runtimeDirectory: p.runtime, locationDirectory: p.cwd, daemonOrigin, transportCredential: credential,
-      pluginEntry: p.bundle, pluginBundle, native: { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6 } });
+      pluginEntry: p.bundle, pluginBundle, native: { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6, admissionTimeoutMs: ADMISSION_TIMEOUT_MS } });
     const input = { optIn: process.env.THOUGHTLOOM_PLUGIN_WITNESS, executable: process.env.OPENCODE_TEST_BINARY, root,
       config: JSON.stringify(witnessConfig(root, provider.origin)), providerOrigin: provider.origin, daemonOrigin, password, transportCredential: credential };
     const url = await guardedLaunch(input, nodeIO, facts, async (spec) => {
@@ -218,7 +218,7 @@ export async function runPluginWitness() {
     owned.healthy();
     const plugins = await client.plugin.list({ location: { directory: p.cwd } }, requestOptions(lifetime.signal));
     validatePluginRegistry(root, plugins.data);
-    worker = new WeavingWorker({ databasePath, adapter: new NativeWeavingAdapter({ databasePath, registrationFile: p.registration, location: p.cwd, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS] }) });
+    worker = new WeavingWorker({ databasePath, adapter: new NativeWeavingAdapter({ databasePath, registrationFile: p.registration, location: p.cwd, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], admissionTimeoutMs: ADMISSION_TIMEOUT_MS }) });
     // Exactly one submission attempt per flow, each in a fresh owned session.
     // Inspection uses the production event
     // handshake + canonical history path; no lost response authorizes a retry.

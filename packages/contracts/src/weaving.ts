@@ -1,7 +1,7 @@
 import { isRecordId } from "./inspection";
 
 export type WeavingWorkerState = "starting" | "working" | "waiting" | "unavailable" | "failed" | "stopped";
-export type WeavingJobStatus = "queued" | "running" | "uncertain" | "completed" | "failed" | "interrupted";
+export type WeavingJobStatus = "queued" | "running" | "uncertain" | "completed" | "failed" | "interrupted" | "abandoned";
 export type WeavingJobKind = "capture" | "dialogue" | "follow_up";
 export type WeavingWorkerView = { configured: boolean; state: WeavingWorkerState };
 export type WeavingStatusView = {
@@ -22,7 +22,7 @@ export function isWeavingWorkerState(value: unknown): value is WeavingWorkerStat
   return value === "starting" || value === "working" || value === "waiting" || value === "unavailable" || value === "failed" || value === "stopped";
 }
 export function isWeavingJobStatus(value: unknown): value is WeavingJobStatus {
-  return value === "queued" || value === "running" || value === "uncertain" || value === "completed" || value === "failed" || value === "interrupted";
+  return value === "queued" || value === "running" || value === "uncertain" || value === "completed" || value === "failed" || value === "interrupted" || value === "abandoned";
 }
 export function parseWeavingWorkerView(value: unknown): WeavingWorkerView | null {
   if (!record(value) || typeof value.configured !== "boolean" || !isWeavingWorkerState(value.state) || (!value.configured && value.state !== "unavailable")) return null;

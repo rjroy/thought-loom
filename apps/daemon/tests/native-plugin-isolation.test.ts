@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AGENT, ANCHOR, ROOT_PREFIX, BUNDLE_SHA256, SOURCE_HASHES, DIALOGUE_OPERATIONS, OPERATIONS, MODEL, NATIVE_BINARY, NATIVE_SHA256, generatedConfig, guardedLaunch, pathsFor,
+import { ADMISSION_TIMEOUT_MS, AGENT, ANCHOR, ROOT_PREFIX, BUNDLE_SHA256, SOURCE_HASHES, DIALOGUE_OPERATIONS, OPERATIONS, MODEL, NATIVE_BINARY, NATIVE_SHA256, generatedConfig, guardedLaunch, pathsFor,
   preparePluginLaunch, readinessFromOutput, selection, validateBinary, validateLaunchSpec, validatePluginRegistry, witnessConfig,
   type BinaryFacts, type GuardIO, type GuardInput, type LaunchSpec, type Metadata } from "../../../tests/native/plugin-isolation";
 import { reviewedBundle, validateSourceHashes } from "../../../tests/native/plugin-bundle";
@@ -137,7 +137,7 @@ test("production offline setup generates exactly the guarded two-scope fixture d
     const p = pathsFor(ownedRoot);
     await provisionNativeSetup({ runtimeDirectory: p.runtime, locationDirectory: p.cwd, daemonOrigin, transportCredential: credential,
       pluginEntry: p.bundle, pluginBundle: await reviewedBundle(repo), native: { registrationFile: p.registration, agent: AGENT, model: MODEL,
-        operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6 } });
+        operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6, admissionTimeoutMs: ADMISSION_TIMEOUT_MS } });
     expect(JSON.parse(await readFile(p.projectConfig, "utf8"))).toEqual(generatedConfig(ownedRoot));
     expect(JSON.parse(await readFile(p.selection, "utf8"))).toEqual(selection(ownedRoot));
   } finally { await rm(ownedRoot, { recursive: true, force: true }); }

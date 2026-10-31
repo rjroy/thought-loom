@@ -7,6 +7,7 @@ import { enqueueDialogueFollowUp } from "./follow-up";
 import { freezeFollowUpInput, followUpOrigins, followUpTargets, followUpChanges, followUpChangeCount } from "./follow-up-data";
 import { FOLLOW_UP_LIMITS, parseFollowUpStatusView, parseFollowUpRetryReceipt, type FollowUpLimits, type FollowUpStatusView,
   type FollowUpRetryInput, type FollowUpRetryReceipt } from "@thoughtloom/contracts";
+import { WeavingAbandonmentService, type AbandonmentInterruptOutcome, type AbandonmentDispatchOutcome } from "./weaving-abandonment";
 
 export type WeavingRun = {
   readonly jobId: string;
@@ -26,6 +27,9 @@ export type WeavingJob = {
 };
 
 type Admission = { kind: "admitted" } | { kind: "uncertain" };
+// Submission authority belongs to the worker's exact live claim, never a lease
+// owner re-read after an external ownership check. It is not part of public IDs.
+export type WeavingAdmissionClaim = { readonly owner: string; readonly leaseMs: number; readonly now: () => number };
 export type CanonicalAssistant = { messageId: string; text: string };
 export type Observation = { kind: "pending" } | { kind: "completed"; recordedChanges: number; assistant?: CanonicalAssistant } |
   { kind: "failed" | "interrupted"; assistant?: CanonicalAssistant };
@@ -35,11 +39,14 @@ export type Observation = { kind: "pending" } | { kind: "completed"; recordedCha
 // reports completion only from canonical evidence for this particular prompt.
 export interface WeavingAdapter {
   prepareSession(run: WeavingRun): Promise<void>;
-  admit(run: WeavingRun): Promise<Admission>;
+  admit(run: WeavingRun, claim: WeavingAdmissionClaim): Promise<Admission>;
   inspect(run: WeavingRun): Promise<Observation>;
   stop?(run: WeavingRun): Promise<void>;
   readPreview?(runId: string): DialoguePreview | undefined;
   releasePreview?(run: WeavingRun): Promise<void>;
+  // Called once after a durable operator abandonment, with domain writes already
+  // fenced. "requested" acknowledges the RPC, never native settlement.
+  interruptAbandoned?(run: WeavingRun, receiptId: string): Promise<AbandonmentInterruptOutcome>;
   close?(): Promise<void>;
 }
 
@@ -109,6 +116,7 @@ export class WeavingWorker {
   private readonly leaseMs: number;
   private readonly maxAttempts: number;
   private readonly recoveryLimit: number;
+  private readonly abandonments: WeavingAbandonmentService;
 
   constructor(options: WeavingWorkerOptions) {
     this.databasePath = options.databasePath;
@@ -117,6 +125,7 @@ export class WeavingWorker {
     this.leaseMs = options.leaseMs ?? 30_000;
     this.maxAttempts = options.maxAttempts ?? 3;
     this.recoveryLimit = options.recoveryLimit ?? 50;
+    this.abandonments = new WeavingAbandonmentService({ databasePath: this.databasePath, now: () => this.time() });
     for (const value of [this.leaseMs, this.maxAttempts, this.recoveryLimit]) {
       if (!Number.isSafeInteger(value) || value < 1) throw new WeavingError("invalid_configuration");
     }
@@ -275,7 +284,7 @@ export class WeavingWorker {
     let category: AttemptError | null = null;
     console.info("weaving.admit attempt", { runId: run.runId });
     try {
-      admission = await adapter.admit(run);
+      admission = await adapter.admit(run, { owner: claim.owner, leaseMs: this.leaseMs, now: () => this.time() });
     } catch {
       category = "admission_unknown";
     }
@@ -292,6 +301,7 @@ export class WeavingWorker {
       console.info("weaving.recover unavailable", { category: "unconfigured" });
       return;
     }
+    await this.dispatchAbandonments();
     await this.dispatchStops();
     const candidates = this.storage("recovery.list", false, (db) => db.query<{ id: string }, [number, number]>(
       `SELECT r.id FROM weaving_runs r JOIN jobs j ON j.id=r.job_id
@@ -360,6 +370,31 @@ export class WeavingWorker {
     }
   }
 
+  async dispatchAbandonments(): Promise<void> {
+    const adapter = this.adapter;
+    if (!adapter) return;
+    for (let count = 0; count < this.recoveryLimit; count++) {
+      const dispatch = this.abandonments.claimInterrupt();
+      if (!dispatch) break;
+      const { run, receiptId } = dispatch;
+      // The durable attempted marker precedes preview cleanup and every native
+      // await. A crash is unconfirmed, not permission to replay this RPC.
+      await this.releasePreview(run);
+      console.info("weaving.abandonment interrupt attempt", { runId: run.runId, receiptId });
+      let outcome: AbandonmentDispatchOutcome;
+      try {
+        outcome = adapter.interruptAbandoned ? await adapter.interruptAbandoned(run, receiptId) :
+          { state: "not_requested", category: "unsupported" } satisfies AbandonmentInterruptOutcome;
+      } catch {
+        outcome = { state: "uncertain", category: "request_failed" };
+      }
+      // A storage failure is not a native request failure. Leave the durable
+      // attempt unconfirmed and surface it; never retry the RPC to repair audit.
+      this.abandonments.finishInterrupt(receiptId, outcome);
+      console.info("weaving.abandonment interrupt outcome", { runId: run.runId, receiptId, outcome: outcome.state });
+    }
+  }
+
   async close(): Promise<void> { await this.adapter?.close?.(); }
 
   readPreview(runId: string): DialoguePreview | undefined {
@@ -396,6 +431,9 @@ export class WeavingWorker {
   private claimNext(): Claim | null {
     return this.storage("job.claim", true, (db) => {
       if (db.query("SELECT 1 FROM jobs WHERE status IN ('running','uncertain') LIMIT 1").get()) return null;
+      // Covers an abandonment committed after recover's outbox scan but before
+      // this claim. Attempted/unconfirmed interrupts never permanently gate work.
+      if (db.query("SELECT 1 FROM weaving_abandonment_dispatch WHERE state='queued' LIMIT 1").get()) return null;
       const job = db.query<{ jobId: string; sourceId: string; kind: WeavingJobKind }, []>(
         `SELECT id AS jobId,source_id AS sourceId,kind FROM jobs WHERE status='queued' AND kind IN ('capture','dialogue','follow_up')
           ORDER BY CASE kind WHEN 'dialogue' THEN 1 ELSE 0 END DESC,priority DESC,rowid LIMIT 1`,
@@ -464,7 +502,9 @@ export class WeavingWorker {
       // target row even when settlement also revokes one or more grants.
       const result = db.query<{ id: string }, [string, number, AttemptError | null, number | null, string | null, string, string, string, number]>(
         `UPDATE weaving_runs SET state=?,lease_owner=NULL,lease_until=NULL,updated_at=?,last_error=?,recorded_changes=?,outcome=?
-         WHERE id=? AND state=? AND outcome IS NULL AND lease_owner=? AND lease_until>? RETURNING id`,
+          WHERE id=? AND state=? AND outcome IS NULL AND lease_owner=? AND lease_until>?
+            AND EXISTS (SELECT 1 FROM jobs j WHERE j.id=weaving_runs.job_id AND j.status IN ('running','uncertain'))
+            AND NOT EXISTS (SELECT 1 FROM weaving_abandonments a WHERE a.run_id=weaving_runs.id) RETURNING id`,
       ).get(state, now, error, state === "completed" ? recordedChanges(db, claim.run.runId) : changes, outcome, claim.run.runId, claim.state, claim.owner, now);
       if (!result) return false;
       const job = db.query<{ id: string }, [string, string]>(

@@ -37,13 +37,14 @@ function Turn({ turn, query, correctionLink, children, progress }: { turn: Dialo
     <div className="user-development"><div className="exchange-input" data-role="user"><div className="exchange-identity"><h3>Your thought</h3><p className="attribution">Your thought saved</p></div><p className="turn-text">{turn.source.text}</p><details className="turn-provenance"><summary role="button">Saved input</summary><p className="turn-date"><time dateTime={turn.source.createdAt}>{readableDate(turn.source.createdAt)}</time></p><Link className="text-link" href={sourceHref(turn.source.id, query)}>View discussion input</Link>{correctionLink && <Link className="text-link" href={correctionLink}>Review this reading</Link>}</details>{progress && <>{progress}<a className="text-link response-jump" href={`#response-${turn.id}`}>View response</a></>}</div>{children}</div>
     <div className="exchange-response" data-role="ai" id={`response-${turn.id}`} tabIndex={-1}>
       <FlowArrow direction="across" className="response-arrow" /><div className="exchange-identity"><h3>Agent response</h3><p className="record-identity">AI-authored</p>{preview && <span className="response-preview-label">Preview</span>}</div>
+      {turn.status === "abandoned" && !progress && <><p className="response-state">Abandoned locally</p><p className="response-state">Native outcome unconfirmed.</p></>}
       {canonical && text.length > 6_000 ? <><p className="response-excerpt">{text.slice(0, 360)}…</p><details className="full-reply"><summary role="button">Read full reply</summary><article className="canonical-response" aria-label="Agent response">{text}</article></details></> : <article className="canonical-response" aria-label="Agent response">{text}</article>}
       {preview?.truncated && <p className="response-state">Preview shortened</p>}
       {!text && <p className="response-state">{pending && !canonical ? turn.status === "queued" ? "Waiting for agent" : turn.status === "uncertain" ? "Outcome uncertain · Check status" : "Waiting for response…" : turn.status === "completed" ? "Response complete · No written reply." : turn.status === "failed" || turn.status === "interrupted" ? `Response ${turn.status} · No written reply saved.` : "No written reply."}</p>}
     </div>
   </section>;
 }
-function progressCopy(turn: DialogueTurnView | undefined) {
+function progressCopy(turn: DialogueTurnView | undefined): { title: string; text: string } {
   if (!turn) return { title: "Ready to develop", text: "Your next thought will be saved before any agent run begins." };
   switch (turn.status) {
     case "queued": return { title: "Waiting for agent", text: "" };
@@ -52,6 +53,7 @@ function progressCopy(turn: DialogueTurnView | undefined) {
     case "completed": return { title: "Response complete", text: "" };
     case "interrupted": return { title: "Response interrupted", text: "Saved input and recorded changes are kept." };
     case "failed": return { title: "Response failed", text: "Saved input and recorded changes are kept. You can send a new thought." };
+    case "abandoned": return { title: "Abandoned locally", text: "Native outcome unconfirmed. Saved input and recorded changes are kept." };
   }
 }
 
@@ -90,7 +92,7 @@ export default function Development({ state, model, query, worker, composerRef, 
     {worker && !worker.configured && <p>Agent not set up · Input can be saved, but responses are waiting. <Link href="/setup/weaving">Set up weaving</Link></p>}
     {worker?.configured && ["unavailable", "failed", "stopped"].includes(worker.state) && <p>Agent service unavailable · Saved input is kept.</p>}
     {!worker && <p className="section-context">Agent availability unknown · Check status.</p>}
-    {(current || state.blocked || !worker) && <div className="claim-actions"><button type="button" className="text-button" onClick={() => void state.check()}>Check status</button>{current?.actions?.stop.eligible && <button type="button" className="text-button" disabled={state.stopPending} onClick={() => void state.stop()}>Stop response</button>}</div>}
+    {(current || state.blocked || !worker) && <div className="claim-actions"><button type="button" className="text-button" onClick={() => void state.check()}>Check status</button>{active && current?.actions?.stop.eligible && <button type="button" className="text-button" disabled={state.stopPending} onClick={() => void state.stop()}>Stop response</button>}</div>}
   </section>;
   const confirmedIdeas = ideas.length > 0 ? <section className="developed-here" aria-label="Developed here" data-linked={hasLinkedIdeas}>
     {hasLinkedIdeas && <svg className="input-idea-route" viewBox="0 0 1000 32" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M500 0V8Q500 16 492 16H8Q0 16 0 24V32" /></svg>}

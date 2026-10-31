@@ -230,8 +230,12 @@ outside this repository**. Do not substitute an existing project or a global
 configuration directory. This offline command prepares private configuration,
 the first-party plugin and its tool connection; it prints `nativeConfigFile`.
 It neither activates a service nor proves provider compatibility. Keep generated
-files private. See `scripts/setup-native.ts` for explicit optional variant and
-step-budget flags; do not add browser-held credentials.
+files private. See `scripts/setup-native.ts` for optional variant and step-budget
+flags. `--admission-timeout-ms` sets the prompt admission deadline (default
+15,000 ms; integer range 1,000–120,000). It does not limit generation; ordinary
+native reads retain their 5,000 ms deadline. A documented 5-second PlayNice hook
+budget could have raced the previous 5-second admission deadline, but the exact
+cause of the observed wait is unconfirmed. Do not add browser-held credentials.
 
 Independently start/manage your own matching OpenCode service for the exact
 prepared location and registration. Stop any existing Thoughtloom launcher,
@@ -259,6 +263,29 @@ remote-phone access. Keep the same database-path override if using one.
    key/payload. An unavailable service and missing configuration are distinct.
    Recorded partial changes remain visible. No operator policy or arbitrary
    provider/model compatibility is implied by this checkpoint.
+
+#### Operator: abandon an uncertain attempt locally
+
+Use this only after reviewing the exact current job and run identities and the
+risk that native work may continue and incur charges. Take a safe SQLite backup
+first. The database must be an existing, owned, absolute path at the current
+schema; the command does not migrate it. Replace every placeholder:
+
+```sh
+bun --no-env-file run scripts/abandon-uncertain.ts \
+  --database /ABSOLUTE/EXISTING/APP.sqlite \
+  --expected-job-id JOB_ID --expected-run-id RUN_ID \
+  --expected-session-id SESSION_ID --expected-prompt-id PROMPT_ID \
+  --expected-status uncertain --idempotency-key STABLE_KEY
+```
+
+This is a read-only preview by default. To apply the exact reviewed request,
+repeat it with the **same** identities and key and append
+`--risk-acknowledgement native-may-continue-and-charge --apply`. The CLI makes no
+native calls. It retains the input, command and immutable audit, revokes the old
+grant, and queues a best-effort interrupt for the daemon. An interrupt request or
+acknowledgement does **not** confirm native cancellation or settlement. The old
+attempt is not resubmitted; a later queued job is separate work.
 
 ### Develop a thought through dialogue
 

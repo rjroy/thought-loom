@@ -31,7 +31,7 @@ function view(db: Database, id: string, readPreview?: PreviewReader): DialogueVi
         ? readPreview?.(turn.runId) : undefined;
       return { id: turn.id, jobId: turn.jobId, createdAt: turn.createdAt, status: turn.status,
       stopRequested: !!turn.stopRequested, actions: { stop: { eligible: !turn.stopRequested && ["queued", "running", "uncertain"].includes(turn.status),
-        expectedRunId: turn.status === "queued" ? null : turn.runId }, retry: false },
+         expectedRunId: turn.status === "queued" || turn.status === "abandoned" ? null : turn.runId }, retry: false },
       source: { id: turn.sourceId, text: turn.text, provenance: turn.provenance, createdAt: turn.createdAt, origin: sourceOrigin(db, turn.sourceId) }, changes: dialogueChanges(db, turn.jobId),
       ...(preview && preview.runId === turn.runId ? { preview } : {}),
       ...(turn.assistant !== null ? { assistant: { text: turn.assistant } } : {}), ...(turn.outcome ? { outcome: turn.outcome } : {}) };
@@ -138,7 +138,7 @@ export class DialogueService {
       // One pending interactive command per root, including other selections on
       // that root. Lease expiry or an uncertain admission never opens this gate.
       const pending = db.query(`SELECT 1 FROM dialogue_turns t JOIN dialogues d ON d.id=t.dialogue_id JOIN jobs j ON j.id=t.job_id
-        WHERE d.source_id=? AND j.status NOT IN ('completed','failed','interrupted') LIMIT 1`).get(dialogue.sourceId);
+         WHERE d.source_id=? AND j.status NOT IN ('completed','failed','interrupted','abandoned') LIMIT 1`).get(dialogue.sourceId);
       if (pending) throw new DialogueError("turn_conflict");
       const sourceId = randomUUID(), turnId = randomUUID(), jobId = randomUUID(), createdAt = new Date().toISOString();
       const position = db.query<{ next: number }, [string]>("SELECT COALESCE(MAX(position),0)+1 AS next FROM dialogue_turns WHERE dialogue_id=?").get(id)?.next;

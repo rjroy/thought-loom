@@ -1,10 +1,10 @@
-import type { Observation, WeavingAdapter, WeavingRun } from "./weaving";
+import type { Observation, WeavingAdapter, WeavingRun, WeavingAdmissionClaim } from "./weaving";
 import { OpenCode, type OpenCodeClient, type SessionInfo } from "@opencode/client";
 import { Service } from "@opencode/client/service";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { createHash } from "node:crypto";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { loopbackOrigin, toolId, toolRecord, type ToolAction, type FollowUpContextLimits, type DialoguePreview } from "@thoughtloom/contracts";
 import { OwnedGrants, supportedToolActions } from "./tool-boundary";
 import { openDatabase } from "./storage";
@@ -12,6 +12,9 @@ import { runScope, type RunScope } from "./run-scope";
 import { dialoguePrompt } from "./dialogue-data";
 import { followUpContextLimits, followUpPrompt } from "./follow-up-prompt";
 import { DialoguePreviewMonitor, previewLimits, type NativeTextEvent, type PreviewLimits, type SubscribeText, type TextSubscription } from "./dialogue-preview";
+import { ADMISSION_SETTLEMENT_MARGIN_MS, MIN_ADMISSION_LEASE_MS, parseAdmissionTimeoutMs } from "./native-admission";
+import { elapsedMilliseconds, nativeErrorMetadata, requestAbortMetadata, type NativeRequestDiagnostic, type NativeRequestStage } from "./native-diagnostics";
+import { abandonedInterruptAuthorized, type AbandonmentInterruptOutcome } from "./weaving-abandonment";
 
 // Port models only the application-used facts; production maps these to the
 // maintained client. It never creates or manages a native process.
@@ -32,7 +35,7 @@ export interface NativeClientPort {
   identity(): Promise<{ version: string; pid: number }>;
   createSession(run: WeavingRun): Promise<NativeSession>;
   getSession(sessionId: string): Promise<NativeSession>;
-  prompt(run: WeavingRun): Promise<{ promptId: string }>;
+  prompt(run: WeavingRun, claim?: WeavingAdmissionClaim): Promise<{ promptId: string }>;
   cancelUndelivered?(sessionId: string, promptId: string): Promise<void>;
   interrupt?(sessionId: string, options: { resume: false }): Promise<void>;
   activity(sessionId: string): Promise<{ active: boolean; outcome: "succeeded" | "failed" | "interrupted" | null }>;
@@ -51,6 +54,7 @@ export type NativeWeavingOptions = {
   followUpContextLimits?: FollowUpContextLimits;
   previewLimits?: PreviewLimits;
   now?: () => number;
+  admissionTimeoutMs?: number;
 };
 
 // Injection seam for exercising the concrete maintained-client mapping without
@@ -59,6 +63,8 @@ export type MaintainedClientHooks = {
   discover: typeof Service.discover;
   headers: typeof Service.headers;
   make: typeof OpenCode.make;
+  timeout?: (milliseconds: number) => AbortSignal;
+  now?: () => number;
 };
 
 export function createMaintainedClient(options: NativeWeavingOptions, hooks: MaintainedClientHooks = { discover: Service.discover, headers: Service.headers, make: OpenCode.make }): NativeClientPort {
@@ -67,8 +73,9 @@ export function createMaintainedClient(options: NativeWeavingOptions, hooks: Mai
 
 export class NativeAdapterError extends Error {
   constructor(readonly code: "invalid_configuration" | "service_unavailable" | "service_identity_mismatch" |
-    "session_ownership_mismatch" | "plugin_unavailable" | "history_unavailable" | "command_conflict" | "admission_uncertain") {
-    super(code);
+    "session_ownership_mismatch" | "plugin_unavailable" | "history_unavailable" | "command_conflict" | "admission_uncertain",
+    options?: ErrorOptions, readonly diagnostic?: NativeRequestDiagnostic) {
+    super(code, options);
     this.name = "NativeAdapterError";
   }
 }
@@ -97,6 +104,7 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     if (this.closed) throw new NativeAdapterError("service_unavailable");
     const o = this.options;
     try { followUpContextLimits(o.followUpContextLimits); } catch { throw new NativeAdapterError("invalid_configuration"); }
+    if (parseAdmissionTimeoutMs(o.admissionTimeoutMs) === null) throw new NativeAdapterError("invalid_configuration");
     if (!isAbsolute(o.registrationFile) || !isAbsolute(o.location) || normalize(o.location) !== o.location || !toolId(o.agent) ||
         !toolId(o.model.providerID) || !toolId(o.model.id) || (o.model.variant !== undefined && !toolId(o.model.variant)) ||
          !o.operations?.length || new Set(o.operations).size !== o.operations.length || o.operations.some((action) => !supportedToolActions.includes(action)) ||
@@ -157,17 +165,21 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     });
   }
 
-  async admit(run: WeavingRun): Promise<{ kind: "admitted" } | { kind: "uncertain" }> {
+  async admit(run: WeavingRun, claim?: WeavingAdmissionClaim): Promise<{ kind: "admitted" } | { kind: "uncertain" }> {
     try {
-      return await this.boundary("admit", run, async () => {
+      return await this.boundary("admit", run, async (trace) => {
+        trace.stage = "connectioncheck";
         await this.connected();
+        trace.stage = "ownershipcheck";
         this.verify(await this.client.getSession(run.sessionId), run);
         if (this.options.databasePath && database(this.options.databasePath, false, (db) =>
           !!db.query("SELECT 1 FROM dialogue_stop_requests WHERE job_id=?").get(run.jobId))) throw new NativeAdapterError("admission_uncertain");
         const key = JSON.stringify([run.runId, run.sessionId, run.promptId]);
         if (this.attempted.has(key)) return { kind: "uncertain" };
         this.attempted.add(key);
-        const admitted = await this.client.prompt(run);
+        trace.stage = "commandload";
+        const admitted = await this.client.prompt(run, claim);
+        trace.stage = "acknowledgementvalidation";
         return admitted.promptId === run.promptId ? { kind: "admitted" } : { kind: "uncertain" };
       });
     } catch { return { kind: "uncertain" }; }
@@ -202,16 +214,43 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     });
   }
 
+  async interruptAbandoned(run: WeavingRun, receiptId: string): Promise<AbandonmentInterruptOutcome> {
+    let submitted = false;
+    try {
+      return await this.boundary("abandon_interrupt", run, async (trace): Promise<AbandonmentInterruptOutcome> => {
+        const path = this.options.databasePath;
+        if (!path || !this.client.interrupt) return { state: "not_requested", category: "unsupported" };
+        const authorized = () => database(path, false, (db) => abandonedInterruptAuthorized(db, run, receiptId));
+        if (!authorized()) return { state: "not_requested", category: "ownership_unverified" };
+        trace.stage = "connectioncheck";
+        await this.connected();
+        trace.stage = "ownershipcheck";
+        this.verify(await this.client.getSession(run.sessionId), run);
+        if (!authorized()) return { state: "not_requested", category: "ownership_unverified" };
+        trace.stage = "interruptrequest";
+        submitted = true;
+        await this.client.interrupt(run.sessionId, { resume: false });
+        return { state: "requested" }; // RPC acknowledgement, not execution settlement.
+      });
+    } catch (error) {
+      if (submitted) throw error;
+      return { state: "not_requested", category: "ownership_unverified" };
+    }
+  }
+
   async inspect(run: WeavingRun): Promise<Observation> {
     return this.boundary("inspect", run, async () => {
+      if (!await this.inspectActive(run)) return { kind: "pending" };
       await this.connected();
       const watch = await this.client.watch?.(run.sessionId);
       try {
         this.verify(await this.client.getSession(run.sessionId), run);
+        if (!await this.inspectActive(run)) return { kind: "pending" };
         if (ownedScope(this.options, run).kind === "dialogue") await this.ensurePreview(run);
         const monitor = this.preview?.matches(run) ? this.preview : undefined;
         const checkpoint = monitor?.checkpoint();
         const before = await this.client.activity(run.sessionId);
+        if (!await this.inspectActive(run)) return { kind: "pending" };
         let cursor: string | undefined;
         const cursors = new Set<string>();
         const messages = new Set<string>();
@@ -224,6 +263,7 @@ export class NativeWeavingAdapter implements WeavingAdapter {
         for (let page = 0; ; page++) {
           if (page >= 100) throw new NativeAdapterError("history_unavailable");
           const result = await this.client.history(run.sessionId, cursor);
+          if (!await this.inspectActive(run)) return { kind: "pending" };
           for (const message of result.messages) {
             if (messages.has(message.id)) throw new NativeAdapterError("history_unavailable");
             messages.add(message.id);
@@ -249,6 +289,7 @@ export class NativeWeavingAdapter implements WeavingAdapter {
         }
         const after = await this.client.activity(run.sessionId);
         this.verify(await this.client.getSession(run.sessionId), run);
+        if (!await this.inspectActive(run)) return { kind: "pending" };
         if (monitor && checkpoint) {
           if (foreignInput || !previewIdentityValid) monitor.reject(foreignInput ? "foreign_input" : "message_identity");
           else monitor.correlate(previewAssistant?.id, previewAssistant?.textParts, checkpoint);
@@ -280,7 +321,25 @@ export class NativeWeavingAdapter implements WeavingAdapter {
   }
 
   readPreview(runId: string): DialoguePreview | undefined {
-    return this.preview?.run.runId === runId ? this.preview.peek() : undefined;
+    return this.preview?.run.runId === runId && this.applicationActive(this.preview.run) ? this.preview.peek() : undefined;
+  }
+
+  private applicationActive(run: WeavingRun): boolean {
+    if (!this.options.databasePath) return true;
+    const db = new Database(this.options.databasePath, { readonly: true });
+    try {
+      return !!db.query(`SELECT 1 FROM weaving_runs r JOIN jobs j ON j.id=r.job_id
+        WHERE r.id=? AND r.job_id=? AND j.source_id=? AND r.session_id=? AND r.prompt_id=? AND r.outcome IS NULL
+          AND r.state IN ('preparing','admitting','admitted','uncertain') AND j.status IN ('running','uncertain')
+          AND NOT EXISTS (SELECT 1 FROM weaving_abandonments a WHERE a.run_id=r.id)`)
+        .get(run.runId, run.jobId, run.sourceId, run.sessionId, run.promptId);
+    } finally { db.close(); }
+  }
+
+  private async inspectActive(run: WeavingRun): Promise<boolean> {
+    if (this.applicationActive(run)) return true;
+    await this.releasePreview(run);
+    return false;
   }
 
   async releasePreview(run: WeavingRun): Promise<void> {
@@ -293,9 +352,11 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     const subscribe = this.client.subscribeText;
     if (!subscribe || this.closed) return;
     try {
+      if (!await this.inspectActive(run)) return;
       if (this.preview && !this.preview.matches(run)) await this.releasePreview(this.preview.run);
       this.preview ??= new DialoguePreviewMonitor(run, subscribe.bind(this.client), this.limits, this.now);
       await this.preview.ensure();
+      await this.inspectActive(run);
     } catch {
       // Preview transport is optional. It never fails preparation/admission or
       // changes the job outcome, and it never retries the prompt.
@@ -310,15 +371,19 @@ export class NativeWeavingAdapter implements WeavingAdapter {
     try { await monitor?.close(); } finally { await this.client.close?.(); }
   }
 
-  private async boundary<T>(operation: string, run: WeavingRun, action: () => Promise<T>): Promise<T> {
+  private async boundary<T>(operation: string, run: WeavingRun, action: (trace: { stage: NativeRequestStage }) => Promise<T>): Promise<T> {
+    const trace: { stage: NativeRequestStage } = { stage: "operation" };
+    const started = performance.now();
     console.info("native.operation attempt", { operation, runId: run.runId });
     try {
-      const result = await action();
+      const result = await action(trace);
       console.info("native.operation succeeded", { operation, runId: run.runId });
       return result;
     } catch (error) {
-      const failure = error instanceof NativeAdapterError ? error : new NativeAdapterError("service_unavailable");
-      console.error("native.operation failed", { operation, runId: run.runId, category: failure.code });
+      const failure = error instanceof NativeAdapterError ? error : new NativeAdapterError("service_unavailable", { cause: error });
+      console.error("native.operation failed", { operation, runId: run.runId, category: failure.code,
+        stage: trace.stage, elapsedMs: elapsedMilliseconds(started, performance.now()),
+        ...failure.diagnostic, ...nativeErrorMetadata(failure) });
       if (this.preview?.matches(run)) {
         this.preview.reject(failure.code);
         if (failure.code === "session_ownership_mismatch" || failure.code === "command_conflict") {
@@ -328,7 +393,7 @@ export class NativeWeavingAdapter implements WeavingAdapter {
       }
       if ((failure.code === "session_ownership_mismatch" || failure.code === "command_conflict") && this.options.databasePath) {
         try { new OwnedGrants(this.options.databasePath).revoke(run.sessionId); }
-        catch { throw new NativeAdapterError("service_unavailable"); }
+        catch (cause) { throw new NativeAdapterError("service_unavailable", { cause }); }
       }
       throw failure;
     }
@@ -364,7 +429,12 @@ class MaintainedClient implements NativeClientPort {
   private readonly lifetime = new AbortController();
   private readonly watches = new Set<Watch>();
   private readonly textSubscriptions = new Set<TextSubscription>();
-  constructor(private readonly options: NativeWeavingOptions, private readonly hooks: MaintainedClientHooks) {}
+  private readonly admissionTimeoutMs: number;
+  constructor(private readonly options: NativeWeavingOptions, private readonly hooks: MaintainedClientHooks) {
+    const budget = parseAdmissionTimeoutMs(options.admissionTimeoutMs);
+    if (budget === null) throw new NativeAdapterError("invalid_configuration");
+    this.admissionTimeoutMs = budget;
+  }
 
   private get client(): OpenCodeClient {
     if (!this.native) throw new NativeAdapterError("service_unavailable");
@@ -374,7 +444,19 @@ class MaintainedClient implements NativeClientPort {
     if (!this.options.databasePath) throw new NativeAdapterError("invalid_configuration");
     return this.options.databasePath;
   }
-  private request() { return { signal: AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(5_000)]) }; }
+  private deadline(milliseconds: number): AbortSignal { return this.hooks.timeout ? this.hooks.timeout(milliseconds) : AbortSignal.timeout(milliseconds); }
+  private clock(): number { return this.hooks.now ? this.hooks.now() : performance.now(); }
+  private request() { return { signal: AbortSignal.any([this.lifetime.signal, this.deadline(5_000)]) }; }
+
+  private async admissionCheck<T>(stage: "identityrequest" | "sessiongetrequest", action: (options: { signal: AbortSignal }) => Promise<T>): Promise<T> {
+    const started = this.clock(), deadline = this.deadline(5_000);
+    const signal = AbortSignal.any([this.lifetime.signal, deadline]);
+    try { return await action({ signal }); }
+    catch (cause) {
+      throw new NativeAdapterError(cause instanceof NativeAdapterError ? cause.code : "service_unavailable", { cause },
+        { stage, budgetMs: 5_000, elapsedMs: elapsedMilliseconds(started, this.clock()), ...requestAbortMetadata(signal, deadline, this.lifetime.signal) });
+    }
+  }
 
   async discover(file: string, version: string) {
     if (version !== "2.2.2" || file !== this.options.registrationFile || !isAbsolute(file)) throw new NativeAdapterError("invalid_configuration");
@@ -391,7 +473,7 @@ class MaintainedClient implements NativeClientPort {
     this.native = this.hooks.make({ baseUrl: endpoint.url, headers: this.hooks.headers(endpoint), fetch: guardedFetch });
     return { url: endpoint.url, version, pid: registration.pid };
   }
-  async identity() { return this.client.server.info(this.request()); }
+  async identity() { return this.admissionCheck("identityrequest", (request) => this.client.server.info(request)); }
 
   private command(run: WeavingRun) {
     return database(this.path, true, (db) => {
@@ -466,21 +548,48 @@ class MaintainedClient implements NativeClientPort {
         ...(scope.kind === "follow_up" ? { jobKind: "follow_up", inputHash: scope.inputHash } : {}) },
     }, this.request()));
   }
-  async getSession(sessionId: string) { return this.project(await this.client.session.get({ sessionID: sessionId }, this.request())); }
+  async getSession(sessionId: string) { return this.project(await this.admissionCheck("sessiongetrequest", (request) => this.client.session.get({ sessionID: sessionId }, request))); }
 
-  async prompt(run: WeavingRun) {
-    const command = this.command(run);
-    database(this.path, true, (db) => {
-      const row = db.query<{ attempted: number }, [string, string, string, string]>(`SELECT c.attempted FROM native_commands c
-        JOIN weaving_runs r ON r.id=c.run_id JOIN jobs j ON j.id=r.job_id JOIN owned_grants g ON g.run_id=r.id AND g.session_id=r.session_id
-        WHERE r.id=? AND r.session_id=? AND r.prompt_id=? AND c.payload_hash=? AND r.outcome IS NULL AND r.state='admitting' AND j.status='running' AND g.revoked=0`,
-      ).get(run.runId, run.sessionId, run.promptId, command.hash);
-      if (!row || row.attempted) throw new NativeAdapterError("admission_uncertain");
-      db.run("UPDATE native_commands SET attempted=1 WHERE run_id=? AND attempted=0", [run.runId]);
-    });
-    const admitted = await this.client.session.prompt({ sessionID: run.sessionId, id: run.promptId, text: command.text }, this.request());
-    if (admitted.sessionID !== run.sessionId || admitted.payload.text !== command.text) throw new NativeAdapterError("command_conflict");
-    return { promptId: admitted.id };
+  async prompt(run: WeavingRun, claim?: WeavingAdmissionClaim) {
+    const started = this.clock();
+    let stage: NativeRequestStage = "commandload";
+    let deadline: AbortSignal | undefined, signal: AbortSignal | undefined;
+    try {
+      const command = this.command(run);
+      stage = "admissionfence";
+      if (!claim) throw new NativeAdapterError("admission_uncertain");
+      // Renew once, only while this exact claim is still live. Renewal and the
+      // one-way attempted marker commit together before any HTTP submission.
+      database(this.path, true, (db) => {
+        const now = claim.now();
+        const reserveMs = Math.max(MIN_ADMISSION_LEASE_MS, claim.leaseMs, this.admissionTimeoutMs + ADMISSION_SETTLEMENT_MARGIN_MS);
+        if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(claim.leaseMs) || claim.leaseMs < 1 || !Number.isSafeInteger(now + reserveMs)) throw new NativeAdapterError("invalid_configuration");
+        const renewed = db.query<{ id: string }, [number, number, string, string, string, string, string, number, string, string]>(
+          `UPDATE weaving_runs SET lease_until=MAX(lease_until,?),updated_at=?
+           WHERE id=? AND job_id=? AND session_id=? AND prompt_id=? AND state='admitting' AND outcome IS NULL
+             AND lease_owner=? AND lease_until>? AND EXISTS (SELECT 1 FROM jobs j WHERE j.id=weaving_runs.job_id AND j.source_id=? AND j.status='running')
+             AND EXISTS (SELECT 1 FROM owned_grants g WHERE g.run_id=weaving_runs.id AND g.session_id=weaving_runs.session_id AND g.revoked=0)
+             AND EXISTS (SELECT 1 FROM native_commands c WHERE c.run_id=weaving_runs.id AND c.payload_hash=? AND c.attempted=0)
+             AND NOT EXISTS (SELECT 1 FROM dialogue_stop_requests s WHERE s.job_id=weaving_runs.job_id) RETURNING id`,
+        ).get(now + reserveMs, now, run.runId, run.jobId, run.sessionId, run.promptId, claim.owner, now, run.sourceId, command.hash);
+        if (!renewed) throw new NativeAdapterError("admission_uncertain");
+        const attempted = db.query<{ run_id: string }, [string, string]>("UPDATE native_commands SET attempted=1 WHERE run_id=? AND payload_hash=? AND attempted=0 RETURNING run_id").get(run.runId, command.hash);
+        if (!attempted) throw new NativeAdapterError("admission_uncertain");
+      });
+      stage = "promptrequest";
+      deadline = this.deadline(this.admissionTimeoutMs);
+      signal = AbortSignal.any([this.lifetime.signal, deadline]);
+      console.info("native.request attempt", { stage, runId: run.runId, budgetMs: this.admissionTimeoutMs });
+      const admitted = await this.client.session.prompt({ sessionID: run.sessionId, id: run.promptId, text: command.text }, { signal });
+      stage = "acknowledgementvalidation";
+      if (admitted.id !== run.promptId || admitted.sessionID !== run.sessionId || admitted.payload.text !== command.text) throw new NativeAdapterError("command_conflict");
+      console.info("native.request succeeded", { stage, runId: run.runId, budgetMs: this.admissionTimeoutMs, elapsedMs: elapsedMilliseconds(started, this.clock()) });
+      return { promptId: admitted.id };
+    } catch (cause) {
+      const diagnostic: NativeRequestDiagnostic = { stage, budgetMs: this.admissionTimeoutMs, elapsedMs: elapsedMilliseconds(started, this.clock()),
+        ...(signal && deadline ? requestAbortMetadata(signal, deadline, this.lifetime.signal) : {}) };
+      throw new NativeAdapterError(cause instanceof NativeAdapterError ? cause.code : "service_unavailable", { cause }, diagnostic);
+    }
   }
 
   async activity(sessionId: string) {

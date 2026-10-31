@@ -7,6 +7,7 @@ import { runScope } from "../../apps/daemon/src/run-scope";
 import { openDatabase, saveCapture } from "../../apps/daemon/src/storage";
 import { createToolApp } from "../../apps/daemon/src/tool-boundary";
 import { WeavingWorker, type WeavingRun } from "../../apps/daemon/src/weaving";
+import { ABANDONMENT_ACKNOWLEDGEMENT, WeavingAbandonmentService } from "../../apps/daemon/src/weaving-abandonment";
 import type { FollowUpLimits, Source, ToolAction } from "../../packages/contracts/src";
 import { dialogueExample as example, type BrowserDialogueScenario } from "./dialogue-content";
 import { followUpExample } from "./follow-up-content";
@@ -147,6 +148,12 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
     metadata: { root, counterpart, item, alternate, neighbor, relationship, exampleOnly: true },
     fetch: (request: Request) => app.fetch(request), metrics,
     async start() { now += 101; await worker.recover(); return worker.startNext(); },
+    captureForAbandonment() { return capture("abandon", "Example original retained after local abandonment."); },
+    abandon() {
+      const run = prompts.at(-1); if (!run) throw new Error("No scripted run to abandon");
+      return new WeavingAbandonmentService({ databasePath, now: () => now }).abandon({ expectedJobId: run.jobId, expectedRunId: run.runId,
+        expectedSessionId: run.sessionId, expectedPromptId: run.promptId, expectedStatus: "uncertain", acknowledgement: ABANDONMENT_ACKNOWLEDGEMENT }, `browser-abandon-${run.runId}`);
+    },
     async advance(outcome: Outcome, text: string, idea: boolean) {
       const run = prompts.at(-1); if (!run) throw new Error("No scripted run to advance");
       if (idea) await writeIdea();
@@ -237,6 +244,8 @@ export function createBrowserDialogueControls(directory: string) {
       if (path === "/__browser/dialogue/metrics" && request.method === "GET") return Response.json(active.metrics());
       if (request.method !== "POST") return Response.json({ error: "Unknown example control" }, { status: 404 });
       if (path === "/__browser/dialogue/start") { const result = await active.start(); return Response.json({ result, ...active.metrics() }); }
+      if (path === "/__browser/dialogue/capture-abandon") return Response.json(active.captureForAbandonment());
+      if (path === "/__browser/dialogue/abandon") return Response.json(active.abandon());
       if (path === "/__browser/dialogue/write-idea") { await active.writeIdea(); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/preview") { const input = await request.json() as { text?: unknown; start?: unknown }; if (typeof input.text !== "string" || typeof input.start !== "boolean") return Response.json({ error: "Invalid preview fixture" }, { status: 400 }); await active.preview(input.text, input.start); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/write-follow-up") { const input = await request.json() as { multiple?: boolean }; await active.writeFollowUp(input.multiple === true); return Response.json(active.metrics()); }

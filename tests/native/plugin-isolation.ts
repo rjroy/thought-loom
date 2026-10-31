@@ -17,6 +17,7 @@ export const OPERATIONS = ["read_source", "record_interpretation"] as const;
 export const DIALOGUE_OPERATIONS = ["read_source", "record_idea"] as const;
 const agentOperations = ["read_source", "record_interpretation", "record_idea"] as const;
 export const MODEL = { providerID: "fixture-provider", id: "fixture-model" } as const;
+export const ADMISSION_TIMEOUT_MS = 17_000;
 const forbiddenPorts = new Set([3000, 3001, 9443, 4173, 4317, 48763]);
 
 export class WitnessGuardError extends Error {
@@ -67,7 +68,7 @@ export function generatedConfig(root: string) {
 }
 export function selection(root: string) {
   const p = pathsFor(root);
-  return { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6,
+  return { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6, admissionTimeoutMs: ADMISSION_TIMEOUT_MS,
     location: p.cwd, connectionFile: p.connection };
 }
 export function witnessConfig(root: string, providerOrigin: string) {

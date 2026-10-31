@@ -68,6 +68,7 @@ export function parseDialogueView(value: unknown): DialogueView | null {
     if (!changes || (entry.assistant !== undefined && (!record(entry.assistant) || typeof entry.assistant.text !== "string")) ||
         (entry.outcome !== undefined && entry.outcome !== "succeeded" && entry.outcome !== "failed" && entry.outcome !== "interrupted")) return null;
     if (entry.outcome === "succeeded" && (!record(entry.assistant) || entry.status !== "completed")) return null;
+    if (entry.status === "abandoned" && (entry.outcome !== undefined || entry.assistant !== undefined)) return null;
     const turnActions = entry.actions === undefined ? undefined : actions(entry.actions);
     if (turnActions === null || (entry.stopRequested !== undefined && typeof entry.stopRequested !== "boolean") ||
         (turnActions?.stop.eligible && (entry.stopRequested || !["queued", "running", "uncertain"].includes(entry.status)))) return null;
