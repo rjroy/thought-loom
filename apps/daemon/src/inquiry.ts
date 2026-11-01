@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { INQUIRY_LIMITS as limits, parseInquiryView, type InquiryView, type Source, type ItemView, type RelationshipView, type FormulationView, type RelationshipVersionView, type EvidenceSource, type FollowUpVersionOrigin } from "@thoughtloom/contracts";
 import { openDatabase, sourceRecord, sourceOrigin } from "./storage";
 import { readIdeaDerivation } from "./knowledge";
+import { readTitle } from "./title-projection";
 
 function evidence(db: Database, table: "formulation_evidence" | "relationship_evidence", column: "formulation_id" | "revision_id", id: string): string[] {
   const rows = db.query<{ id: string }, [string]>(`SELECT source_id AS id FROM ${table} WHERE ${column}=? ORDER BY position LIMIT ${limits.evidencePerVersion + 1}`).all(id);
@@ -34,7 +35,8 @@ function readItem(db: Database, id: string, selectedVersionId?: string): ItemVie
   const current = history.at(-1);
   if (!current) throw new Error("Missing inquiry formulation");
   const derivation = readIdeaDerivation(db, id);
-  return { ...item, current, history, historyTruncated: versions.length > limits.history, ...(derivation ? { derivation } : {}) };
+  const title = readTitle(db, item.sourceId, id, current.id).title;
+  return { ...item, current, history, historyTruncated: versions.length > limits.history, ...(derivation ? { derivation } : {}), ...(title ? { title } : {}) };
 }
 
 function readRelationship(db: Database, id: string): RelationshipView {
@@ -89,8 +91,9 @@ export function readInquiry(databasePath: string, sourceId: string, target?: { i
       });
       const selectedVersion = target ? items.find((item) => item.id === target.itemId)?.history.find((version) => version.id === target.versionId) : undefined;
       if (target && !selectedVersion) throw new Error("Missing selected formulation");
+      const selectedTitle = target ? readTitle(db, sourceId, target.itemId, target.versionId).title : null;
       const view = parseInquiryView({ source, items, relationships, evidenceSources, truncated: rootRows.length > limits.rootItems || unique.length > limits.relationships,
-        ...(target && selectedVersion ? { selectedTarget: { kind: "item", id: target.itemId, versionId: target.versionId, text: selectedVersion.text, author: selectedVersion.author, evidenceSourceIds: selectedVersion.evidenceSourceIds } } : {}) });
+        ...(target && selectedVersion ? { selectedTarget: { kind: "item", id: target.itemId, versionId: target.versionId, text: selectedVersion.text, author: selectedVersion.author, evidenceSourceIds: selectedVersion.evidenceSourceIds, ...(selectedTitle ? { title: selectedTitle } : {}) } } : {}) });
       if (!view) throw new Error("Invalid inquiry closure");
       return view;
     }).deferred();

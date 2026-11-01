@@ -54,11 +54,34 @@ textarea:read-only { opacity: .9; cursor: wait; }
 .thought-springboard { margin-top: 36px; }
 .thought-springboard[hidden] { display: none; }
 .thought-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.thought-card-wrap { position: relative; min-width: 0; }
+.thought-title-tooltip { position: absolute; z-index: 20; bottom: calc(100% + 8px); left: 0; width: max-content; max-width: min(30rem, calc(100vw - 56px)); padding: 12px 16px; border: 1px solid var(--parchment); border-radius: 6px; background: var(--night); color: var(--parchment); font-size: 18px; line-height: 1.45; overflow-wrap: anywhere; }
+.thought-title-tooltip[hidden] { display: none; }
+@supports (position-anchor: --thought) { .thought-title-tooltip { position: fixed; inset: auto; bottom: anchor(top); left: anchor(left); margin-bottom: 8px; position-try-fallbacks: flip-block, flip-inline; max-height: calc(100dvh - 32px); overflow: auto; } }
 .thought-card { display: block; position: relative; min-width: 0; padding: 14px 18px 18px; border: 1px solid var(--role-border); border-radius: 6px; text-decoration: none; }
 .thought-card:hover { border-color: currentColor; }
 .thought-card-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; color: var(--supporting); font-size: 14px; margin-bottom: 8px; }
 .thought-card-excerpt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 20px; line-height: 1.4; }
 .springboard-recovery { display: flex; align-items: center; gap: 16px; color: var(--supporting); font-size: 16px; }
+.thought-title { margin: 10px 0 14px; text-align: start; }
+.thought-title-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 20px; }
+.thought-title-text { font-size: 20px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.thought-title-heading .text-button { font-size: 14px; }
+.thought-title-heading > .thought-title-text { flex: 1 1 240px; }
+.title-form { margin-top: 12px; max-width: 640px; }
+.title-form label { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.title-form input { display: block; width: 100%; min-height: 46px; padding: 9px 12px; border: 1px solid var(--supporting); border-radius: 6px; color: inherit; background: transparent; font-size: 18px; caret-color: currentColor; }
+.title-form input[readonly] { cursor: wait; }
+.title-author { font-size: 14px; color: var(--supporting); margin-bottom: 8px; }
+.title-error { font-size: 16px; margin-top: 8px; }
+.title-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 10px; font-size: 16px; }
+.title-actions .button { font-size: 16px; min-height: 44px; padding: 9px 16px; }
+.interpretation-reading > .thought-title-text, .developed-idea > .thought-title-text { grid-column: 1 / -1; margin-top: 10px; }
+.interpretation-reading:has(> .thought-title-text) > .claim-actions { grid-row: 6; }
+.inquiry-source > .thought-title { grid-column: 1 / -1; min-width: 0; margin: 4px 0 8px; }
+.source-heading > div { min-width: 0; }
+.source-heading h1 { overflow-wrap: anywhere; }
+.result-body { margin: 10px 0; }
 .draft-state { color: var(--supporting); font-size: 16px; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 11px 22px; border: 1px solid transparent; border-radius: 6px; font-size: 18px; font-weight: 600; line-height: 1.25; text-decoration: none; text-align: center; flex-shrink: 0; transition: background-color 140ms ease-out, color 140ms ease-out; }
 .button.primary { background: var(--lantern); color: var(--night); border-color: var(--lantern); }

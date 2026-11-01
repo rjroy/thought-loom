@@ -11,6 +11,11 @@ service. Meaningful saved changes can queue focused background follow-up;
 its status and confirmed findings stay separate from the discussion. The concept mockups are guidelines,
 not a pixel contract or a claim that the full experience is built.
 
+You can edit short titles for originals, readings and developing ideas without
+changing their text or requiring a model call. Titles appear on thought cards
+and in search; untitled thoughts use excerpts. Automatic AI title generation
+is not yet enabled.
+
 ## Run locally
 
 Use Bun **1.4.3** and Node.js **26.13.0** (`.tool-versions`). Node runs Next;

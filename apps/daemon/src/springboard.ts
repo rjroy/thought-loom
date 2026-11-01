@@ -1,12 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { SPRINGBOARD_RECENT_MAX, SPRINGBOARD_RANDOM_MAX, SPRINGBOARD_EXCERPT_MAX, parseRecentThoughts, parseSpringboardView, type RecentThoughtsView, type SpringboardView } from "@thoughtloom/contracts";
 import { openDatabase } from "./storage";
+import { readTitle } from "./title-projection";
 
-function projection(row: unknown): unknown {
-  if (typeof row !== "object" || row === null || !("versionId" in row) || !("excerpt" in row) || typeof row.excerpt !== "string") return row;
+function projection(db: Database, row: unknown): unknown {
+  if (typeof row !== "object" || row === null || !("versionId" in row) || !("excerpt" in row) || typeof row.excerpt !== "string" || !("sourceId" in row) || typeof row.sourceId !== "string" || !("id" in row) || typeof row.id !== "string") return row;
   const excerpt = row.excerpt.slice(0, SPRINGBOARD_EXCERPT_MAX).replace(/[\uD800-\uDBFF]$/u, "");
-  if (row.versionId !== null) return { ...row, excerpt };
-  const { versionId: _versionId, ...source } = row; return { ...source, excerpt };
+  const title = readTitle(db, row.sourceId, row.versionId === null ? undefined : row.id, typeof row.versionId === "string" ? row.versionId : undefined).title;
+  if (row.versionId !== null) return { ...row, excerpt, ...(title ? { title } : {}) };
+  const { versionId: _versionId, ...source } = row; return { ...source, excerpt, ...(title ? { title } : {}) };
 }
 
 function recentInSnapshot(db: Database, limit: number): RecentThoughtsView {
@@ -20,7 +22,7 @@ function recentInSnapshot(db: Database, limit: number): RecentThoughtsView {
           WHERE i.created_at IS NOT NULL
           ORDER BY i.created_at DESC,i.kind ASC,i.id ASC LIMIT ?
       ) SELECT * FROM recent_sources UNION ALL SELECT * FROM recent_items ORDER BY createdAt DESC,kind ASC,id ASC LIMIT ?`).all(SPRINGBOARD_EXCERPT_MAX, limit, SPRINGBOARD_EXCERPT_MAX, limit, limit);
-  const view = parseRecentThoughts({ items: items.map(projection) });
+  const view = parseRecentThoughts({ items: items.map((row) => projection(db, row)) });
   if (!view) throw new Error("Invalid recent projection");
   return view;
 }
@@ -55,7 +57,7 @@ export function readSpringboard(databasePath: string, recentLimit: number, rando
           FROM knowledge_items i JOIN formulations f ON f.rowid=(SELECT rowid FROM formulations WHERE item_id=i.id ORDER BY rowid DESC LIMIT 1) WHERE 1=1${excludeItems}
       ) ORDER BY random() LIMIT ?`).all(SPRINGBOARD_EXCERPT_MAX, ...sources, SPRINGBOARD_EXCERPT_MAX, ...items, randomLimit);
       const random = sampled.map((row) => {
-        const value = projection(row);
+        const value = projection(db, row);
         return typeof value === "object" && value !== null ? { ...value, selection: "random" } : value;
       });
       const view = parseSpringboardView({ items: [...recent.map((entry) => ({ ...entry, selection: "recent" })), ...random] });

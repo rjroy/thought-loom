@@ -7,12 +7,14 @@ import { discussionHref, inquiryHref } from "../../lib/links";
 import EvidenceLinks from "./evidence-links";
 import { useDevelopmentNavigation } from "./development-navigation";
 import FlowArrow from "./flow-arrow";
+import { ThoughtTitleText } from "./thought-title";
 
 export function InterpretationReading({ item, sources, selected, query = "", onDiscuss, onRestore, onCorrect, busy = false }: { item: ItemView; sources: EvidenceSource[]; selected: boolean; query?: string; onDiscuss?: () => void; onRestore?: (version: string) => void; onCorrect?: () => void; busy?: boolean }) {
   const navigation = useDevelopmentNavigation();
   const attribution = item.current.author === "ai" ? item.kind === "interpretation" ? "AI interpretation" : "AI developing idea" : "Your recorded formulation";
   return <article className={`interpretation-reading${selected ? " matched-reading" : ""}`} id={`item-${item.id}`} tabIndex={-1} data-role={item.current.author === "user" ? "user" : item.kind === "developing-idea" ? "idea" : "ai"}>
     <p className="attribution"><span>{attribution}</span>{item.current.author === "ai" && <span className="hypothesis-state">Tentative</span>}</p>
+    <ThoughtTitleText target={{ kind: "item", itemId: item.id, versionId: item.current.id }} initial={item.title} />
     <p className="current-formulation">{item.current.text}</p>
     {selected && <p className="selection-context">Current formulation</p>}
     <details className="evidence-disclosure"><summary role="button">Evidence</summary><EvidenceLinks ids={item.current.evidenceSourceIds} sources={sources} query={query} /></details>

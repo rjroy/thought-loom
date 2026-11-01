@@ -11,9 +11,15 @@ import useDevelopment from "./use-development";
 import Development from "./development";
 import { DevelopmentNavigation, revealInquiryAnchor } from "./development-navigation";
 import FollowUpStatus from "./follow-up-status";
+import ThoughtTitleEditor, { ThoughtTitles, useTitleObservations } from "./thought-title";
 import { pendingFollowUpVersions, stageFollowUpChanges, type PendingFollowUpVersion } from "../../lib/follow-up-client";
 
-export default function InquiryContext({ initial, weaving, query, selectedId, initialDialogue, dialogueError = "" }: { initial: InquiryView; weaving: WeavingStatusView | null; query: string; selectedId: string; initialDialogue: DialogueView | null; dialogueError?: string }) {
+type InquiryContextProps = { initial: InquiryView; weaving: WeavingStatusView | null; query: string; selectedId: string; initialDialogue: DialogueView | null; dialogueError?: string };
+export default function InquiryContext(props: InquiryContextProps) {
+  return <ThoughtTitles key={props.initial.source.id} root={props.initial.source.id} initial={props.initial}><InquiryContents {...props} /></ThoughtTitles>;
+}
+function InquiryContents({ initial, weaving, query, selectedId, initialDialogue, dialogueError = "" }: InquiryContextProps) {
+  const titleObservations = useTitleObservations();
   const [model, setModel] = useState(initial), [refreshError, setRefreshError] = useState(false);
   const [pendingFindings, setPendingFindings] = useState<PendingFollowUpVersion[]>([]);
   const [openedId, setOpenedId] = useState(selectedId);
@@ -25,7 +31,7 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
   const visibleVersions = useRef(new Set([...initial.items.flatMap((item) => item.history.map((version) => version.id)), ...initial.relationships.flatMap((relation) => relation.history.map((version) => version.id))]));
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const navigationIntent = useRef(0);
-  useEffect(() => () => { navigationIntent.current++; }, []);
+  useEffect(() => () => { navigationIntent.current++; }, [selectedId, initial.selectedTarget?.versionId, initialDialogue?.id]);
   const [worker, setWorker] = useState(weaving?.worker ?? null);
   const [mutationError, setMutationError] = useState(""), [mutationBusy, setMutationBusy] = useState(false);
   const mutationRunning = useRef(false), mutationKeys = useRef(new Map<string, { signature: string; key: string }>());
@@ -42,11 +48,12 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
         reloadRequested.current = false;
         const accept = acceptRequested.current; acceptRequested.current = false;
         try {
-          const path = projection.current;
+          const path = projection.current, titleObservation = titleObservations.begin();
           const response = await fetch(path, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
           const next = response.ok ? parseInquiryView(await response.json()) : null;
           if (path !== projection.current) { reloadRequested.current = true; continue; }
           if (!next || next.source.id !== source.id || next.source.text !== source.text || next.source.createdAt !== source.createdAt || next.source.provenance !== source.provenance) throw new Error("Context unavailable");
+          titleObservations.accept(titleObservation, next);
           if (accept) {
             for (const item of next.items) for (const version of item.history) visibleVersions.current.add(version.id);
             for (const relation of next.relationships) for (const version of relation.history) visibleVersions.current.add(version.id);
@@ -59,7 +66,7 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
     })();
     inFlight.current = task;
     try { return await task; } finally { inFlight.current = null; }
-  }, [source.id, source.text, source.createdAt, source.provenance]);
+  }, [source.id, source.text, source.createdAt, source.provenance, titleObservations]);
   const refresh = useCallback(async (snapshot: WeavingStatusView) => {
     setWorker(snapshot.worker);
     const signature = JSON.stringify(snapshot);
@@ -92,24 +99,27 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
   }, [source.id, selectedId, initial.selectedTarget?.versionId]);
   const development = useDevelopment({ root: source.id, initialSelection, initialDialogue, onSnapshot: snapshot });
   function discuss(selection: DialogueSelection) {
+    navigationIntent.current++;
     void development.select(selection);
     requestAnimationFrame(() => composerRef.current?.focus());
   }
   async function openItem(item: InquiryView["items"][number]) {
-    const intent = ++navigationIntent.current;
+    const intent = ++navigationIntent.current, owner = document.activeElement;
+    const isCurrent = () => intent === navigationIntent.current && window.location.pathname === `/sources/${source.id}/inquiry`;
     setOpenedId(item.id);
     window.history.pushState(null, "", inquiryHref(source.id, query, item.id));
     await development.select({ kind: "item", id: item.id, versionId: item.current.id });
-    if (intent !== navigationIntent.current || window.location.pathname !== `/sources/${source.id}/inquiry`) return;
+    if (!isCurrent()) return;
     const address = new URL(window.location.href); address.hash = "discussion-target";
-    window.history.replaceState(null, "", address); revealInquiryAnchor("discussion-target");
+    window.history.replaceState(null, "", address); revealInquiryAnchor("discussion-target", { owner, isCurrent });
   }
   async function openDiscussion(id: string, turnId: string) {
-    const intent = ++navigationIntent.current;
+    const intent = ++navigationIntent.current, owner = document.activeElement;
+    const isCurrent = () => intent === navigationIntent.current && window.location.pathname === `/sources/${source.id}/inquiry`;
     const view = await development.activateDialogue(id);
-    if (!view || intent !== navigationIntent.current || window.location.pathname !== `/sources/${source.id}/inquiry`) return;
+    if (!view || !isCurrent()) return;
     window.history.pushState(null, "", discussionHref(source.id, view.id, query, turnId));
-    revealInquiryAnchor(`turn-${turnId}`);
+    revealInquiryAnchor(`turn-${turnId}`, { owner, isCurrent });
   }
   async function mutate(path: string, input: object): Promise<boolean> {
     if (mutationRunning.current) return false;
@@ -139,6 +149,7 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
     <DevelopmentNavigation.Provider value={{ root: source.id, openItem: (item) => void openItem(item), openDiscussion: (id, turnId) => void openDiscussion(id, turnId) }}><div className="inquiry-grid">
       <section className="inquiry-source" id="original-source" aria-label="Original source">
         <div className="source-band-heading"><h2>Original · Unchanged · Excerpt</h2><Link className="button secondary" href={`/sources/${source.id}`}>Open source</Link></div>
+        <ThoughtTitleEditor target={{ kind: "source" }} initial={model.source.title} kind="original" />
         <p className="source-preview">{source.text.slice(0, 240)}{source.text.length > 240 ? "…" : ""}</p>
         <div className="source-band-actions"><details className="source-disclosure"><summary role="button">Read full original</summary><dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details><button type="button" className="text-button" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button></div>
       </section>

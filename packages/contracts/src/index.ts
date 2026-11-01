@@ -7,7 +7,9 @@ export type Source = CaptureInput & {
   id: string;
   createdAt: string;
   origin?: SourceOrigin;
+  title?: ThoughtTitle;
 };
+export type ThoughtTitle = { revisionId: string; text: string; author: "user" | "ai" };
 export type SourceOrigin = { kind: "capture" } | { kind: "discussion-turn"; dialogueId: string; turnId: string; rootSourceId: string };
 
 export type SourceSearchResult = {
@@ -28,7 +30,8 @@ export * from "./springboard";
 // for fetching the immutable original. Knowledge is present for formulation hits.
 export type SearchResult = {
   sourceId: string;
-  matchOrigin: "source" | "interpretation" | "alias";
+  matchOrigin: "source" | "interpretation" | "alias" | "title";
+  title?: ThoughtTitle;
   source: { excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
   item?: { id: string; kind: "interpretation" | "developing-idea"; formulationId: string; text: string; author: "user" | "ai" };
 };

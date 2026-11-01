@@ -25,11 +25,15 @@ export function pendingFollowUpVersions(model: InquiryView, allowed: ReadonlySet
 export function stageFollowUpChanges(previous: InquiryView, next: InquiryView, allowed: ReadonlySet<string>): InquiryView {
   const held = (version: { id: string; followUp?: FollowUpVersionOrigin }) => !!version.followUp && !allowed.has(version.id);
   const items = next.items.flatMap((item) => {
+    const old = previous.items.find((old) => old.id === item.id);
     const history = item.history.filter((version) => !held(version)), current = history.at(-1);
     if (!current) {
-      const old = previous.items.find((old) => old.id === item.id); return old ? [old] : [];
+      return old ? [item.title?.author === "user" ? { ...old, title: item.title } : old] : [];
     }
-    return [{ ...item, current, history }];
+    // Generated metadata describes next.current, not a held earlier body. A user
+    // label belongs to the stable entity and can arrive without accepting findings.
+    const title = item.title?.author === "user" || current.id === item.current.id ? item.title : old?.current.id === current.id ? old.title : undefined;
+    return [{ ...item, current, history, title }];
   });
   const ids = new Set(items.map((item) => item.id));
   const relationships = next.relationships.flatMap((relation) => {
@@ -50,5 +54,11 @@ export function stageFollowUpChanges(previous: InquiryView, next: InquiryView, a
     ...relationships.flatMap((relation) => relation.history.flatMap((version) => version.evidenceSourceIds))]);
   const references = new Map([...previous.evidenceSources, ...next.evidenceSources].map((source) => [source.id, source]));
   const evidenceSources = [...needed].flatMap((id) => { const source = references.get(id); return source ? [source] : []; });
-  return parseInquiryView({ ...next, items: displayed, relationships, evidenceSources }) ?? previous;
+  const { selectedTarget, ...snapshot } = next;
+  const pinnedItem = selectedTarget ? displayed.find((item) => item.id === selectedTarget.id && item.sourceId === next.source.id) : undefined;
+  const pinnedVersion = pinnedItem?.history.find((version) => version.id === selectedTarget?.versionId);
+  const pinnedTitle = pinnedVersion?.id === pinnedItem?.current.id ? pinnedItem?.title : selectedTarget?.title;
+  return parseInquiryView({ ...snapshot, items: displayed, relationships, evidenceSources,
+    ...(selectedTarget && pinnedVersion ? { selectedTarget: { kind: selectedTarget.kind, id: selectedTarget.id, versionId: pinnedVersion.id,
+      text: pinnedVersion.text, author: pinnedVersion.author, evidenceSourceIds: pinnedVersion.evidenceSourceIds, ...(pinnedTitle ? { title: pinnedTitle } : {}) } } : {}) }) ?? previous;
 }

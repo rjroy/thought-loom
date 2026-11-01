@@ -2,8 +2,10 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
 import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
+import { migrateTitles } from "./title-schema";
+import { readTitle } from "./title-projection";
 
-export const CURRENT_DATABASE_VERSION = 18;
+export const CURRENT_DATABASE_VERSION = 19;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -527,6 +529,10 @@ export function openDatabase(path: string): Database {
           BEGIN SELECT RAISE(ABORT, 'immutable item creation time'); END`);
         db.run("PRAGMA user_version = 18");
       }
+      if (version && version.user_version < 19) {
+        migrateTitles(db);
+        db.run("PRAGMA user_version = 19");
+      }
       if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();
     db.run("PRAGMA foreign_keys = ON");
@@ -591,6 +597,7 @@ export function searchSources(path: string, query: string, overrides: Partial<Se
 
   const db = openDatabase(path);
   try {
+    return db.transaction(() => {
     type SourceRow = { sourceId: string; text: string; provenance: string; createdAt: string };
     type ItemRow = SourceRow & { itemId: string; kind: "interpretation" | "developing-idea"; formulationId: string; formulationText: string; author: "user" | "ai" };
     const sourceStatement = db.query<SourceRow, [string, number]>(`SELECT s.id AS sourceId, s.text, s.provenance, s.created_at AS createdAt
@@ -602,6 +609,17 @@ export function searchSources(path: string, query: string, overrides: Partial<Se
       JOIN sources s ON s.id=i.source_id JOIN formulations f ON f.item_id=i.id
       WHERE formulation_search MATCH ? AND f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=i.id)
       ORDER BY bm25(formulation_search),i.id LIMIT ?`);
+    type TitleRow = SourceRow & { itemId: string | null; kind: "interpretation" | "developing-idea" | null; formulationId: string | null; formulationText: string | null; author: "user" | "ai" | null; titleRevisionId: string; titleText: string; titleAuthor: "user" | "ai" };
+    const titleStatement = db.query<TitleRow, [string, number]>(`SELECT s.id AS sourceId,s.text,s.provenance,s.created_at AS createdAt,
+      i.id AS itemId,i.kind,f.id AS formulationId,f.text AS formulationText,f.author,
+      r.id AS titleRevisionId,r.text AS titleText,r.author AS titleAuthor
+      FROM title_search JOIN title_entities e ON e.id=title_search.entity_id
+      JOIN title_heads h ON h.entity_id=e.id JOIN title_revisions r ON r.id=COALESCE(h.user_revision_id,h.revision_id)
+      LEFT JOIN knowledge_items i ON i.id=e.item_id
+      LEFT JOIN formulations f ON f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=i.id)
+      JOIN sources s ON s.id=COALESCE(e.source_id,i.source_id)
+      WHERE title_search MATCH ? AND (r.author='user' OR i.id IS NULL OR r.formulation_id=f.id)
+      ORDER BY bm25(title_search),e.id LIMIT ?`);
     const seen = new Set<string>();
     const results: SearchResult[] = [];
     const add = (terms: string[], prefix: boolean, alias: boolean) => {
@@ -620,6 +638,14 @@ export function searchSources(path: string, query: string, overrides: Partial<Se
           results.push({ sourceId: row.sourceId, matchOrigin: alias ? "alias" : "interpretation", source: { excerpt: row.text.slice(0, 240), provenance: row.provenance, createdAt: row.createdAt }, item: { id: row.itemId, kind: row.kind, formulationId: row.formulationId, text: row.formulationText, author: row.author } });
         }
       }
+      for (const row of titleStatement.all(expression, limits.results)) {
+        const key = row.itemId ? `item:${row.itemId}` : `source:${row.sourceId}`;
+        if (seen.has(key) || results.length >= limits.results) continue;
+        if (row.itemId && (!row.kind || !row.formulationId || !row.formulationText || !row.author)) continue;
+        seen.add(key);
+        results.push({ sourceId: row.sourceId, matchOrigin: "title", title: { revisionId: row.titleRevisionId, text: row.titleText, author: row.titleAuthor }, source: { excerpt: row.text.slice(0, 240), provenance: row.provenance, createdAt: row.createdAt },
+          ...(row.itemId && row.kind && row.formulationId && row.formulationText && row.author ? { item: { id: row.itemId, kind: row.kind, formulationId: row.formulationId, text: row.formulationText, author: row.author } } : {}) });
+      }
     };
     add(tokens, false, false);
     add(tokens, true, false);
@@ -634,13 +660,18 @@ export function searchSources(path: string, query: string, overrides: Partial<Se
     }
     if (results.length === 0 && tokens.length === 1 && tokens[0] && tokens[0].length >= 4) {
       const word = tokens[0].toLowerCase();
-      const candidates = db.query<{ term: string }, [string, string, number, number, string, string, number, number, number]>(
+      const candidates = db.query<{ term: string }, [string, string, number, number, string, string, number, number, string, string, number, number, number]>(
         `SELECT term FROM source_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ?
-         UNION SELECT term FROM formulation_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ? LIMIT ?`,
-      ).all(word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, limits.typoCandidates);
+         UNION SELECT term FROM formulation_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ?
+         UNION SELECT term FROM title_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ? LIMIT ?`,
+      ).all(word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, limits.typoCandidates);
       for (const { term } of candidates) if (oneEditAway(word, term)) add([term], false, false);
     }
-    return results.map((result) => ({ ...result, source: { ...result.source, origin: sourceOrigin(db, result.sourceId) } }));
+    return results.map((result) => {
+      const title = readTitle(db, result.sourceId, result.item?.id, result.item?.formulationId).title;
+      return { ...result, ...(title ? { title } : {}), source: { ...result.source, origin: sourceOrigin(db, result.sourceId) } };
+    });
+    }).deferred();
   } finally {
     db.close();
   }
@@ -670,6 +701,8 @@ export function rebuildSearchIndex(path: string): void {
       opened.run("DELETE FROM formulation_search");
       opened.run(`INSERT INTO formulation_search(item_id,text) SELECT f.item_id,f.text FROM formulations f
         WHERE f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=f.item_id)`);
+      opened.run("DELETE FROM title_search");
+      opened.run(`INSERT INTO title_search(entity_id,text) SELECT h.entity_id,r.text FROM title_heads h JOIN title_revisions r ON r.id=COALESCE(h.user_revision_id,h.revision_id)`);
     }).immediate();
     console.info("search.rebuild succeeded");
   } catch {
@@ -701,7 +734,8 @@ export function sourceRecord(db: Database, id: string): Source | null {
   if (!row) return null;
   const origin = sourceOrigin(db, id);
   const legacy = origin.kind === "capture" && db.query<{ version: number }, [string]>("SELECT response_version AS version FROM capture_receipts WHERE source_id=?").get(id)?.version === 1;
-  const source = parseSourceRecord({ ...row, ...(legacy ? {} : { origin }) });
+  const title = readTitle(db, id).title;
+  const source = parseSourceRecord({ ...row, ...(legacy ? {} : { origin }), ...(title ? { title } : {}) });
   if (!source) throw new Error("Invalid source record");
   return source;
 }

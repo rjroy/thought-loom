@@ -33,7 +33,7 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
   return (
     <main id="main" className="workspace source-workspace" tabIndex={-1}>
       <div className="source-heading">
-        <div><h1>{discussionInput ? "Discussion input" : "Original thought"}</h1><p className="saved-receipt"><StatusIcon kind="saved" /><span>{discussionInput ? "Discussion input saved · Your words" : "Original saved"}</span></p></div>
+        <div><h1>{discussionInput ? "Discussion input" : source.title?.text ?? "Original thought"}</h1><p className="saved-receipt"><StatusIcon kind="saved" /><span>{discussionInput ? "Discussion input saved · Your words" : "Original saved"}</span></p></div>
         <Link className="button secondary" href="/">Capture another</Link>
       </div>
       <dl className="source-meta">

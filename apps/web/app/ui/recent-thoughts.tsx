@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { parseSpringboardView, type SpringboardThought } from "@thoughtloom/contracts";
-import { inquiryHref } from "../../lib/links";
+import ThoughtCard from "./thought-card";
 
 type Batch = { kind: "loading" } | { kind: "ready"; items: SpringboardThought[] } | { kind: "unavailable" };
 
@@ -37,15 +36,6 @@ export default function RecentThoughts({ hidden }: { hidden: boolean }) {
   return <section className="thought-springboard" aria-label="Thoughts" hidden={hidden} aria-busy={batch.kind === "loading"}>
     {batch.kind === "loading" && <p className="section-context" role="status">Loading thoughts…</p>}
     {batch.kind === "unavailable" && <div className="springboard-recovery"><p role="status">Thoughts unavailable.</p><button className="text-button" type="button" onClick={() => void load()}>Retry</button></div>}
-    {batch.kind === "ready" && <div className="thought-cards">{batch.items.map((thought) => {
-      const original = thought.kind === "source";
-      const role = original ? "original" : thought.author === "user" ? "user" : thought.kind === "developing-idea" ? "idea" : "ai";
-      const attribution = original ? "Original" : thought.author === "user" ? "Your formulation" : thought.kind === "interpretation" ? "AI interpretation · Tentative" : "AI developing idea · Tentative";
-      const href = original ? `${inquiryHref(thought.sourceId)}#discussion-target` : inquiryHref(thought.sourceId, "", thought.id, thought.versionId);
-      return <Link className="thought-card" href={href} prefetch={false} key={`${original ? "source" : "item"}-${thought.id}`} data-role={role} title={thought.excerpt}>
-        <span className="thought-card-meta"><span>{attribution}</span><span>{thought.selection === "recent" ? "Recent" : "Random"}</span></span>
-        <span className="thought-card-excerpt">{thought.excerpt}</span>
-      </Link>;
-    })}</div>}
+    {batch.kind === "ready" && <div className="thought-cards">{batch.items.map((thought) => <ThoughtCard key={`${thought.kind === "source" ? "source" : "item"}-${thought.id}`} thought={thought} />)}</div>}
   </section>;
 }

@@ -77,6 +77,74 @@ async function noOverflow(page: Page) { expect(await page.evaluate(() => documen
 
 test.afterEach(async ({ request }) => { await control(request, "reset"); });
 
+test("TITLE-UI-02 staged follow-up keeps generated title paired with displayed formulation", async ({ page, request }) => {
+  const meta = await world(request, true), item = meta.neighbor;
+  if (!item) throw new Error("Expected neighboring reading");
+  const old = item.current;
+  const oldReceipt = await (await control(request, "seed-generated-title", { itemId: item.id, versionId: old.id, text: "Earlier generated label" })).json() as { revisionId: string };
+  const before = await inquiry(request, meta.counterpart.id);
+  expect(before.items.find((entry) => entry.id === item.id)).toMatchObject({ current: { id: old.id }, title: { revisionId: oldReceipt.revisionId, text: "Earlier generated label", author: "ai" } });
+  await page.goto(`/sources/${meta.counterpart.id}/inquiry`);
+  const reading = page.locator(`#item-${item.id}`);
+  await expect(reading).toContainText(old.text); await expect(reading).toContainText("Earlier generated label");
+  await origin(request, meta.counterpart); await start(request, "follow_up");
+  await control(request, "write-neighbor-follow-up"); await advance(request, "succeeded");
+  const after = await inquiry(request, meta.counterpart.id), updated = after.items.find((entry) => entry.id === item.id);
+  if (!updated || updated.current.id === old.id || !updated.current.followUp) throw new Error("Expected actual follow-up revision");
+  const newReceipt = await (await control(request, "seed-generated-title", { itemId: item.id, versionId: updated.current.id, text: "New generated label" })).json() as { revisionId: string };
+  expect((await inquiry(request, meta.counterpart.id)).items.find((entry) => entry.id === item.id)).toMatchObject({ current: { id: updated.current.id }, title: { revisionId: newReceipt.revisionId, text: "New generated label", author: "ai" } });
+  const refresh = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/sources/${meta.counterpart.id}/inquiry` && response.status() === 200);
+  await send(page, example.secondThought); await start(request, "dialogue"); await advance(request, "succeeded", example.reply);
+  await expect(primary(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible(); await refresh;
+  await expect(reading).toContainText(old.text);
+  await expect(reading).not.toContainText("New generated label");
+  await expect(reading).toContainText("Earlier generated label");
+  const userLabel = await request.post(`${daemonURL}/sources/${meta.counterpart.id}/title`, { headers: { "idempotency-key": "fixture-follow-up-user-title" }, data: { target: { kind: "item", itemId: item.id, versionId: updated.current.id }, text: "User label across versions", expectedTitleRevisionId: newReceipt.revisionId } });
+  expect(userLabel.status()).toBe(200);
+  await send(page, "Refresh the staged reading without accepting findings."); await start(request, "dialogue"); await advance(request, "succeeded", example.reply);
+  await expect(reading).toContainText(old.text); await expect(reading).toContainText("User label across versions");
+  await panel(page).getByRole("button", { name: "View follow-up findings", exact: true }).click();
+  await expect(reading).toContainText(updated.current.text); await expect(reading).toContainText("User label across versions");
+});
+
+test("TITLE-UI-02 primed title cache yields to newer user override during staged refresh", async ({ page, request }) => {
+  const meta = await world(request, true), item = meta.neighbor;
+  if (!item) throw new Error("Expected neighboring reading");
+  const old = item.current;
+  await control(request, "seed-generated-title", { itemId: item.id, versionId: old.id, text: "Primed old AI title" });
+  await page.goto(`/sources/${meta.counterpart.id}/inquiry`);
+  const overview = page.getByRole("region", { name: "Reading to explore" });
+  const reading = page.locator(`#item-${item.id}`);
+  await expect(overview).toContainText(old.text);
+  const firstRead = page.waitForResponse((response) => {
+    const url = new URL(response.url()); return url.pathname === `/api/sources/${meta.counterpart.id}/title` && url.searchParams.get("itemId") === item.id && url.searchParams.get("versionId") === old.id && response.status() === 200;
+  });
+  await overview.getByRole("button", { name: "Edit reading title", exact: true }).click();
+  expect(await (await firstRead).json()).toMatchObject({ title: { text: "Primed old AI title", author: "ai" } });
+  await expect(overview.getByRole("textbox", { name: "Reading title" })).toHaveValue("Primed old AI title");
+  await overview.getByRole("button", { name: "Cancel", exact: true }).click();
+  await origin(request, meta.counterpart); await start(request, "follow_up");
+  await control(request, "write-neighbor-follow-up"); await advance(request, "succeeded");
+  const updated = (await inquiry(request, meta.counterpart.id)).items.find((entry) => entry.id === item.id);
+  if (!updated || updated.current.id === old.id || !updated.current.followUp) throw new Error("Expected actual follow-up revision");
+  const ai = await (await control(request, "seed-generated-title", { itemId: item.id, versionId: updated.current.id, text: "New AI label" })).json() as { revisionId: string };
+  const edited = await request.post(`${daemonURL}/sources/${meta.counterpart.id}/title`, { headers: { "idempotency-key": "fixture-primed-user-label" }, data: { target: { kind: "item", itemId: item.id, versionId: updated.current.id }, text: "User override after cache", expectedTitleRevisionId: ai.revisionId } });
+  expect(edited.status()).toBe(200);
+  const current = await inquiry(request, meta.counterpart.id);
+  expect(current.items.find((entry) => entry.id === item.id)).toMatchObject({ current: { id: updated.current.id }, title: { text: "User override after cache", author: "user" } });
+  const uncached = await page.context().newPage();
+  try {
+    await uncached.goto(`/sources/${meta.counterpart.id}/inquiry`);
+    await expect(uncached.locator(`#item-${item.id}`)).toContainText("User override after cache");
+  } finally { await uncached.close(); }
+  const refresh = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/sources/${meta.counterpart.id}/inquiry` && response.status() === 200);
+  await send(page, example.secondThought); await start(request, "dialogue"); await advance(request, "succeeded", example.reply);
+  await expect(primary(page).getByRole("heading", { name: "Response complete", exact: true })).toBeVisible(); await refresh;
+  await expect(reading).toContainText(old.text);
+  await expect(reading).toContainText("User override after cache");
+  await expect(reading).not.toContainText("Primed old AI title");
+});
+
 test("a neighboring root's follow-up cannot silently replace either endpoint or shared connection in an open inquiry", async ({ page, request }) => {
   const meta = await world(request, true);
   expect(meta.item).not.toBeNull(); expect(meta.neighbor).not.toBeNull(); expect(meta.relationship).not.toBeNull();

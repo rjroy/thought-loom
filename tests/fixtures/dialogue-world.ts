@@ -148,6 +148,24 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
   return {
     metadata: { root, counterpart, item, alternate, neighbor, relationship, exampleOnly: true },
     fetch: (request: Request) => app.fetch(request), metrics,
+    // Seed valid persisted AI metadata, not an implementation of title generation.
+    seedGeneratedTitle(itemId: string, versionId: string, text: string) {
+      const db = openDatabase(databasePath);
+      try {
+        return db.transaction(() => {
+          const target = db.query<{ sourceId: string }, [string, string]>("SELECT i.source_id AS sourceId FROM knowledge_items i JOIN formulations f ON f.item_id=i.id WHERE i.id=? AND f.id=?").get(itemId, versionId);
+          if (!target || (target.sourceId !== root.id && target.sourceId !== counterpart.id)) throw new Error("Invalid fixture title target");
+          let entity = db.query<{ id: string }, [string]>("SELECT id FROM title_entities WHERE item_id=?").get(itemId);
+          if (!entity) { entity = { id: crypto.randomUUID() }; db.run("INSERT INTO title_entities(id,item_id) VALUES (?,?)", [entity.id, itemId]); }
+          const revisionId = crypto.randomUUID();
+          db.run("INSERT INTO title_revisions(id,entity_id,text,author,formulation_id,created_at) VALUES (?,?,?,'ai',?,'2030-01-01T00:00:00.000Z')", [revisionId, entity.id, text, versionId]);
+          db.run("INSERT INTO title_heads(entity_id,revision_id,user_revision_id) VALUES (?,?,NULL) ON CONFLICT(entity_id) DO UPDATE SET revision_id=excluded.revision_id", [entity.id, revisionId]);
+          db.run("DELETE FROM title_search WHERE entity_id=?", [entity.id]);
+          db.run("INSERT INTO title_search(entity_id,text) VALUES (?,?)", [entity.id, text]);
+          return { revisionId, itemId, versionId, sourceId: target.sourceId };
+        }).immediate();
+      } finally { db.close(); }
+    },
     async start() { now += 101; await worker.recover(); return worker.startNext(); },
     captureForAbandonment() { return capture("abandon", "Example original retained after local abandonment."); },
     seedRecentReading(outsideWindow: boolean, userAuthored: boolean, longText: boolean) {
@@ -288,6 +306,11 @@ export function createBrowserDialogueControls(directory: string) {
       if (request.method !== "POST") return Response.json({ error: "Unknown example control" }, { status: 404 });
       if (path === "/__browser/dialogue/start") { const result = await active.start(); return Response.json({ result, ...active.metrics() }); }
       if (path === "/__browser/dialogue/capture-abandon") return Response.json(active.captureForAbandonment());
+      if (path === "/__browser/dialogue/seed-generated-title") {
+        const input: unknown = await request.json();
+        if (typeof input !== "object" || input === null || !("itemId" in input) || !("versionId" in input) || !("text" in input) || typeof input.itemId !== "string" || typeof input.versionId !== "string" || typeof input.text !== "string") return Response.json({ error: "Invalid title fixture" }, { status: 400 });
+        return Response.json(active.seedGeneratedTitle(input.itemId, input.versionId, input.text));
+      }
       if (path === "/__browser/dialogue/seed-recent-reading") { const input = await request.json() as { outsideWindow?: boolean; userAuthored?: boolean; longText?: boolean }; return Response.json(active.seedRecentReading(input.outsideWindow === true, input.userAuthored === true, input.longText === true)); }
       if (path === "/__browser/dialogue/revise-recent-reading") return Response.json(active.reviseRecentReading());
       if (path === "/__browser/dialogue/seed-legacy-random") return Response.json(active.seedLegacyRandom());

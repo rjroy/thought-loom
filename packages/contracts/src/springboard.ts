@@ -1,10 +1,11 @@
-import { isRecordId } from "./inspection";
+import { isRecordId, parseThoughtTitle } from "./inspection";
+import type { ThoughtTitle } from "./index";
 
 export const SPRINGBOARD_RECENT_MAX = 32;
 export const SPRINGBOARD_RANDOM_MAX = 32;
 export const SPRINGBOARD_EXCERPT_MAX = 240;
 export type RecentThought = { id: string; sourceId: string; kind: "source" | "interpretation" | "developing-idea";
-  versionId?: string; author: "user" | "ai"; createdAt: string; excerpt: string };
+  versionId?: string; author: "user" | "ai"; createdAt: string; excerpt: string; title?: ThoughtTitle };
 export type RecentThoughtsView = { items: RecentThought[] };
 export type SpringboardThought = Omit<RecentThought, "createdAt"> & { createdAt: string | null; selection: "recent" | "random" };
 export type SpringboardView = { items: SpringboardThought[] };
@@ -17,13 +18,15 @@ function thought(value: unknown, allowUnknownDate: boolean): Omit<SpringboardTho
       (!(typeof value.createdAt === "string" && !Number.isNaN(Date.parse(value.createdAt))) && !(allowUnknownDate && value.createdAt === null)) ||
       typeof value.excerpt !== "string" || !value.excerpt.trim() || value.excerpt.length > SPRINGBOARD_EXCERPT_MAX) return null;
   const createdAt = value.createdAt;
+  const title = "title" in value && value.title !== undefined ? parseThoughtTitle(value.title) : undefined;
+  if (title === null) return null;
   if (typeof createdAt !== "string" && createdAt !== null) return null;
   if (value.kind === "source") {
     if (value.id !== value.sourceId || value.author !== "user" || ("versionId" in value && value.versionId !== undefined) || createdAt === null) return null;
-    return { id: value.id, sourceId: value.sourceId, kind: value.kind, author: value.author, createdAt, excerpt: value.excerpt };
+    return { id: value.id, sourceId: value.sourceId, kind: value.kind, author: value.author, createdAt, excerpt: value.excerpt, ...(title ? { title } : {}) };
   }
   if (!("versionId" in value) || !isRecordId(value.versionId)) return null;
-  return { id: value.id, sourceId: value.sourceId, kind: value.kind, versionId: value.versionId, author: value.author, createdAt, excerpt: value.excerpt };
+  return { id: value.id, sourceId: value.sourceId, kind: value.kind, versionId: value.versionId, author: value.author, createdAt, excerpt: value.excerpt, ...(title ? { title } : {}) };
 }
 
 export function parseRecentThoughts(value: unknown): RecentThoughtsView | null {

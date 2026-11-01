@@ -9,6 +9,7 @@ import { createDialogueApp } from "./dialogue-http";
 import { createKnowledgeHttpApp } from "./knowledge-http";
 import { createFollowUpHttpApp } from "./follow-up-http";
 import { readRecentThoughts, readSpringboard } from "./springboard";
+import { createTitleHttpApp } from "./title-http";
 
 export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
@@ -22,6 +23,7 @@ export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial
   app.route("/", createFollowUpHttpApp(options));
   app.route("/", createDialogueApp({ databasePath: options.databasePath, weavingWorker: options.weavingWorker }));
   app.route("/", createKnowledgeHttpApp({ databasePath: options.databasePath }));
+  app.route("/", createTitleHttpApp(options.databasePath));
 
   app.post("/captures", async (context) => {
     let body: unknown;
