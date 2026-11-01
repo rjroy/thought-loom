@@ -236,8 +236,10 @@ outside this repository**. Do not substitute an existing project or a global
 configuration directory. This offline command prepares private configuration,
 the first-party plugin and its tool connection; it prints `nativeConfigFile`.
 It neither activates a service nor proves provider compatibility. Keep generated
-files private. See `scripts/setup-native.ts` for optional variant and step-budget
-flags. `--admission-timeout-ms` sets the prompt admission deadline (default
+files private. No agent iteration limit is set by default. To set an explicit
+limit, pass `--max-steps` with an integer from 1 to 100; existing configurations
+with a limit retain it. The script also accepts an optional model variant.
+`--admission-timeout-ms` sets the prompt admission deadline (default
 15,000 ms; integer range 1,000–120,000). It does not limit generation; ordinary
 native reads retain their 5,000 ms deadline. A documented 5-second PlayNice hook
 budget could have raced the previous 5-second admission deadline, but the exact

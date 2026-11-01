@@ -11,7 +11,7 @@ export class NativeSetupError extends Error {
 }
 export type NativeSetupConfig = {
   registrationFile: string; location: string; connectionFile: string; agent: string;
-  model: { providerID: string; id: string; variant?: string }; operations: ToolAction[]; maxSteps: number;
+  model: { providerID: string; id: string; variant?: string }; operations: ToolAction[]; maxSteps?: number;
   dialogueOperations?: ToolAction[];
   admissionTimeoutMs: number;
 };
@@ -29,14 +29,14 @@ function parseSelection(value: unknown): ResolvedSelection {
       !toolRecord(value.model) || !toolId(value.model.providerID) || !toolId(value.model.id) ||
       (value.model.variant !== undefined && !toolId(value.model.variant)) || !Array.isArray(value.operations) || !value.operations.length ||
       !value.operations.every((action): action is ToolAction => typeof action === "string" && DOMAIN_ACTIONS.some((allowed) => allowed === action)) ||
-      new Set(value.operations).size !== value.operations.length || value.operations.includes("record_idea") || (value.dialogueOperations !== undefined && (!Array.isArray(value.dialogueOperations) || !value.dialogueOperations.length || !value.dialogueOperations.every((action) => DOMAIN_ACTIONS.some((allowed) => allowed === action)) || new Set(value.dialogueOperations).size !== value.dialogueOperations.length)) || typeof value.maxSteps !== "number" || !Number.isSafeInteger(value.maxSteps) || value.maxSteps < 1 || value.maxSteps > 100) {
+      new Set(value.operations).size !== value.operations.length || value.operations.includes("record_idea") || (value.dialogueOperations !== undefined && (!Array.isArray(value.dialogueOperations) || !value.dialogueOperations.length || !value.dialogueOperations.every((action) => DOMAIN_ACTIONS.some((allowed) => allowed === action)) || new Set(value.dialogueOperations).size !== value.dialogueOperations.length)) || (value.maxSteps !== undefined && (typeof value.maxSteps !== "number" || !Number.isSafeInteger(value.maxSteps) || value.maxSteps < 1 || value.maxSteps > 100))) {
     throw new NativeSetupError("invalid_configuration");
   }
   const admissionTimeoutMs = parseAdmissionTimeoutMs(value.admissionTimeoutMs);
   if (admissionTimeoutMs === null) throw new NativeSetupError("invalid_configuration");
   return { registrationFile: value.registrationFile, agent: value.agent,
     model: { providerID: value.model.providerID, id: value.model.id, ...(value.model.variant ? { variant: value.model.variant } : {}) },
-    operations: [...value.operations], maxSteps: value.maxSteps, admissionTimeoutMs,
+    operations: [...value.operations], ...(typeof value.maxSteps === "number" ? { maxSteps: value.maxSteps } : {}), admissionTimeoutMs,
     ...(Array.isArray(value.dialogueOperations) ? { dialogueOperations: value.dialogueOperations.filter((action): action is ToolAction => DOMAIN_ACTIONS.some((allowed) => allowed === action)) } : {}) };
 }
 
@@ -120,7 +120,7 @@ export async function provisionNativeSetup(options: {
     const actions = [...new Set([...(native?.operations ?? DOMAIN_ACTIONS), ...(native?.dialogueOperations ?? [])])];
     const permissions = [{ action: "*", resource: "*", effect: "deny" }, ...actions.map((action) => ({ action, resource: "*", effect: "allow" }))];
     await write(configFile, JSON.stringify({ plugins: [{ package: pluginDirectory, options: { connectionFile, sourceEntry: options.pluginEntry } }],
-      ...(native ? { agents: { [native.agent]: { mode: "primary", description: "Thoughtloom constrained domain weaver", steps: native.maxSteps, permissions } } } : {}) }, null, 2));
+      ...(native ? { agents: { [native.agent]: { mode: "primary", description: "Thoughtloom constrained domain weaver", ...(native.maxSteps !== undefined ? { steps: native.maxSteps } : {}), permissions } } } : {}) }, null, 2));
     const nativeConfigFile = native ? resolve(runtime, "native.json") : undefined;
     if (nativeConfigFile) await write(nativeConfigFile, JSON.stringify({ ...native, location, connectionFile }, null, 2));
     console.info("native.setup succeeded", { nativeSelection: !!native });

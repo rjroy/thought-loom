@@ -11,7 +11,7 @@ if (import.meta.main) {
     const { values } = parseArgs({ args: Bun.argv.slice(2), options: {
       "runtime-directory": { type: "string" }, "location-directory": { type: "string" }, "daemon-origin": { type: "string" },
       "registration-file": { type: "string" }, agent: { type: "string" }, provider: { type: "string" }, model: { type: "string" },
-      variant: { type: "string" }, "plugin-entry": { type: "string" }, "max-steps": { type: "string", default: "20" },
+      variant: { type: "string" }, "plugin-entry": { type: "string" }, "max-steps": { type: "string" },
       "admission-timeout-ms": { type: "string" },
     }, strict: true, allowPositionals: false });
     const runtimeDirectory = values["runtime-directory"], locationDirectory = values["location-directory"], daemonOrigin = values["daemon-origin"];
@@ -25,7 +25,8 @@ if (import.meta.main) {
     const setup = await provisionNativeSetup({ runtimeDirectory, locationDirectory, daemonOrigin,
       transportCredential: randomBytes(32).toString("base64url"), pluginEntry: resolve(entry), pluginBundle: await output.text(),
       native: { registrationFile, agent, model: { providerID, id, ...(values.variant ? { variant: values.variant } : {}) },
-         operations: [...CAPTURE_ACTIONS], dialogueOperations: [...DOMAIN_ACTIONS], maxSteps: Number(values["max-steps"]),
+         operations: [...CAPTURE_ACTIONS], dialogueOperations: [...DOMAIN_ACTIONS],
+         ...(values["max-steps"] !== undefined ? { maxSteps: Number(values["max-steps"]) } : {}),
          ...(values["admission-timeout-ms"] !== undefined ? { admissionTimeoutMs: Number(values["admission-timeout-ms"]) } : {}) } });
     console.info("Native configuration generated; not activated or live-validated.", { nativeConfigFile: setup.nativeConfigFile });
   } catch {
