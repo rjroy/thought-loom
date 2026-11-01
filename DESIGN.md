@@ -19,9 +19,9 @@ typography:
     letterSpacing: "-0.025em"
   inquiry-title:
     fontFamily: "Source Sans 3, sans-serif"
-    fontSize: "26px"
-    fontWeight: 400
-    lineHeight: 1.35
+    fontSize: "22px"
+    fontWeight: 600
+    lineHeight: 1.3
     letterSpacing: "normal"
   phone-title:
     fontFamily: "Source Sans 3, sans-serif"
@@ -91,6 +91,11 @@ typography:
     fontWeight: 400
     lineHeight: 1.35
   phone-inquiry-focus:
+    fontFamily: "Source Sans 3, sans-serif"
+    fontSize: "18px"
+    fontWeight: 400
+    lineHeight: 1.5
+  source-document-phone:
     fontFamily: "Source Sans 3, sans-serif"
     fontSize: "23px"
     fontWeight: 400
@@ -177,7 +182,7 @@ These two surface tints are role colors, not an additional general-purpose tonal
 
 Use Source Sans 3 throughout, including headings. The upright variable font is self-hosted with `next/font/local`; its [license and copy provenance](apps/web/app/fonts/README.md) are part of the project. No identity display face or emblem is adopted.
 
-Frontmatter records reused roles, not an exhaustive scale. Search headings are (36px), reducing to (30px) on phones; capture starts directly with its text field, without a visible heading or introductory assurance. Thoughts share a left-aligned family, with hierarchy following placement rather than author. Compact cards are title-led: a prominent (20px semibold) stored title, otherwise the first up to five whitespace-normalized words of the represented body, preserving punctuation. This fallback is display-only, never a persisted or AI-authored title. An optional one-line body preview is subordinate (16px); attribution and contextual controls use (13px) text with existing touch targets. Focal/detail bodies remain fully readable at (26px/23px), with optional stored labels above them. The actual pinned formulation remains the semantic inquiry heading. Metadata stays sentence case; timestamps use tabular numerals where styled.
+Frontmatter records reused roles, not an exhaustive scale. Search headings are (36px), reducing to (30px) on phones; capture starts directly with its text field, without a visible heading or introductory assurance. Thoughts share a left-aligned family, with hierarchy following placement rather than author. Compact cards are title-led: a prominent (20px semibold) stored title, otherwise the first up to five whitespace-normalized words of the represented body, preserving punctuation. This fallback is display-only, never a persisted or AI-authored title. An optional one-line body preview is subordinate (16px); attribution and contextual controls use (13px) text with existing touch targets. Inquiry focal and overview cards use the same title-led order at (22px semibold), above un-clamped (18px) reading text; exact long text retains its existing disclosure. The unchanged standalone source-document body scale is (26px/23px). The actual pinned formulation remains the semantic inquiry heading. Metadata stays sentence case; timestamps use tabular numerals where styled.
 
 ## Layout
 
@@ -203,7 +208,7 @@ Controls and claim nodes use restrained corners and thin (1px) borders. Filled c
 
 ## Components
 
-- **Thought reading:** `ThoughtContent` shares presentation order without owning domain state. Original sources, AI interpretations, saved user contributions and confirmed developed thoughts retain their existing semantic containers and exact identities. Compact titles lead; body previews recede, with full formulations available in focal views/history and original/input text at their existing source links. Five-word labels use the exact represented version, never a different pinned/current formulation; discussion-input labels do not create standalone title records. Title editors expose their existing label and controls for placement above the body and in the contextual footer; their commands, target binding and recovery state are unchanged. Full source documents retain the complete body. Agent response remains a separate conversational surface, not a durable thought or a second idea feed.
+- **Thought reading:** `ThoughtContent` shares title/body/metadata/actions order without owning domain state, including inquiry focal targets and overview readings. Original sources, AI interpretations, saved user contributions and confirmed developed thoughts retain their existing semantic containers and exact identities. Titles lead both compact and focal cards; compact previews recede while focal formulations remain fully available. Five-word labels use the exact represented version, never a different pinned/current formulation; discussion-input labels do not create standalone title records. Focal source labels share the existing source title state without duplicating its original-band editor. Item editors keep their exact pinned target, commands and recovery state. Connections retain their relation rationale and endpoints without an invented thought title. Full source documents retain the complete body. Agent response remains a separate conversational surface, not a durable thought or a second idea feed.
 - **Actions:** Lantern-filled primary actions; outlined secondary actions invert on hover. Standard buttons have a minimum height of (48px); compact shell controls use (46px). Disabled actions retain legible text and a neutral border. Capture becomes read-only while saving and keeps its draft on failure.
 - **Fields:** capture has a programmatic Your thought label; the composer has a visible label. Capture keeps relevant draft/save/error feedback without redundant introductory copy. Compact shell search has a programmatic label and explicit Search button. Capture and dialogue text sit on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
 - **Focus and navigation:** a Horizon outline (3px, offset 5px), switching to Night for controls within colored claim surfaces; underlined links and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.

@@ -15,18 +15,18 @@ import { compactThoughtLabel } from "../../lib/thought-label";
 
 export type DevelopmentState = ReturnType<typeof useDevelopment>;
 
-function TargetQuote({ context, compact = false }: { context: DialogueSelectedContext; compact?: boolean }) {
+function TargetQuote({ context, compact = false, title, actions }: { context: DialogueSelectedContext; compact?: boolean; title?: ReactNode; actions?: ReactNode }) {
   const text = context.kind === "relationship" ? context.rationale : context.text;
-  return <ThoughtContent body={<><blockquote className="thought-body">{compact ? <p>{text.length > 1_200 ? `${text.slice(0, 240)}…` : text}</p> : <h1>{text.length > 1_200 ? `${text.slice(0, 240)}…` : text}</h1>}</blockquote>
+  return <ThoughtContent title={title} body={<><blockquote className="thought-body">{compact ? <p>{text.length > 1_200 ? `${text.slice(0, 240)}…` : text}</p> : <h1>{text.length > 1_200 ? `${text.slice(0, 240)}…` : text}</h1>}</blockquote>
     {text.length > 1_200 && <details className="target-disclosure"><summary role="button">Read selected context · Full text</summary><blockquote>{text}</blockquote></details>}
     {context.kind === "relationship" && <div className="target-relationship"><p className="target-endpoint"><strong>From: </strong><span>{context.from.version.text}</span></p><p className="target-endpoint"><strong>{context.type === "suggests" ? "Suggests" : context.type === "supports" ? "Supports" : "Challenges"}: </strong><span>{context.to.version.text}</span></p></div>}</>}
-    metadata={<p className="record-identity">{context.kind === "relationship" ? `Pinned connection · ${context.author === "ai" ? "AI suggestion" : "Your recorded connection"}` : context.kind === "source" ? "Your unchanged original" : `Pinned reading · ${context.author === "ai" ? "AI-authored · Tentative" : "Written by you"}`}</p>} />;
+    metadata={<p className="record-identity">{context.kind === "relationship" ? `Pinned connection · ${context.author === "ai" ? "AI suggestion" : "Your recorded connection"}` : context.kind === "source" ? "Your unchanged original" : `Pinned reading · ${context.author === "ai" ? "AI-authored · Tentative" : "Written by you"}`}</p>} actions={actions} />;
 }
-function FallbackQuote({ selection, model, compact = false }: { selection: DialogueSelection; model: InquiryView; compact?: boolean }) {
-  if (selection.kind === "source") return <TargetQuote context={{ ...model.source, kind: "source" }} compact={compact} />;
+function FallbackQuote({ selection, model, compact = false, title, actions }: { selection: DialogueSelection; model: InquiryView; compact?: boolean; title?: ReactNode; actions?: ReactNode }) {
+  if (selection.kind === "source") return <TargetQuote context={{ ...model.source, kind: "source" }} compact={compact} title={title} actions={actions} />;
   if (selection.kind === "item") {
     const item = model.items.find((item) => item.id === selection.id), version = item?.history.find((v) => v.id === selection.versionId);
-    return version ? <TargetQuote context={{ ...version, kind: "item" }} /> : <p>Loading the exact selected reading…</p>;
+    return version ? <TargetQuote context={{ ...version, kind: "item" }} compact={compact} title={title} actions={actions} /> : <ThoughtContent title={title} body={<p>Loading the exact selected reading…</p>} actions={actions} />;
   }
   const relation = model.relationships.find((r) => r.id === selection.id), version = relation?.history.find((v) => v.id === selection.versionId);
   return <><p className="record-identity">Pinned connection</p><blockquote>{version?.rationale ?? "Loading the exact selected connection…"}</blockquote></>;
@@ -89,6 +89,11 @@ export default function Development({ state, model, query, worker, composerRef, 
   const pinnedVersion = selection.kind === "item" ? selectedItem?.history.find((version) => version.id === selection.versionId) : undefined;
   const pinnedTitle = selection.kind === "item" && model.selectedTarget?.id === selection.id && model.selectedTarget.versionId === selection.versionId ? model.selectedTarget.title
     : selectedItem?.title && (selectedItem.current.id === (selection.kind === "item" ? selection.versionId : "") || selectedItem.title.author === "user") ? selectedItem.title : undefined;
+  const representedText = selected ? selected.kind === "relationship" ? undefined : selected.text
+    : selection.kind === "source" ? model.source.text : selection.kind === "item" ? pinnedVersion?.text : undefined;
+  const renderTarget = (title?: ReactNode, actions?: ReactNode) => selected
+    ? <TargetQuote context={selected} compact={!!overviewItem} title={title} actions={actions} />
+    : <FallbackQuote selection={selection} model={model} compact={!!overviewItem} title={title} actions={actions} />;
   const pinnedAuthor = selected ? selected.kind === "source" ? "user" : selected.author : pinnedVersion?.author ?? (selection.kind === "source" ? "user" : selectedRelationship?.history.find((version) => version.id === selection.versionId)?.author);
   const targetRole = selection.kind === "source" ? "original" : pinnedAuthor === "user" ? "user" : pinnedAuthor === "ai" ? selectedItem?.kind === "developing-idea" ? "idea" : "ai" : undefined;
   const sourceEvidence = pinnedVersion?.evidenceSourceIds.includes(model.source.id) ?? false;
@@ -114,12 +119,13 @@ export default function Development({ state, model, query, worker, composerRef, 
     })}</div></section> : null;
   return <section className="development-area" id="development" aria-label="Develop this thought" data-has-turn={!!current} data-emerging={!!derivation} data-selection={selection.kind} data-overview={!!overviewItem}>
     {overviewItem && <section className="working-reading thought-reading thought-reading-focal" aria-label="Reading to explore" data-role={overviewItem.current.author === "user" ? "user" : overviewItem.kind === "developing-idea" ? "idea" : "ai"} data-source-backed={overviewItem.current.evidenceSourceIds.includes(model.source.id)}>{overviewItem.current.evidenceSourceIds.includes(model.source.id) && <FlowArrow className="source-to-reading" />}
-      <ThoughtTitleEditor target={{ kind: "item", itemId: overviewItem.id, versionId: overviewItem.current.id }} initial={overviewItem.title} kind={overviewItem.kind === "developing-idea" ? "idea" : "reading"}>{({ title, controls }) => <ThoughtContent title={title} body={<h1 className="thought-body">{overviewItem.current.text}</h1>}
+      <ThoughtTitleEditor target={{ kind: "item", itemId: overviewItem.id, versionId: overviewItem.current.id }} initial={overviewItem.title} kind={overviewItem.kind === "developing-idea" ? "idea" : "reading"} fallbackText={overviewItem.current.text}>{({ title, controls }) => <ThoughtContent title={title} body={<h1 className="thought-body">{overviewItem.current.text}</h1>}
         metadata={<p className="attribution"><span>{overviewItem.current.author === "user" ? "Your recorded formulation" : overviewItem.kind === "interpretation" ? "AI interpretation" : "AI developing idea"}</span>{overviewItem.current.author === "ai" && <span>Tentative</span>}</p>}
         actions={<><button className="text-button" type="button" onClick={onDiscussOverview}>Discuss this reading</button>{controls}</>} />}</ThoughtTitleEditor>
     </section>}
     <section className={`discussion-target thought-reading ${overviewItem ? "thought-reading-context" : "thought-reading-focal"}`} id="discussion-target" tabIndex={-1} aria-label="Discussion target" data-role={targetRole} data-source-backed={sourceEvidence && !overviewItem && !derivation}>{sourceEvidence && !overviewItem && !derivation && <FlowArrow className="source-to-reading" />}
-      {selection.kind === "item" && selectedItem ? <ThoughtTitleEditor target={{ kind: "item", itemId: selection.id, versionId: selection.versionId }} initial={pinnedTitle} kind={selectedItem.kind === "developing-idea" ? "idea" : "reading"}>{({ title, controls }) => <>{title}{selected ? <TargetQuote context={selected} compact={!!overviewItem} /> : <FallbackQuote selection={state.selection} model={model} compact={!!overviewItem} />}<div className="thought-reading-actions">{controls}</div></>}</ThoughtTitleEditor> : <>{selected ? <TargetQuote context={selected} compact={!!overviewItem} /> : <FallbackQuote selection={state.selection} model={model} compact={!!overviewItem} />}</>}
+      {selection.kind === "item" && selectedItem ? <ThoughtTitleEditor target={{ kind: "item", itemId: selection.id, versionId: selection.versionId }} initial={pinnedTitle} kind={selectedItem.kind === "developing-idea" ? "idea" : "reading"} fallbackText={representedText}>{({ title, controls }) => renderTarget(title, controls)}</ThoughtTitleEditor>
+        : selection.kind === "source" ? renderTarget(<ThoughtTitleText target={{ kind: "source" }} initial={model.source.title} fallbackText={representedText} />) : renderTarget()}
       {overviewItem && <p className="composer-context">Discussion target · Original</p>}{changed && <p className="context-change">Current formulation changed · This discussion keeps its pinned revision.</p>}</section>
     {derivation && <section className="idea-derivation" aria-label="Idea derivation"><h2>How this idea emerged</h2><div className="derivation-chain"><svg className="provenance-paths" viewBox="0 0 1200 56" preserveAspectRatio="none" aria-hidden="true" focusable="false">{sourceEvidence && <path d={prior ? "M200 56V32Q200 24 208 24H592Q600 24 600 16V0" : "M300 56V32Q300 24 308 24H592Q600 24 600 16V0"} />}{prior && <path d="M600 56V0" />}<path d={prior ? "M1000 56V32Q1000 24 992 24H608Q600 24 600 16V0" : "M900 56V32Q900 24 892 24H608Q600 24 600 16V0"} /><path d="M592 9L600 1L608 9" /></svg><span className="mobile-provenance-rail" aria-hidden="true"><FlowArrow direction="up" /></span>
       <div className="derivation-card thought-reading thought-reading-compact" data-role="original">{sourceEvidence && <FlowArrow direction="left" className="provenance-join" />}<ThoughtContent title={<ThoughtTitleText target={{ kind: "source" }} initial={model.source.title} fallbackText={model.source.text} />} body={null} actions={<a className="text-link" href="#original-source">Original thought</a>} /></div>
