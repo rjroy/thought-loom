@@ -7,6 +7,7 @@ import WeavingStatus from "../../ui/weaving-status";
 import { discussionHref, firstParameter } from "../../../lib/links";
 import { validSearchQuery } from "../../../lib/daemon";
 import FollowUpStatus from "../../ui/follow-up-status";
+import ThoughtContent from "../../ui/thought-content";
 
 export const metadata: Metadata = { title: "Original thought" };
 export const dynamic = "force-dynamic";
@@ -33,16 +34,19 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
   return (
     <main id="main" className="workspace source-workspace" tabIndex={-1}>
       <div className="source-heading">
-        <div><h1>{discussionInput ? "Discussion input" : source.title?.text ?? "Original thought"}</h1><p className="saved-receipt"><StatusIcon kind="saved" /><span>{discussionInput ? "Discussion input saved · Your words" : "Original saved"}</span></p></div>
+        <div><h1>{discussionInput ? "Discussion input" : "Original thought"}</h1></div>
         <Link className="button secondary" href="/">Capture another</Link>
       </div>
-      <dl className="source-meta">
+      <section className="source-document thought-reading thought-reading-focal" data-role={discussionInput ? "user" : "original"}>
+        <ThoughtContent title={!discussionInput && source.title && <p className="thought-title-text">{source.title.text}</p>}
+          body={<article className="original-text thought-body" aria-label={discussionInput ? "Discussion input" : "Original thought"}>{source.text}</article>}
+          metadata={<><p className="saved-receipt"><StatusIcon kind="saved" /><span>{discussionInput ? "Discussion input saved · Your words" : "Original saved"}</span><span>Your words · Unchanged</span></p><dl className="source-meta">
         <div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{date} UTC</time></dd></div>
         <div><dt>Origin</dt><dd>{discussionInput ? "Your discussion input" : source.provenance}</dd></div>
-      </dl>
-      <article className="original-text" aria-label={discussionInput ? "Discussion input" : "Original thought"}>{source.text}</article>
-      <p className="source-preservation">Your words · Unchanged</p>
-      {discussionInput ? <Link className="text-link" href={discussionHref(origin.rootSourceId, origin.dialogueId, query, origin.turnId)}>Return to discussion</Link> : <><Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link><WeavingStatus key={id} sourceId={id} initial={weaving?.kind === "found" ? weaving.value : null} /></>}
+      </dl></>}
+          actions={discussionInput ? <Link className="text-link" href={discussionHref(origin.rootSourceId, origin.dialogueId, query, origin.turnId)}>Return to discussion</Link> : <Link className="text-link" href={`/sources/${source.id}/inquiry`}>Explore recorded context</Link>} />
+      </section>
+      {!discussionInput && <WeavingStatus key={id} sourceId={id} initial={weaving?.kind === "found" ? weaving.value : null} />}
       {!discussionInput && <FollowUpStatus key={`follow-up-${id}`} sourceId={id} query={query} initialModel={context?.kind === "found" ? context.value : null} />}
     </main>
   );

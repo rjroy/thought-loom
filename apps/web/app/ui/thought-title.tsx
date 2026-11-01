@@ -134,14 +134,15 @@ export function ThoughtTitleText({ target, initial }: { target: TitleTarget; ini
   const { title } = useTitleLabel(target, initial);
   return title ? <p className="thought-title-text">{title.text}</p> : null;
 }
-export default function ThoughtTitleEditor({ target, initial, kind }: { target: TitleTarget; initial?: ThoughtTitle; kind: "original" | "reading" | "idea" }) {
+export default function ThoughtTitleEditor({ target, initial, kind, children }: { target: TitleTarget; initial?: ThoughtTitle; kind: "original" | "reading" | "idea"; children?: (parts: { title: ReactNode; controls: ReactNode }) => ReactNode }) {
   const { titles, title } = useTitleLabel(target, initial), id = useId(), button = useRef<HTMLButtonElement>(null), input = useRef<HTMLInputElement>(null), form = useRef<HTMLFormElement>(null);
   if (!titles) return null;
   const entity = titleEntityKey(target), entry = titles.entries[entity], editing = entry?.editing;
   const invalid = !!entry?.draft && !isThoughtTitleText(entry.draft), message = invalid ? "Use 1–240 characters on one line." : entry?.error;
   const returnFocus = () => requestAnimationFrame(() => { if (document.activeElement === document.body && button.current?.isConnected) button.current.focus({ preventScroll: true }); });
-  return <div className="thought-title">
-    <div className="thought-title-heading">{title && <p className="thought-title-text">{title.text}</p>}<button ref={button} type="button" className="text-button" aria-expanded={!!editing} onClick={() => { titles.open(target, initial); requestAnimationFrame(() => { if (document.activeElement === button.current || document.activeElement === document.body) input.current?.focus({ preventScroll: true }); }); }}>Edit {kind} title</button></div>
+  const label = title ? <p className="thought-title-text">{title.text}</p> : null;
+  const controls = <div className="thought-title-controls">
+    <button ref={button} type="button" className="text-button" aria-expanded={!!editing} onClick={() => { titles.open(target, initial); requestAnimationFrame(() => { if (document.activeElement === button.current || document.activeElement === document.body) input.current?.focus({ preventScroll: true }); }); }}>Edit {kind} title</button>
     {editing && <form ref={form} className="title-form" aria-busy={entry.loading || entry.saving} onSubmit={async (event) => {
       event.preventDefault(); if (await titles.save(entity)) { const focused = form.current?.contains(document.activeElement); titles.close(entity); if (focused) returnFocus(); }
     }}>
@@ -153,4 +154,5 @@ export default function ThoughtTitleEditor({ target, initial, kind }: { target: 
       <div className="title-actions"><button type="submit" className="button secondary" disabled={entry.saving || entry.loading || (!entry.ready && !entry.pending) || !isThoughtTitleText(entry.draft)}>{entry.saving ? "Saving…" : "Save title"}</button><button type="button" className="text-button" disabled={entry.saving} onClick={() => { const focused = form.current?.contains(document.activeElement); titles.close(entity); if (focused) returnFocus(); }}>Cancel</button>{!entry.ready && !entry.loading && <button type="button" className="text-button" onClick={() => void titles.refresh(entity)}>Check title</button>}{entry.loading && <span role="status">Loading title…</span>}</div>
     </form>}
   </div>;
+  return children ? children({ title: label, controls }) : <div className="thought-title"><div className="thought-title-heading">{label}</div>{controls}</div>;
 }

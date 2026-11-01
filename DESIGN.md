@@ -19,10 +19,10 @@ typography:
     letterSpacing: "-0.025em"
   inquiry-title:
     fontFamily: "Source Sans 3, sans-serif"
-    fontSize: "32px"
-    fontWeight: 600
-    lineHeight: 1.15
-    letterSpacing: "-0.025em"
+    fontSize: "26px"
+    fontWeight: 400
+    lineHeight: 1.35
+    letterSpacing: "normal"
   phone-title:
     fontFamily: "Source Sans 3, sans-serif"
     fontSize: "30px"
@@ -57,7 +57,7 @@ typography:
     lineHeight: 1.6
   formulation:
     fontFamily: "Source Sans 3, sans-serif"
-    fontSize: "23px"
+    fontSize: "21px"
     fontWeight: 400
     lineHeight: 1.45
   control:
@@ -88,13 +88,13 @@ typography:
   original-focus:
     fontFamily: "Source Sans 3, sans-serif"
     fontSize: "26px"
-    fontWeight: 600
-    lineHeight: 1.2
+    fontWeight: 400
+    lineHeight: 1.35
   phone-inquiry-focus:
     fontFamily: "Source Sans 3, sans-serif"
-    fontSize: "27px"
-    fontWeight: 600
-    lineHeight: 1.2
+    fontSize: "23px"
+    fontWeight: 400
+    lineHeight: 1.35
   compact-source-control:
     fontFamily: "Source Sans 3, sans-serif"
     fontSize: "13px"
@@ -103,7 +103,7 @@ typography:
 rounded:
   control: "6px"
   reading-surface: "6px"
-  original-band: "4px"
+  original-band: "6px"
   notice: "12px"
 spacing:
   tight: "8px"
@@ -167,7 +167,7 @@ This records the current web presentation correction for capture, retrieval, con
 
 ## Colors
 
-Primary action: **Lantern**, also used for text selection. **Parchment** is the dominant thinking surface with **Night** text. Original words use **Night** with Parchment ink; AI readings and canonical replies use a 24% Horizon/Parchment tint; user contributions and user-authored formulations use a 38% Lantern/Parchment tint; AI developing ideas use solid **Horizon** with Night ink. Supporting text mixes each surface's own ink and fill. The exact pinned author controls a selected formulation's color, not a newer revision's author. **Horizon** also marks keyboard focus. No extra brand hues are introduced.
+Primary action: **Lantern**, also used for text selection. **Parchment** is the dominant thinking surface with **Night** text. Original words use **Night** with Parchment ink; AI readings use a 24% Horizon/Parchment tint; user contributions and user-authored formulations use a 38% Lantern/Parchment tint; AI developing ideas use solid **Horizon** with Night ink. Agent response stays on Parchment with a conversational heading and hairline, rather than masquerading as another saved thought. Supporting text mixes each surface's own ink and fill. The exact pinned author controls a selected formulation's color, not a newer revision's author. **Horizon** also marks keyboard focus. No extra brand hues are introduced.
 
 **The Source Distinction Rule.** Keep original text distinct from tentative AI formulations; color never replaces the author or status label.
 
@@ -177,7 +177,7 @@ These two surface tints are role colors, not an additional general-purpose tonal
 
 Use Source Sans 3 throughout, including headings. The upright variable font is self-hosted with `next/font/local`; its [license and copy provenance](apps/web/app/fonts/README.md) are part of the project. No identity display face or emblem is adopted.
 
-Frontmatter records reused roles, not an exhaustive scale. Search headings are (36px), reducing to (30px) on phones; capture starts directly with its text field, without a visible heading or introductory assurance. The actual pinned formulation is the inquiry heading, normally (32px), reducing to (27px) on phones. An original with existing readings uses a smaller (26px/23px) focal quote to leave room for those readings. Formulation nodes are (23px/21px). Metadata stays sentence case; timestamps use tabular numerals where styled.
+Frontmatter records reused roles, not an exhaustive scale. Search headings are (36px), reducing to (30px) on phones; capture starts directly with its text field, without a visible heading or introductory assurance. All thoughts use the same left-aligned reading hierarchy: optional short title (18px semibold), primary body, compact attribution/state (14px), then contextual controls. Focal bodies are (26px/23px); compact bodies are (21px/20px). Scale follows placement, never author or thought kind. The actual pinned formulation remains the semantic inquiry heading. Metadata stays sentence case; timestamps use tabular numerals where styled.
 
 ## Layout
 
@@ -203,6 +203,7 @@ Controls and claim nodes use restrained corners and thin (1px) borders. Filled c
 
 ## Components
 
+- **Thought reading:** `ThoughtContent` shares presentation order without owning domain state. Original sources, AI interpretations, saved user contributions and confirmed developed thoughts retain their existing semantic containers and exact identities. Title editors expose their existing label and controls for placement above the body and in the contextual footer; their commands, target binding and recovery state are unchanged. Full source documents use the same hierarchy, while springboard links use a compact label-first preview. Agent response remains a separate conversational surface, not a durable thought or a second idea feed.
 - **Actions:** Lantern-filled primary actions; outlined secondary actions invert on hover. Standard buttons have a minimum height of (48px); compact shell controls use (46px). Disabled actions retain legible text and a neutral border. Capture becomes read-only while saving and keeps its draft on failure.
 - **Fields:** capture has a programmatic Your thought label; the composer has a visible label. Capture keeps relevant draft/save/error feedback without redundant introductory copy. Compact shell search has a programmatic label and explicit Search button. Capture and dialogue text sit on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
 - **Focus and navigation:** a Horizon outline (3px, offset 5px), switching to Night for controls within colored claim surfaces; underlined links and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.

@@ -16,8 +16,8 @@ export default function ThoughtCard({ thought }: { thought: SpringboardThought }
   return <div className="thought-card-wrap" onMouseEnter={() => { setHovered(true); setDismissed(false); }} onMouseLeave={() => setHovered(false)} onKeyDown={(event) => { if (event.key === "Escape") { setDismissed(true); event.stopPropagation(); } }}>
     <Link className="thought-card" href={href} prefetch={false} data-role={role} style={{ anchorName: anchor }}
       aria-describedby={reveal ? id : undefined} onFocus={() => { setFocused(true); setDismissed(false); }} onBlur={() => setFocused(false)}>
-      <span className="thought-card-meta"><span>{attribution}</span><span>{thought.selection === "recent" ? "Recent" : "Random"}</span></span>
       <span className="thought-card-excerpt">{label}</span>
+      <span className="thought-card-meta"><span>{attribution}</span><span>{thought.selection === "recent" ? "Recent" : "Random"}</span></span>
     </Link>
     {thought.title && <span id={id} className="thought-title-tooltip" role="tooltip" hidden={!reveal} style={{ positionAnchor: anchor }}>{label}</span>}
   </div>;

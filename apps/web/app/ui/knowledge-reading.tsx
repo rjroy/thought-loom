@@ -8,19 +8,19 @@ import EvidenceLinks from "./evidence-links";
 import { useDevelopmentNavigation } from "./development-navigation";
 import FlowArrow from "./flow-arrow";
 import { ThoughtTitleText } from "./thought-title";
+import ThoughtContent from "./thought-content";
 
 export function InterpretationReading({ item, sources, selected, query = "", onDiscuss, onRestore, onCorrect, busy = false }: { item: ItemView; sources: EvidenceSource[]; selected: boolean; query?: string; onDiscuss?: () => void; onRestore?: (version: string) => void; onCorrect?: () => void; busy?: boolean }) {
   const navigation = useDevelopmentNavigation();
   const attribution = item.current.author === "ai" ? item.kind === "interpretation" ? "AI interpretation" : "AI developing idea" : "Your recorded formulation";
-  return <article className={`interpretation-reading${selected ? " matched-reading" : ""}`} id={`item-${item.id}`} tabIndex={-1} data-role={item.current.author === "user" ? "user" : item.kind === "developing-idea" ? "idea" : "ai"}>
-    <p className="attribution"><span>{attribution}</span>{item.current.author === "ai" && <span className="hypothesis-state">Tentative</span>}</p>
-    <ThoughtTitleText target={{ kind: "item", itemId: item.id, versionId: item.current.id }} initial={item.title} />
-    <p className="current-formulation">{item.current.text}</p>
-    {selected && <p className="selection-context">Current formulation</p>}
-    <details className="evidence-disclosure"><summary role="button">Evidence</summary><EvidenceLinks ids={item.current.evidenceSourceIds} sources={sources} query={query} /></details>
+  return <article className={`interpretation-reading thought-reading thought-reading-compact${selected ? " matched-reading" : ""}`} id={`item-${item.id}`} tabIndex={-1} data-role={item.current.author === "user" ? "user" : item.kind === "developing-idea" ? "idea" : "ai"}>
+    <ThoughtContent title={<ThoughtTitleText target={{ kind: "item", itemId: item.id, versionId: item.current.id }} initial={item.title} />}
+      body={<p className="current-formulation thought-body">{item.current.text}</p>}
+      metadata={<><p className="attribution"><span>{attribution}</span>{item.current.author === "ai" && <span className="hypothesis-state">Tentative</span>}</p>{selected && <p className="selection-context">Current formulation</p>}</>}
+      actions={<><details className="evidence-disclosure"><summary role="button">Evidence</summary><EvidenceLinks ids={item.current.evidenceSourceIds} sources={sources} query={query} /></details>
     {item.derivation && <Link className="text-link derivation-link" href={discussionHref(item.sourceId, item.derivation.dialogueId, query, item.derivation.turnId)} onNavigate={navigation?.root === item.sourceId ? (event) => { event.preventDefault(); navigation.openDiscussion(item.derivation!.dialogueId, item.derivation!.turnId); } : undefined}>From this discussion</Link>}
     <div className="claim-actions">{onDiscuss && <button className="button secondary" type="button" onClick={onDiscuss}>Discuss this reading</button>}{onCorrect && <button className="text-button" type="button" disabled={busy} onClick={onCorrect}>Use my saved thought as formulation</button>}</div>
-    <details className="reading-history"><summary role="button">View history</summary><section aria-label="Formulation history"><ol>{item.history.map((version, index) => <li key={version.id} id={`version-${version.id}`} tabIndex={-1}><p className="version-meta">{item.historyTruncated ? "Shown version" : "Version"} {index + 1}{version.id === item.current.id ? " · Current" : ""} · {version.author === "ai" ? "AI-authored" : "Written by you"}</p><p>{version.text}</p><EvidenceLinks ids={version.evidenceSourceIds} sources={sources} prefix="Version evidence:" query={query} />{onRestore && version.id !== item.current.id && <button className="text-button" type="button" disabled={busy} onClick={() => onRestore(version.id)}>Restore this version</button>}</li>)}</ol>{item.historyTruncated && <p className="history-limit">Only the latest {item.history.length} versions are shown. Older history remains stored.</p>}</section></details>
+    <details className="reading-history"><summary role="button">View history</summary><section aria-label="Formulation history"><ol>{item.history.map((version, index) => <li key={version.id} id={`version-${version.id}`} tabIndex={-1}><p className="version-meta">{item.historyTruncated ? "Shown version" : "Version"} {index + 1}{version.id === item.current.id ? " · Current" : ""} · {version.author === "ai" ? "AI-authored" : "Written by you"}</p><p>{version.text}</p><EvidenceLinks ids={version.evidenceSourceIds} sources={sources} prefix="Version evidence:" query={query} />{onRestore && version.id !== item.current.id && <button className="text-button" type="button" disabled={busy} onClick={() => onRestore(version.id)}>Restore this version</button>}</li>)}</ol>{item.historyTruncated && <p className="history-limit">Only the latest {item.history.length} versions are shown. Older history remains stored.</p>}</section></details></>} />
   </article>;
 }
 

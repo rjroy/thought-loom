@@ -12,6 +12,7 @@ import Development from "./development";
 import { DevelopmentNavigation, revealInquiryAnchor } from "./development-navigation";
 import FollowUpStatus from "./follow-up-status";
 import ThoughtTitleEditor, { ThoughtTitles, useTitleObservations } from "./thought-title";
+import ThoughtContent from "./thought-content";
 import { pendingFollowUpVersions, stageFollowUpChanges, type PendingFollowUpVersion } from "../../lib/follow-up-client";
 
 type InquiryContextProps = { initial: InquiryView; weaving: WeavingStatusView | null; query: string; selectedId: string; initialDialogue: DialogueView | null; dialogueError?: string };
@@ -147,11 +148,11 @@ function InquiryContents({ initial, weaving, query, selectedId, initialDialogue,
   return <>
     {model.truncated && <p className="context-limit" role="status">This view shows a bounded neighborhood. Some recorded context is not shown; your full original remains available.</p>}
     <DevelopmentNavigation.Provider value={{ root: source.id, openItem: (item) => void openItem(item), openDiscussion: (id, turnId) => void openDiscussion(id, turnId) }}><div className="inquiry-grid">
-      <section className="inquiry-source" id="original-source" aria-label="Original source">
-        <div className="source-band-heading"><h2>Original · Unchanged · Excerpt</h2><Link className="button secondary" href={`/sources/${source.id}`}>Open source</Link></div>
-        <ThoughtTitleEditor target={{ kind: "source" }} initial={model.source.title} kind="original" />
-        <p className="source-preview">{source.text.slice(0, 240)}{source.text.length > 240 ? "…" : ""}</p>
-        <div className="source-band-actions"><details className="source-disclosure"><summary role="button">Read full original</summary><dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details><button type="button" className="text-button" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button></div>
+      <section className="inquiry-source thought-reading thought-reading-compact" id="original-source" aria-label="Original source" data-role="original">
+        <ThoughtTitleEditor target={{ kind: "source" }} initial={model.source.title} kind="original">{({ title, controls }) => <ThoughtContent title={title}
+          body={<p className="source-preview thought-body">{source.text.slice(0, 240)}{source.text.length > 240 ? "…" : ""}</p>}
+          metadata={<h2 className="attribution">Original · Unchanged · Excerpt</h2>}
+          actions={<><details className="source-disclosure"><summary role="button">Read full original</summary><dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details><Link className="text-link" href={`/sources/${source.id}`}>Open source</Link><button type="button" className="text-button" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button>{controls}</>} />}</ThoughtTitleEditor>
       </section>
       <div className="original-progress"><WeavingStatus sourceId={source.id} initial={weaving} onSnapshot={refresh} compact /></div>
       <Development state={development} model={model} query={query} worker={worker} composerRef={composerRef} initialError={dialogueError} overviewItem={overviewItem}
