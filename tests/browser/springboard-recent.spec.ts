@@ -22,9 +22,9 @@ test.afterEach(async ({ request }) => { await control(request, "reset"); });
 test("empty recent collection omits the group and capture still saves", async ({ page, request }) => {
   await control(request, "empty-collection");
   expect(await recent(request)).toEqual([]);
-  const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/springboard/recent");
+  const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/springboard");
   await page.goto("/"); expect((await loaded).status()).toBe(200);
-  await expect(page.getByRole("region", { name: "Recent thoughts", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Thoughts", exact: true })).toHaveCount(0);
   const draft = "Fixture original from an empty collection.";
   await editor(page).fill(draft);
   const saved = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/captures" && response.request().method() === "POST");
@@ -40,7 +40,7 @@ test("recent read retry preserves a draft and the recovered batch stays stable",
   let count = 0, retryInitiated = false, entered = () => {}, release = () => {}, finished = () => {};
   const waiting = new Promise<void>((resolve) => { entered = resolve; }), gate = new Promise<void>((resolve) => { release = resolve; }), done = new Promise<void>((resolve) => { finished = resolve; });
   let held = false;
-  await page.route("**/api/springboard/recent", async (route) => {
+  await page.route("**/api/springboard", async (route) => {
     count++;
     if (!retryInitiated) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "fixture read unavailable" }) });
     held = true;
@@ -49,7 +49,7 @@ test("recent read retry preserves a draft and the recovered batch stays stable",
   });
   try {
     await page.goto("/");
-    const group = page.getByRole("region", { name: "Recent thoughts", exact: true });
+    const group = page.getByRole("region", { name: "Thoughts", exact: true });
     const retry = group.getByRole("button", { name: /retry/i });
     await expect(retry).toBeVisible(); await expect(editor(page)).toBeVisible();
     await editor(page).fill("Draft survives retry");
@@ -66,7 +66,7 @@ test("recent read retry preserves a draft and the recovered batch stays stable",
     await control(request, "capture-abandon");
     for (let n = 0; n < sampled.length; n++) expect(await card(page, sampled[n]).getAttribute("href")).toBe(hrefs[n]);
     expect(count).toBe(initialReads + 1);
-  } finally { release(); if (held) await done; await page.unroute("**/api/springboard/recent"); }
+  } finally { release(); if (held) await done; await page.unroute("**/api/springboard"); }
 });
 
 test("recent original cards stay stable through focus, typing, paste, clear and an unconfirmed save", async ({ page, request, context }) => {

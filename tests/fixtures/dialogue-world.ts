@@ -170,6 +170,23 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
         { itemId: recentReading.id, expectedVersionId: recentReading.current.id, text: "Fixture later formulation must not replace the sampled version.", evidenceSourceIds: [root.id] });
       return recentReading;
     },
+    seedLegacyRandom() {
+      const db = openDatabase(databasePath);
+      try {
+        for (const [id, version, text] of [["legacy-random-ai", "legacy-random-ai-v1", "Fixture legacy random AI reading"], ["legacy-random-user", "legacy-random-user-v1", "Fixture legacy reading before user correction"]]) {
+          db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES (?,'interpretation',?)", [id, root.id]);
+          db.run("INSERT INTO formulations(id,item_id,text,author,operation_id) VALUES (?,?,?,'ai',?)", [version, id, text, `${id}-operation`]);
+          db.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES (?,?,0)", [version, root.id]);
+        }
+      } finally { db.close(); }
+      const user = knowledge.reviseItem({ actor: "user", operationId: "legacy-random-user-correction" }, { itemId: "legacy-random-user", expectedVersionId: "legacy-random-user-v1", text: "Fixture legacy random user correction", evidenceSourceIds: [root.id] });
+      return { ai: knowledge.getItem("legacy-random-ai"), user };
+    },
+    reviseLegacyRandom() {
+      const previous = knowledge.getItem("legacy-random-ai");
+      return knowledge.reviseItem({ actor: "user", operationId: "legacy-random-later-revision" }, { itemId: previous.id, expectedVersionId: previous.current.id,
+        text: "Later legacy revision must not replace sampled formulation.", evidenceSourceIds: [root.id] });
+    },
     abandon() {
       const run = prompts.at(-1); if (!run) throw new Error("No scripted run to abandon");
       return new WeavingAbandonmentService({ databasePath, now: () => now }).abandon({ expectedJobId: run.jobId, expectedRunId: run.runId,
@@ -273,6 +290,8 @@ export function createBrowserDialogueControls(directory: string) {
       if (path === "/__browser/dialogue/capture-abandon") return Response.json(active.captureForAbandonment());
       if (path === "/__browser/dialogue/seed-recent-reading") { const input = await request.json() as { outsideWindow?: boolean; userAuthored?: boolean; longText?: boolean }; return Response.json(active.seedRecentReading(input.outsideWindow === true, input.userAuthored === true, input.longText === true)); }
       if (path === "/__browser/dialogue/revise-recent-reading") return Response.json(active.reviseRecentReading());
+      if (path === "/__browser/dialogue/seed-legacy-random") return Response.json(active.seedLegacyRandom());
+      if (path === "/__browser/dialogue/revise-legacy-random") return Response.json(active.reviseLegacyRandom());
       if (path === "/__browser/dialogue/abandon") return Response.json(active.abandon());
       if (path === "/__browser/dialogue/write-idea") { await active.writeIdea(); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/preview") { const input = await request.json() as { text?: unknown; start?: unknown }; if (typeof input.text !== "string" || typeof input.start !== "boolean") return Response.json({ error: "Invalid preview fixture" }, { status: 400 }); await active.preview(input.text, input.start); return Response.json(active.metrics()); }

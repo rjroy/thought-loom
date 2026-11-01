@@ -1,5 +1,5 @@
 import "server-only";
-import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, parseRecentThoughts, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
+import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, parseRecentThoughts, parseSpringboardView, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
 import { isSourceId, parseSource } from "./source";
 import { isIdempotencyKey, parseWeavingRetryInput, parseWeavingRetryReceipt, parseWeavingStatusView, type WeavingStatusView } from "@thoughtloom/contracts";
 
@@ -108,6 +108,10 @@ export async function readSearch(query: string): Promise<{ kind: "found"; result
 
 export async function readRecentThoughts() {
   return readProjection("bff.springboard.recent", "/springboard/recent?limit=2", parseRecentThoughts);
+}
+
+export async function readSpringboard() {
+  return readProjection("bff.springboard.read", "/springboard?recent=2&random=2", parseSpringboardView);
 }
 
 export async function readInquiry(id: string, target?: { itemId: string; versionId: string }): Promise<ProjectionRead<InquiryView>> {

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, SPRINGBOARD_RECENT_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
+import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, SPRINGBOARD_RECENT_MAX, SPRINGBOARD_RANDOM_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
 import { readInquiry } from "./inquiry";
 import { findSource, saveCapture, searchSources } from "./storage";
 import type { SearchLimits } from "./storage";
@@ -8,7 +8,7 @@ import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
 import { createDialogueApp } from "./dialogue-http";
 import { createKnowledgeHttpApp } from "./knowledge-http";
 import { createFollowUpHttpApp } from "./follow-up-http";
-import { readRecentThoughts } from "./springboard";
+import { readRecentThoughts, readSpringboard } from "./springboard";
 
 export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
@@ -91,6 +91,21 @@ export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial
     console.info("springboard.recent attempt", { limit });
     try { const view = readRecentThoughts(options.databasePath, limit); console.info("springboard.recent completed", { count: view.items.length }); return context.json(view, 200); }
     catch { console.error("springboard.recent failed", { category: "read_model_unavailable" }); return context.json({ error: "Recent thoughts unavailable" }, 503); }
+  });
+
+  app.get("/springboard", (context) => {
+    const params = new URL(context.req.url).searchParams;
+    const limit = (name: string, maximum: number): number | null => {
+      const values = params.getAll(name);
+      if (values.length > 1 || (values.length === 1 && !/^[1-9]\d*$/.test(values[0]))) return null;
+      const value = values.length ? Number(values[0]) : 2;
+      return Number.isSafeInteger(value) && value >= 1 && value <= maximum ? value : null;
+    };
+    const recent = limit("recent", SPRINGBOARD_RECENT_MAX), random = limit("random", SPRINGBOARD_RANDOM_MAX);
+    if (recent === null || random === null) return context.json({ error: "Invalid springboard limit" }, 400);
+    console.info("springboard.read attempt", { recent, random });
+    try { const view = readSpringboard(options.databasePath, recent, random); console.info("springboard.read completed", { count: view.items.length }); return context.json(view, 200); }
+    catch { console.error("springboard.read failed", { category: "read_model_unavailable" }); return context.json({ error: "Thoughts unavailable" }, 503); }
   });
 
   app.get("/sources/:id/inquiry", (context) => {
