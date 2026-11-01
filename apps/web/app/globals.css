@@ -171,6 +171,8 @@ textarea:read-only { opacity: .9; cursor: wait; }
 .text-button.text-disclosure-toggle { min-height: 44px; font-size: 13px; }
 .disclosed-text { max-width: 72ch; font-size: 16px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-read-status { font-size: 14px; color: var(--supporting); }
+.source-excerpt-disclosure > .text-disclosure-toggle { display: block; }
+.source-excerpt-disclosure > .thought-text-panel { margin-top: 4px; }
 .thought-reading-compact .thought-reading-meta { margin-top: 6px; }
 .thought-reading-compact .thought-reading-meta .attribution, .thought-reading-compact .thought-reading-meta .record-identity { font-size: 13px; gap: 4px 12px; }
 .thought-reading-compact .thought-reading-actions { margin-top: 6px; padding-top: 0; gap: 0 16px; }
@@ -325,7 +327,7 @@ summary:hover { text-decoration: underline; }
 .development-area > .error-notice, .development-area > .status-recovery { order: 5; }
 .idea-derivation { order: 1; position: relative; margin: 0 auto; padding-top: 56px; width: min(1120px, 100%); }
 .idea-derivation > h2 { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 1; padding: 0 8px; background: var(--parchment); font-size: 16px; font-weight: 400; white-space: nowrap; color: var(--supporting); }
-.derivation-chain { display: flex; gap: 32px; position: relative; }
+.derivation-chain { display: flex; align-items: flex-start; gap: 32px; position: relative; }
 .derivation-chain > .derivation-card { flex: 1; }
 .provenance-paths { position: absolute; top: -56px; left: 0; width: 100%; height: 56px; overflow: visible; pointer-events: none; }
 .mobile-provenance-rail, .provenance-join { display: none; }
@@ -387,7 +389,7 @@ summary:hover { text-decoration: underline; }
   .connection-direction { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .relationship-verb { flex-direction: row; min-height: 40px; }
   .relationship-verb strong { order: 1; }
-  .derivation-chain { flex-direction: column; gap: 16px; padding-left: 28px; }
+  .derivation-chain { flex-direction: column; align-items: stretch; gap: 16px; padding-left: 28px; }
   .provenance-paths { display: none; }
   .mobile-provenance-rail { display: block; position: absolute; left: 11px; top: -24px; bottom: 0; width: 2px; background: var(--night); pointer-events: none; }
   .mobile-provenance-rail > .flow-arrow { position: absolute; left: -11px; top: -32px; }

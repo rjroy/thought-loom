@@ -3,6 +3,7 @@ import Link from "next/link";
 import { readSearch } from "../../lib/daemon";
 import { firstParameter, inquiryHref, readableDate, searchHref, sourceHref } from "../../lib/links";
 import StatusIcon from "../ui/status-icon";
+import { ThoughtTextDisclosure } from "../ui/text-disclosure";
 
 export const metadata: Metadata = { title: "Find a thought" };
 
@@ -27,9 +28,12 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               {result.results.map((hit) => <article className="search-result" key={hit.item ? `item-${hit.item.id}` : `source-${hit.sourceId}`}>
                 <p className="match-origin">{hit.matchOrigin === "title" ? "Matched title" : hit.matchOrigin === "source" ? "Matched original" : hit.matchOrigin === "alias" ? "Matched recorded alias" : hit.item?.author === "ai" ? "Matched AI note" : "Matched formulation"}</p>
                 {hit.source.origin?.kind === "discussion-turn" && <p className="attribution">Your discussion input</p>}
-                {hit.item && <><p className="attribution">{hit.item.author === "ai" ? hit.item.kind === "interpretation" ? "AI interpretation · Tentative" : "AI developing idea · Tentative" : "Your recorded formulation"}</p><p className="result-formulation"><Link href={inquiryHref(hit.sourceId, query, hit.item.id, hit.item.formulationId)}>{hit.title?.text ?? hit.item.text}</Link></p>{hit.title && <p className="result-body">{hit.item.text}</p>}<p className="excerpt-label">Original excerpt</p></>}
+                {hit.item && <><p className="attribution">{hit.item.author === "ai" ? hit.item.kind === "interpretation" ? "AI interpretation · Tentative" : "AI developing idea · Tentative" : "Your recorded formulation"}</p><p className="result-formulation"><Link href={inquiryHref(hit.sourceId, query, hit.item.id, hit.item.formulationId)}>{hit.title?.text ?? hit.item.text}</Link></p>{hit.title && <p className="result-body">{hit.item.text}</p>}<p className="excerpt-label">Original</p></>}
                 {!hit.item && hit.title && <p className="result-formulation"><Link href={hit.source.origin?.kind === "discussion-turn" ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query)}>{hit.title.text}</Link></p>}
-                <p className="result-excerpt">{hit.item || hit.title ? hit.source.excerpt : <Link href={hit.source.origin?.kind === "discussion-turn" ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query)}>{hit.source.excerpt}</Link>}</p>
+                <div className="source-excerpt-disclosure"><ThoughtTextDisclosure target={{ kind: "source", sourceId: hit.sourceId }} preview={{
+                  collapsed: <p className="result-excerpt">{hit.item || hit.title ? hit.source.excerpt : <Link href={hit.source.origin?.kind === "discussion-turn" ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query)}>{hit.source.excerpt}</Link>}</p>,
+                  expanded: !hit.item && !hit.title ? <p className="excerpt-label"><Link href={hit.source.origin?.kind === "discussion-turn" ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query)}>Open source</Link></p> : undefined,
+                }} /></div>
                 <p className="result-provenance"><span>{hit.source.provenance}</span><time dateTime={hit.source.createdAt}>{readableDate(hit.source.createdAt)}</time></p>
                 <Link className="text-link result-open" href={hit.source.origin?.kind === "discussion-turn" ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query, hit.item?.id, hit.item?.formulationId)}>Open thought</Link>
               </article>)}</>}
