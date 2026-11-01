@@ -51,6 +51,7 @@ yarn-error.log*
 /.data/
 *.local.json
 *.local.md
+*.local.sh
 .env
 
 # Beads / Dolt files (added by bd init)
