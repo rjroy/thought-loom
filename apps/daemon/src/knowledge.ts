@@ -255,7 +255,7 @@ export class KnowledgeService {
       if (input.kind !== "interpretation" && input.kind !== "developing-idea") throw new KnowledgeError("invalid_input");
       evidence(db, [input.sourceId]);
       const id = crypto.randomUUID();
-      db.run("INSERT INTO knowledge_items (id, kind, source_id) VALUES (?,?,?)", [id, input.kind, input.sourceId]);
+      db.run("INSERT INTO knowledge_items (id, kind, source_id, created_at) VALUES (?,?,?,?)", [id, input.kind, input.sourceId, new Date(Date.now()).toISOString()]);
       appendFormulation(db, context, id, input.text, input.evidenceSourceIds);
       return readItem(db, id);
     }, (result) => ({ resultId: result.id, revisionId: result.current.id }), itemAt);
@@ -272,7 +272,7 @@ export class KnowledgeService {
       evidence(db, input.evidenceSourceIds);
       if (input.derivedFrom && !db.query("SELECT 1 FROM formulations WHERE id=? AND item_id=?").get(input.derivedFrom.versionId, input.derivedFrom.itemId)) throw new KnowledgeError("invalid_reference");
       const id = crypto.randomUUID();
-      db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES (?,'developing-idea',?)", [id, input.rootSourceId]);
+      db.run("INSERT INTO knowledge_items(id,kind,source_id,created_at) VALUES (?,'developing-idea',?,?)", [id, input.rootSourceId, new Date(Date.now()).toISOString()]);
       appendFormulation(db, context, id, input.text, input.evidenceSourceIds);
       db.run("INSERT INTO idea_derivations(item_id,dialogue_id,turn_id,root_source_id,turn_source_id,from_item_id,from_version_id) VALUES (?,?,?,?,?,?,?)",
         [id, input.dialogueId, input.turnId, input.rootSourceId, input.turnSourceId, input.derivedFrom?.itemId ?? null, input.derivedFrom?.versionId ?? null]);

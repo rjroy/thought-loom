@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, type FollowUpLimits } from "@thoughtloom/contracts";
+import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, SPRINGBOARD_RECENT_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
 import { readInquiry } from "./inquiry";
 import { findSource, saveCapture, searchSources } from "./storage";
 import type { SearchLimits } from "./storage";
@@ -8,6 +8,7 @@ import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
 import { createDialogueApp } from "./dialogue-http";
 import { createKnowledgeHttpApp } from "./knowledge-http";
 import { createFollowUpHttpApp } from "./follow-up-http";
+import { readRecentThoughts } from "./springboard";
 
 export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
@@ -82,11 +83,24 @@ export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial
     }
   });
 
+  app.get("/springboard/recent", (context) => {
+    const values = new URL(context.req.url).searchParams.getAll("limit");
+    if (values.length > 1 || (values.length === 1 && !/^[1-9]\d*$/.test(values[0]))) return context.json({ error: "Invalid recent limit" }, 400);
+    const limit = values.length ? Number(values[0]) : 2;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > SPRINGBOARD_RECENT_MAX) return context.json({ error: "Invalid recent limit" }, 400);
+    console.info("springboard.recent attempt", { limit });
+    try { const view = readRecentThoughts(options.databasePath, limit); console.info("springboard.recent completed", { count: view.items.length }); return context.json(view, 200); }
+    catch { console.error("springboard.recent failed", { category: "read_model_unavailable" }); return context.json({ error: "Recent thoughts unavailable" }, 503); }
+  });
+
   app.get("/sources/:id/inquiry", (context) => {
     const id = context.req.param("id");
     if (!isRecordId(id)) return context.json({ error: "Source not found" }, 404);
+    const params = new URL(context.req.url).searchParams, itemIds = params.getAll("itemId"), versionIds = params.getAll("versionId");
+    if (itemIds.length > 1 || versionIds.length > 1 || itemIds.length !== versionIds.length ||
+        (itemIds.length === 1 && (!isRecordId(itemIds[0]) || !isRecordId(versionIds[0])))) return context.json({ error: "Invalid selected target" }, 400);
     try {
-      const view = readInquiry(options.databasePath, id);
+      const view = readInquiry(options.databasePath, id, itemIds.length ? { itemId: itemIds[0], versionId: versionIds[0] } : undefined);
       return view ? context.json(view, 200) : context.json({ error: "Source not found" }, 404);
     } catch {
       return context.json({ error: "Inquiry could not be read" }, 503);

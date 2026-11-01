@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseDialogueView, parseFollowUpStatusView, parseWeavingStatusView } from "@thoughtloom/contracts";
@@ -212,29 +212,44 @@ test("a held recovery completion loses to an earlier committed abandonment", asy
 });
 
 test("migration from controlled schema 16 preserves sources, job order, run and owned grant", async () => {
-  const f = await fixture();
+  const directory = await mkdtemp(join(tmpdir(), "thoughtloom-schema16-")); directories.push(directory);
+  const databasePath = join(directory, "baseline.sqlite");
+  const schema = await readFile(new URL("../../../tests/fixtures/thoughtloom-schema-v16.sql", import.meta.url), "utf8");
+  const db = new Database(databasePath, { create: true });
+  const projections = ["SELECT id,CAST(text AS BLOB) AS bytes,provenance,created_at FROM sources ORDER BY rowid",
+    "SELECT id,kind,source_id FROM knowledge_items ORDER BY rowid", "SELECT * FROM formulations ORDER BY rowid",
+    "SELECT * FROM formulation_evidence ORDER BY formulation_id,position", "SELECT * FROM jobs ORDER BY rowid",
+    "SELECT * FROM weaving_runs ORDER BY rowid", "SELECT * FROM owned_grants ORDER BY rowid", "SELECT * FROM native_commands ORDER BY rowid",
+    "SELECT * FROM capture_receipts ORDER BY rowid", "SELECT * FROM knowledge_receipts ORDER BY rowid"];
+  let before: unknown[][];
   try {
-    const db = new Database(f.databasePath);
-    const triggers = ["weaving_abandonment_scope", "weaving_abandonment_immutable", "weaving_abandonment_retained", "abandonment_dispatch_scope", "abandonment_dispatch_identity", "abandonment_dispatch_forward", "abandonment_dispatch_retained", "abandoned_job_final", "abandoned_job_retained", "abandoned_run_frozen", "abandoned_job_no_run", "abandoned_job_no_grant", "abandoned_command_insert", "abandoned_command_update", "abandoned_dialogue_no_outcome"];
-    try {
-      for (const trigger of triggers) db.run(`DROP TRIGGER "${trigger}"`);
-      db.run("DROP TABLE weaving_abandonment_dispatch"); db.run("DROP TABLE weaving_abandonments");
-      db.run("PRAGMA user_version=16");
-    } finally { db.close(); }
-    const before = snapshot(f.databasePath);
-    const old = new Database(f.databasePath, { readonly: true });
-    const grant = old.query("SELECT session_id,run_id,source_ids,operations,scope_hash,revoked FROM owned_grants").all(); old.close();
-    const migrated = openDatabase(f.databasePath);
-    try {
-      expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 17 });
-      expect(migrated.query("PRAGMA foreign_key_check").all()).toEqual([]);
-      expect(migrated.query("SELECT session_id,run_id,source_ids,operations,scope_hash,revoked FROM owned_grants").all()).toEqual(grant);
-    } finally { migrated.close(); }
-    const after = snapshot(f.databasePath);
-    expect(after.jobs).toEqual(before.jobs); expect(after.runs).toEqual(before.runs); expect(after.sources).toEqual(before.sources);
-    expect(after.abandonment.map((table) => table.name)).toEqual(expect.arrayContaining(["weaving_abandonments", "weaving_abandonment_dispatch"]));
-    expect(after.abandonment.every((table) => table.rows.length === 0)).toBe(true);
-  } finally { await f.worker.close(); }
+    db.exec(schema); db.run("PRAGMA foreign_keys=ON");
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 16 });
+    db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES ('v16-source',?,'fixture','2002-01-01T00:00:00.000Z'),('v16-next','Queued fixture','fixture','2003-01-01T00:00:00.000Z')", ["  Preserved original\nexactly.  "]);
+    db.run("INSERT INTO jobs(id,source_id,status,priority,kind) VALUES ('v16-job','v16-source','uncertain',0,'capture'),('v16-next-job','v16-next','queued',0,'capture')");
+    db.run("INSERT INTO capture_receipts(idempotency_key,payload_hash,source_id,response_version) VALUES ('v16-capture','fixture-hash','v16-source',2)");
+    db.run("INSERT INTO weaving_runs(id,job_id,attempt,session_id,prompt_id,state,created_at,updated_at) VALUES ('v16-run','v16-job',1,'ses_v16','msg_v16','uncertain',1,2)");
+    db.run("INSERT INTO owned_grants(session_id,run_id,location,agent,source_ids,operations,scope_hash,revoked) VALUES ('ses_v16','v16-run','/fixture/location','fixture-agent','[\"v16-source\"]','[\"record_interpretation\"]','fixture-grant',0)");
+    db.run("INSERT INTO native_commands(run_id,payload,payload_hash,attempted) VALUES ('v16-run','fixture-command','fixture-command-hash',1)");
+    db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES ('v16-item','interpretation','v16-source')");
+    db.run("INSERT INTO formulations(id,item_id,text,author,operation_id,run_id) VALUES ('v16-form-1','v16-item','Earlier reading','ai','v16-op-1','v16-run')");
+    db.run("INSERT INTO formulations(id,item_id,text,author,operation_id) VALUES ('v16-form-2','v16-item','Current reading','user','v16-op-2')");
+    db.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES ('v16-form-1','v16-source',0),('v16-form-2','v16-source',0)");
+    db.run("INSERT INTO knowledge_receipts(operation_id,payload_hash,result_id,revision_id) VALUES ('v16-op-1','fixture-hash-1','v16-item','v16-form-1'),('v16-op-2','fixture-hash-2','v16-item','v16-form-2')");
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    before = projections.map((sql) => db.query(sql).all());
+  } finally { db.close(); }
+  const migrated = openDatabase(databasePath);
+  try {
+    expect(migrated.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(projections.map((sql) => migrated.query(sql).all())).toEqual(before);
+    expect(migrated.query("SELECT created_at FROM knowledge_items WHERE id='v16-item'").get()).toEqual({ created_at: null });
+    expect(migrated.query<{ name: string }, []>("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('weaving_abandonments','weaving_abandonment_dispatch') ORDER BY name").all())
+      .toEqual([{ name: "weaving_abandonment_dispatch" }, { name: "weaving_abandonments" }]);
+    expect(migrated.query("SELECT * FROM weaving_abandonments").all()).toEqual([]);
+    expect(migrated.query("SELECT * FROM weaving_abandonment_dispatch").all()).toEqual([]);
+    expect(migrated.query("SELECT name FROM sqlite_schema WHERE type='trigger' AND name='abandoned_run_frozen'").get()).toEqual({ name: "abandoned_run_frozen" });
+  } finally { migrated.close(); }
 });
 
 test("a locally abandoned job cannot be reopened by a stale database write", async () => {

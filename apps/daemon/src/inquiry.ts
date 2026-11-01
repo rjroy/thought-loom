@@ -20,11 +20,17 @@ function followUpOrigin(db: Database, table: "formulations" | "relationship_revi
   return origin ? { followUp: origin } : {};
 }
 
-function readItem(db: Database, id: string): ItemView {
+function readItem(db: Database, id: string, selectedVersionId?: string): ItemView {
   const item = db.query<Pick<ItemView, "id" | "kind" | "sourceId">, [string]>("SELECT id,kind,source_id AS sourceId FROM knowledge_items WHERE id=?").get(id);
   if (!item) throw new Error("Missing inquiry item");
-  const versions = db.query<Omit<FormulationView, "evidenceSourceIds">, [string]>(`SELECT id,text,author FROM formulations WHERE item_id=? ORDER BY rowid DESC LIMIT ${limits.history + 1}`).all(id);
-  const history = versions.slice(0, limits.history).reverse().map((version) => ({ ...version, evidenceSourceIds: evidence(db, "formulation_evidence", "formulation_id", version.id), ...followUpOrigin(db, "formulations", version.id) }));
+  const versions = db.query<Omit<FormulationView, "evidenceSourceIds"> & { sequence: number }, [string]>(`SELECT id,text,author,rowid AS sequence FROM formulations WHERE item_id=? ORDER BY rowid DESC LIMIT ${limits.history + 1}`).all(id);
+  const retained = versions.slice(0, limits.history);
+  if (selectedVersionId && !retained.some((version) => version.id === selectedVersionId)) {
+    const selected = db.query<Omit<FormulationView, "evidenceSourceIds"> & { sequence: number }, [string, string]>("SELECT id,text,author,rowid AS sequence FROM formulations WHERE item_id=? AND id=?").get(id, selectedVersionId);
+    if (!selected) throw new Error("Missing selected formulation");
+    retained.pop(); retained.push(selected);
+  }
+  const history = retained.sort((a, b) => a.sequence - b.sequence).map(({ sequence: _sequence, ...version }) => ({ ...version, evidenceSourceIds: evidence(db, "formulation_evidence", "formulation_id", version.id), ...followUpOrigin(db, "formulations", version.id) }));
   const current = history.at(-1);
   if (!current) throw new Error("Missing inquiry formulation");
   const derivation = readIdeaDerivation(db, id);
@@ -44,7 +50,7 @@ function readRelationship(db: Database, id: string): RelationshipView {
 // A read-only projection in the daemon, not a second domain-write service.
 // Indexed lookups, finite fan-out/history and one transaction prevent a graph
 // dump or a mixture of revisions from separate snapshots.
-export function readInquiry(databasePath: string, sourceId: string): InquiryView | null {
+export function readInquiry(databasePath: string, sourceId: string, target?: { itemId: string; versionId: string }): InquiryView | null {
   console.info("inquiry.read attempt", { sourceId });
   let connection: Database | undefined;
   try {
@@ -53,8 +59,10 @@ export function readInquiry(databasePath: string, sourceId: string): InquiryView
     const result = db.transaction((): InquiryView | null => {
       const source = sourceRecord(db, sourceId);
       if (!source) return null;
+      if (target && !db.query(`SELECT 1 FROM knowledge_items i JOIN formulations f ON f.item_id=i.id WHERE i.id=? AND i.source_id=? AND f.id=?`).get(target.itemId, sourceId, target.versionId)) return null;
       const rootRows = db.query<{ id: string }, [string]>(`SELECT id FROM knowledge_items WHERE source_id=? ORDER BY rowid LIMIT ${limits.rootItems + 1}`).all(sourceId);
       const rootIds = rootRows.slice(0, limits.rootItems).map((row) => row.id);
+      if (target && !rootIds.includes(target.itemId)) { if (rootIds.length === limits.rootItems) rootIds.pop(); rootIds.push(target.itemId); }
       const incident: { id: string; fromItemId: string; toItemId: string }[] = [];
       if (rootIds.length) {
         const parameters = rootIds.map(() => "?").join(",");
@@ -67,7 +75,7 @@ export function readInquiry(databasePath: string, sourceId: string): InquiryView
       const selected = unique.slice(0, limits.relationships);
       const itemIds = new Set(rootIds);
       for (const row of selected) { itemIds.add(row.fromItemId); itemIds.add(row.toItemId); }
-      const items = [...itemIds].map((id) => readItem(db, id));
+      const items = [...itemIds].map((id) => readItem(db, id, target?.itemId === id ? target.versionId : undefined));
       const relationships = selected.map((row) => readRelationship(db, row.id));
       const sourceIds = new Set([sourceId, ...items.map((item) => item.sourceId)]);
       for (const item of items) for (const version of item.history) for (const id of version.evidenceSourceIds) sourceIds.add(id);
@@ -79,7 +87,10 @@ export function readInquiry(databasePath: string, sourceId: string): InquiryView
         if (!ref) throw new Error("Missing inquiry evidence source");
         return { ...ref, origin: sourceOrigin(db, id) };
       });
-      const view = parseInquiryView({ source, items, relationships, evidenceSources, truncated: rootRows.length > limits.rootItems || unique.length > limits.relationships });
+      const selectedVersion = target ? items.find((item) => item.id === target.itemId)?.history.find((version) => version.id === target.versionId) : undefined;
+      if (target && !selectedVersion) throw new Error("Missing selected formulation");
+      const view = parseInquiryView({ source, items, relationships, evidenceSources, truncated: rootRows.length > limits.rootItems || unique.length > limits.relationships,
+        ...(target && selectedVersion ? { selectedTarget: { kind: "item", id: target.itemId, versionId: target.versionId, text: selectedVersion.text, author: selectedVersion.author, evidenceSourceIds: selectedVersion.evidenceSourceIds } } : {}) });
       if (!view) throw new Error("Invalid inquiry closure");
       return view;
     }).deferred();

@@ -51,6 +51,14 @@ textarea::placeholder { color: color-mix(in srgb, var(--night) 72%, var(--parchm
 textarea:focus-visible { outline-color: var(--horizon); }
 textarea:read-only { opacity: .9; cursor: wait; }
 .capture-actions { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 22px; }
+.thought-springboard { margin-top: 36px; }
+.thought-springboard[hidden] { display: none; }
+.thought-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.thought-card { display: block; position: relative; min-width: 0; padding: 14px 18px 18px; border: 1px solid var(--role-border); border-radius: 6px; text-decoration: none; }
+.thought-card:hover { border-color: currentColor; }
+.thought-card-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; color: var(--supporting); font-size: 14px; margin-bottom: 8px; }
+.thought-card-excerpt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 20px; line-height: 1.4; }
+.springboard-recovery { display: flex; align-items: center; gap: 16px; color: var(--supporting); font-size: 16px; }
 .draft-state { color: var(--supporting); font-size: 16px; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 11px 22px; border: 1px solid transparent; border-radius: 6px; font-size: 18px; font-weight: 600; line-height: 1.25; text-decoration: none; text-align: center; flex-shrink: 0; transition: background-color 140ms ease-out, color 140ms ease-out; }
 .button.primary { background: var(--lantern); color: var(--night); border-color: var(--lantern); }
@@ -359,6 +367,7 @@ summary:hover { text-decoration: underline; }
   .derivation-chain > .originating-input { order: -1; }
 }
 @media (max-width: 600px) {
+  .thought-cards { grid-template-columns: minmax(0, 1fr); }
   .site-header { padding: 8px 20px; gap: 4px 16px; }
   .site-header .capture-link { min-height: 44px; padding: 8px 16px; }
   .site-name { font-size: 23px; }

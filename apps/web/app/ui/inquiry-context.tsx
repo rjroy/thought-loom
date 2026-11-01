@@ -30,6 +30,8 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
   const [mutationError, setMutationError] = useState(""), [mutationBusy, setMutationBusy] = useState(false);
   const mutationRunning = useRef(false), mutationKeys = useRef(new Map<string, { signature: string; key: string }>());
   const source = initial.source;
+  const projectionPath = `/api/sources/${source.id}/inquiry${initial.selectedTarget ? `?${new URLSearchParams({ itemId: initial.selectedTarget.id, versionId: initial.selectedTarget.versionId })}` : ""}`;
+  const projection = useRef(projectionPath); projection.current = projectionPath;
   const reloadKnowledge = useCallback(async (acceptFollowUps = false) => {
     reloadRequested.current = true;
     if (acceptFollowUps) acceptRequested.current = true;
@@ -40,8 +42,10 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
         reloadRequested.current = false;
         const accept = acceptRequested.current; acceptRequested.current = false;
         try {
-          const response = await fetch(`/api/sources/${source.id}/inquiry`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+          const path = projection.current;
+          const response = await fetch(path, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
           const next = response.ok ? parseInquiryView(await response.json()) : null;
+          if (path !== projection.current) { reloadRequested.current = true; continue; }
           if (!next || next.source.id !== source.id || next.source.text !== source.text || next.source.createdAt !== source.createdAt || next.source.provenance !== source.provenance) throw new Error("Context unavailable");
           if (accept) {
             for (const item of next.items) for (const version of item.history) visibleVersions.current.add(version.id);
@@ -80,8 +84,12 @@ export default function InquiryContext({ initial, weaving, query, selectedId, in
   }, [model]);
   const initialSelection = useMemo<DialogueSelection>(() => {
     const selected = initial.items.find((item) => item.id === selectedId && item.sourceId === source.id);
-    return initialDialogue?.selection ?? (selected ? { kind: "item", id: selected.id, versionId: selected.current.id } : { kind: "source", id: source.id });
-  }, [initial.items, initialDialogue, selectedId, source.id]);
+    const pinned = initial.selectedTarget;
+    return initialDialogue?.selection ?? (pinned ? { kind: "item", id: pinned.id, versionId: pinned.versionId } : selected ? { kind: "item", id: selected.id, versionId: selected.current.id } : { kind: "source", id: source.id });
+  }, [initial.items, initial.selectedTarget, initialDialogue, selectedId, source.id]);
+  useEffect(() => {
+    if (window.location.hash === "#discussion-target") revealInquiryAnchor("discussion-target");
+  }, [source.id, selectedId, initial.selectedTarget?.versionId]);
   const development = useDevelopment({ root: source.id, initialSelection, initialDialogue, onSnapshot: snapshot });
   function discuss(selection: DialogueSelection) {
     void development.select(selection);

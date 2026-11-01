@@ -6,11 +6,12 @@ export function searchHref(query: string): string {
   return query ? `/search?q=${encodeURIComponent(query)}` : "/search";
 }
 
-export function inquiryHref(sourceId: string, query = "", itemId?: string): string {
+export function inquiryHref(sourceId: string, query = "", itemId?: string, versionId?: string): string {
   const parameters = new URLSearchParams();
   if (query) parameters.set("q", query);
   if (itemId) parameters.set("item", itemId);
-  return `/sources/${encodeURIComponent(sourceId)}/inquiry${parameters.size ? `?${parameters}` : ""}${itemId ? `#item-${encodeURIComponent(itemId)}` : ""}`;
+  if (itemId && versionId) parameters.set("version", versionId);
+  return `/sources/${encodeURIComponent(sourceId)}/inquiry${parameters.size ? `?${parameters}` : ""}${itemId && versionId ? "#discussion-target" : itemId ? `#item-${encodeURIComponent(itemId)}` : ""}`;
 }
 
 export function readableDate(value: string): string {

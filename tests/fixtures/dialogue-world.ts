@@ -65,6 +65,7 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
   const operations: ToolAction[] = options.followUp ? [...backgroundActions, "record_idea"] : ["read_source", "read_item", "record_idea"];
   const captureOperations: ToolAction[] = options.followUp ? [...backgroundActions] : ["read_source"];
   let availability: "available" | "unconfigured" | "unavailable" = "available", uncertainFollowUp = false;
+  let recentReading: ReturnType<KnowledgeService["createItem"]> | null = null;
   const scopeFor = (run: WeavingRun) => {
     const db = openDatabase(databasePath);
     try { const scope = runScope(db, run); if (!scope) throw new Error("Missing owned fixture scope"); return scope; }
@@ -149,6 +150,26 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
     fetch: (request: Request) => app.fetch(request), metrics,
     async start() { now += 101; await worker.recover(); return worker.startNext(); },
     captureForAbandonment() { return capture("abandon", "Example original retained after local abandonment."); },
+    seedRecentReading(outsideWindow: boolean, userAuthored: boolean, longText: boolean) {
+      const originalNow = Date.now;
+      try {
+        Date.now = () => Date.parse("2035-01-01T00:00:00.000Z");
+        if (outsideWindow) for (let n = 0; n < 65; n++) knowledge.createItem({ actor: "ai", operationId: `springboard-filler-${n}`, runId: "fixture-seed" },
+          { kind: "interpretation", sourceId: root.id, text: `Fixture earlier reading ${n}`, evidenceSourceIds: [root.id] });
+        Date.now = () => Date.parse("2040-01-01T00:00:00.000Z");
+        recentReading = knowledge.createItem({ actor: "ai", operationId: "springboard-reading", runId: "fixture-seed" },
+          { kind: "interpretation", sourceId: root.id, text: longText ? `Fixture long interpretation ${"careful handoff ".repeat(40)}` : "Fixture sampled interpretation about changing handoffs.", evidenceSourceIds: [root.id] });
+        if (userAuthored) recentReading = knowledge.reviseItem({ actor: "user", operationId: "springboard-user-revision" },
+          { itemId: recentReading.id, expectedVersionId: recentReading.current.id, text: "My saved corrected interpretation of the handoff.", evidenceSourceIds: [root.id] });
+        return recentReading;
+      } finally { Date.now = originalNow; }
+    },
+    reviseRecentReading() {
+      if (!recentReading) throw new Error("No sampled fixture reading");
+      recentReading = knowledge.reviseItem({ actor: "user", operationId: "springboard-later-revision" },
+        { itemId: recentReading.id, expectedVersionId: recentReading.current.id, text: "Fixture later formulation must not replace the sampled version.", evidenceSourceIds: [root.id] });
+      return recentReading;
+    },
     abandon() {
       const run = prompts.at(-1); if (!run) throw new Error("No scripted run to abandon");
       return new WeavingAbandonmentService({ databasePath, now: () => now }).abandon({ expectedJobId: run.jobId, expectedRunId: run.runId,
@@ -227,16 +248,21 @@ export type BrowserDialogueMetadata = BrowserDialogueWorld["metadata"];
 // on this fixture, and no test command alters the normal user's database.
 export function createBrowserDialogueControls(directory: string) {
   let active: BrowserDialogueWorld | null = null;
+  let emptyApp: ReturnType<typeof createApp> | null = null;
   return {
-    async close() { await active?.close(); active = null; },
+    async close() { await active?.close(); active = null; emptyApp = null; },
     async fetch(request: Request): Promise<Response | null> {
       const path = new URL(request.url).pathname;
-      if (!path.startsWith("/__browser/dialogue")) return active ? active.fetch(request) : null;
-      if (path === "/__browser/dialogue/reset" && request.method === "POST") { await active?.close(); active = null; return Response.json({ reset: true }); }
+      if (!path.startsWith("/__browser/dialogue")) return active ? active.fetch(request) : emptyApp ? emptyApp.fetch(request) : null;
+      if (path === "/__browser/dialogue/reset" && request.method === "POST") { await active?.close(); active = null; emptyApp = null; return Response.json({ reset: true }); }
+      if (path === "/__browser/dialogue/empty-collection" && request.method === "POST") {
+        await active?.close(); active = null; emptyApp = createApp({ databasePath: join(directory, `empty-${crypto.randomUUID()}.sqlite`) });
+        return Response.json({ empty: true });
+      }
       if (path === "/__browser/dialogue/world" && request.method === "POST") {
         const input = await request.json() as { scenario?: BrowserDialogueScenario; empty?: boolean; followUp?: boolean; limitedFollowUp?: boolean; previewLimit?: number };
         if (input.scenario !== undefined && input.scenario !== "available" && input.scenario !== "uncertain") return Response.json({ error: "Invalid example scenario" }, { status: 400 });
-        await active?.close(); active = await createDialogueWorld(join(directory, `dialogue-${crypto.randomUUID()}.sqlite`), input.scenario ?? "available", input.empty === true,
+        await active?.close(); emptyApp = null; active = await createDialogueWorld(join(directory, `dialogue-${crypto.randomUUID()}.sqlite`), input.scenario ?? "available", input.empty === true,
           { followUp: input.followUp === true, ...(input.limitedFollowUp === true ? { followUpLimits: { jobs: 1, origins: 1, targets: 1, changes: 1 } } : {}), ...(input.previewLimit ? { previewLimit: input.previewLimit } : {}) });
         return Response.json(active.metadata);
       }
@@ -245,6 +271,8 @@ export function createBrowserDialogueControls(directory: string) {
       if (request.method !== "POST") return Response.json({ error: "Unknown example control" }, { status: 404 });
       if (path === "/__browser/dialogue/start") { const result = await active.start(); return Response.json({ result, ...active.metrics() }); }
       if (path === "/__browser/dialogue/capture-abandon") return Response.json(active.captureForAbandonment());
+      if (path === "/__browser/dialogue/seed-recent-reading") { const input = await request.json() as { outsideWindow?: boolean; userAuthored?: boolean; longText?: boolean }; return Response.json(active.seedRecentReading(input.outsideWindow === true, input.userAuthored === true, input.longText === true)); }
+      if (path === "/__browser/dialogue/revise-recent-reading") return Response.json(active.reviseRecentReading());
       if (path === "/__browser/dialogue/abandon") return Response.json(active.abandon());
       if (path === "/__browser/dialogue/write-idea") { await active.writeIdea(); return Response.json(active.metrics()); }
       if (path === "/__browser/dialogue/preview") { const input = await request.json() as { text?: unknown; start?: unknown }; if (typeof input.text !== "string" || typeof input.start !== "boolean") return Response.json({ error: "Invalid preview fixture" }, { status: 400 }); await active.preview(input.text, input.start); return Response.json(active.metrics()); }

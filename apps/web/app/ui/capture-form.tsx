@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { CaptureInput, Source } from "@thoughtloom/contracts";
 import { parseSource } from "../../lib/source";
 import StatusIcon from "./status-icon";
+import RecentThoughts from "./recent-thoughts";
 
 type Attempt = { key: string; input: CaptureInput };
 
@@ -78,7 +79,7 @@ export default function CaptureForm() {
   }
 
   return (
-    <form onSubmit={save} className="capture-form" aria-busy={saving}>
+    <><form onSubmit={save} className="capture-form" aria-busy={saving}>
       <textarea
         ref={editor}
         id="thought"
@@ -99,6 +100,6 @@ export default function CaptureForm() {
         <button className="button primary" type="submit" disabled={saving || !text.trim()}>{saving ? "Saving…" : error ? "Retry save" : "Save original"}</button>
       </div>
       {saved && <div className="notice" role="status"><StatusIcon kind="saved" /><p><strong>Original saved</strong>. <Link href={`/sources/${saved.id}`}>Open your saved original</Link>.</p></div>}
-    </form>
+    </form><RecentThoughts hidden={text.length > 0 || saving || saved !== null} /></>
   );
 }

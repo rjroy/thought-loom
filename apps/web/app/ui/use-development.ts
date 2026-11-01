@@ -66,7 +66,12 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
     if (!mounted.current || current.current !== key || window.location.pathname !== `/sources/${encodeURIComponent(root)}/inquiry`) return;
     const next = new URL(window.location.href);
     next.searchParams.set("dialogue", id);
-    if (explicit || !next.hash.startsWith("#turn-")) next.hash = "development";
+    if (next.searchParams.has("version")) {
+      const selection = all.current[key]?.selection;
+      if (selection?.kind === "item") { next.searchParams.set("item", selection.id); next.searchParams.set("version", selection.versionId); }
+      else { next.searchParams.delete("item"); next.searchParams.delete("version"); }
+    }
+    if (explicit || (!next.hash.startsWith("#turn-") && next.hash !== "#discussion-target")) next.hash = "development";
     window.history.replaceState(null, "", next);
   }, [root]);
   const read = useCallback(async (key: string, manual = false, signal?: AbortSignal) => {

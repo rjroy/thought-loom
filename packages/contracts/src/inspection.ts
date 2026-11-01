@@ -9,7 +9,8 @@ export type ItemView = { id: string; sourceId: string; kind: "interpretation" | 
 export type RelationshipVersionView = { id: string; status: "active" | "rejected"; rationale: string; author: "user" | "ai"; evidenceSourceIds: string[]; followUp?: FollowUpVersionOrigin };
 export type RelationshipView = { id: string; fromItemId: string; toItemId: string; type: "supports" | "challenges" | "suggests"; current: RelationshipVersionView; history: RelationshipVersionView[]; historyTruncated: boolean };
 export type EvidenceSource = { id: string; excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
-export type InquiryView = { source: Source; items: ItemView[]; relationships: RelationshipView[]; evidenceSources: EvidenceSource[]; truncated: boolean };
+export type InquirySelectedTarget = { kind: "item"; id: string; versionId: string; text: string; author: "user" | "ai"; evidenceSourceIds: string[] };
+export type InquiryView = { source: Source; items: ItemView[]; relationships: RelationshipView[]; evidenceSources: EvidenceSource[]; truncated: boolean; selectedTarget?: InquirySelectedTarget };
 
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function text(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
@@ -111,7 +112,17 @@ export function parseInquiryView(value: unknown): InquiryView | null {
   if (needed.size !== refIds.size || [...needed].some((id) => !refIds.has(id))) return null;
   const rootRef = evidenceSources.find((entry) => entry.id === source.id);
   if (!rootRef || rootRef.provenance !== source.provenance || rootRef.createdAt !== source.createdAt) return null;
-  return { source, items, relationships, evidenceSources, truncated: value.truncated };
+  let selectedTarget: InquirySelectedTarget | undefined;
+  if (value.selectedTarget !== undefined) {
+    const target = value.selectedTarget;
+    if (!record(target) || target.kind !== "item" || !isRecordId(target.id) || !isRecordId(target.versionId) || !text(target.text) || !author(target.author)) return null;
+    const ids = evidence(target.evidenceSourceIds);
+    const item = items.find((entry) => entry.id === target.id && entry.sourceId === source.id);
+    const version = item?.history.find((entry) => entry.id === target.versionId);
+    if (!ids || !version || version.text !== target.text || version.author !== target.author || JSON.stringify(version.evidenceSourceIds) !== JSON.stringify(ids)) return null;
+    selectedTarget = { kind: "item", id: target.id, versionId: target.versionId, text: target.text, author: target.author, evidenceSourceIds: ids };
+  }
+  return { source, items, relationships, evidenceSources, truncated: value.truncated, ...(selectedTarget ? { selectedTarget } : {}) };
 }
 
 function searchResult(value: unknown): SearchResult | null {

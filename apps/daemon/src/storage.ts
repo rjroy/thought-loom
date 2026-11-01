@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
 import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
 
-export const CURRENT_DATABASE_VERSION = 17;
+export const CURRENT_DATABASE_VERSION = 18;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -518,6 +518,14 @@ export function openDatabase(path: string): Database {
       if (version && version.user_version < 17) {
         migrateWeavingAbandonment(db);
         db.run("PRAGMA user_version = 17");
+      }
+      if (version && version.user_version < 18) {
+        db.run("ALTER TABLE knowledge_items ADD COLUMN created_at TEXT");
+        db.run("CREATE INDEX knowledge_created_at ON knowledge_items(created_at, id) WHERE created_at IS NOT NULL");
+        db.run("CREATE INDEX sources_created_at ON sources(created_at DESC, id)");
+        db.run(`CREATE TRIGGER knowledge_creation_time_immutable BEFORE UPDATE OF created_at ON knowledge_items
+          BEGIN SELECT RAISE(ABORT, 'immutable item creation time'); END`);
+        db.run("PRAGMA user_version = 18");
       }
       if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();

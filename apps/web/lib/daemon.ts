@@ -1,5 +1,5 @@
 import "server-only";
-import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
+import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, parseRecentThoughts, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
 import { isSourceId, parseSource } from "./source";
 import { isIdempotencyKey, parseWeavingRetryInput, parseWeavingRetryReceipt, parseWeavingStatusView, type WeavingStatusView } from "@thoughtloom/contracts";
 
@@ -106,11 +106,17 @@ export async function readSearch(query: string): Promise<{ kind: "found"; result
   return response.kind === "found" ? { kind: "found", results: response.value.results } : { kind: "unavailable" };
 }
 
-export async function readInquiry(id: string): Promise<ProjectionRead<InquiryView>> {
+export async function readRecentThoughts() {
+  return readProjection("bff.springboard.recent", "/springboard/recent?limit=2", parseRecentThoughts);
+}
+
+export async function readInquiry(id: string, target?: { itemId: string; versionId: string }): Promise<ProjectionRead<InquiryView>> {
   if (!isRecordId(id)) return { kind: "not-found" };
-  return readProjection("bff.inquiry.read", `/sources/${encodeURIComponent(id)}/inquiry`, (value) => {
+  if (target && (!isRecordId(target.itemId) || !isRecordId(target.versionId))) return { kind: "not-found" };
+  const query = target ? `?${new URLSearchParams(target)}` : "";
+  return readProjection("bff.inquiry.read", `/sources/${encodeURIComponent(id)}/inquiry${query}`, (value) => {
     const parsed = parseInquiryView(value);
-    return parsed?.source.id === id ? parsed : null;
+    return parsed?.source.id === id && (!target || (parsed.selectedTarget?.id === target.itemId && parsed.selectedTarget.versionId === target.versionId)) ? parsed : null;
   });
 }
 
