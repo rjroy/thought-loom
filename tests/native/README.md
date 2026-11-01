@@ -1,5 +1,62 @@
 # Opt-in Thoughtloom plugin witness
 
+## Generated-title fixture evidence and limits
+
+The reviewed production source marker is `thoughtloom-generated-titles-v1`;
+the five-source and bundle pins in `plugin-provenance.ts` are freshly regenerated
+reviewed inputs, not cryptographic proof of executing bytes. The isolated source
+title fixture passed with the final bundle: `/tmp/opencode/title-native-witness-rerun.log`
+records OpenCode 2.2.2, verified RPC, frozen command/grant, a completed native
+title tool, AI revision, preserved USER override and original, zero semantic
+changes and follow-up jobs, revoked grant, four fake-provider requests and
+completed cleanup. Its test-specific permission ceiling does not prove the
+production setup permits title calls.
+
+The final-bundle watcher fixture also passed: `/tmp/opencode/finalbundle-watch-witness.log`
+records A→B at the same PID/location, changed setup ID, fresh client/new nonce,
+11 expected actions, zero provider requests and completed cleanup. The malformed
+swap established only no B observed, not a witnessed failed setup. Neither test
+proves native exact-item title invocation or authorizes live rollout. The accepted
+64-artifact manifest SHA-256 is `4aafd83fe75f2386e91aa26c8d0c75a77b7b2b80639af9e02d8e5d3f1d0888a9`.
+The historical baseline fixture is not a substitute for these results.
+
+Offline reproduction: from the isolated copy, `bun --no-env-file run
+tests/native/plugin-provenance-report.ts`. Source closure is `plugin.ts`,
+`capabilities.ts`, `contracts/src/tools.ts`, `native-capabilities.ts` and
+`inspection.ts`; candidate bundle A is
+`45cdf149bc2c5ddb5f16eb3ebecc925794c88604d2205455996a0e02d7f200da`,
+test-marker B is
+`1b4eaea29e41bac3f108a3d1c307073484fe9ff9384f9cf9a8db735a8fa292e1`.
+The embedded marker is a reviewed identifier, not an executing-byte hash.
+
+### Source-title fixture — reviewed isolated execution
+
+The following is the isolated command used for the final witness, not permission
+to rerun against a live application or change a shared native service:
+
+```sh
+THOUGHTLOOM_PLUGIN_WITNESS=1 THOUGHTLOOM_TITLE_WITNESS=1 \
+OPENCODE_TEST_BINARY=/home/rjroy/.local/share/mise/installs/npm-opencode-cli/2.2.2/node_modules/.mise/@opencode+cli@2.2.2/node_modules/@opencode/cli/bin/opencode.exe \
+bun --no-env-file run tests/native/title-witness.ts
+```
+
+This adds one explicit title-only launch profile: native uses a fresh private
+home/config/database and the pinned binary/bundle, with project discovery and
+file watching disabled. An exact test-owned config-content agent ceiling adds
+only `record_title_v1` to the baseline; the offline-provisioned project file and
+legacy profiles stay unchanged. This fixture-specific ceiling is not proof that
+an operator's native setup permits title calls. The fake provider uses only
+loopback, a fixed synthetic source and bounded scripted read/title/final flow.
+The guard rejects the app ports and checks generated files before owned launch.
+The fixture requires a fresh matching RPC nonce/build/PID/location, a new frozen
+title-capable command/grant, one successful native title invocation, an AI title
+revision, preserved user override and original, zero semantic changes and no
+follow-up job. Cleanup signals only the owned process and retains the private
+root if uncertain. The 75-second lifetime and request bounds apply; no external
+provider or personal data is involved. Source-only evidence does **not** prove
+exact-item titles, legacy-command denial, A→B activation of this bundle, live
+rollout, hostile-process isolation or production permission configuration.
+
 **Historical capture-only witness passed on 2026-10-31** after security review and independent
 execution; results and limits are recorded in the [research note](../../.lore/work/research/opencode-2.2.2-owned-tools.md#2026-10-31--isolated-application-witness).
 This does not certify personal policies, operator-service compatibility, dialogue
@@ -9,8 +66,8 @@ three baseline profiles or an operator-service check. It changes no production
 configuration. Any rerun remains explicit opt-in and subject to security review.
 
 **Phase-4 capture+dialogue witness passed on 2026-10-31** after fresh review.
-An independent tester ran the exact command below **once**, with the current
-reviewed source/bundle pins: exit **0**. This is separate from the historical
+An independent tester ran the exact command below **once**, with the then-reviewed
+source/bundle pins: exit **0**. This is separate from the historical
 capture-only result; the existing baseline's three profiles were not rerun.
 
 Receipt: **2.2.2**, plugin **active**, capture job and dialogue **completed**,
@@ -41,7 +98,36 @@ native process or provider/model call. The real-source bundle check uses
 test writes only a fresh private temporary fixture and removes it afterward;
 it checks that production setup and the exact guarded documents agree.
 
-## Native execution — independent tester only, after review
+## Watcher capability fixture — reviewed isolated execution
+
+The final-bundle watcher pass above used the separate profile below. Any future
+execution requires applicable safety review and authorization; isolated fixture
+approval is not live-rollout authorization:
+
+```sh
+THOUGHTLOOM_PLUGIN_WITNESS=1 THOUGHTLOOM_PLUGIN_WATCH_WITNESS=1 \
+OPENCODE_TEST_BINARY=/home/rjroy/.local/share/mise/installs/npm-opencode-cli/2.2.2/node_modules/.mise/@opencode+cli@2.2.2/node_modules/@opencode/cli/bin/opencode.exe \
+bun --no-env-file run tests/native/plugin-watch-witness.ts
+```
+
+This separate profile keeps the exact guarded binary, private fixture root,
+sanitized environment, fixed location and single local package, but enables file
+watching. It sends no prompts: both loopback fixture services reject requests,
+and provider requests must remain zero. It observes executing-build A, tries a
+malformed same-entry replacement (no B must be observed), atomically swaps the
+same entry to test-only B, and requires B from the same PID/location plus a new
+nonce through a fresh client. B differs only in an embedded fixture marker and is
+pinned separately; neither marker is an executing-byte hash. The malformed check
+does not prove that the watcher observed that failed replacement. This watcher
+alone does not invoke the title tool. Failure means STOP, not a
+reload, new location or retry against shared services. Cleanup signals only the
+owned child group and retains the private root if cleanup is uncertain.
+
+The candidate source and in-memory bundle digests can be reproduced without
+native execution using `bun --no-env-file run tests/native/plugin-provenance-report.ts`.
+The report writes no pins; a reviewer must inspect source and update pins explicitly.
+
+## Baseline native execution — independent tester only, after review
 
 The opt-in script is `test:native:plugin`. Its equivalent exact entrypoint is:
 
@@ -57,11 +143,11 @@ witness failure is a failure, not permission to relax isolation or retry a promp
 
 ## Review surface and narrow baseline adaptation
 
-* `plugin-isolation.ts` defines a single exact configuration/environment profile.
+* `plugin-isolation.ts` defines exact baseline and separately opted-in watcher environment profiles.
   `node-io.ts` supplies metadata/hash checks. `owned-native.ts` is the only spawn
   site, reached through `guardedLaunch` after all guards.
-* `plugin-provenance.ts` pins exactly the first-party plugin and its only runtime
-  source import, `contracts/src/tools.ts`. `plugin-bundle.ts` checks canonical
+* `plugin-provenance.ts` pins the plugin, capability module, and their two contract
+  inputs. `plugin-bundle.ts` checks canonical
   source paths/hashes and reproduces the pinned in-memory bundle. The harness
   never learns a hash from current files and then approves it automatically.
 * Require Linux x64, Bun 1.4.3, canonical repository cwd and the exact existing
@@ -88,7 +174,7 @@ witness failure is a failure, not permission to relax isolation or retry a promp
   pinned binary; registry validation allows those and only our exact active local
   package. It does not pretend the first-party package is the entire native
   registry. Active status alone is not success.
-* Disable model catalog fetch, free providers, updates, file watching, sharing,
+* Disable model catalog fetch, free providers, updates, baseline file watching, sharing,
   snapshots, warming and automatic compaction. The only enabled chat model must
   be the test-owned loopback provider. Default-deny permissions allow only exact
   actions. The agent ceiling is exactly `read_source`, `record_interpretation`

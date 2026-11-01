@@ -106,7 +106,7 @@ export async function followUpFixture(register: (close: () => Promise<void>) => 
   async function correct(itemId: string, expectedVersionId: string, text: string, turnSourceId: string, key = `correction-${++sequence}`) {
     return app.request(`/items/${itemId}/correct`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ expectedVersionId, text, sourceId: turnSourceId }) });
   }
-  async function native(settings: { maintained?: boolean; uncertain?: boolean; maxAttempts?: number; contextCharacters?: number } = {}) {
+  async function native(settings: { maintained?: boolean; uncertain?: boolean; maxAttempts?: number; contextCharacters?: number; titleCapability?: boolean } = {}) {
     const registrationFile = join(directory, `registration-${++sequence}.json`);
     await writeFile(registrationFile, JSON.stringify({ url: "http://127.0.0.1:1234", pid: 42, version: "2.2.2" }), { mode: 0o600 });
     const sessions = new Map<string, NativeSession>(), sdkSessions = new Map<string, Record<string, unknown>>();
@@ -119,6 +119,10 @@ export async function followUpFixture(register: (close: () => Promise<void>) => 
     const sdk = {
       server: { async info() { return { version: "2.2.2", pid: 42 }; } },
       plugin: { async list() { return { data: [{ id: "thoughtloom", state: { status: "active" } }] }; } },
+      rpc: { async call(input: { input: { nonce: string } }) {
+        if (!settings.titleCapability) throw new Error("Capability unavailable");
+        return { output: { protocol: 1, nonce: input.input.nonce, buildId: "fixture-reviewed-build", setupId: "fixture-setup", nativePid: 42, directory: location, actions: ["read_source", "record_title_v1"] } };
+      } },
       session: {
         async create(input: Record<string, unknown>) {
           if (typeof input.id !== "string") throw new Error("Missing SDK session ID");
@@ -131,7 +135,7 @@ export async function followUpFixture(register: (close: () => Promise<void>) => 
         async prompt(input: { sessionID: string; id: string; text: string }) { nativePrompts.push(structuredClone(input)); return { id: input.id, sessionID: input.sessionID, payload: { text: input.text } }; },
       },
     } as unknown as OpenCodeClient;
-    const maintained = settings.maintained ? createMaintainedClient(options, { async discover() { return { url: "http://127.0.0.1:1234", auth: { type: "basic", username: "fixture", password: "test-owned" } }; }, headers: Service.headers, make() { return sdk; } }) : undefined;
+    const maintained = settings.maintained ? createMaintainedClient(options, { async discover() { return { url: "http://127.0.0.1:1234", auth: { type: "basic", username: "fixture", password: "test-owned" } }; }, headers: Service.headers, make() { return sdk; }, ...(settings.titleCapability ? { expectedCapabilityBuildId: "fixture-reviewed-build" } : {}) }) : undefined;
     const client: NativeClientPort = {
       discover: (file, version) => maintained ? maintained.discover(file, version) : Promise.resolve({ url: "http://127.0.0.1:1234", version: "2.2.2", pid: 42 }),
       identity: () => maintained ? maintained.identity() : Promise.resolve({ version: "2.2.2", pid: 42 }),

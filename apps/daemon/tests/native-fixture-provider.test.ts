@@ -1,8 +1,38 @@
 import { expect, test } from "bun:test";
 import { fixtureConversation, ORIGINAL, INTERPRETATION, FINAL, USER_INPUT, IDEA, DIALOGUE_FINAL, READ_CALL, WRITE_CALL, TURN_READ_CALL, IDEA_CALL, PROVIDER_LIMITS,
   type DialogueFixture } from "../../../tests/native/fixture-provider";
+import { titleFixtureConversation, titleFixtureProvider, TITLE_READ_CALL, TITLE_WRITE_CALL, TITLE_TEXT, TITLE_FINAL } from "../../../tests/native/title-fixture-provider";
+import { readinessFromOutput } from "../../../tests/native/plugin-isolation";
 
 const sourceId = "source_fixture_root";
+
+test("title provider requires exact tool catalog and read receipt before its single fixed write", () => {
+  const head = "fixture-head", machine = titleFixtureConversation(sourceId, head), tools = [...captureTools, "record_title_v1"];
+  const requestTitle = (body: unknown) => machine.reply("POST", "/v1/chat/completions", body);
+  expect(requestTitle(payload(tools)).delta).toMatchObject({ tool_calls: [{ id: TITLE_READ_CALL, function: { name: "read_source" } }] });
+  expect(requestTitle(payload(tools, [result(TITLE_READ_CALL, { text: ORIGINAL, titleState: { headRevisionId: head } })])).delta).toMatchObject({ tool_calls: [{ id: TITLE_WRITE_CALL, function: { name: "record_title_v1", arguments: JSON.stringify({ rootSourceId: sourceId, target: { kind: "source" }, text: TITLE_TEXT, expectedTitleRevisionId: head }) } }] });
+  expect(requestTitle(payload(tools, [result(TITLE_WRITE_CALL, { text: TITLE_TEXT })]))).toEqual({ delta: { content: TITLE_FINAL }, finish: "stop" });
+  expect(() => requestTitle(payload(tools))).toThrow("title_provider_turn_budget");
+  const denied = titleFixtureConversation(sourceId, head);
+  expect(() => denied.reply("POST", "/v1/chat/completions", payload([...tools, "bash"]))).toThrow("title_provider_tools_rejected");
+  const missing = titleFixtureConversation(sourceId, head); missing.reply("POST", "/v1/chat/completions", payload(tools));
+  expect(() => missing.reply("POST", "/v1/chat/completions", payload(tools, [result(TITLE_READ_CALL, { text: ORIGINAL })]))).toThrow("title_provider_read_missing");
+});
+
+test("title provider HTTP is loopback bounded and fails closed on unexpected tools", async () => {
+  const controller = new AbortController(), provider = titleFixtureProvider(sourceId, "fixture-head", controller.signal);
+  try {
+    expect(readinessFromOutput(`server listening on ${provider.origin}\n`)).toBe(provider.origin);
+    const post = (body: unknown) => fetch(`${provider.origin}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), redirect: "error" });
+    const first = await post(payload([...captureTools, "record_title_v1"]));
+    expect(first.status).toBe(200); expect(await first.text()).toContain(TITLE_READ_CALL);
+    const denied = await post(payload([...captureTools, "record_title_v1", "bash"]));
+    expect(denied.status).toBe(400); await denied.body?.cancel();
+    const after = await post(payload([...captureTools, "record_title_v1"]));
+    expect(after.status).toBe(400); await after.body?.cancel();
+    expect(provider.counts().failed).toBe(true);
+  } finally { controller.abort(); await provider.close(); }
+});
 const captureTools = ["read_source", "record_interpretation"], dialogueTools = ["read_source", "record_idea"];
 function context(): DialogueFixture { return { dialogueId: "dialogue_fixture", turnId: "turn_fixture", turnSourceId: "source_fixture_turn", derivedFrom: { itemId: "item_fixture", versionId: "version_fixture" } }; }
 type Conversation = ReturnType<typeof fixtureConversation>;

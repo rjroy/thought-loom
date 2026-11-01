@@ -21,6 +21,7 @@ import { FINAL, INTERPRETATION, ORIGINAL, READ_CALL, WRITE_CALL, DIALOGUE_FINAL,
   PROVIDER_LIMITS, fixtureProvider, type DialogueFixture } from "./fixture-provider";
 import { startOwnedNative } from "./owned-native";
 import { reviewedBundle } from "./plugin-bundle";
+import { canonicalHistory } from "./fixture-history";
 
 function check(value: unknown, code: string): asserts value { if (!value) throw new WitnessGuardError(code); }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -30,18 +31,6 @@ async function privateWrite(path: string, content: string) {
 }
 type Accepted = { native: NativeIdentity; action: string };
 function requestOptions(signal: AbortSignal) { return { signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]) }; }
-async function canonicalHistory(client: OpenCodeClient, run: WeavingRun, signal: AbortSignal) {
-  const result: SessionMessageInfo[] = [], seen = new Set<string>(), cursors = new Set<string>();
-  let cursor: string | undefined;
-  for (let page = 0; page < 20; page++) {
-    const next = await client.message.list({ sessionID: run.sessionId, limit: 50, ...(cursor ? { cursor } : { order: "asc" as const }) }, requestOptions(signal));
-    for (const message of next.data) { check(!seen.has(message.id), "witness_history_duplicate"); seen.add(message.id); result.push(message); }
-    if (!next.cursor.next) return result;
-    check(!cursors.has(next.cursor.next), "witness_history_cursor_loop");
-    cursor = next.cursor.next; cursors.add(cursor);
-  }
-  throw new WitnessGuardError("witness_history_page_budget");
-}
 function verifyContext(history: SessionMessageInfo[], run: WeavingRun, accepted: Accepted[], kind: "capture" | "dialogue") {
   check(history.filter((message) => message.type === "user").length === 1 && history.some((message) => message.type === "user" && message.id === run.promptId), "witness_prompt_identity");
   const expected = kind === "capture" ? [{ action: "read_source", call: READ_CALL }, { action: "record_interpretation", call: WRITE_CALL }] :
@@ -234,7 +223,7 @@ export async function runPluginWitness() {
       await pause(100, undefined, { signal: lifetime.signal });
     }
     const run = started.run;
-    const history = await canonicalHistory(client, run, lifetime.signal);
+    const history = await canonicalHistory(client, run.sessionId, lifetime.signal);
     verifyContext(history, run, accepted, "capture");
     await verifyNativeSettlement(client, run, "capture", p.cwd, lifetime.signal);
     const derivedFrom = verifyStorage(databasePath, run, accepted, sourceBefore);
@@ -281,7 +270,7 @@ export async function runPluginWitness() {
       await pause(100, undefined, { signal: lifetime.signal });
     }
     const dialogueAccepted = accepted.filter((entry) => entry.native.sessionID === dialogueRun.sessionId);
-    const dialogueHistory = await canonicalHistory(client, dialogueRun, lifetime.signal);
+    const dialogueHistory = await canonicalHistory(client, dialogueRun.sessionId, lifetime.signal);
     const assistantId = verifyContext(dialogueHistory, dialogueRun, dialogueAccepted, "dialogue");
     await verifyNativeSettlement(client, dialogueRun, "dialogue", p.cwd, lifetime.signal, context);
     verifyDialogueStorage(databasePath, dialogueRun, dialogueAccepted, context, assistantId, sourceBefore);

@@ -7,6 +7,8 @@ import { createToolApp, OwnedGrants, type OwnedGrant } from "../src/tool-boundar
 import { WeavingWorker, type WeavingAdapter } from "../src/weaving";
 import { KnowledgeService } from "../src/knowledge";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
+import { nativePermissions, parseNativeCommand } from "../src/native-profile";
 
 const directories: string[] = [];
 const pendingWorkers: Array<{ release: () => void; done: Promise<unknown> }> = [];
@@ -57,6 +59,47 @@ test("transport credential is required even for an otherwise plausible native en
   const response = await send({ native, input }, "wrong-test-credential");
   expect(response.status).toBe(401);
 });
+
+test("generated title endpoint rejects a legacy owned grant without mutating titles or run authority", async () => {
+  const f = await fixture(); await f.activate();
+  const read = new Database(f.databasePath, { readonly: true });
+  try {
+    const queries = ["SELECT * FROM sources ORDER BY id", "SELECT * FROM jobs ORDER BY id", "SELECT * FROM owned_grants ORDER BY session_id", "SELECT * FROM native_commands ORDER BY run_id", "SELECT * FROM title_entities ORDER BY id", "SELECT * FROM title_revisions ORDER BY id", "SELECT * FROM title_heads ORDER BY entity_id", "SELECT * FROM title_receipts ORDER BY idempotency_key", "SELECT * FROM title_search ORDER BY entity_id"];
+    const before = queries.map((query) => read.query(query).all());
+    const response = await f.tools.request("/internal/tools/record-title-v1", { method: "POST", headers: { authorization: "Bearer test-only-credential", "content-type": "application/json" }, body: JSON.stringify({ action: "record_title_v1", native: f.native, input: { rootSourceId: f.source.id, target: { kind: "source" }, text: "Generated title", expectedTitleRevisionId: null } }) });
+    expect(response.status).toBe(403);
+    expect(queries.map((query) => read.query(query).all())).toEqual(before);
+  } finally { read.close(); }
+});
+
+for (const scenario of ["no-command", "missing-proof", "proof-without-title", "wrong-command-hash"] as const) {
+  test(`title grant rejects ${scenario} without authority or title writes`, async () => {
+    const f = await fixture();
+    const actions = ["read_source", "record_interpretation", "record_title_v1"] as const;
+    const proof = { protocol: 1, nonce: "test-nonce", buildId: "test-reviewed-build", setupId: "test-setup", nativePid: 42, directory: f.grant.location, actions: ["read_source", "record_title_v1"] };
+    const command = { text: "fixture command", location: f.grant.location, agent: f.grant.agent, model: { providerID: "fixture", id: "model", variant: "default" }, permissions: nativePermissions(actions), profile: { version: 1, actions: [...actions], capability: proof } };
+    // This proves the synthetic command is structurally valid; it is never
+    // treated as an accepted proof or used to manufacture a positive grant.
+    expect(parseNativeCommand(command)).not.toBeNull();
+    if (scenario !== "no-command") {
+      const capability = scenario === "missing-proof" ? null : scenario === "proof-without-title" ? { ...proof, actions: ["read_source"] } : proof;
+      const payload = JSON.stringify({ ...command, profile: { ...command.profile, capability } });
+      if (scenario !== "wrong-command-hash") expect(parseNativeCommand(JSON.parse(payload))).toBeNull();
+      const hash = scenario === "wrong-command-hash" ? "0".repeat(64) : createHash("sha256").update(payload).digest("hex");
+      const db = new Database(f.databasePath);
+      try { db.run("INSERT INTO native_commands(run_id,payload,payload_hash) VALUES (?,?,?)", [f.grant.run.runId, payload, hash]); }
+      finally { db.close(); }
+    }
+    const db = new Database(f.databasePath, { readonly: true });
+    try {
+      const queries = ["SELECT * FROM owned_grants", "SELECT * FROM title_entities", "SELECT * FROM title_revisions", "SELECT * FROM title_heads", "SELECT * FROM title_receipts", "SELECT * FROM title_search"];
+      const before = queries.map((query) => db.query(query).all());
+      expect(() => f.grants.bind({ ...f.grant, operations: [...actions] })).toThrow();
+      expect(queries.map((query) => db.query(query).all())).toEqual(before);
+      expect(f.admissions).toEqual([]);
+    } finally { db.close(); }
+  });
+}
 
 test("a transport credential alone cannot authorize unowned or child/fork sessions", async () => {
   const { send, native, input } = await fixture();

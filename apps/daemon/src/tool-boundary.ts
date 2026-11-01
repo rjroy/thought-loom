@@ -3,12 +3,15 @@ import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
-import { DOMAIN_ACTIONS, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
-import { KnowledgeError, KnowledgeService, type KnowledgeContext } from "./knowledge";
-import { findSource, openDatabase, searchSources } from "./storage";
+import { isLegacyNativeAction, NATIVE_CAPABILITY_ACTIONS, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
+import { KnowledgeError, KnowledgeService, readItem, readRelationship, type KnowledgeContext } from "./knowledge";
+import { openDatabase, searchSources, sourceRecord } from "./storage";
 import type { WeavingRun } from "./weaving";
 import { runScope, type RunScope } from "./run-scope";
 import { dialogueHeader } from "./dialogue-data";
+import { parseNativeCommand } from "./native-profile";
+import { writeTitle } from "./title-write";
+import { readTitle } from "./title-projection";
 
 export type OwnedGrant = {
   run: WeavingRun;
@@ -18,8 +21,9 @@ export type OwnedGrant = {
   operations: ToolAction[];
 };
 
-// Only implemented domain operations can be granted. No generic SQL/file tool.
-export const supportedToolActions: readonly ToolAction[] = DOMAIN_ACTIONS;
+// Known grant vocabulary only. Extension grants also require a matching frozen
+// native profile; a registered boundary alone never supplies that authority.
+export const supportedToolActions: readonly ToolAction[] = NATIVE_CAPABILITY_ACTIONS;
 type GrantRecord = { runId: string; location: string; agent: string; sourceIds: string; operations: string; revoked: number; jobId: string; root: string; promptId: string };
 type GrantRow = GrantRecord & { scope: RunScope };
 
@@ -56,6 +60,18 @@ function authorize(db: Database, native: NativeIdentity, location: string, actio
   return { ...row, scope };
 }
 
+function titleCommandHash(db: Database, grant: GrantRow, pluginBuildId: unknown): string {
+  const saved = db.query<{ payload: string; hash: string }, [string]>("SELECT payload,payload_hash AS hash FROM native_commands WHERE run_id=?").get(grant.runId);
+  if (!saved || createHash("sha256").update(saved.payload).digest("hex") !== saved.hash) throw new KnowledgeError("forbidden");
+  let value: unknown;
+  try { value = JSON.parse(saved.payload); } catch { throw new KnowledgeError("forbidden"); }
+  const command = parseNativeCommand(value), capability = command?.profile.capability;
+  if (!command || !capability || !command.profile.actions.includes("record_title_v1") || !capability.actions.includes("record_title_v1") ||
+      pluginBuildId !== capability.buildId || command.location !== grant.location || command.agent !== grant.agent ||
+      JSON.stringify([...command.profile.actions].sort()) !== JSON.stringify(strings(grant.operations).sort())) throw new KnowledgeError("forbidden");
+  return saved.hash;
+}
+
 // These administrative operations are daemon-internal, not model-facing APIs.
 export class OwnedGrants {
   constructor(private readonly databasePath: string) {}
@@ -80,6 +96,12 @@ export class OwnedGrants {
         }
         const sourceIds = JSON.stringify([...grant.sourceIds].sort());
         const operations = JSON.stringify([...grant.operations].sort());
+        const native = db.query<{ payload: string; hash: string }, [string]>("SELECT payload,payload_hash AS hash FROM native_commands WHERE run_id=?").get(run.runId);
+        if (native) {
+          const command = parseNativeCommand(JSON.parse(native.payload));
+          if (!command || createHash("sha256").update(native.payload).digest("hex") !== native.hash || command.location !== grant.location || command.agent !== grant.agent ||
+              JSON.stringify([...command.profile.actions].sort()) !== operations) throw new KnowledgeError("forbidden");
+        } else if (grant.operations.some((action) => !isLegacyNativeAction(action))) throw new KnowledgeError("forbidden");
         const hash = createHash("sha256").update(JSON.stringify([
           run.runId, run.jobId, run.sourceId, run.sessionId, run.promptId, grant.location, grant.agent, sourceIds, operations,
         ])).digest("hex");
@@ -185,12 +207,13 @@ export function createToolApp(options: { databasePath: string; transportCredenti
   async function envelope(request: Request, action: ToolAction) {
     let body: unknown;
     try { body = await request.json(); } catch { throw new KnowledgeError("invalid_input"); }
-    if (!toolRecord(body) || !toolKeys(body, ["native", "input", "action"]) || (body.action !== undefined && body.action !== action)) {
+    const keys = action === "record_title_v1" ? ["native", "input", "action", "pluginBuildId"] : ["native", "input", "action"];
+    if (!toolRecord(body) || !toolKeys(body, keys) || (body.action !== undefined && body.action !== action)) {
       throw new KnowledgeError("invalid_input");
     }
     const native = parseNativeIdentity(body.native);
     if (!native) throw new KnowledgeError("invalid_input");
-    return { native, input: body.input };
+    return { native, input: body.input, pluginBuildId: body.pluginBuildId };
   }
 
   function mutate<T>(native: NativeIdentity, action: ToolAction, scope: (db: Database, grant: GrantRow) => void,
@@ -206,12 +229,9 @@ export function createToolApp(options: { databasePath: string; transportCredenti
     const knowledge = new KnowledgeService(options.databasePath, (db) => { check(db); }, before ? (db) => before(db, check(db)) : undefined);
     return change(knowledge, { actor: "ai", operationId, runId: grant.runId });
   }
-  function witness(native: NativeIdentity, action: ToolAction, kind: "source" | "item" | "relationship", id: string, version: string | null) {
-    storage(options.databasePath, true, (db) => {
-      const grant = authorize(db, native, options.location, action);
-      db.run(`INSERT INTO tool_reads(run_id,kind,record_id,version_id) VALUES (?,?,?,?)
-        ON CONFLICT(run_id,kind,record_id) DO UPDATE SET version_id=excluded.version_id`, [grant.runId, kind, id, version]);
-    });
+  function witness(db: Database, grant: GrantRow, kind: "source" | "item" | "relationship", id: string, version: string | null) {
+    db.run(`INSERT INTO tool_reads(run_id,kind,record_id,version_id) VALUES (?,?,?,?)
+      ON CONFLICT(run_id,kind,record_id) DO UPDATE SET version_id=excluded.version_id`, [grant.runId, kind, id, version]);
   }
 
   app.post("/internal/tools/record-interpretation", async (context) => {
@@ -233,6 +253,32 @@ export function createToolApp(options: { databasePath: string; transportCredenti
     const result = knowledge.createItem({ actor: "ai", operationId, runId: grant.runId }, { ...input, kind: "interpretation" });
     console.info("tools.interpretation succeeded", { runId: grant.runId, operationId, itemId: result.id });
     return context.json(result);
+  });
+
+  app.post("/internal/tools/record-title-v1", async (context) => {
+    const body = await envelope(context.req.raw, "record_title_v1");
+    console.info("tools.title attempt", { sessionId: body.native.sessionID, messageId: body.native.messageID, callId: body.native.callID });
+    const result = storage(options.databasePath, true, (db) => {
+      // Authorization, frozen build/profile validation and replay all share the
+      // write transaction: revocation or settlement cannot race a title write.
+      const grant = authorize(db, body.native, options.location, "record_title_v1");
+      const commandHash = titleCommandHash(db, grant, body.pluginBuildId);
+      const input = parseGeneratedTitle(body.input);
+      if (!input) throw new KnowledgeError("invalid_input");
+      // The shared writer checks item/root association and, for a new generated
+      // revision, the exact current formulation under this same transaction.
+      if (input.rootSourceId !== grant.scope.rootSourceId) throw new KnowledgeError("forbidden");
+      const callHash = createHash("sha256").update(JSON.stringify([body.native.sessionID, body.native.messageID, body.native.callID])).digest("hex");
+      // ':' is excluded from public manual idempotency keys. The retained native
+      // receipt identifies the owning run/call; its hash binds the accepted
+      // command (including capability proof), native identity and exact input.
+      const key = `native-title-v1:${grant.runId}:${callHash}`;
+      const payloadHash = createHash("sha256").update(JSON.stringify({ action: "record_title_v1", runId: grant.runId, native: body.native, commandHash, input })).digest("hex");
+      return { runId: grant.runId, title: writeTitle(db, { sourceId: input.rootSourceId, target: input.target, text: input.text,
+        expectedTitleRevisionId: input.expectedTitleRevisionId, author: "ai", key, payloadHash }) };
+    });
+    console.info("tools.title succeeded", { runId: result.runId, revisionId: result.title.revisionId });
+    return context.json(result.title);
   });
 
   app.post("/internal/tools/record-alias", async (context) => {
@@ -313,9 +359,14 @@ export function createToolApp(options: { databasePath: string; transportCredenti
   app.post("/internal/tools/read-source", async (context) => {
     const body = await envelope(context.req.raw, "read_source");
     if (!toolRecord(body.input) || !toolKeys(body.input, ["sourceId"]) || !toolId(body.input.sourceId)) throw new KnowledgeError("invalid_input");
-    storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "read_source"));
-    const source = findSource(options.databasePath, body.input.sourceId);
-    if (source) witness(body.native, "read_source", "source", source.id, null);
+    const id = body.input.sourceId;
+    const source = storage(options.databasePath, true, (db) => {
+      const grant = authorize(db, body.native, options.location, "read_source");
+      const source = sourceRecord(db, id);
+      if (!source) return null;
+      witness(db, grant, "source", source.id, null);
+      return { ...source, titleState: readTitle(db, source.id) };
+    });
     return source ? context.json(source) : context.json({ error: "Source not found" }, 404);
   });
   for (const action of ["read_item", "read_relationship"] as const) {
@@ -324,10 +375,19 @@ export function createToolApp(options: { databasePath: string; transportCredenti
       const field = action === "read_item" ? "itemId" : "relationshipId";
       if (!toolRecord(body.input) || !toolKeys(body.input, [field]) || !toolId(body.input[field])) throw new KnowledgeError("invalid_input");
       const id = body.input[field];
-      storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, action));
-      const service = new KnowledgeService(options.databasePath);
-      const result = action === "read_item" ? service.getItem(id) : service.getRelationship(id);
-      witness(body.native, action, action === "read_item" ? "item" : "relationship", id, result.current.id);
+      // Body/current version, title state and read witness share one snapshot;
+      // a concurrent formulation/title change cannot mix their identities.
+      const result = storage(options.databasePath, true, (db) => {
+        const grant = authorize(db, body.native, options.location, action);
+        if (action === "read_item") {
+          const item = readItem(db, id);
+          witness(db, grant, "item", id, item.current.id);
+          return { ...item, titleState: readTitle(db, item.sourceId, item.id, item.current.id) };
+        }
+        const relationship = readRelationship(db, id);
+        witness(db, grant, "relationship", id, relationship.current.id);
+        return relationship;
+      });
       return context.json(result);
     });
   }

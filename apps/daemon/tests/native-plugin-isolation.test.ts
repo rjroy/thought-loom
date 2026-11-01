@@ -8,11 +8,52 @@ import { ADMISSION_TIMEOUT_MS, AGENT, ANCHOR, ROOT_PREFIX, BUNDLE_SHA256, SOURCE
   type BinaryFacts, type GuardIO, type GuardInput, type LaunchSpec, type Metadata } from "../../../tests/native/plugin-isolation";
 import { reviewedBundle, validateSourceHashes } from "../../../tests/native/plugin-bundle";
 import { provisionNativeSetup } from "../src/native-setup";
+import { fixtureBuildB, preflightPluginWatch } from "../../../tests/native/plugin-watch-witness";
 
 const root = `${ANCHOR}/thoughtloom-plugin-witness-pure-owned`;
 const providerOrigin = "http://127.0.0.1:18491", daemonOrigin = "http://127.0.0.1:18492";
 const password = "fixture_native_password_123456789", credential = "fixture_transport_secret_1234567";
 const p = pathsFor(root);
+
+function preflightClient(options: { rejectBarrier?: boolean; unsafeRegistry?: boolean } = {}) {
+  const calls: string[] = [], locations: string[] = [], signals: AbortSignal[] = [];
+  const client = {
+    server: { async info(request: { signal: AbortSignal }) { calls.push("info"); signals.push(request.signal); return { version: "2.2.2", pid: 42, paths: { tmp: join(root, "tmp") } }; } },
+    model: { async list(input: { location: { directory: string }; types: string[] }, request: { signal: AbortSignal }) {
+      calls.push("model.list"); locations.push(input.location.directory); signals.push(request.signal);
+      expect(input.types).toEqual(["chat"]);
+      if (options.rejectBarrier) throw new Error("fixture activation unavailable");
+      return { data: [{ providerID: MODEL.providerID, id: MODEL.id, enabled: true, type: "chat" }] };
+    } },
+    plugin: { async list(input: { location: { directory: string } }, request: { signal: AbortSignal }) {
+      calls.push("plugin.list"); locations.push(input.location.directory); signals.push(request.signal);
+      const plugin = { id: "thoughtloom", source: { type: "local", path: p.plugin }, state: { status: "active" } };
+      return { data: options.unsafeRegistry ? [plugin, { id: "other", source: { type: "local", path: "/fixture/unsafe" }, state: { status: "active" } }] : [plugin] };
+    } },
+  };
+  return { client, calls, locations, signals };
+}
+
+test("watch preflight awaits location-scoped model metadata barrier before strict registry", async () => {
+  const f = preflightClient(), controller = new AbortController();
+  await preflightPluginWatch(f.client, { root, pid: 42, signal: controller.signal });
+  expect(f.calls).toEqual(["info", "model.list", "plugin.list"]);
+  expect(f.locations).toEqual([p.cwd, p.cwd]);
+  expect(f.signals).toHaveLength(3); expect(f.signals.every((signal) => !signal.aborted)).toBe(true);
+});
+
+test("watch preflight barrier failure stops before registry and continuation", async () => {
+  const f = preflightClient({ rejectBarrier: true }); let continued = false;
+  const outcome = await preflightPluginWatch(f.client, { root, pid: 42, signal: new AbortController().signal }).then(() => { continued = true; return "accepted"; }, () => "rejected");
+  expect(outcome).toBe("rejected"); expect(f.calls).toEqual(["info", "model.list"]); expect(continued).toBe(false);
+});
+
+test("watch preflight rejects unsafe registry even after successful barrier", async () => {
+  const f = preflightClient({ unsafeRegistry: true }); let continued = false;
+  const outcome = await preflightPluginWatch(f.client, { root, pid: 42, signal: new AbortController().signal }).then(() => { continued = true; return "accepted"; }, (error: unknown) => error);
+  expect(outcome).toMatchObject({ code: "fixture_plugin_registry_rejected" });
+  expect(f.calls).toEqual(["info", "model.list", "plugin.list"]); expect(continued).toBe(false);
+});
 function input(): GuardInput {
   return { optIn: "1", executable: NATIVE_BINARY, root, providerOrigin, daemonOrigin, password,
     transportCredential: credential, config: JSON.stringify(witnessConfig(root, providerOrigin)) };
@@ -65,10 +106,31 @@ test("the single plugin profile retains project-discovery disable and a fresh ex
   expect(launched).toBe(1);
 });
 
+test("title profile requires its own opt-in and only adds the title agent ceiling", async () => {
+  const title = { ...input(), profile: "title" as const, titleOptIn: "1", config: JSON.stringify(witnessConfig(root, providerOrigin, "title")) };
+  await denied({ ...title, titleOptIn: undefined });
+  await denied({ ...title, config: JSON.stringify(witnessConfig(root, providerOrigin)) });
+  const spec = await preparePluginLaunch(title, io(), facts());
+  expect(spec.env.OPENCODE_DISABLE_FILEWATCHER).toBe("1");
+  const config: unknown = JSON.parse(spec.env.OPENCODE_CONFIG_CONTENT ?? "null");
+  expect(config).toEqual(witnessConfig(root, providerOrigin, "title"));
+  expect(witnessConfig(root, providerOrigin, "title").agents[AGENT]?.permissions).toEqual([...witnessConfig(root, providerOrigin).agents[AGENT].permissions, { action: "record_title_v1", resource: "*", effect: "allow" }]);
+  await denied({ ...title, config: title.config.replace("record_title_v1", "bash") });
+});
+
 for (const selector of [undefined, "", "opencode", "/usr/bin/opencode", `${NATIVE_BINARY}/../opencode.exe`]) {
   test(`rejects an unapproved binary selector (${String(selector)}) without launching`, async () => { await denied({ ...input(), executable: selector }); });
 }
 test("explicit opt-in is mandatory even for the approved binary", async () => { await denied({ ...input(), optIn: undefined }); });
+test("watcher profile requires separate opt-in and changes only the watcher flag", async () => {
+  await denied({ ...input(), profile: "watcher" });
+  const baseline = await preparePluginLaunch(input(), io(), facts());
+  const watcher = await preparePluginLaunch({ ...input(), profile: "watcher", watcherOptIn: "1" }, io(), facts());
+  expect(watcher.env).not.toHaveProperty("OPENCODE_DISABLE_FILEWATCHER");
+  expect(Object.entries({ ...watcher.env, OPENCODE_DISABLE_FILEWATCHER: "1" }).sort()).toEqual(Object.entries(baseline.env).sort());
+  expect(() => validateLaunchSpec(watcher, input())).toThrow();
+  expect(() => validateLaunchSpec(baseline, { ...input(), profile: "watcher", watcherOptIn: "1" })).toThrow();
+});
 for (const key of ["canonical", "regularExecutable", "elf", "siblingMatches"] as const) {
   test(`binary ${key} failure cannot reach launch`, async () => { await denied(input(), io(), { ...facts(), [key]: false }); });
 }
@@ -121,6 +183,7 @@ test("reviewed plugin provenance rejects historical hashes and unexpected source
   expect(() => validateSourceHashes({ ...SOURCE_HASHES })).not.toThrow();
   expect(() => validateSourceHashes({ ...SOURCE_HASHES, "packages/agent-tools/src/plugin.ts": "8bc121d9837ccf2b86451e0efd6c96d8ea558d3e8e58e447e73ac9cd72fb796d" })).toThrow();
   expect(() => validateSourceHashes({ ...SOURCE_HASHES, "packages/contracts/src/tools.ts": "02a889a770122f3a2a2ddcd2afc56e8551fe39b71ec2e14c95c51e6bdf84f22d" })).toThrow();
+  for (const path of Object.keys(SOURCE_HASHES)) expect(() => validateSourceHashes({ ...SOURCE_HASHES, [path]: "0".repeat(64) })).toThrow();
   expect(() => validateSourceHashes({ ...SOURCE_HASHES, "../external-plugin.ts": BUNDLE_SHA256 })).toThrow();
   expect(() => validateSourceHashes({ "packages/agent-tools/src/plugin.ts": SOURCE_HASHES["packages/agent-tools/src/plugin.ts"] })).toThrow();
 });
@@ -128,6 +191,9 @@ test("the current exact sources reproduce the reviewed bundle without native exe
   const repo = fileURLToPath(new URL("../../../", import.meta.url)).replace(/\/$/, "");
   const text = await reviewedBundle(repo);
   expect(createHash("sha256").update(text).digest("hex")).toBe(BUNDLE_SHA256);
+  const other = fixtureBuildB(text);
+  expect(createHash("sha256").update(other).digest("hex")).toBe("1b4eaea29e41bac3f108a3d1c307073484fe9ff9384f9cf9a8db735a8fa292e1");
+  expect(() => fixtureBuildB("unreviewed fixture")).toThrow();
   await expect(reviewedBundle(`${repo}/other`)).rejects.toThrow();
 });
 test("production offline setup generates exactly the guarded two-scope fixture documents", async () => {
@@ -165,7 +231,7 @@ test("a prepared environment cannot gain host credentials, discovery, startup fl
 });
 test("native readiness accepts only the pinned complete loopback line and excludes app ports", () => {
   expect(readinessFromOutput("server listening on http://127.0.0.1:18493\n")).toBe("http://127.0.0.1:18493");
-  for (const output of ["server listening on http://127.0.0.1:3001\n", "server listening on http://localhost:18493\n", "server listening on http://127.0.0.1:18493", "http://127.0.0.1:18493\n"]) expect(readinessFromOutput(output)).toBeUndefined();
+  for (const output of ["server listening on http://127.0.0.1:3001\n", "server listening on http://127.0.0.1:4174\n", "server listening on http://127.0.0.1:4318\n", "server listening on http://localhost:18493\n", "server listening on http://127.0.0.1:18493", "http://127.0.0.1:18493\n"]) expect(readinessFromOutput(output)).toBeUndefined();
 });
 test("native registry permits compiled-in code plus only the exact active owned plugin", () => {
   const plugin = { id: "thoughtloom", source: { type: "local", path: p.plugin }, state: { status: "active" } };

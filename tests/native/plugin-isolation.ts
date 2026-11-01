@@ -18,7 +18,7 @@ export const DIALOGUE_OPERATIONS = ["read_source", "record_idea"] as const;
 const agentOperations = ["read_source", "record_interpretation", "record_idea"] as const;
 export const MODEL = { providerID: "fixture-provider", id: "fixture-model" } as const;
 export const ADMISSION_TIMEOUT_MS = 17_000;
-const forbiddenPorts = new Set([3000, 3001, 9443, 4173, 4317, 48763]);
+const forbiddenPorts = new Set([3000, 3001, 9443, 4173, 4174, 4317, 4318, 48763]);
 
 export class WitnessGuardError extends Error {
   constructor(readonly code: string) { super(code); this.name = "WitnessGuardError"; }
@@ -71,7 +71,7 @@ export function selection(root: string) {
   return { registrationFile: p.registration, agent: AGENT, model: MODEL, operations: [...OPERATIONS], dialogueOperations: [...DIALOGUE_OPERATIONS], maxSteps: 6, admissionTimeoutMs: ADMISSION_TIMEOUT_MS,
     location: p.cwd, connectionFile: p.connection };
 }
-export function witnessConfig(root: string, providerOrigin: string) {
+export function witnessConfig(root: string, providerOrigin: string, profile?: "title") {
   return {
     model: "fixture-provider/fixture-model", update: "disable", share: "disabled", snapshots: false, warming: false,
     permissions: [{ action: "*", resource: "*", effect: "deny" }],
@@ -80,6 +80,8 @@ export function witnessConfig(root: string, providerOrigin: string) {
       settings: { baseURL: `${providerOrigin}/v1`, apiKey: "fixture-only" },
       models: { "fixture-model": { type: "chat", capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 131072, output: 2048 } } } } },
     ...generatedConfig(root),
+    ...(profile === "title" ? { agents: { [AGENT]: { mode: "primary", description: "Thoughtloom constrained domain weaver", steps: 6,
+      permissions: [...permissions(), { action: "record_title_v1", resource: "*", effect: "allow" }] } } } : {}),
   };
 }
 function canonical(value: unknown): string {
@@ -128,6 +130,7 @@ export function validatePluginRegistry(root: string, value: unknown): void {
 export type GuardInput = {
   optIn: string | undefined; executable: string | undefined; root: string; config: string;
   providerOrigin: string; daemonOrigin: string; password: string; transportCredential: string;
+  profile?: "watcher" | "title"; watcherOptIn?: string; titleOptIn?: string;
 };
 export type LaunchSpec = { executable: string; args: string[]; cwd: string; env: Record<string, string> };
 function environment(input: GuardInput) {
@@ -137,7 +140,7 @@ function environment(input: GuardInput) {
   return { ...env, OPENCODE_DB: p.OPENCODE_DB, GIT_CONFIG_GLOBAL: p.GIT_CONFIG_GLOBAL,
     OPENCODE_CONFIG_CONTENT: input.config, OPENCODE_CONFIG_PROJECT_DISABLE: "1",
     OPENCODE_DISABLE_CLAUDE_CODE: "1", OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_DISABLE_FREE_MODELS: "1",
-    OPENCODE_DISABLE_AUTOUPDATE: "1", OPENCODE_DISABLE_FILEWATCHER: "1", OPENCODE_DISABLE_FFF: "1",
+    OPENCODE_DISABLE_AUTOUPDATE: "1", ...(input.profile === "watcher" ? {} : { OPENCODE_DISABLE_FILEWATCHER: "1" }), OPENCODE_DISABLE_FFF: "1",
     OPENCODE_PASSWORD: input.password, PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1" };
 }
 export function validateLaunchSpec(spec: LaunchSpec, input: GuardInput) {
@@ -159,11 +162,12 @@ async function checkedPath(root: string, path: string, expected: "directory" | "
 export async function preparePluginLaunch(input: GuardInput, io: GuardIO, facts: BinaryFacts): Promise<LaunchSpec> {
   const snapshot = { ...input };
   requireOptIn(snapshot.optIn, snapshot.executable);
+  requireGuard(snapshot.profile === undefined || (snapshot.profile === "watcher" && snapshot.watcherOptIn === "1") || (snapshot.profile === "title" && snapshot.titleOptIn === "1"), "profile_opt_in_required");
   validateBinary({ ...facts });
   requireGuard(contained(ANCHOR, snapshot.root) && new RegExp(`^${ROOT_PREFIX}[A-Za-z0-9_-]{6,64}$`).test(relative(ANCHOR, snapshot.root)), "fixture_root_rejected");
   requireGuard(origin(snapshot.providerOrigin) && origin(snapshot.daemonOrigin) && snapshot.providerOrigin !== snapshot.daemonOrigin &&
     /^[A-Za-z0-9_-]{24,128}$/.test(snapshot.password) && /^[A-Za-z0-9_-]{24,128}$/.test(snapshot.transportCredential) && snapshot.password !== snapshot.transportCredential, "fixture_boundary_rejected");
-  requireGuard(sameJson(snapshot.config, witnessConfig(snapshot.root, snapshot.providerOrigin)), "fixture_config_rejected");
+  requireGuard(sameJson(snapshot.config, witnessConfig(snapshot.root, snapshot.providerOrigin, snapshot.profile === "title" ? "title" : undefined)), "fixture_config_rejected");
   requireGuard(await io.inspect("/etc/opencode") === "missing", "system_config_not_absent");
   requireGuard(await io.inspect(ANCHOR) === "directory" && await io.canonical(ANCHOR) === ANCHOR && await io.canonical(snapshot.root) === snapshot.root, "fixture_anchor_rejected");
   requireGuard(await io.private(snapshot.root), "fixture_permissions_rejected");

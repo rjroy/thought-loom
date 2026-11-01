@@ -73,7 +73,7 @@ function evidence(db: Database, ids: string[]) {
   }
 }
 
-function readItem(db: Database, id: string): KnowledgeItem {
+export function readItem(db: Database, id: string): KnowledgeItem {
   const item = db.query<{ id: string; kind: KnowledgeItem["kind"]; sourceId: string }, [string]>(
     "SELECT id, kind, source_id AS sourceId FROM knowledge_items WHERE id = ?",
   ).get(id);
@@ -101,7 +101,7 @@ export function readIdeaDerivation(db: Database, id: string): IdeaDerivation | u
   return derivation;
 }
 
-function readRelationship(db: Database, id: string): Relationship {
+export function readRelationship(db: Database, id: string): Relationship {
   const relationship = db.query<{ id: string; fromItemId: string; toItemId: string; type: Relationship["type"] }, [string]>(
     "SELECT id, from_item_id AS fromItemId, to_item_id AS toItemId, type FROM relationships WHERE id = ?",
   ).get(id);

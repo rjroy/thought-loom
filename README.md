@@ -13,8 +13,9 @@ not a pixel contract or a claim that the full experience is built.
 
 You can edit short titles for originals, readings and developing ideas without
 changing their text or requiring a model call. Titles appear on thought cards
-and in search; untitled thoughts use excerpts. Automatic AI title generation
-is not yet enabled.
+and in search; untitled thoughts use excerpts. AI title generation is implemented
+for appropriately authorized weaving runs, but this checkpoint has not been
+deployed to the running application or enabled in its native setup.
 
 ## Run locally
 
@@ -377,9 +378,11 @@ still apply. Responsive phone layout does not enable remote phone hosting.
 
 Current setup generates separate capture/dialogue operation scopes and bundles
 the owned plugin. An older private setup does not automatically gain new tools.
-Use a fresh isolated setup if upgrading that configuration; do not modify a
-personal/shared service silently. Model/provider charges and operator-policy
-responsibilities still apply. No example agent or annotations are auto-seeded.
+The isolated title witness used a test-specific permission ceiling; production
+permissions and fixed-location activation still need explicit operational
+approval and verification. Do not silently reconfigure or restart a personal or
+shared service. Model/provider charges and operator-policy responsibilities
+still apply. No example agent or annotations are auto-seeded.
 
 ## Boundaries and checks
 

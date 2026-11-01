@@ -1,6 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { FOLLOW_UP_CONTEXT_LIMITS, type FollowUpContextLimits, type FollowUpTargetView } from "@thoughtloom/contracts";
 import { readFollowUpInput, FollowUpDataError } from "./follow-up-data";
+import type { NativeRunProfile } from "./native-profile";
+import { titlePrompt } from "./title-prompt";
 
 export function followUpContextLimits(input?: FollowUpContextLimits): FollowUpContextLimits {
   const limits = { ...(input ?? FOLLOW_UP_CONTEXT_LIMITS) };
@@ -30,7 +32,7 @@ function currentTarget(db: Database, target: FollowUpTargetView, textLimit: numb
 
 // Data is selected by frozen entity references, never a graph/corpus dump. The
 // full immutable origin/version facts remain in SQLite even when context is cut.
-export function followUpPrompt(db: Database, jobId: string, input?: FollowUpContextLimits): { text: string } {
+export function followUpPrompt(db: Database, jobId: string, input?: FollowUpContextLimits, profile?: NativeRunProfile): { text: string } {
   const limits = followUpContextLimits(input), frozen = readFollowUpInput(db, jobId);
   if (!frozen) throw new FollowUpDataError();
   const source = db.query<{ text: string }, [string]>("SELECT text FROM sources WHERE id=?").get(frozen.sourceId);
@@ -66,5 +68,9 @@ export function followUpPrompt(db: Database, jobId: string, input?: FollowUpCont
   if (!included) throw new FollowUpDataError();
   text += `Context truncated: ${shortened || !sourceIncluded || included < work.length || origins < frozen.origins.length || excerpt.length < source.text.length}. Historical target versions remain retained.\n`;
   if (text.length > limits.characters) throw new FollowUpDataError();
+  // Optional title work cannot displace required affected-version context or
+  // enlarge this run's bounded prompt. If it does not fit, keep baseline work.
+  const titles = titlePrompt(profile);
+  if (titles.length + text.length <= limits.characters) text = titles + text;
   return { text };
 }

@@ -3,7 +3,9 @@ import type { Plugin } from "@opencode/plugin";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
-import { loopbackOrigin, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, toolId, toolRecord, type ToolAction } from "../../contracts/src/tools";
+import { loopbackOrigin, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, toolId, toolRecord, type ToolAction } from "../../contracts/src/tools";
+import { NATIVE_PLUGIN_BUILD_ID } from "../../contracts/src/native-capabilities";
+import { registerCapabilities } from "./capabilities";
 
 export type NativeToolContext = ToolContext;
 export type NativePluginContext = Plugin.Context;
@@ -80,13 +82,17 @@ const plugin: Plugin.Plugin = {
     if (typeof ctx.options.connectionFile !== "string") throw new Error("Thoughtloom connection file required");
     const connection = await readToolConnection(ctx.options.connectionFile);
     if (ctx.location.directory !== connection.location) throw new Error("Thoughtloom plugin location mismatch");
+    const tools = [...definitions, generatedTitleDefinition];
     await ctx.tool.transform((editor) => {
-      for (const definition of definitions) {
+      for (const definition of tools) {
         editor.add({ ...definition, options: { codemode: false, permission: definition.name },
           execute: async (value, native) => ({ content: JSON.stringify(await forward(definition.name, value, native, ctx, connection)) }),
         });
       }
     });
+    // Readiness describes this completed registration, never write authority.
+    // Every call still requires its immutable, owned run grant at the daemon.
+    await registerCapabilities(ctx, tools.map((definition) => definition.name));
   },
 };
 
@@ -94,6 +100,7 @@ export default plugin;
 
 function project(action: ToolAction, value: unknown) {
   switch (action) {
+    case "record_title_v1": return parseGeneratedTitle(value, false);
     case "record_interpretation": return parseInterpretation(value, false);
     case "record_idea": return parseIdea(value, false);
     case "record_alias": return parseAlias(value, false);
@@ -124,18 +131,19 @@ async function forward(action: ToolAction, value: unknown, native: NativeToolCon
   native.signal.throwIfAborted();
   return send(connection, `/internal/tools/${action.replaceAll("_", "-")}`, {
     native: { sessionID: native.sessionID, agent: native.agent, messageID: native.messageID, callID: native.id }, action, input,
+    ...(action === "record_title_v1" ? { pluginBuildId: NATIVE_PLUGIN_BUILD_ID } : {}),
   }, native.signal);
 }
 
 const string = { type: "string" as const };
 const evidence = { type: "array" as const, items: string, minItems: 1, maxItems: 16 };
-type Property = typeof string | typeof evidence | { type: "string"; enum: string[] } | { type: "object"; properties: Record<string, Property>; required: string[]; additionalProperties: boolean };
+type Property = { type: "string"; enum?: string[]; minLength?: number; maxLength?: number } | typeof evidence | { type: "null" } | { anyOf: Property[] } | { oneOf: Property[] } | { type: "object"; properties: Record<string, Property>; required: string[]; additionalProperties: boolean };
 function schema(properties: Record<string, Property>) {
   return { type: "object" as const, properties, required: Object.keys(properties), additionalProperties: false };
 }
 const definitions: Array<{ name: ToolAction; description: string; input: ReturnType<typeof schema> }> = [
-  { name: "read_source", description: "Read immutable original evidence anywhere in the corpus before citing it.", input: schema({ sourceId: string }) },
-  { name: "read_item", description: "Read a knowledge item, its current version, attribution and source evidence.", input: schema({ itemId: string }) },
+  { name: "read_source", description: "Read immutable original evidence anywhere in the corpus before citing it. Includes titleState: canonical headRevisionId and effective title (possibly a protected USER label). Read access does not grant writes there.", input: schema({ sourceId: string }) },
+  { name: "read_item", description: "Read a knowledge item, its exact current version, attribution and source evidence. Includes titleState: canonical headRevisionId separately from the effective title and its attribution.", input: schema({ itemId: string }) },
   { name: "read_relationship", description: "Read a relationship's endpoints, current version, rationale and evidence.", input: schema({ relationshipId: string }) },
   { name: "search", description: "Search sources and attributable annotations for candidate connections; similarity is not evidence.", input: schema({ query: string }) },
   { name: "record_interpretation", description: "Record a tentative interpretation anchored to this run's original source.", input: schema({ sourceId: string, text: string, evidenceSourceIds: evidence }) },
@@ -147,3 +155,10 @@ const definitions: Array<{ name: ToolAction; description: string; input: ReturnT
   { name: "revise_interpretation", description: "Append a revision to root-scoped AI material at its expected version. User corrections cannot be rewritten.", input: schema({ itemId: string, expectedVersionId: string, text: string, evidenceSourceIds: evidence }) },
   { name: "revise_relationship", description: "Append an expected-version revision to a root-anchored AI relationship after reading it and both current endpoint items. Never reactivate rejected claims.", input: schema({ relationshipId: string, expectedVersionId: string, status: { type: "string", enum: ["active", "rejected"] }, rationale: string, evidenceSourceIds: evidence }) },
 ];
+const generatedTitleDefinition = {
+  name: "record_title_v1" as const,
+  description: "Submit a short AI title for an original or exact item formulation with its expected title head. Requires an explicit generated-title grant; never changes original content.",
+  input: schema({ rootSourceId: string,
+    target: { oneOf: [schema({ kind: { type: "string", enum: ["source"] } }), schema({ kind: { type: "string", enum: ["item"] }, itemId: string, versionId: string })] },
+    text: { type: "string", minLength: 1, maxLength: 240 }, expectedTitleRevisionId: { anyOf: [string, { type: "null" }] } }),
+};

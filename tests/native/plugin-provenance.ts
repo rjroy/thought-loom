@@ -1,4 +1,4 @@
-// Deliberate phase-4 refresh, 2026-10-31. These exact bytes are review inputs,
+// Generated-title candidate, pending review. These exact bytes are review inputs,
 // NOT a claim that this bundle has executed. The earlier capture witness is
 // historical evidence for its earlier bundle only (see README).
 export const PLUGIN_PROVENANCE = {
@@ -6,10 +6,13 @@ export const PLUGIN_PROVENANCE = {
   runtime: "bun@1.4.3",
   entrypoint: "packages/agent-tools/src/plugin.ts",
   build: { target: "bun", format: "esm", packages: "bundle" },
-  registeredTools: 10,
+  registeredTools: 11,
 } as const;
 export const SOURCE_HASHES = {
-  "packages/agent-tools/src/plugin.ts": "4e5f62a7806cf9a1a49f3edaa1a9f2b6c846d641ef910d0b9e699d2dffc04153",
-  "packages/contracts/src/tools.ts": "ad18dc44175e900d98d07a89f44481141aab08c946d3a95999c45ff2cf638fef",
+  "packages/agent-tools/src/plugin.ts": "85ca9d9da64a46e8668b0e3f9fc27497cbf6f3803cf7f21315cfd6c0619a728d",
+  "packages/agent-tools/src/capabilities.ts": "6520489ed401277ffb956e79baf1d27aa9829fab4230345304a1511b2a3a6923",
+  "packages/contracts/src/tools.ts": "68e150b1ed3ed1c92c736e03d445b89161ce399f5529a352ec0090a73da2c006",
+  "packages/contracts/src/native-capabilities.ts": "d963027a403540830847228538b16985bb77edbd0b9003a51aeed3906321ff80",
+  "packages/contracts/src/inspection.ts": "0b01372024cd2a22943842ac9636056592c2978becb886e616fa952f74858b57",
 } as const;
-export const BUNDLE_SHA256 = "eb68510bdc3d1989683a8b6c5ae3caab47c6785a626c3c63f6a79517ab71f04c";
+export const BUNDLE_SHA256 = "45cdf149bc2c5ddb5f16eb3ebecc925794c88604d2205455996a0e02d7f200da";

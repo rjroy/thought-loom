@@ -2,16 +2,11 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { createHash } from "node:crypto";
 import { isIdempotencyKey, isRecordId, isThoughtTitleText } from "@thoughtloom/contracts";
-import type { Database } from "bun:sqlite";
 import { openDatabase } from "./storage";
 import { readTitle } from "./title-projection";
+import { KnowledgeError } from "./knowledge";
+import { validTitleTarget as validTarget, writeTitle, type TitleTarget as Target } from "./title-write";
 
-type Target = { kind: "source" } | { kind: "item"; itemId: string; versionId: string };
-function validTarget(db: Database, sourceId: string, target: Target): boolean {
-  return target.kind === "source"
-    ? !!db.query("SELECT 1 FROM sources WHERE id=?").get(sourceId)
-    : !!db.query("SELECT 1 FROM knowledge_items i JOIN formulations f ON f.item_id=i.id WHERE i.source_id=? AND i.id=? AND f.id=?").get(sourceId, target.itemId, target.versionId);
-}
 function targetFrom(value: unknown): Target | null {
   if (typeof value !== "object" || value === null || Array.isArray(value) || !("kind" in value)) return null;
   if (value.kind === "source" && Object.keys(value).length === 1) return { kind: "source" };
@@ -48,21 +43,13 @@ export function createTitleHttpApp(databasePath: string) {
     const db = openDatabase(databasePath);
     try {
       const result = db.transaction(() => {
-        const receipt = db.query<{ hash: string; revisionId: string; text: string; author: "user" }, [string]>(`SELECT c.payload_hash AS hash,r.id AS revisionId,r.text,r.author FROM title_receipts c JOIN title_revisions r ON r.id=c.revision_id WHERE c.idempotency_key=?`).get(key);
-        if (receipt) return receipt.hash === hash ? { status: 200 as const, body: { revisionId: receipt.revisionId, text: receipt.text, author: receipt.author } } : { status: 409 as const, body: { error: "operation_conflict" } };
-        if (!validTarget(db, sourceId, target)) return { status: 404 as const, body: { error: "invalid_reference" } };
-        const itemId = target.kind === "item" ? target.itemId : undefined;
-        const current = readTitle(db, sourceId, itemId, target.kind === "item" ? target.versionId : undefined);
-        if (current.headRevisionId !== expected) return { status: 409 as const, body: { error: "version_conflict" } };
-        let entity = db.query<{ id: string }, [string]>(`SELECT id FROM title_entities WHERE ${itemId ? "item_id" : "source_id"}=?`).get(itemId ?? sourceId);
-        if (!entity) { entity = { id: crypto.randomUUID() }; db.run("INSERT INTO title_entities(id,source_id,item_id) VALUES (?,?,?)", [entity.id, itemId ? null : sourceId, itemId ?? null]); }
-        const revisionId = crypto.randomUUID();
-        db.run("INSERT INTO title_revisions(id,entity_id,text,author,formulation_id,created_at) VALUES (?,?,?,'user',?,?)", [revisionId, entity.id, text, target.kind === "item" ? target.versionId : null, new Date().toISOString()]);
-        db.run("INSERT INTO title_heads(entity_id,revision_id,user_revision_id) VALUES (?,?,?) ON CONFLICT(entity_id) DO UPDATE SET revision_id=excluded.revision_id,user_revision_id=excluded.user_revision_id", [entity.id, revisionId, revisionId]);
-        db.run("INSERT INTO title_receipts(idempotency_key,payload_hash,revision_id) VALUES (?,?,?)", [key, hash, revisionId]);
-        db.run("DELETE FROM title_search WHERE entity_id=?", [entity.id]);
-        db.run("INSERT INTO title_search(entity_id,text) VALUES (?,?)", [entity.id, text]);
-        return { status: 200 as const, body: { revisionId, text, author: "user" as const } };
+        try {
+          return { status: 200 as const, body: writeTitle(db, { sourceId, target, text, expectedTitleRevisionId: expected, author: "user", key, payloadHash: hash }) };
+        } catch (error) {
+          if (error instanceof KnowledgeError && error.code === "invalid_reference") return { status: 404 as const, body: { error: error.code } };
+          if (error instanceof KnowledgeError && (error.code === "operation_conflict" || error.code === "version_conflict")) return { status: 409 as const, body: { error: error.code } };
+          throw error;
+        }
       }).immediate();
       console.info("title.edit completed", { sourceId, status: result.status });
       context.header("cache-control", "no-store");

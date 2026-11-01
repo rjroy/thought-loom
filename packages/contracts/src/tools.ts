@@ -1,4 +1,8 @@
-export type ToolAction = "read_source" | "read_item" | "read_relationship" | "search" | "record_interpretation" | "record_alias" | "record_relationship" | "revise_interpretation" | "revise_relationship" | "record_idea";
+import { isRecordId, isThoughtTitleText } from "./inspection";
+
+export type ToolAction = "read_source" | "read_item" | "read_relationship" | "search" | "record_interpretation" | "record_alias" | "record_relationship" | "revise_interpretation" | "revise_relationship" | "record_idea" | "record_title_v1";
+// Baseline domain operations. Extensions are selected separately by a verified
+// capability profile, never added to legacy permissions through this list.
 export const DOMAIN_ACTIONS: readonly ToolAction[] = ["read_source", "read_item", "read_relationship", "search", "record_interpretation", "record_alias", "record_relationship", "revise_interpretation", "revise_relationship", "record_idea"];
 export const CAPTURE_ACTIONS = DOMAIN_ACTIONS.filter((action) => action !== "record_idea");
 export type IdeaInput = { rootSourceId: string; turnSourceId: string; dialogueId: string; turnId: string; text: string; evidenceSourceIds: string[]; derivedFrom?: { itemId: string; versionId: string } };
@@ -9,6 +13,12 @@ export type AliasInput = { alias: string; expansion: string; evidenceSourceIds: 
 export type RelationshipInput = { fromItemId: string; toItemId: string; fromVersionId: string; toVersionId: string; type: "supports" | "challenges" | "suggests"; rationale: string; evidenceSourceIds: string[] };
 export type InterpretationRevisionInput = { itemId: string; expectedVersionId: string; text: string; evidenceSourceIds: string[] };
 export type RelationshipRevisionInput = { relationshipId: string; expectedVersionId: string; status: "active" | "rejected"; rationale: string; evidenceSourceIds: string[] };
+export type GeneratedTitleInput = {
+  rootSourceId: string;
+  target: { kind: "source" } | { kind: "item"; itemId: string; versionId: string };
+  text: string;
+  expectedTitleRevisionId: string | null;
+};
 
 export function toolRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -36,6 +46,17 @@ export function parseNativeIdentity(value: unknown): NativeIdentity | null {
   if (!toolId(sessionID) || !sessionID.startsWith("ses_") || !toolId(agent) ||
       !toolId(messageID) || !messageID.startsWith("msg_") || !toolId(callID)) return null;
   return { sessionID, agent, messageID, callID };
+}
+
+export function parseGeneratedTitle(value: unknown, strict = true): GeneratedTitleInput | null {
+  if (!toolRecord(value) || (strict && !toolKeys(value, ["rootSourceId", "target", "text", "expectedTitleRevisionId"])) ||
+      !isRecordId(value.rootSourceId) || !isThoughtTitleText(value.text) || (value.expectedTitleRevisionId !== null && !isRecordId(value.expectedTitleRevisionId)) || !toolRecord(value.target)) return null;
+  const target = value.target;
+  if (target.kind === "source" && toolKeys(target, ["kind"])) return { rootSourceId: value.rootSourceId, target: { kind: "source" }, text: value.text, expectedTitleRevisionId: value.expectedTitleRevisionId };
+  if (target.kind === "item" && toolKeys(target, ["kind", "itemId", "versionId"]) && isRecordId(target.itemId) && isRecordId(target.versionId)) {
+    return { rootSourceId: value.rootSourceId, target: { kind: "item", itemId: target.itemId, versionId: target.versionId }, text: value.text, expectedTitleRevisionId: value.expectedTitleRevisionId };
+  }
+  return null;
 }
 
 export function parseInterpretation(value: unknown, strict = true): InterpretationInput | null {

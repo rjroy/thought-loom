@@ -2,6 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { parseItemView, parseRelationshipView, parseFollowUpRetryReceipt, parseFollowUpStatusView, type FollowUpJobView } from "@thoughtloom/contracts";
 import { backgroundActions, followUpFixture } from "./follow-up-support";
+import { followUpPrompt } from "../src/follow-up-prompt";
+import { parseNativeCommand } from "../src/native-profile";
+import { titlePrompt } from "../src/title-prompt";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
@@ -9,6 +12,61 @@ async function fixture() { return followUpFixture((close) => cleanups.push(close
 function required<T>(value: T | null | undefined): T { expect(value).not.toBeNull(); expect(value).not.toBeUndefined(); if (value === null || value === undefined) throw new Error("Missing fixture result"); return value; }
 function job(jobs: FollowUpJobView[], id: string) { return required(jobs.find((entry) => entry.id === id)); }
 const headers = (key: string) => ({ "content-type": "application/json", "idempotency-key": key });
+
+test("title-capable follow-up uses the existing run without semantic recursion", async () => {
+  const f = await fixture(), origin = await f.origin();
+  const native = await f.native({ maintained: true, titleCapability: true }), started = await native.worker.startNext();
+  expect(started.kind).toBe("started"); if (started.kind !== "started") throw new Error("Missing follow-up run");
+  const grant = required(f.read((db) => db.query<{ operations: string }, [string]>("SELECT operations FROM owned_grants WHERE run_id=?").get(started.run.runId)));
+  expect(JSON.parse(grant.operations)).toEqual([...backgroundActions, "record_title_v1"].sort());
+  const response = await f.app.request("/internal/tools/record-title-v1", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer test-owned-follow-up-credential" }, body: JSON.stringify({ action: "record_title_v1", pluginBuildId: "fixture-reviewed-build", native: { sessionID: started.run.sessionId, agent: "fixture_weaver", messageID: "msg_followup_title", callID: "call_followup_title" }, input: { rootSourceId: f.root.id, target: { kind: "item", itemId: origin.item.id, versionId: origin.item.current.id }, text: "A follow-up title", expectedTitleRevisionId: null } }) });
+  expect(response.status).toBe(200);
+  native.setOutcome(started.run, "succeeded"); await native.worker.recover();
+  expect(f.jobs()).toEqual([{ id: started.run.jobId, status: "completed" }]);
+  expect(job((await f.status(native.worker)).jobs, started.run.jobId).recordedChanges).toBe(0);
+  expect((await native.worker.startNext()).kind).toBe("empty");
+  expect(native.nativePrompts).toHaveLength(1);
+  const prompt = required(native.nativePrompts[0]).text;
+  expect(prompt).toMatch(/record_title_v1/i);
+  expect(prompt).toMatch(/(optional|not required|if useful)/i);
+  expect(prompt).toMatch(/(current.{0,50}(formulation|version)|(formulation|version).{0,50}current)/i);
+  expect(prompt).toMatch(/(user.{0,60}(title|label)|(title|label).{0,60}user)/i);
+  expect(prompt).toMatch(/(head|expectedTitleRevisionId)/i);
+  expect(prompt).toMatch(/(short|concise|brief)/i);
+  expect(prompt).toMatch(/(source|root)/i);
+  expect(prompt).toMatch(/(grant|scope|owned)/i);
+});
+
+test("title-capable follow-up keeps bounded current context when title guidance cannot fit", async () => {
+  const f = await fixture(), origin = await f.origin("A controlled affected formulation.");
+  const limits = { targets: 2, origins: 2, characters: 1_800 };
+  const native = await f.native({ maintained: true, titleCapability: true, contextCharacters: limits.characters });
+  const started = await native.worker.startNext();
+  expect(started.kind).toBe("started"); if (started.kind !== "started") throw new Error("Missing follow-up run");
+  const row = required(f.read((db) => db.query<{ payload: string }, [string]>("SELECT payload FROM native_commands WHERE run_id=?").get(started.run.runId)));
+  const command = required(parseNativeCommand(JSON.parse(row.payload)));
+  expect(command.profile.actions).toContain("record_title_v1");
+  expect(command.profile.capability).toMatchObject({ buildId: "fixture-reviewed-build", actions: ["read_source", "record_title_v1"] });
+  const grant = required(f.read((db) => db.query<{ operations: string }, [string]>("SELECT operations FROM owned_grants WHERE run_id=?").get(started.run.runId)));
+  expect(JSON.parse(grant.operations)).toEqual([...backgroundActions, "record_title_v1"].sort());
+  const baseline = f.read((db) => followUpPrompt(db, started.run.jobId, limits).text);
+  const guidance = titlePrompt(command.profile);
+  expect(guidance).toContain("record_title_v1");
+  expect(baseline.length + guidance.length).toBeGreaterThan(limits.characters);
+  expect(native.nativePrompts).toHaveLength(1);
+  const prompt = required(native.nativePrompts[0]).text;
+  expect(prompt).toBe(baseline);
+  expect(prompt.length).toBeLessThanOrEqual(limits.characters);
+  expect(prompt).not.toContain("record_title_v1");
+  expect(prompt).toContain(`Owned original source ID: ${f.root.id}`);
+  const line = required(prompt.split("\n").find((entry) => entry.startsWith("Affected entity — current protected version: ")));
+  const target: unknown = JSON.parse(line.slice("Affected entity — current protected version: ".length));
+  expect(target).toMatchObject({ kind: "item", id: origin.item.id, versionId: origin.item.current.id, text: "A controlled affected formulation.", author: "ai", textTruncated: false });
+  native.setOutcome(started.run, "succeeded"); await native.worker.recover();
+  expect(f.jobs()).toEqual([{ id: started.run.jobId, status: "completed" }]);
+  expect((await native.worker.startNext()).kind).toBe("empty");
+  expect(native.nativePrompts).toHaveLength(1);
+});
 
 test("native follow-up grants nine background actions, protects USER text, and a real successful write cannot recurse", async () => {
   const f = await fixture(), origin = await f.origin();

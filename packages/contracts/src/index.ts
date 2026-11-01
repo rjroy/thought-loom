@@ -19,6 +19,7 @@ export type SourceSearchResult = {
 
 export * from "./inspection";
 export * from "./tools";
+export * from "./native-capabilities";
 export * from "./weaving";
 export * from "./dialogue";
 export * from "./user-commands";
