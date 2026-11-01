@@ -46,6 +46,52 @@ and retrieval. Configured weaving uses your selected agent/provider/model.
 For a production-mode local launch, run `bun run build` then `bun start`.
 The build command must succeed first; it does not start either service.
 
+#### Foreground production launch with explicit configuration
+
+For an already built checkout and an existing database, use the existing local
+`launch-configured.env` in the project root, or prepare a private file elsewhere.
+The launcher does not create or modify it. It must be owned by your user, a
+regular non-symlink file with mode `0600`; use absolute existing file paths and
+distinct explicit loopback ports. The following illustrates the data format, not
+your actual paths or port choices (replace every placeholder):
+
+```text
+THOUGHTLOOM_DATABASE_PATH="/ABSOLUTE/EXISTING/APP.sqlite"
+THOUGHTLOOM_WEB_PORT="YOUR_WEB_PORT"
+THOUGHTLOOM_DAEMON_PORT="YOUR_DAEMON_PORT"
+THOUGHTLOOM_NATIVE_CONFIG_FILE="/ABSOLUTE/EXISTING/native.json"
+```
+
+The native config line is optional; `THOUGHTLOOM_TOOL_CONNECTION_FILE` is also
+accepted when explicitly needed. Values are data, not shell commands. Use JSON
+double-quoted strings for paths containing spaces. Duplicate, unknown or malformed
+settings are rejected; omitted settings do not inherit ambient Thoughtloom
+settings. Existing native configuration, credentials and service management are
+unchanged. Ensure the pinned Bun and Node runtimes are available on `PATH` and
+the production build already exists; the launcher does not install or build.
+
+From your own terminal, substitute the absolute checkout and launch-file paths:
+
+```sh
+bun --no-env-file run /ABSOLUTE/CHECKOUT/scripts/run.ts start --launch-env /ABSOLUTE/CHECKOUT/launch-configured.env
+```
+
+The command works from any working directory. Keep that terminal open: logs are
+printed there, and Ctrl+C there stops its tracked child processes. Shutdown is
+not a guarantee that native agent work has drained or settled. In another
+terminal, inspect the configured endpoints without starting or stopping anything:
+
+```sh
+bun --no-env-file run /ABSOLUTE/CHECKOUT/scripts/run.ts status --launch-env /ABSOLUTE/CHECKOUT/launch-configured.env
+```
+
+Status reports HTTP readiness, not process identity or ownership; other local
+processes can respond on those ports. The daemon probe reads `/weaving/status`
+without querying storage; a valid response means the HTTP endpoint is ready,
+not that the weaving worker is available or working. No background manager or cross-terminal
+stop command is provided. Port checks reduce accidental conflicts but cannot
+reserve the ports until the child services bind.
+
 ### Back up and inspect a restored copy
 
 These commands back up **only the Thoughtloom application SQLite database**,
