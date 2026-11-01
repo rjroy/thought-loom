@@ -149,9 +149,9 @@ function InquiryContents({ initial, weaving, query, selectedId, initialDialogue,
     {model.truncated && <p className="context-limit" role="status">This view shows a bounded neighborhood. Some recorded context is not shown; your full original remains available.</p>}
     <DevelopmentNavigation.Provider value={{ root: source.id, openItem: (item) => void openItem(item), openDiscussion: (id, turnId) => void openDiscussion(id, turnId) }}><div className="inquiry-grid">
       <section className="inquiry-source thought-reading thought-reading-compact" id="original-source" aria-label="Original source" data-role="original">
-        <ThoughtTitleEditor target={{ kind: "source" }} initial={model.source.title} kind="original">{({ title, controls }) => <ThoughtContent title={title}
-          body={<p className="source-preview thought-body">{source.text.slice(0, 240)}{source.text.length > 240 ? "…" : ""}</p>}
-          metadata={<h2 className="attribution">Original · Unchanged · Excerpt</h2>}
+        <ThoughtTitleEditor target={{ kind: "source" }} initial={model.source.title} kind="original" fallbackText={source.text}>{({ title, controls }) => <ThoughtContent title={title}
+          body={null}
+          metadata={<h2 className="attribution">Original · Unchanged</h2>}
           actions={<><details className="source-disclosure"><summary role="button">Read full original</summary><dl className="inquiry-source-meta"><div><dt>Origin</dt><dd>{source.provenance}</dd></div><div><dt>Captured</dt><dd><time dateTime={source.createdAt}>{readableDate(source.createdAt)}</time></dd></div></dl><article className="original-text inquiry-original" aria-label="Original thought">{source.text}</article></details><Link className="text-link" href={`/sources/${source.id}`}>Open source</Link><button type="button" className="text-button" onClick={() => discuss({ kind: "source", id: source.id })}>Discuss original</button>{controls}</>} />}</ThoughtTitleEditor>
       </section>
       <div className="original-progress"><WeavingStatus sourceId={source.id} initial={weaving} onSnapshot={refresh} compact /></div>

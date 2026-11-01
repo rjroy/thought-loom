@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { parseInquiryView, parseRecentThoughts, type RecentThought } from "../../packages/contracts/src";
 import { dialogueExample as example } from "../fixtures/dialogue-content";
 import type { BrowserDialogueMetadata } from "../fixtures/dialogue-world";
+import { inquiryHref } from "../../apps/web/lib/links";
 
 const daemon = `http://127.0.0.1:${process.env.THOUGHTLOOM_E2E_DAEMON_PORT ?? "4318"}`;
 async function control(request: APIRequestContext, name: string, data: object = {}) {
@@ -14,7 +15,10 @@ async function recent(request: APIRequestContext) {
   const response = await request.get(`${daemon}/springboard/recent?limit=2`); expect(response.status()).toBe(200);
   const parsed = parseRecentThoughts(await response.json()); if (!parsed) throw new Error("Invalid recent fixture data"); return parsed.items;
 }
-function card(page: Page, thought: RecentThought) { return page.getByRole("link").filter({ hasText: thought.excerpt }); }
+function card(page: Page, thought: RecentThought) {
+  const href = thought.kind === "source" ? `${inquiryHref(thought.sourceId)}#discussion-target` : inquiryHref(thought.sourceId, "", thought.id, thought.versionId);
+  return page.locator(`a.thought-card[href=${JSON.stringify(href)}]`);
+}
 function editor(page: Page) { return page.getByRole("textbox", { name: "Your thought", exact: true }); }
 const target = (page: Page) => page.getByRole("region", { name: "Discussion target", exact: true });
 test.afterEach(async ({ request }) => { await control(request, "reset"); });
@@ -154,7 +158,7 @@ test("recent user-corrected interpretation retains its actual author", async ({ 
   await expect(link.getByText(/written by you|your (?:reading|formulation|thought)/i)).toBeVisible();
 });
 
-test("long recent reading uses an accessible bounded excerpt and retains full formulation on open", async ({ page, request }) => {
+test("long recent reading uses an accessible compact label and retains full formulation on open", async ({ page, request }) => {
   const { root } = await world(request);
   const item = await (await control(request, "seed-recent-reading", { longText: true })).json() as { id: string; current: { id: string; text: string } };
   const sample = (await recent(request)).find((entry) => entry.id === item.id);
@@ -162,7 +166,8 @@ test("long recent reading uses an accessible bounded excerpt and retains full fo
   expect(sample.excerpt.length).toBeLessThan(item.current.text.length);
   expect(item.current.text.startsWith(sample.excerpt)).toBe(true);
   await page.goto("/"); const link = card(page, sample); await expect(link).toBeVisible();
-  await expect(link).toHaveAccessibleName(new RegExp(sample.excerpt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const label = sample.title?.text ?? sample.excerpt.trim().split(/\s+/u).slice(0, 5).join(" ");
+  await expect(link).toHaveAccessibleName(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   await link.focus(); await page.keyboard.press("Enter");
   await expect(page).toHaveURL((url) => url.pathname === `/sources/${root.id}/inquiry` && url.searchParams.get("item") === item.id && url.searchParams.get("version") === item.current.id);
   await expect(target(page)).toContainText(item.current.text);

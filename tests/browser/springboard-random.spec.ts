@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { parseDialogueTurnReceipt, parseDialogueView, parseInquiryView, parseSpringboardView, type SpringboardThought } from "../../packages/contracts/src";
 import { dialogueExample as example } from "../fixtures/dialogue-content";
 import type { BrowserDialogueMetadata } from "../fixtures/dialogue-world";
+import { inquiryHref } from "../../apps/web/lib/links";
 
 const daemon = `http://127.0.0.1:${process.env.THOUGHTLOOM_E2E_DAEMON_PORT ?? "4318"}`;
 async function control(request: APIRequestContext, name: string, data: object = {}) {
@@ -20,7 +21,10 @@ async function openWithActualBatch(page: Page, request: APIRequestContext) {
   await page.goto("/");
   const view = parseSpringboardView(await (await loaded).json()); if (!view) throw new Error("Invalid browser batch"); return view.items;
 }
-function card(page: Page, thought: SpringboardThought) { return page.getByRole("link").filter({ hasText: thought.excerpt }); }
+function card(page: Page, thought: SpringboardThought) {
+  const href = thought.kind === "source" ? `${inquiryHref(thought.sourceId)}#discussion-target` : inquiryHref(thought.sourceId, "", thought.id, thought.versionId);
+  return page.locator(`a.thought-card[href=${JSON.stringify(href)}]`);
+}
 const editor = (page: Page) => page.getByRole("textbox", { name: "Your thought", exact: true });
 const target = (page: Page) => page.getByRole("region", { name: "Discussion target", exact: true });
 test.afterEach(async ({ request }) => { await control(request, "reset"); });

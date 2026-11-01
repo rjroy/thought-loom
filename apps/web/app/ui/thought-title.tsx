@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useId, useMemo, useRef, useState,
 import { isThoughtTitleText, type InquiryView, type ThoughtTitle } from "@thoughtloom/contracts";
 import { getTitle, saveTitle, TitleError, titleEntityKey, titleTargetKey, type TitleInput, type TitleTarget, type TitleView } from "../../lib/title-client";
 import { inquiryTitleMetadata, TitleState, titleMetadataIdentity, type TitleObservation } from "../../lib/title-state";
+import { compactThoughtLabel } from "../../lib/thought-label";
 
 type Entry = { session: symbol; target: TitleTarget; draft: string; editing: boolean; loading: boolean; saving: boolean; initialized: boolean; ready: boolean; head: string | null; edits: number; error: string; pending: { key: string; input: TitleInput } | null };
 function useTitles(root: string, initial?: InquiryView) {
@@ -130,17 +131,19 @@ function useTitleLabel(target: TitleTarget, initial?: ThoughtTitle) {
   useEffect(() => { observations?.seed(target, initial); }, [observations, key, identity]);
   return { titles, title: titles ? titles.display(target) : initial };
 }
-export function ThoughtTitleText({ target, initial }: { target: TitleTarget; initial?: ThoughtTitle }) {
+export function ThoughtTitleText({ target, initial, fallbackText }: { target: TitleTarget; initial?: ThoughtTitle; fallbackText?: string }) {
   const { title } = useTitleLabel(target, initial);
-  return title ? <p className="thought-title-text">{title.text}</p> : null;
+  const label = compactThoughtLabel(title?.text, fallbackText ?? "");
+  return label ? <p className="thought-title-text">{label}</p> : null;
 }
-export default function ThoughtTitleEditor({ target, initial, kind, children }: { target: TitleTarget; initial?: ThoughtTitle; kind: "original" | "reading" | "idea"; children?: (parts: { title: ReactNode; controls: ReactNode }) => ReactNode }) {
+export default function ThoughtTitleEditor({ target, initial, kind, fallbackText, children }: { target: TitleTarget; initial?: ThoughtTitle; kind: "original" | "reading" | "idea"; fallbackText?: string; children?: (parts: { title: ReactNode; controls: ReactNode }) => ReactNode }) {
   const { titles, title } = useTitleLabel(target, initial), id = useId(), button = useRef<HTMLButtonElement>(null), input = useRef<HTMLInputElement>(null), form = useRef<HTMLFormElement>(null);
   if (!titles) return null;
   const entity = titleEntityKey(target), entry = titles.entries[entity], editing = entry?.editing;
   const invalid = !!entry?.draft && !isThoughtTitleText(entry.draft), message = invalid ? "Use 1–240 characters on one line." : entry?.error;
   const returnFocus = () => requestAnimationFrame(() => { if (document.activeElement === document.body && button.current?.isConnected) button.current.focus({ preventScroll: true }); });
-  const label = title ? <p className="thought-title-text">{title.text}</p> : null;
+  const text = compactThoughtLabel(title?.text, fallbackText ?? "");
+  const label = text ? <p className="thought-title-text">{text}</p> : null;
   const controls = <div className="thought-title-controls">
     <button ref={button} type="button" className="text-button" aria-expanded={!!editing} onClick={() => { titles.open(target, initial); requestAnimationFrame(() => { if (document.activeElement === button.current || document.activeElement === document.body) input.current?.focus({ preventScroll: true }); }); }}>Edit {kind} title</button>
     {editing && <form ref={form} className="title-form" aria-busy={entry.loading || entry.saving} onSubmit={async (event) => {
