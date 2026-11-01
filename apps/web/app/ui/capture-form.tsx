@@ -79,8 +79,6 @@ export default function CaptureForm() {
 
   return (
     <form onSubmit={save} className="capture-form" aria-busy={saving}>
-      <label htmlFor="thought">Your thought</label>
-      <p className="field-help" id="thought-help">Saved exactly as written. No title needed.</p>
       <textarea
         ref={editor}
         id="thought"
@@ -89,7 +87,8 @@ export default function CaptureForm() {
         onChange={(event) => changeText(event.target.value)}
         readOnly={saving}
         required
-        aria-describedby={`thought-help${error ? " save-error" : ""}${editedAfterFailure ? " edited-warning" : ""}`}
+        aria-label="Your thought"
+        aria-describedby={`${error ? "save-error" : ""}${editedAfterFailure ? " edited-warning" : ""}`.trim() || undefined}
         placeholder="An observation, an unfinished question, a line worth returning to…"
         rows={8}
       />

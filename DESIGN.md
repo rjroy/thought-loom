@@ -177,7 +177,7 @@ These two surface tints are role colors, not an additional general-purpose tonal
 
 Use Source Sans 3 throughout, including headings. The upright variable font is self-hosted with `next/font/local`; its [license and copy provenance](apps/web/app/fonts/README.md) are part of the project. No identity display face or emblem is adopted.
 
-Frontmatter records reused roles, not an exhaustive scale. Capture/search headings are (36px), reducing to (30px) on phones. The actual pinned formulation is the inquiry heading, normally (32px), reducing to (27px) on phones. An original with existing readings uses a smaller (26px/23px) focal quote to leave room for those readings. Formulation nodes are (23px/21px). Metadata stays sentence case; timestamps use tabular numerals where styled.
+Frontmatter records reused roles, not an exhaustive scale. Search headings are (36px), reducing to (30px) on phones; capture starts directly with its text field, without a visible heading or introductory assurance. The actual pinned formulation is the inquiry heading, normally (32px), reducing to (27px) on phones. An original with existing readings uses a smaller (26px/23px) focal quote to leave room for those readings. Formulation nodes are (23px/21px). Metadata stays sentence case; timestamps use tabular numerals where styled.
 
 ## Layout
 
@@ -200,7 +200,7 @@ Controls and claim nodes use restrained corners and thin (1px) borders. Filled c
 ## Components
 
 - **Actions:** Lantern-filled primary actions; outlined secondary actions invert on hover. Standard buttons have a minimum height of (48px); compact shell controls use (46px). Disabled actions retain legible text and a neutral border. Capture becomes read-only while saving and keeps its draft on failure.
-- **Fields:** capture and composer have visible labels; compact shell search has a programmatic label and explicit Search button. Capture and dialogue text sit on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
+- **Fields:** capture has a programmatic Your thought label; the composer has a visible label. Capture keeps relevant draft/save/error feedback without redundant introductory copy. Compact shell search has a programmatic label and explicit Search button. Capture and dialogue text sit on Parchment; search stays on Night. Capture padding reduces to (18px) on phones. Search is a native GET form, not agentic search.
 - **Focus and navigation:** a Horizon outline (3px, offset 5px), switching to Night for controls within colored claim surfaces; underlined links and a keyboard-visible skip link. Do not add custom keyboard conventions. Query-return links remain real links.
 - **Source and history:** native `details`/`summary` disclosures, exact source whitespace and stable source URLs. Evidence and version histories attach to claims; full connection endpoints are inspectable in context. Histories retain author, current/earlier versions, evidence, reversal controls and truncation. No invented version dates.
 - **Attribution and feedback:** distinguish your original, AI interpretations, user formulations, tentative/active hypotheses, and rejected relationships in text. Search match origin is not connection evidence. Saving/queued notices use status semantics; failures use alerts with recovery. Queued does not mean a worker is running. There is no approval inbox.

@@ -35,6 +35,20 @@ async function assertOriginalView(page: Page, source: Source) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+test("quiet capture keeps a named input and save while removing redundant visible copy", async ({ page }) => {
+  await page.goto("/");
+  const editor = page.getByRole("textbox", { name: "Your thought", exact: true });
+  await expect(editor).toBeVisible();
+  const save = page.getByRole("button", { name: /^save(?: original)?$/i });
+  await expect(save).toBeVisible(); await expect(save).toBeDisabled();
+  await editor.fill("A controlled thought to save.");
+  await expect(save).toBeEnabled();
+  await expect(page.getByText("Capture a thought", { exact: true })).toBeHidden();
+  await expect(page.getByText("A fragment is enough.", { exact: true })).toBeHidden();
+  await expect(page.getByText("Your thought", { exact: true })).toBeHidden();
+  await expect(page.getByText(/saved exactly as written/i)).toBeHidden();
+});
+
 test("saves the exact original with provenance and date at a reopenable URL", async ({ page, context, request, baseURL }) => {
   const original = `  A thought about intent, not just orchestration.\nKeep this line and its spacing. ${randomUUID()}  `;
   await page.goto("/");
