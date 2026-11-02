@@ -37,6 +37,12 @@ for (const { bind, connect } of [
   const node = Bun.which("node");
   if (!node) throw new Error("Node is required for the production Next fixture");
   const directory = await mkdtemp("/tmp/opencode/thoughtloom-next-wildcard-");
+  const receipt = { id: "receipt-1", sourceId: "source-1", jobId: "job-1", expectedRunId: "run-1", status: "queued" };
+  const forwarded: { path: string; method: string; key: string | null; body: unknown }[] = [];
+  const daemon = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    forwarded.push({ path: new URL(request.url).pathname, method: request.method, key: request.headers.get("idempotency-key"), body: await request.json() });
+    return Response.json(receipt, { status: 202 });
+  } });
   let child: ReturnType<typeof Bun.spawn> | undefined;
   try {
     const port = await reservePort(bind);
@@ -45,7 +51,7 @@ for (const { bind, connect } of [
       env: {
         PATH: `${dirname(node)}:/usr/bin:/bin`, HOME: directory, TMPDIR: directory,
         NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_ALLOWED_HOST: accessHost,
-        THOUGHTLOOM_WEB_HOST: bind, THOUGHTLOOM_DAEMON_URL: "http://127.0.0.1:1",
+        THOUGHTLOOM_WEB_HOST: bind, THOUGHTLOOM_DAEMON_URL: `http://127.0.0.1:${daemon.port}`,
       },
       stdin: "ignore", stdout: "ignore", stderr: "ignore",
     });
@@ -79,12 +85,33 @@ for (const { bind, connect } of [
       await response.body?.cancel();
       expect(response.status, JSON.stringify(headers)).toBe(status);
     }
+    const retryPath = "/api/sources/source-1/follow-ups/job-1/retry";
+    const retry = (host: string, extraHeaders: Record<string, string> = {}) => fetch(`http://${connect}:${port}${retryPath}`, {
+      method: "POST", headers: { host, "content-type": "application/json", "idempotency-key": "retry-key-1", ...extraHeaders },
+      body: JSON.stringify({ expectedRunId: "run-1" }), redirect: "manual", signal: AbortSignal.timeout(5_000),
+    });
+    const rejectedRetryHeaders: { host: string; [key: string]: string }[] = [
+      { host: `attacker.example:${port}`, "x-forwarded-host": approved },
+      { host: approved, origin: "http://attacker.example" },
+    ];
+    for (const headers of rejectedRetryHeaders) {
+      const { host, ...extraHeaders } = headers;
+      const response = await retry(host, extraHeaders);
+      expect(response.status).toBe(403);
+      await response.body?.cancel();
+    }
+    expect(forwarded).toEqual([]);
+    const response = await retry(approved, { origin: `http://${approved}` });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(receipt);
+    expect(forwarded).toEqual([{ path: "/sources/source-1/follow-ups/job-1/retry", method: "POST", key: "retry-key-1", body: { expectedRunId: "run-1" } }]);
   } finally {
     if (child && child.exitCode === null) {
       child.kill("SIGTERM");
       const deadline = setTimeout(() => { if (child?.exitCode === null) child.kill("SIGKILL"); }, 5_000);
       try { await child.exited; } finally { clearTimeout(deadline); }
     }
+    daemon.stop(true);
     await rm(directory, { recursive: true, force: true });
   }
 }, 30_000);

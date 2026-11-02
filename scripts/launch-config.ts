@@ -2,15 +2,12 @@ import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { isIPv4 } from "node:net";
+import { allowedHostname } from "../packages/contracts/src/local-request";
+
+export { allowedHostname as validAllowedHost };
 
 const allowed = new Set(["THOUGHTLOOM_DATABASE_PATH", "THOUGHTLOOM_WEB_PORT", "THOUGHTLOOM_WEB_HOST", "THOUGHTLOOM_DAEMON_PORT", "THOUGHTLOOM_NATIVE_CONFIG_FILE", "THOUGHTLOOM_TOOL_CONNECTION_FILE", "THOUGHTLOOM_ALLOWED_HOST"]);
 type LaunchConfig = { values: Record<string, string>; databasePath: string; webPort: number; daemonPort: number };
-
-// Keep the launcher's input validation aligned with the request authority guard.
-export function validAllowedHost(value: string): boolean {
-  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(value)) return false;
-  try { return new URL(`http://${value}`).hostname === value.toLowerCase(); } catch { return false; }
-}
 
 export async function readLaunchConfig(path: string): Promise<LaunchConfig> {
   if (!isAbsolute(path)) throw new Error("Launch file path must be absolute");
@@ -39,7 +36,7 @@ export async function readLaunchConfig(path: string): Promise<LaunchConfig> {
     if (key === "THOUGHTLOOM_DATABASE_PATH" && !value) throw new Error(`${key} is required`);
     if (value && (!isAbsolute(value) || !(await stat(value)).isFile())) throw new Error(`${key} must name an existing absolute file`);
   }
-  if (values.THOUGHTLOOM_ALLOWED_HOST !== undefined && !validAllowedHost(values.THOUGHTLOOM_ALLOWED_HOST)) throw new Error("Invalid allowed host");
+  if (values.THOUGHTLOOM_ALLOWED_HOST !== undefined && !allowedHostname(values.THOUGHTLOOM_ALLOWED_HOST)) throw new Error("Invalid allowed host");
   if (values.THOUGHTLOOM_WEB_HOST !== undefined && !isIPv4(values.THOUGHTLOOM_WEB_HOST)) throw new Error("Invalid web host");
   function port(key: string): number {
     const value = values[key];

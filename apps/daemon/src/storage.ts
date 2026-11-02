@@ -68,8 +68,6 @@ export function openDatabase(path: string): Database {
         db.run("PRAGMA user_version = 2");
       }
       if (version && version.user_version < 3) {
-        db.run("CREATE VIRTUAL TABLE source_search USING fts5(source_id UNINDEXED, text)");
-        db.run("INSERT INTO source_search (source_id, text) SELECT id, text FROM sources");
         db.run("PRAGMA user_version = 3");
       }
       if (version && version.user_version < 4) {
@@ -124,12 +122,6 @@ export function openDatabase(path: string): Database {
         )`);
         db.run("CREATE INDEX alias_lookup ON search_aliases(lower(alias))");
         db.run("CREATE INDEX expansion_lookup ON search_aliases(lower(expansion))");
-        db.run("CREATE VIRTUAL TABLE formulation_search USING fts5(item_id UNINDEXED, text)");
-        db.run(`INSERT INTO formulation_search(item_id,text)
-          SELECT f.item_id,f.text FROM formulations f WHERE f.rowid =
-          (SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=f.item_id)`);
-        db.run("CREATE VIRTUAL TABLE source_vocabulary USING fts5vocab(source_search, 'row')");
-        db.run("CREATE VIRTUAL TABLE formulation_vocabulary USING fts5vocab(formulation_search, 'row')");
         db.run("PRAGMA user_version = 5");
       }
       if (version && version.user_version < 6) {

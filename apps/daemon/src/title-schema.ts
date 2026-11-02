@@ -27,6 +27,4 @@ export function migrateTitles(db: Database): void {
     revision_id TEXT NOT NULL REFERENCES title_revisions(id))`);
   db.run("CREATE TRIGGER title_receipt_immutable BEFORE UPDATE ON title_receipts BEGIN SELECT RAISE(ABORT,'immutable title receipt'); END");
   db.run("CREATE TRIGGER title_receipt_retained BEFORE DELETE ON title_receipts BEGIN SELECT RAISE(ABORT,'retained title receipt'); END");
-  db.run("CREATE VIRTUAL TABLE title_search USING fts5(entity_id UNINDEXED, text)");
-  db.run("CREATE VIRTUAL TABLE title_vocabulary USING fts5vocab(title_search, 'row')");
 }

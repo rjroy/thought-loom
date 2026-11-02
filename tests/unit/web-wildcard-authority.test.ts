@@ -17,27 +17,7 @@ function webRequest(headers: Record<string, string>, syntheticHost = "0.0.0.0") 
   return proxy(request as Parameters<typeof proxy>[0]);
 }
 
-test("web wildcard bind accepts approved external authorities without trusting the bind authority", () => {
-  process.env.THOUGHTLOOM_ALLOWED_HOST = accessHost;
-  process.env.THOUGHTLOOM_WEB_HOST = "0.0.0.0";
-  for (const host of [`${accessHost}:4317`, "127.0.0.1:4317"]) {
-    for (const headers of [{ host }, { host, origin: `http://${host}` }]) {
-      expect(webRequest(headers).headers.get("x-middleware-next")).toBe("1");
-    }
-  }
-  const rejected: Record<string, string>[] = [
-    { host: "0.0.0.0:4317" },
-    { host: "attacker.example:4317", "x-forwarded-host": "127.0.0.1:4317" },
-    { host: `${accessHost}:4317`, origin: "http://attacker.example" },
-    { host: `${accessHost}:4317`, "x-forwarded-host": "attacker.example" },
-    { host: `${accessHost}:4317`, "x-forwarded-proto": "https" },
-    { host: `${accessHost}:4317`, forwarded: "host=localhost" },
-  ];
-  for (const headers of rejected) expect(webRequest(headers).status).toBe(403);
-});
-
-test("specific IPv4 bind is internal authority, not an additional trusted external host", () => {
-  const bind = "100.64.0.10"; // Fixture only: no network access is made.
+test.each(["0.0.0.0", "100.64.0.10"])("web bind %s accepts approved authorities without trusting the bind authority", (bind) => {
   process.env.THOUGHTLOOM_ALLOWED_HOST = accessHost;
   process.env.THOUGHTLOOM_WEB_HOST = bind;
   for (const host of [`${accessHost}:4317`, "127.0.0.1:4317"]) {
@@ -55,6 +35,11 @@ test("specific IPv4 bind is internal authority, not an additional trusted extern
     { host: `${accessHost}:4317`, forwarded: "host=localhost" },
   ];
   for (const headers of rejected) expect(webRequest(headers, bind).status).toBe(403);
+});
+
+test("specific IPv4 bind does not normalize a different synthetic host", () => {
+  process.env.THOUGHTLOOM_ALLOWED_HOST = accessHost;
+  process.env.THOUGHTLOOM_WEB_HOST = "100.64.0.10";
   expect(webRequest({ host: `${accessHost}:4317` }, "100.64.0.11").status).toBe(403);
 });
 

@@ -66,6 +66,9 @@ async function fixture() {
   for (const entry of await readdir(sourceScripts)) {
     if (entry.endsWith(".ts")) await copyFile(join(sourceScripts, entry), join(scripts, entry));
   }
+  const contracts = join(root, "packages/contracts/src");
+  await mkdir(contracts, { recursive: true });
+  await copyFile(fileURLToPath(new URL("../../packages/contracts/src/local-request.ts", import.meta.url)), join(contracts, "local-request.ts"));
   const dummy = `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "dummy child only\\n");\n`;
   await writeFile(daemonEntry, dummy);
   await writeFile(nextEntry, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "dummy web only\\n");\n`);
@@ -464,6 +467,15 @@ test.each(["http://host.example.test", "host.example.test:8080", "host.example.t
   const f = await fixture();
   const result = await f.run(["start", "--launch-env", f.launchEnv], { THOUGHTLOOM_ALLOWED_HOST: host });
   expect(result.exitCode).not.toBe(0);
+  expect(result.spawned).toBe(false);
+});
+
+test("invalid launch-file allowed host is rejected even with a valid shell override", async () => {
+  const f = await fixture();
+  await writeFile(f.launchEnv, f.contents({ THOUGHTLOOM_ALLOWED_HOST: "host.example.test:8080" }));
+  const result = await f.run(["start", "--launch-env", f.launchEnv], { THOUGHTLOOM_ALLOWED_HOST: accessHost });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.output).toContain("Invalid or inaccessible launch file/configuration");
   expect(result.spawned).toBe(false);
 });
 

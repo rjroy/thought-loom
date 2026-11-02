@@ -1,5 +1,5 @@
 import "server-only";
-import { isIdempotencyKey, isLocalRequest, isRecordId, parseFollowUpRetryInput, parseFollowUpRetryReceipt, parseFollowUpStatusView } from "@thoughtloom/contracts";
+import { isAllowedRequestOrigin, isIdempotencyKey, isRecordId, parseFollowUpRetryInput, parseFollowUpRetryReceipt, parseFollowUpStatusView } from "@thoughtloom/contracts";
 import { daemonURL, privateJSON, readProjection } from "./daemon";
 
 export async function readFollowUps(id: string) {
@@ -10,7 +10,7 @@ export async function readFollowUps(id: string) {
 }
 
 export async function retryFollowUp(request: Request, sourceId: string, jobId: string) {
-  if (!isLocalRequest(request)) return privateJSON({ error: "Forbidden" }, 403);
+  if (!isAllowedRequestOrigin(request)) return privateJSON({ error: "Forbidden" }, 403);
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return privateJSON({ error: "JSON required" }, 415);
   const key = request.headers.get("idempotency-key");
   if (!isRecordId(sourceId) || !isRecordId(jobId) || !isIdempotencyKey(key)) return privateJSON({ error: "Invalid retry identity" }, 400);

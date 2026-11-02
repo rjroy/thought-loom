@@ -1,36 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { parseSearchResponse } from "@thoughtloom/contracts";
-import { createApp } from "../src/app";
-import { KnowledgeService } from "../src/knowledge";
-import { createToolApp, OwnedGrants } from "../src/tool-boundary";
-import { WeavingWorker, type WeavingRun } from "../src/weaving";
+import { ownedSearchTransport, searchFixture } from "./search-fixture";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 async function fixture() {
-  const dir = await mkdtemp("/tmp/opencode/search-contract-test-"), databasePath = join(dir, "fixture.sqlite"), app = createApp({ databasePath });
-  let n = 0;
-  async function capture(text: string) {
-    const response = await app.request("/captures", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": `search-capture-${++n}` }, body: JSON.stringify({ text, provenance: "controlled fixture" }) });
-    expect(response.status).toBe(201); return await response.json() as { id: string; text: string };
-  }
-  const root = await capture("Fixture owned root without matching terms.");
-  let enter = (_run: WeavingRun) => {}, release = () => {};
-  const entered = new Promise<WeavingRun>((resolve) => { enter = resolve; }), gate = new Promise<void>((resolve) => { release = resolve; });
-  const worker = new WeavingWorker({ databasePath, adapter: { async prepareSession(run) { enter(run); await gate; }, async admit() { return { kind: "admitted" }; }, async inspect() { return { kind: "pending" }; } } });
-  const done = worker.startNext();
-  cleanup.push(async () => { release(); await done; await worker.close(); await rm(dir, { recursive: true, force: true }); });
-  const run = await Promise.race([entered, done.then(() => { throw new Error("Owned fixture run did not enter preparation"); })]);
-  new OwnedGrants(databasePath).bind({ run, location: "/fixture/search", agent: "fixture-search", sourceIds: [root.id], operations: ["search"] });
-  release(); expect((await done).kind).toBe("started");
-  const tools = createToolApp({ databasePath, transportCredential: "fixture-search-credential", location: "/fixture/search" });
-  const native = { sessionID: run.sessionId, agent: "fixture-search", messageID: "msg_fixture_search", callID: "call_fixture_search" };
-  const tool = (input: unknown) => tools.request("/internal/tools/search", { method: "POST", headers: { authorization: "Bearer fixture-search-credential", "content-type": "application/json" }, body: JSON.stringify({ action: "search", native, input }) });
-  const get = (query: string, extra = "") => app.request(`/search?q=${encodeURIComponent(query)}${extra}`);
-  return { databasePath, root, capture, knowledge: new KnowledgeService(databasePath), get, tool };
+  const f = await searchFixture("Fixture owned root without matching terms.", cleanup);
+  const tool = await ownedSearchTransport(f, cleanup);
+  const get = (query: string, extra = "") => f.app.request(`/search?q=${encodeURIComponent(query)}${extra}`);
+  return { ...f, get, tool };
 }
 
 const wireResult = {

@@ -3,41 +3,25 @@ import { Database } from "bun:sqlite";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createApp } from "../src/app";
-import { KnowledgeService } from "../src/knowledge";
-import { createToolApp, OwnedGrants } from "../src/tool-boundary";
-import { WeavingWorker, type WeavingRun } from "../src/weaving";
+import { ownedSearchTransport, searchFixture } from "./search-fixture";
 import { openDatabase } from "../src/storage";
 import { rebuildSearchProjection } from "../src/search-projection";
 import { DialogueService } from "../src/dialogue";
 import { typoVariants } from "../src/search-query";
 import { writeTitle } from "../src/title-write";
+import { readTitle } from "../src/title-projection";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 
 async function fixture(rootText = "Unrelated fixture root for the owned search grant.") {
-  const dir = await mkdtemp("/tmp/opencode/indexed-search-test-"), databasePath = join(dir, "fixture.sqlite");
-  const app = createApp({ databasePath }); let count = 0;
-  const capture = async (text: string) => {
-    const response = await app.request("/captures", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": `indexed-${++count}` }, body: JSON.stringify({ text, provenance: "test-owned source" }) });
-    expect(response.status).toBe(201);
-    return await response.json() as { id: string; text: string; provenance: string };
+  const f = await searchFixture(rootText, cleanup);
+  const get = (query: string, limit = 50) => f.app.request(`/search?${new URLSearchParams({ q: query, limit: String(limit) })}`);
+  const attachTool = async () => {
+    const request = await ownedSearchTransport(f, cleanup);
+    return (query: string, limit = 50) => request({ query, limit });
   };
-  const root = await capture(rootText);
-  let enter = (_run: WeavingRun) => {}, release = () => {};
-  const entered = new Promise<WeavingRun>((resolve) => { enter = resolve; });
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const worker = new WeavingWorker({ databasePath, adapter: { async prepareSession(run) { enter(run); await gate; }, async admit() { return { kind: "admitted" }; }, async inspect() { return { kind: "pending" }; } } });
-  const done = worker.startNext();
-  cleanup.push(async () => { release(); await done; await worker.close(); await rm(dir, { recursive: true, force: true }); });
-  const run = await Promise.race([entered, done.then(() => { throw new Error("Fixture worker did not enter"); })]);
-  new OwnedGrants(databasePath).bind({ run, location: "/fixture/indexed-search", agent: "fixture-search", sourceIds: [root.id], operations: ["search"] });
-  release(); expect((await done).kind).toBe("started");
-  const tools = createToolApp({ databasePath, transportCredential: "indexed-fixture-only", location: "/fixture/indexed-search" });
-  const native = { sessionID: run.sessionId, agent: "fixture-search", messageID: "msg_indexed_fixture", callID: "call_indexed_fixture" };
-  const get = (query: string, limit = 50) => app.request(`/search?${new URLSearchParams({ q: query, limit: String(limit) })}`);
-  const tool = (query: string, limit = 50) => tools.request("/internal/tools/search", { method: "POST", headers: { authorization: "Bearer indexed-fixture-only", "content-type": "application/json" }, body: JSON.stringify({ action: "search", native, input: { query, limit } }) });
-  return { app, databasePath, root, capture, get, tool, knowledge: new KnowledgeService(databasePath) };
+  return { ...f, get, attachTool };
 }
 
 type Result = { sourceId: string; item?: { id: string; formulationId: string; author: string }; source: { provenance: string }; match: { kind: string; correctedTerms: Array<{ from: string; to: string }> }; passage: { fragments: Array<{ text: string }> } };
@@ -48,13 +32,14 @@ async function results(response: Response) {
 
 test.each([["typoi", "typo"], ["softwsre", "software"], ["develpment", "software"], ["softw", "software"], ["softwsre development kit", "software"], ["my softwsre development kit", "software"], ["DEVELOPMENT software", "software"]] as const)("indexed search %s finds %s across both transports without writes", async (query, label) => {
   const f = await fixture(), software = await f.capture("My useful software development kit for building tools."), typo = await f.capture("A typo can obscure an intended word."), other = await f.capture("A quiet garden after rainfall.");
+  const requestTool = await f.attachTool();
   const db = new Database(f.databasePath, { readonly: true });
   try {
     const tables = ["sources", "knowledge_items", "formulations", "relationships", "search_aliases", "tool_reads", "jobs"];
     const snapshot = () => tables.map((name) => db.query(`SELECT * FROM ${name}`).all());
     const before = snapshot();
     const wanted = label === "typo" ? typo : software;
-    const get = await f.get(query), tool = await f.tool(query); expect(tool.status).toBe(200);
+    const get = await f.get(query), tool = await requestTool(query); expect(tool.status).toBe(200);
     const result = await results(get); expect(await tool.json()).toEqual(result);
     const found = result.results.find((entry) => entry.sourceId === wanted.id && !entry.item);
     expect(found).toBeDefined(); expect(found?.source.provenance).toBe(wanted.provenance);
@@ -70,12 +55,13 @@ test("FTS-01 ordinary typo survives an alphabetically crowded same-initial vocab
   expect(terms.length).toBeGreaterThan(128);
   expect(terms.every((term) => term.startsWith("t") && term < "typo")).toBe(true);
   const f = await fixture(decoys), target = await f.capture("A typo can obscure an intended word.");
+  const requestTool = await f.attachTool();
   const db = new Database(f.databasePath, { readonly: true });
   try {
     expect(db.query<{ count: number }, []>("SELECT count(*) AS count FROM sources").get()?.count).toBe(2);
     expect(db.query<{ count: number }, []>("SELECT count(*) AS count FROM search_vocabulary WHERE term >= 't' AND term < 'typo'").get()?.count).toBeGreaterThan(128);
     const before = ["sources", "knowledge_items", "formulations", "relationships", "search_aliases", "tool_reads", "jobs"].map((name) => db.query(`SELECT * FROM ${name}`).all());
-    const get = await f.get("typoi"), tool = await f.tool("typoi");
+    const get = await f.get("typoi"), tool = await requestTool("typoi");
     expect(get.status).toBe(200); expect(tool.status).toBe(200);
     const actual = await get.json() as { results: Array<{ sourceId: string; match: { kind: string; correctedTerms: Array<{ from: string; to: string }> } }>; searchTruncated: boolean };
     expect(await tool.json()).toEqual(actual);
@@ -149,22 +135,25 @@ test("indexed generated title is version-bound, while edited user title remains 
   } finally { db.close(); }
 });
 
+test("historical generated title retains its text while the latest head remains the CAS fence", async () => {
+  const f = await fixture(), source = await f.capture("Historical title fixture.");
+  const item = f.knowledge.createItem({ actor: "ai", operationId: "historical-title-item", runId: "fixture" }, { kind: "interpretation", sourceId: source.id, text: "First reading.", evidenceSourceIds: [source.id] });
+  const db = openDatabase(f.databasePath);
+  try {
+    const first = db.transaction(() => writeTitle(db, { sourceId: source.id, target: { kind: "item", itemId: item.id, versionId: item.current.id }, author: "ai", text: "First label", key: "historical-title-first", payloadHash: "historical-title-first", expectedTitleRevisionId: null })).immediate();
+    const revised = f.knowledge.reviseItem({ actor: "ai", operationId: "historical-title-revise", runId: "fixture" }, { itemId: item.id, expectedVersionId: item.current.id, text: "Second reading.", evidenceSourceIds: [source.id] });
+    const second = db.transaction(() => writeTitle(db, { sourceId: source.id, target: { kind: "item", itemId: item.id, versionId: revised.current.id }, author: "ai", text: "Second label", key: "historical-title-second", payloadHash: "historical-title-second", expectedTitleRevisionId: first.revisionId })).immediate();
+    expect(readTitle(db, source.id, item.id, item.current.id)).toEqual({ headRevisionId: second.revisionId, title: { revisionId: first.revisionId, author: "ai", text: "First label" } });
+    expect(readTitle(db, source.id, item.id)).toEqual({ headRevisionId: second.revisionId, title: null });
+  } finally { db.close(); }
+});
+
 test("indexed fresh database has an FTS5 projection", async () => {
   const f = await fixture(), source = await f.capture("A distinct indexed lantern note.");
   const db = new Database(f.databasePath);
   try {
     const fts = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' AND lower(sql) LIKE '%using fts5(%'").all();
     expect(fts.length).toBeGreaterThan(0);
-  } finally { db.close(); }
-  expect((await results(await f.get("lantern"))).results.some((entry) => entry.sourceId === source.id)).toBe(true);
-});
-
-test("indexed search does not depend on retired fuzzy heads", async () => {
-  const f = await fixture(), source = await f.capture("A distinct indexed lantern note.");
-  const db = new Database(f.databasePath);
-  try {
-    const old = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='fuzzy_targets'").get();
-    if (old) db.run("DELETE FROM fuzzy_targets WHERE target_kind='source' AND target_id=?", [source.id]);
   } finally { db.close(); }
   expect((await results(await f.get("lantern"))).results.some((entry) => entry.sourceId === source.id)).toBe(true);
 });
@@ -203,6 +192,7 @@ test("fixed schema 21 upgrades and backfills current sources, formulations and u
     expect(upgraded.query("SELECT text,provenance FROM sources WHERE id='legacy-source'").get()).toEqual({ text: sourceText, provenance: "historical fixture" });
     expect(upgraded.query("SELECT id,text,author FROM formulations WHERE item_id='legacy-item' ORDER BY rowid").all()).toEqual([{ id: "legacy-old", text: oldText, author: "ai" }, { id: "legacy-current", text: currentText, author: "user" }]);
     expect(upgraded.query("SELECT payload_hash,source_id FROM capture_receipts WHERE idempotency_key='legacy-receipt'").get()).toEqual({ payload_hash: "fixture-hash", source_id: "legacy-source" });
+    expect(upgraded.query("SELECT name FROM sqlite_master WHERE name IN ('fuzzy_targets','fuzzy_fields','fuzzy_chunks','fuzzy_projection_state')").all()).toEqual([]);
     expect(upgraded.query("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally { upgraded.close(); }
   const app = createApp({ databasePath });
@@ -286,6 +276,7 @@ test("failed indexed rebuild rolls back the old complete projection and canonica
 
 test("more plausible corrections than the per-term cap report truncation without writes", async () => {
   const f = await fixture();
+  const requestTool = await f.attachTool();
   const candidateIds: string[] = [];
   for (const word of ["tast", "tent", "text", "tist", "tost"]) candidateIds.push((await f.capture(word)).id);
   const db = new Database(f.databasePath, { readonly: true });
@@ -295,13 +286,14 @@ test("more plausible corrections than the per-term cap report truncation without
     expect(response.searchTruncated).toBe(true);
     expect(response.results).toHaveLength(3);
     expect(response.results.every((entry) => candidateIds.includes(entry.sourceId) && entry.match.kind === "typo" && entry.match.correctedTerms.length === 1 && entry.match.correctedTerms[0].from === "test")).toBe(true);
-    const tool = await f.tool("test"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
+    const tool = await requestTool("test"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
     expect(["sources", "knowledge_items", "formulations", "relationships", "search_aliases", "tool_reads", "jobs"].map((name) => db.query(`SELECT * FROM ${name}`).all())).toEqual(before);
   } finally { db.close(); }
 });
 
 test("32-character correction routes honor per-term and request probe ceilings", async () => {
   const f = await fixture(), suffix = "bcdefghijklmnopqrstuvwx23456789";
+  const requestTool = await f.attachTool();
   const terms = ["a", "b", "c", "d"].map((prefix) => prefix + suffix);
   expect(terms.every((term) => Array.from(term).length === 32)).toBe(true);
   await f.capture(terms.join(" ")); await f.capture(terms.map((term) => `${term}z`).join(" "));
@@ -316,11 +308,12 @@ test("32-character correction routes honor per-term and request probe ceilings",
   } finally { db.close(); }
   const query = terms.join(" "), response = await results(await f.get(query));
   expect(response.searchTruncated).toBe(true);
-  const tool = await f.tool(query); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
+  const tool = await requestTool(query); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
 });
 
 test("bounded correction variants report truncation and keep GET/tool results identical", async () => {
   const f = await fixture();
+  const requestTool = await f.attachTool();
   for (const word of ["aaab", "aaac", "aaad", "bbba", "bbbc", "bbbd", "ccca", "cccb", "cccd", "ddda", "dddb", "dddc"]) await f.capture(word);
   const db = openDatabase(f.databasePath);
   try {
@@ -331,11 +324,12 @@ test("bounded correction variants report truncation and keep GET/tool results id
   } finally { db.close(); }
   const response = await results(await f.get("aaaa bbbb cccc dddd"));
   expect(response.searchTruncated).toBe(true);
-  const tool = await f.tool("aaaa bbbb cccc dddd"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
+  const tool = await requestTool("aaaa bbbb cccc dddd"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
 });
 
 test("bounded recorded alias expansion reports truncation without mutating alias evidence", async () => {
   const f = await fixture(), evidence = await f.capture("Fixture alias evidence.");
+  const requestTool = await f.attachTool();
   for (let n = 0; n < 9; n++) {
     await f.capture(`orchard${n}`);
     f.knowledge.recordAlias({ actor: "user", operationId: `fts-bounded-alias-${n}` }, { alias: "ZXQ", expansion: `orchard${n}`, evidenceSourceIds: [evidence.id] });
@@ -347,7 +341,7 @@ test("bounded recorded alias expansion reports truncation without mutating alias
     expect(response.aliasExpansionTruncated).toBe(true);
     expect(response.results.length).toBeLessThanOrEqual(8);
     expect(db.query("SELECT * FROM alias_evidence ORDER BY alias_id,position").all()).toEqual(before);
-    const tool = await f.tool("zxq"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
+    const tool = await requestTool("zxq"); expect(tool.status).toBe(200); expect(await tool.json()).toEqual(response);
   } finally { db.close(); }
 });
 
@@ -374,6 +368,7 @@ test.each([19, 20])("fixed schema %i upgrades while preserving canonical history
     expect(upgraded.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBeGreaterThan(21);
     expect(upgraded.query("SELECT id,text,author FROM formulations ORDER BY rowid").all()).toEqual([{ id: "historic-old", text: "Old observatory text", author: "ai" }, { id: "historic-current", text: "Current compass idea", author: "user" }]);
     expect(upgraded.query("SELECT payload_hash,source_id FROM capture_receipts WHERE idempotency_key='historic-receipt'").get()).toEqual({ payload_hash: "fixture-hash", source_id: "historic-source" });
+    expect(upgraded.query("SELECT name FROM sqlite_master WHERE name IN ('source_search','source_vocabulary','formulation_search','formulation_vocabulary','title_search','title_vocabulary','alias_lookup','expansion_lookup')").all()).toEqual([]);
     expect(upgraded.query("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally { upgraded.close(); }
   const app = createApp({ databasePath });
