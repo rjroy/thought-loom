@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { CaptureInput, Source } from "@thoughtloom/contracts";
 import { parseSource } from "../../lib/source";
+import { commandId } from "../../lib/command-id";
 import StatusIcon from "./status-icon";
 import RecentThoughts from "./recent-thoughts";
 
@@ -35,7 +36,7 @@ export default function CaptureForm() {
     event.preventDefault();
     if (inFlight.current || !text.trim()) return;
     const current = attempt.current ?? {
-      key: crypto.randomUUID(),
+      key: commandId(),
       input: { text, provenance: "Manual web capture" },
     };
     attempt.current = current;

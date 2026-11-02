@@ -5,6 +5,7 @@ import Link from "next/link";
 import { parseInquiryView, parseItemView, parseRelationshipView, type DialogueSelection, type DialogueView, type InquiryView, type WeavingStatusView } from "@thoughtloom/contracts";
 import { discussionHref, inquiryHref, readableDate } from "../../lib/links";
 import { DevelopmentError, postDevelopment } from "../../lib/development-client";
+import { commandId } from "../../lib/command-id";
 import { InterpretationReading, ConnectionReading } from "./knowledge-reading";
 import WeavingStatus from "./weaving-status";
 import useDevelopment from "./use-development";
@@ -126,7 +127,7 @@ function InquiryContents({ initial, weaving, query, selectedId, initialDialogue,
     if (mutationRunning.current) return false;
     mutationRunning.current = true; setMutationBusy(true); setMutationError("");
     const signature = JSON.stringify(input), prior = mutationKeys.current.get(path);
-    const command = prior?.signature === signature ? prior : { signature, key: crypto.randomUUID() };
+    const command = prior?.signature === signature ? prior : { signature, key: commandId() };
     mutationKeys.current.set(path, command);
     try {
       const raw = await postDevelopment(path, input, command.key);

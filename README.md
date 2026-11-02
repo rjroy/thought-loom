@@ -34,12 +34,22 @@ It explicitly supplies an absolute SQLite path at `.data/thoughtloom.sqlite`
 Set `THOUGHTLOOM_DATABASE_PATH`, `THOUGHTLOOM_WEB_PORT`, or
 `THOUGHTLOOM_DAEMON_PORT` before launch to use another path/ports.
 
-The responsive phone layout can be tried in desktop browser device emulation.
-**Do not expose either service to a network or use a public tunnel.** There is
-no authentication yet. Other local processes can access the loopback services.
-The services reject non-loopback or malformed request authorities and untrusted
-origins; this guard is not authentication or protection from local processes.
-Real phone access waits for a separate hosting/authentication decision.
+By default the services accept HTTP requests only for loopback. To allow one
+additional exact hostname, set `THOUGHTLOOM_ALLOWED_HOST=your-host.example` in
+the launch environment; provide a hostname only, without scheme, port, path or
+wildcards. Other or malformed authorities and untrusted origins are rejected.
+This hostname check is **not a firewall or authentication**;
+other local processes can access the loopback services. Do not expose either
+service publicly. For direct access from Tailscale devices, set
+`THOUGHTLOOM_WEB_HOST` to this machine's Tailscale IPv4 address and set
+`THOUGHTLOOM_ALLOWED_HOST` to its exact Tailscale hostname. Use that hostname
+and web port locally as well: the web server binds only the selected address,
+not loopback too. The daemon remains loopback-only. Alternatively, a separately
+configured restricted proxy can forward to the loopback web port; preserve Host
+and HTTP Origin, omit `Forwarded`, and use only allowed Host values and `http`
+for `X-Forwarded-Host` and `X-Forwarded-Proto`. Tailscale and firewall
+configuration require separate operational authorization. No separate app login
+or HTTPS redirect is provided.
 No OpenCode service, model, provider secret, or paid call is needed for capture
 and retrieval. Configured weaving uses your selected agent/provider/model.
 
@@ -56,7 +66,7 @@ For an already built checkout and an existing database, use the existing local
 `launch-configured.env` in the project root, or prepare a private file elsewhere.
 The launcher does not create or modify it. It must be owned by your user, a
 regular non-symlink file with mode `0600`; use absolute existing file paths and
-distinct explicit loopback ports. The following illustrates the data format, not
+distinct explicit ports. The following illustrates the data format, not
 your actual paths or port choices (replace every placeholder):
 
 ```text
@@ -66,11 +76,14 @@ THOUGHTLOOM_DAEMON_PORT="YOUR_DAEMON_PORT"
 THOUGHTLOOM_NATIVE_CONFIG_FILE="/ABSOLUTE/EXISTING/native.json"
 ```
 
-The native config line is optional; `THOUGHTLOOM_TOOL_CONNECTION_FILE` is also
+The native config line is optional; `THOUGHTLOOM_TOOL_CONNECTION_FILE`,
+`THOUGHTLOOM_ALLOWED_HOST` and `THOUGHTLOOM_WEB_HOST` are also
 accepted when explicitly needed. Values are data, not shell commands. Use JSON
 double-quoted strings for paths containing spaces. Duplicate, unknown or malformed
-settings are rejected; omitted settings do not inherit ambient Thoughtloom
-settings. Existing native configuration, credentials and service management are
+settings are rejected. Omitted settings do not inherit ambient Thoughtloom
+settings, except `THOUGHTLOOM_ALLOWED_HOST` and `THOUGHTLOOM_WEB_HOST`: an explicitly set shell value
+overrides the launch-file value. The web host must be an IPv4 address and defaults
+to `127.0.0.1`. Existing native configuration, credentials and service management are
 unchanged. Ensure the pinned Bun and Node runtimes are available on `PATH` and
 the production build already exists; the launcher does not install or build.
 
@@ -334,8 +347,8 @@ then use the actual printed configuration path:
 THOUGHTLOOM_NATIVE_CONFIG_FILE='/ACTUAL/RUNTIME/native.json' bun dev
 ```
 
-Keep both Thoughtloom services on loopback; there is no authentication or
-remote-phone access. Keep the same database-path override if using one.
+Keep the daemon on loopback; there is no authentication. For optional Tailscale
+web access, follow the listener guidance above. Keep the same database-path override if using one.
 
 1. Capture a thought. **Original saved** acknowledges the durable source, not
    an agent outcome. **Queued for weaving** means no run has started.

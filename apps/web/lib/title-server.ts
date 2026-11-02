@@ -1,5 +1,5 @@
 import "server-only";
-import { isIdempotencyKey, isRecordId, parseThoughtTitle } from "@thoughtloom/contracts";
+import { isAllowedRequestOrigin, isIdempotencyKey, isRecordId, parseThoughtTitle } from "@thoughtloom/contracts";
 import { daemonURL, privateJSON, readProjection } from "./daemon";
 import { parseTitleInput, parseTitleView, type TitleTarget } from "./title-client";
 
@@ -8,11 +8,7 @@ export function readThoughtTitle(id: string, target: TitleTarget) {
   return readProjection("bff.title.read", `/sources/${encodeURIComponent(id)}/title${query}`, parseTitleView);
 }
 export async function titleCommand(request: Request, id: string): Promise<Response> {
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try { const url = new URL(origin); if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.host !== request.headers.get("host")) return privateJSON({ error: "Cross-origin mutation is not allowed" }, 403); }
-    catch { return privateJSON({ error: "Invalid request origin" }, 403); }
-  }
+  if (!isAllowedRequestOrigin(request)) return privateJSON({ error: "Cross-origin mutation is not allowed" }, 403);
   if (request.headers.get("sec-fetch-site") === "cross-site") return privateJSON({ error: "Cross-site mutation is not allowed" }, 403);
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return privateJSON({ error: "JSON required" }, 415);
   const key = request.headers.get("idempotency-key");

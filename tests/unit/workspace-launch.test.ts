@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "../../apps/daemon/src/app";
+import { accessHost } from "../fixtures/access-host";
 
 // Exercise the actual CLI without ever giving its hardwired child path a real
 // daemon or Next. Mirror scripts unchanged; children either exit immediately or
@@ -39,8 +40,8 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-function server(fetch: (request: Request) => Response | Promise<Response>) {
-  const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch });
+function server(fetch: (request: Request) => Response | Promise<Response>, hostname = "127.0.0.1") {
+  const listener = Bun.serve({ hostname, port: 0, fetch });
   // Never let a fixture accidentally use an operator/application port.
   if (!listener.port || [3000, 3001, 4173, 4174].includes(listener.port)) {
     listener.stop(true);
@@ -157,7 +158,7 @@ function observe(child: Launcher) {
   };
 }
 
-async function servingFixture(includeNative: boolean) {
+async function servingFixture(includeNative: boolean, host?: { file?: string; shell?: string }, bind?: { file?: string; shell?: string }) {
   const f = await fixture();
   const native = join(f.root, "fixture-native.json"), tools = join(f.root, "fixture-tools.json");
   const privateValues = ["fixture-native-body-never-log", "fixture-tool-body-never-log"];
@@ -167,6 +168,8 @@ async function servingFixture(includeNative: boolean) {
     THOUGHTLOOM_DATABASE_PATH: f.database,
     THOUGHTLOOM_WEB_PORT: String(f.webPort), THOUGHTLOOM_DAEMON_PORT: String(f.daemonPort),
     ...(includeNative ? { THOUGHTLOOM_NATIVE_CONFIG_FILE: native, THOUGHTLOOM_TOOL_CONNECTION_FILE: tools } : {}),
+    ...(host?.file ? { THOUGHTLOOM_ALLOWED_HOST: host.file } : {}),
+    ...(bind?.file ? { THOUGHTLOOM_WEB_HOST: bind.file } : {}),
   };
   await writeFile(f.launchEnv, f.contents(selected));
   await writeFile(join(f.root, ".env"), "THOUGHTLOOM_DAEMON_PORT=invalid-dotenv-shadow\nFIXTURE_DOTENV_LEAK=must-not-forward\n");
@@ -176,8 +179,10 @@ async function servingFixture(includeNative: boolean) {
     THOUGHTLOOM_NATIVE_CONFIG_FILE: join(f.root, "ambient-native.json"),
     THOUGHTLOOM_TOOL_CONNECTION_FILE: join(f.root, "ambient-tools.json"),
     THOUGHTLOOM_UNSELECTED: "ambient-setting-must-not-forward",
+    ...(host?.shell ? { THOUGHTLOOM_ALLOWED_HOST: host.shell } : {}),
+    ...(bind?.shell ? { THOUGHTLOOM_WEB_HOST: bind.shell } : {}),
   };
-  const captured = [...Object.keys(selected), "THOUGHTLOOM_NATIVE_CONFIG_FILE", "THOUGHTLOOM_TOOL_CONNECTION_FILE", "THOUGHTLOOM_UNSELECTED", "THOUGHTLOOM_DAEMON_URL", "NEXT_TELEMETRY_DISABLED", "FIXTURE_DOTENV_LEAK"];
+  const captured = [...Object.keys(selected), "THOUGHTLOOM_ALLOWED_HOST", "THOUGHTLOOM_WEB_HOST", "THOUGHTLOOM_NATIVE_CONFIG_FILE", "THOUGHTLOOM_TOOL_CONNECTION_FILE", "THOUGHTLOOM_UNSELECTED", "THOUGHTLOOM_DAEMON_URL", "NEXT_TELEMETRY_DISABLED", "FIXTURE_DOTENV_LEAK"];
   const metadata = { daemon: join(f.root, "daemon-metadata.json"), web: join(f.root, "web-metadata.json") };
   const gates = { daemon: join(f.root, "daemon-ready"), web: join(f.root, "web-ready") };
   for (const service of ["daemon", "web"] as const) {
@@ -210,7 +215,7 @@ for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => {
   console.log("fixture " + service + " stopped " + signal);
   server.close(() => process.exit(0));
 });
-server.listen(port, "127.0.0.1", () => console.log("fixture " + service + " listening"));
+server.listen(port, service === "daemon" ? "127.0.0.1" : process.argv[process.argv.indexOf("--hostname") + 1], () => console.log("fixture " + service + " listening"));
 `);
   }
   function start() { const child = f.spawn(["start", "--launch-env", f.launchEnv], environment, 10_000); return { child, log: observe(child) }; }
@@ -440,6 +445,74 @@ test("configured foreground SIGTERM cleans both children and omitted native sett
   expect(await readFile(join(f.root, "web-stopped"), "utf8")).toBe("SIGTERM");
   await expectChildrenGone(f);
 }, 15_000);
+
+test.each([
+  ["shell only", { shell: accessHost }, accessHost],
+  ["launch file only", { file: accessHost }, accessHost],
+  ["shell overrides launch file", { file: "file-host.example.test", shell: accessHost }, accessHost],
+] satisfies [string, { file?: string; shell?: string }, string][])("configured launch passes allowed host to both children: %s", async (_name, setting, expected) => {
+  const f = await servingFixture(false, setting), { child, log } = await f.ready();
+  const selected = { ...f.selected, THOUGHTLOOM_ALLOWED_HOST: expected };
+  expect((await readChildMetadata(f.metadata.daemon)).env).toEqual(selected);
+  expect((await readChildMetadata(f.metadata.web)).env).toEqual({ ...selected, THOUGHTLOOM_DAEMON_URL: `http://127.0.0.1:${f.daemonPort}`, NEXT_TELEMETRY_DISABLED: "1" });
+  child.kill("SIGTERM");
+  expect(await log.exited).toBe(0);
+  await expectChildrenGone(f);
+}, 15_000);
+
+test.each(["http://host.example.test", "host.example.test:8080", "host.example.test/path", "*.example.test"])("configured launch rejects invalid allowed host %s before spawning", async (host) => {
+  const f = await fixture();
+  const result = await f.run(["start", "--launch-env", f.launchEnv], { THOUGHTLOOM_ALLOWED_HOST: host });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.spawned).toBe(false);
+});
+
+// 127.0.0.2 is a distinct local-only interface address: it exercises a
+// non-default bind without relying on a Tailscale interface or live service.
+test.each([
+  ["shell only", { shell: "127.0.0.2" }],
+  ["launch file only", { file: "127.0.0.2" }],
+  ["shell overrides launch file", { file: "127.0.0.1", shell: "127.0.0.2" }],
+] satisfies [string, { file?: string; shell?: string }][])("configured web bind and readiness use selected IPv4: %s", async (_name, setting) => {
+  const f = await servingFixture(false, undefined, setting), { child, log } = await f.ready();
+  const selected = { ...f.selected, THOUGHTLOOM_WEB_HOST: "127.0.0.2" };
+  const daemon = await readChildMetadata(f.metadata.daemon), web = await readChildMetadata(f.metadata.web);
+  expect(daemon.env).toEqual(selected);
+  expect(web.env).toEqual({ ...selected, THOUGHTLOOM_DAEMON_URL: `http://127.0.0.1:${f.daemonPort}`, NEXT_TELEMETRY_DISABLED: "1" });
+  expect(web.argv).toEqual(["start", "--hostname", "127.0.0.2", "--port", String(f.webPort)]);
+  expect(log.stdout).toContain(`http://127.0.0.2:${f.webPort}`);
+  const status = await f.run(["status", "--launch-env", f.launchEnv], setting.shell ? { THOUGHTLOOM_WEB_HOST: setting.shell } : {});
+  expect(status.exitCode).toBe(0);
+  expect(status.output).toContain(`daemon http://127.0.0.1:${f.daemonPort} ready`);
+  expect(status.output).toContain(`web http://127.0.0.2:${f.webPort} ready`);
+  child.kill("SIGTERM");
+  expect(await log.exited).toBe(0);
+  await expectChildrenGone(f);
+}, 15_000);
+
+test("web port preflight checks the selected bind address before spawning", async () => {
+  const f = await fixture();
+  const occupied = server(() => new Response("test-owned listener"), "127.0.0.2");
+  await writeFile(f.launchEnv, f.contents({ THOUGHTLOOM_WEB_HOST: "127.0.0.2", THOUGHTLOOM_WEB_PORT: String(occupied.port) }));
+  const result = await f.run(["start", "--launch-env", f.launchEnv]);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.spawned).toBe(false);
+});
+
+test.each(["", "--hostname", "http://127.0.0.1", "127.0.0.1:3000", "127.0.0.1/path", "localhost", "256.1.1.1", "::1"])("rejects invalid web bind %j from shell before spawning", async (host) => {
+  const f = await fixture();
+  const result = await f.run(["start", "--launch-env", f.launchEnv], { THOUGHTLOOM_WEB_HOST: host });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.spawned).toBe(false);
+});
+
+test.each(["--hostname", "http://127.0.0.1", "127.0.0.1:3000", "localhost", "256.1.1.1"])("rejects invalid web bind %j from launch file before spawning even with valid shell override", async (host) => {
+  const f = await fixture();
+  await writeFile(f.launchEnv, f.contents({ THOUGHTLOOM_WEB_HOST: host }));
+  const result = await f.run(["start", "--launch-env", f.launchEnv], { THOUGHTLOOM_WEB_HOST: "127.0.0.2" });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.spawned).toBe(false);
+});
 
 test("a tracked web child exiting zero stops its sibling and makes the workspace exit nonzero", async () => {
   const f = await servingFixture(false), { log } = await f.ready();

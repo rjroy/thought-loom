@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { parseFollowUpRetryReceipt, type FollowUpJobView, type FollowUpStatusView, type FollowUpTargetView, type InquiryView } from "@thoughtloom/contracts";
 import { DevelopmentError, postDevelopment } from "../../lib/development-client";
+import { commandId } from "../../lib/command-id";
 import { getFollowUps, getInquiryContext, type PendingFollowUpVersion } from "../../lib/follow-up-client";
 import { discussionHref, inquiryHref, sourceHref } from "../../lib/links";
 import { revealInquiryAnchor, useDevelopmentNavigation } from "./development-navigation";
@@ -95,7 +96,7 @@ export default function FollowUpStatus({ sourceId, query = "", initialModel = nu
     if (submitting.current.has(job.id)) return;
     const existing = commands.current.get(job.id);
     if (!existing && (!job.actions.retry || !job.run)) return;
-    const command = existing ?? { key: crypto.randomUUID(), expectedRunId: job.run!.id };
+    const command = existing ?? { key: commandId(), expectedRunId: job.run!.id };
     commands.current.set(job.id, command); setPending((old) => ({ ...old, [job.id]: command }));
     submitting.current.add(job.id); setSending((old) => ({ ...old, [job.id]: true }));
     setErrors((old) => ({ ...old, [job.id]: "" }));

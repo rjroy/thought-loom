@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { parseWeavingRetryReceipt, parseWeavingStatusView, type WeavingStatusView } from "@thoughtloom/contracts";
+import { commandId } from "../../lib/command-id";
 import StatusIcon from "./status-icon";
 
 type Command = { key: string; expectedRunId: string };
@@ -63,7 +64,7 @@ export default function WeavingStatus({ sourceId, initial, onSnapshot, compact =
     if (submitting.current) return;
     const existing = command.current;
     if (!existing && (!view?.actions.retry || !view.run)) return;
-    const request = existing ?? { key: crypto.randomUUID(), expectedRunId: view!.run!.id };
+    const request = existing ?? { key: commandId(), expectedRunId: view!.run!.id };
     command.current = request; setPending(request);
     submitting.current = true; setSending(true); setMessage("");
     try {

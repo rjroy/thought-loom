@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseDialogueStopReceipt, parseDialogueTurnReceipt, parseDialogueView, type DialogueSelection, type DialogueView } from "@thoughtloom/contracts";
 import { creationKey, DevelopmentError, getDialogue, postDevelopment, reconcileDialogue, selectionKey } from "../../lib/development-client";
+import { commandId } from "../../lib/command-id";
 
 type Pending = { key: string; text: string };
 type Context = { selection: DialogueSelection; dialogue: DialogueView | null; draft: string; error: string; notice: string; loading: boolean; sending: boolean; pending: Pending | null; busyConflict: boolean; stopPending: boolean };
@@ -173,7 +174,7 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
   async function send() {
     const key = current.current, entry = all.current[key];
     if (sends.current.has(key) || !entry.draft.trim()) return;
-    const pending = entry.pending ?? { key: crypto.randomUUID(), text: entry.draft };
+    const pending = entry.pending ?? { key: commandId(), text: entry.draft };
     sends.current.add(key); patch(key, { sending: true, error: "", pending });
     try {
       const view = await ensure(key);
@@ -192,7 +193,7 @@ export default function useDevelopment({ root, initialSelection, initialDialogue
     const key = current.current, entry = all.current[key], turn = entry.dialogue?.turns.at(-1);
     if (!entry.dialogue || !turn?.actions?.stop.eligible || entry.stopPending) return;
     let command = stops.current.get(turn.id);
-    if (!command) { command = { key: crypto.randomUUID(), expectedRunId: turn.actions.stop.expectedRunId }; stops.current.set(turn.id, command); }
+    if (!command) { command = { key: commandId(), expectedRunId: turn.actions.stop.expectedRunId }; stops.current.set(turn.id, command); }
     patch(key, { stopPending: true });
     try {
       const receipt = parseDialogueStopReceipt(await postDevelopment(`/api/dialogues/${entry.dialogue.id}/turns/${turn.id}/stop`, { expectedRunId: command.expectedRunId }, command.key));

@@ -1,10 +1,17 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createApp } from "../src/app";
+import { accessHost } from "../../../tests/fixtures/access-host";
 
 const directories: string[] = [];
-afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
+const originalAllowedHost = process.env.THOUGHTLOOM_ALLOWED_HOST;
+beforeEach(() => { delete process.env.THOUGHTLOOM_ALLOWED_HOST; });
+afterEach(async () => {
+  if (originalAllowedHost === undefined) delete process.env.THOUGHTLOOM_ALLOWED_HOST;
+  else process.env.THOUGHTLOOM_ALLOWED_HOST = originalAllowedHost;
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+});
 
 async function fixture() {
   const directory = await mkdtemp("/tmp/opencode/thoughtloom-access-test-"); directories.push(directory);
@@ -54,6 +61,44 @@ test("daemon mutations reject hostile Host or Origin and preserve fixture data",
 test("hostile Origin cannot read private daemon data even with a local Host", async () => {
   const f = await fixture();
   const response = await f.request(`/sources/${f.source.id}`, { headers: { host: "127.0.0.1:4318", origin: "http://attacker.example" } });
+  expect(response.status).toBe(403);
+  expect(await response.text()).not.toContain("access-guard-fixture-secret");
+});
+
+test("approved HTTP hostname passes daemon host and origin guard without weakening native callback protection", async () => {
+  process.env.THOUGHTLOOM_ALLOWED_HOST = accessHost;
+  const f = await fixture();
+  const host = `${accessHost}:4318`, origin = `http://${host}`;
+  const read = await f.request(`/sources/${f.source.id}`, { headers: { host, origin } });
+  expect(read.status).toBe(200);
+  expect(await read.json()).toMatchObject({ id: f.source.id, text: "access-guard-fixture-secret" });
+  const capture = await f.request("/captures", { method: "POST", headers: { host, origin, "content-type": "application/json", "idempotency-key": "private-host-fixture" }, body: JSON.stringify({ text: "private hostname fixture", provenance: "test fixture" }) });
+  expect(capture.status).toBe(201);
+  const callback = await f.request("/internal/tools/read-source", { method: "POST", headers: { host, origin, authorization: "Bearer fixture-only-credential", "content-type": "application/json" }, body: "{}" });
+  expect(callback.status).toBe(403);
+});
+
+test("approved daemon hostname rejects lookalikes and mismatched origins", async () => {
+  process.env.THOUGHTLOOM_ALLOWED_HOST = accessHost;
+  const f = await fixture();
+  const cases: Record<string, string>[] = [
+    { host: `${accessHost}.attacker.example:4318` },
+    { host: `${accessHost}:4318`, origin: "http://attacker.example" },
+    { host: `${accessHost}:4318`, origin: "http://localhost:4318" },
+    { host: `${accessHost}:4318`, origin: `http://${accessHost}:4318`, "x-forwarded-host": "attacker.example" },
+    { host: `${accessHost}:4318`, origin: `http://${accessHost}:4318`, "x-forwarded-proto": "https" },
+    { host: `${accessHost}:4318`, origin: `http://${accessHost}:4318`, forwarded: "host=localhost" },
+  ];
+  for (const headers of cases) {
+    const response = await f.request(`/sources/${f.source.id}`, { headers });
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("access-guard-fixture-secret");
+  }
+});
+
+test("without an allowed hostname the daemon remains loopback-only", async () => {
+  const f = await fixture();
+  const response = await f.request(`/sources/${f.source.id}`, { headers: { host: `${accessHost}:4318`, origin: `http://${accessHost}:4318` } });
   expect(response.status).toBe(403);
   expect(await response.text()).not.toContain("access-guard-fixture-secret");
 });

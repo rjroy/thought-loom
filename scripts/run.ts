@@ -1,7 +1,7 @@
-import { createServer } from "node:net";
+import { createServer, isIPv4 } from "node:net";
 import { resolve } from "node:path";
 import { stat } from "node:fs/promises";
-import { readLaunchConfig } from "./launch-config";
+import { readLaunchConfig, validAllowedHost } from "./launch-config";
 
 const root = resolve(import.meta.dir, "..");
 const webDirectory = resolve(root, "apps/web");
@@ -18,7 +18,8 @@ function configuredPort(name: string, fallback: number): number {
 
 async function endpointReady(url: string, daemon: boolean): Promise<boolean> {
   try {
-    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(700) });
+    // Probe the selected interface with an authority accepted by the web guard.
+    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(700), ...(daemon ? {} : { headers: { Host: `127.0.0.1:${webPort}` } }) });
     if (!daemon) { await response.body?.cancel(); return response.status >= 200 && response.status < 300; }
     if (response.status !== 200 || !response.body) { await response.body?.cancel(); return false; }
     const reader = response.body.getReader();
@@ -37,11 +38,11 @@ async function endpointReady(url: string, daemon: boolean): Promise<boolean> {
   } catch { return false; }
 }
 
-async function checkPort(port: number): Promise<void> {
+async function checkPort(port: number, host: string): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const server = createServer();
-    server.once("error", () => reject(new Error(`Loopback port ${port} is unavailable`)));
-    server.listen(port, "127.0.0.1", () => server.close((error) => error ? reject(error) : resolvePromise()));
+    server.once("error", () => reject(new Error(`Port ${port} is unavailable on the selected address`)));
+    server.listen(port, host, () => server.close((error) => error ? reject(error) : resolvePromise()));
   });
 }
 
@@ -55,9 +56,15 @@ catch (error) {
 const databasePath = config?.databasePath ?? resolve(process.env.THOUGHTLOOM_DATABASE_PATH ?? resolve(root, ".data/thoughtloom.sqlite"));
 const webPort = config?.webPort ?? configuredPort("THOUGHTLOOM_WEB_PORT", 3000);
 const daemonPort = config?.daemonPort ?? configuredPort("THOUGHTLOOM_DAEMON_PORT", 3001);
+// These non-secret settings may explicitly override the launch file.
+const allowedHost = process.env.THOUGHTLOOM_ALLOWED_HOST ?? config?.values.THOUGHTLOOM_ALLOWED_HOST;
+if (allowedHost !== undefined && !validAllowedHost(allowedHost)) throw new Error("Invalid THOUGHTLOOM_ALLOWED_HOST");
+const configuredWebHost = process.env.THOUGHTLOOM_WEB_HOST ?? config?.values.THOUGHTLOOM_WEB_HOST;
+if (configuredWebHost !== undefined && !isIPv4(configuredWebHost)) throw new Error("Invalid THOUGHTLOOM_WEB_HOST");
+const webHost = configuredWebHost ?? "127.0.0.1";
 if (webPort === daemonPort) throw new Error("Web and daemon ports must differ");
 const daemonURL = `http://127.0.0.1:${daemonPort}`;
-const webURL = `http://127.0.0.1:${webPort}`;
+const webURL = `http://${webHost}:${webPort}`;
 const daemonReadiness = `${daemonURL}/weaving/status`;
 
 if (mode === "status") {
@@ -74,11 +81,11 @@ try {
   next = Bun.resolveSync("next/dist/bin/next", webDirectory);
   if (config) {
     if (!(await stat(resolve(webDirectory, ".next/BUILD_ID"))).isFile()) throw new Error("Production build is missing");
-    await checkPort(webPort);
-    await checkPort(daemonPort);
+    await checkPort(webPort, webHost);
+    await checkPort(daemonPort, "127.0.0.1");
   }
 } catch (error) {
-  console.error("Workspace preflight failed:", error instanceof Error && (error.message.startsWith("Loopback port") || error.message.startsWith("Node executable")) ? error.message : "check Node, Next and the existing production build");
+  console.error("Workspace preflight failed:", error instanceof Error && (error.message.startsWith("Port ") || error.message.startsWith("Node executable")) ? error.message : "check Node, Next and the existing production build");
   process.exit(1);
 }
 
@@ -87,6 +94,8 @@ if (config) {
   for (const key of Object.keys(childEnv)) if (key.startsWith("THOUGHTLOOM_")) delete childEnv[key];
   Object.assign(childEnv, config.values);
 }
+if (allowedHost !== undefined) childEnv.THOUGHTLOOM_ALLOWED_HOST = allowedHost;
+if (configuredWebHost !== undefined) childEnv.THOUGHTLOOM_WEB_HOST = configuredWebHost;
 const children: ReturnType<typeof Bun.spawn>[] = [];
 let stopping = false;
 let shutdown: Promise<void> | undefined;
@@ -125,7 +134,7 @@ try {
   if (!ready) throw new Error("Owned daemon did not become ready");
   console.info("workspace.daemon ready");
   console.info("workspace.web starting", { mode });
-  const web = Bun.spawn([node, next, mode, "--hostname", "127.0.0.1", "--port", String(webPort)], {
+  const web = Bun.spawn([node, next, mode, "--hostname", webHost, "--port", String(webPort)], {
     cwd: webDirectory, env: { ...childEnv, NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_DAEMON_URL: daemonURL }, stdout: "inherit", stderr: "inherit",
   });
   children.push(web);

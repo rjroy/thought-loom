@@ -1,5 +1,5 @@
 import "server-only";
-import { isIdempotencyKey, isRecordId, parseDialogueInput, parseDialogueStopInput, parseDialogueStopReceipt, parseDialogueTurnInput, parseDialogueTurnReceipt,
+import { isAllowedRequestOrigin, isIdempotencyKey, isRecordId, parseDialogueInput, parseDialogueStopInput, parseDialogueStopReceipt, parseDialogueTurnInput, parseDialogueTurnReceipt,
   parseDialogueView, parseItemCorrectionInput, parseItemRestoreInput, parseItemView, parseRelationshipRejectInput, parseRelationshipRestoreInput, parseRelationshipView } from "@thoughtloom/contracts";
 import { daemonURL, privateJSON, readProjection } from "./daemon";
 
@@ -15,13 +15,7 @@ type Command = "create" | "turn" | "stop" | "correct-item" | "restore-item" | "r
 // Closed command set: neither paths, upstream origins nor authority come from
 // browser input. Hono assigns user authority and owns all mutations/fences.
 export async function developmentCommand(request: Request, command: Command, id: string, turnId?: string): Promise<Response> {
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      const url = new URL(origin);
-      if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.host !== request.headers.get("host")) return privateJSON({ error: "Cross-origin mutation is not allowed" }, 403);
-    } catch { return privateJSON({ error: "Invalid request origin" }, 403); }
-  }
+  if (!isAllowedRequestOrigin(request)) return privateJSON({ error: "Cross-origin mutation is not allowed" }, 403);
   if (request.headers.get("sec-fetch-site") === "cross-site") return privateJSON({ error: "Cross-site mutation is not allowed" }, 403);
   if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return privateJSON({ error: "JSON required" }, 415);
   const key = request.headers.get("idempotency-key");

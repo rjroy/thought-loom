@@ -5,6 +5,7 @@
     "node": "26.13.0"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "5.2.0",
     "@thoughtloom/contracts": "workspace:*",
     "next": "16.4.3",
     "react": "19.3.1",

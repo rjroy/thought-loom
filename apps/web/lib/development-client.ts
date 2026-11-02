@@ -1,4 +1,5 @@
 import { parseDialogueView, type DialogueSelection } from "@thoughtloom/contracts";
+import { Sha256 } from "@aws-crypto/sha256-js";
 
 export class DevelopmentError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
@@ -51,6 +52,8 @@ export function selectionKey(selection: DialogueSelection): string {
 }
 
 export async function creationKey(root: string, selection: DialogueSelection): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(["thoughtloom-context-v1", root, selectionKey(selection)])));
-  return `discussion_${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  const hash = new Sha256();
+  hash.update(new TextEncoder().encode(JSON.stringify(["thoughtloom-context-v1", root, selectionKey(selection)])));
+  const digest = await hash.digest();
+  return `discussion_${Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }

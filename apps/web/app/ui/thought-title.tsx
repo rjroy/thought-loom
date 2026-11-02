@@ -5,6 +5,7 @@ import { isThoughtTitleText, type InquiryView, type ThoughtTitle } from "@though
 import { getTitle, saveTitle, TitleError, titleEntityKey, titleTargetKey, type TitleInput, type TitleTarget, type TitleView } from "../../lib/title-client";
 import { inquiryTitleMetadata, TitleState, titleMetadataIdentity, type TitleObservation } from "../../lib/title-state";
 import { compactThoughtLabel } from "../../lib/thought-label";
+import { commandId } from "../../lib/command-id";
 
 type Entry = { session: symbol; target: TitleTarget; draft: string; editing: boolean; loading: boolean; saving: boolean; initialized: boolean; ready: boolean; head: string | null; edits: number; error: string; pending: { key: string; input: TitleInput } | null };
 function useTitles(root: string, initial?: InquiryView) {
@@ -56,7 +57,7 @@ function useTitles(root: string, initial?: InquiryView) {
   async function save(entity: string): Promise<boolean> {
     const entry = state.current[entity];
     if (!entry || entry.saving || (!entry.ready && !entry.pending) || !isThoughtTitleText(entry.draft)) return false;
-    const command = entry.pending ?? { key: crypto.randomUUID(), input: { target: entry.target, text: entry.draft, expectedTitleRevisionId: entry.head } };
+    const command = entry.pending ?? { key: commandId(), input: { target: entry.target, text: entry.draft, expectedTitleRevisionId: entry.head } };
     // Fence both kinds of pre-write read. A receipt acknowledges only this exact
     // command, never the current head or another editor's draft.
     canonical.beginWrite(command.input.target);

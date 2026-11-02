@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { accessHost } from "./tests/fixtures/access-host";
 
 const webPort = process.env.THOUGHTLOOM_E2E_WEB_PORT ?? "4317";
 
@@ -25,6 +26,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "bun run tests/browser/serve.ts",
+    env: { THOUGHTLOOM_ALLOWED_HOST: accessHost },
     url: `http://127.0.0.1:${webPort}`,
     reuseExistingServer: false,
     timeout: 60_000,
