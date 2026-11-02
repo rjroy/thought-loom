@@ -46,6 +46,10 @@ and retrieval. Configured weaving uses your selected agent/provider/model.
 For a production-mode local launch, run `bun run build` then `bun start`.
 The build command must succeed first; it does not start either service.
 
+For an agent setting up a managed production instance through `~/.dotfiles`,
+see [Production deployment with Ansible](docs/production-deployment.md).
+The guide distinguishes current launcher support from Ansible wiring still to add.
+
 #### Foreground production launch with explicit configuration
 
 For an already built checkout and an existing database, use the existing local
