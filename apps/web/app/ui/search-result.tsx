@@ -15,21 +15,18 @@ function MarkedFragment({ fragment }: { fragment: SearchPassageFragment }) {
 }
 
 function MatchingPassage({ passage, href, item }: { passage: SearchPassage; href?: string; item: boolean }) {
-  const separated = passage.fragments.some((fragment, index) => index > 0 && fragment.start > passage.fragments[index - 1].end);
-  const text = passage.fragments.map((fragment, index) => <Fragment key={fragment.start}>
-    {(index === 0 ? fragment.start > 0 : fragment.start > passage.fragments[index - 1].end) && <span aria-hidden="true">… </span>}
+  const text = <>{passage.leadingEllipsis && <span aria-hidden="true">… </span>}{passage.fragments.map((fragment, index) => <Fragment key={index}>
     <MarkedFragment fragment={fragment} />
-  </Fragment>);
+  </Fragment>)}{passage.trailingEllipsis && <span aria-hidden="true"> …</span>}</>;
   return <>{passage.fragments.length > 0 && <p className={`result-passage ${item ? "result-formulation" : "result-excerpt"}`}>{href ? <Link href={href} prefetch={false}>{text}</Link> : text}</p>}
-    {separated && <p className="match-explanation">Match spans separated passages.</p>}
-    {passage.omittedMatchedCharacters && <p className="match-explanation">Some matched text is outside this preview.</p>}</>;
+    {passage.omitted && <p className="match-explanation">{passage.fragments.length ? "Preview shortened." : "Preview unavailable."}</p>}</>;
 }
 
 export default function SearchResultReading({ hit, query }: { hit: SearchResult; query: string }) {
   const input = hit.source.origin.kind === "discussion-turn";
   const href = hit.item ? inquiryHref(hit.sourceId, query, hit.item.id, hit.item.formulationId) : input ? sourceHref(hit.sourceId, query) : inquiryHref(hit.sourceId, query);
   const titleMatch = hit.match.field === "title";
-  const titleFragment = titleMatch && hit.passage.fragments.length === 1 && hit.passage.fragments[0].start === 0 && hit.passage.fragments[0].text === hit.title?.text ? hit.passage.fragments[0] : undefined;
+  const titleFragment = titleMatch && !hit.passage.leadingEllipsis && !hit.passage.trailingEllipsis && hit.passage.fragments.length === 1 && hit.passage.fragments[0].text === hit.title?.text ? hit.passage.fragments[0] : undefined;
   const originalContext = hit.item || titleMatch;
   const target = hit.item ? { kind: "item" as const, sourceId: hit.sourceId, itemId: hit.item.id, versionId: hit.item.formulationId } : { kind: "source" as const, sourceId: hit.sourceId };
   return <article className="search-result">
@@ -39,6 +36,7 @@ export default function SearchResultReading({ hit, query }: { hit: SearchResult;
     {!input && !hit.item && hit.matchOrigin !== "source" && <p className="attribution">Original</p>}
     {hit.item && <p className="attribution">{hit.item.author === "user" ? "Your recorded formulation" : hit.item.kind === "interpretation" ? "AI interpretation · Tentative" : "AI developing idea · Tentative"}</p>}
     {hit.alias && <p className="match-explanation">Matched “{hit.alias.expandedQuery}” via a recorded alias · {hit.alias.author === "user" ? "Written by you" : "AI-authored"}</p>}
+    {hit.match.kind === "typo" && <p className="match-explanation">Including {hit.match.correctedTerms.map(({ from, to }) => `“${to}” for “${from}”`).join(", ")}.</p>}
     {(!titleMatch || hit.item) && <div className="source-excerpt-disclosure"><ThoughtTextDisclosure target={target} preview={titleMatch ? undefined : {
       collapsed: <MatchingPassage passage={hit.passage} item={!!hit.item} href={hit.title ? undefined : href} />,
       expanded: !hit.title ? <p className="excerpt-label"><Link href={href} prefetch={false}>Open matched thought</Link></p> : undefined,

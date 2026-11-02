@@ -3,10 +3,9 @@ import type { ThoughtTitle } from "@thoughtloom/contracts";
 
 type TitleIdentity = Pick<ThoughtTitle, "revisionId" | "author">;
 
-// Identity-only resolution lets the streaming reader check an effective head
-// without loading a potentially huge canonical title. Both readers share this
-// USER-override/current-formulation decision, not a second title policy.
-export function readTitleIdentity(db: Database, sourceId: string, itemId?: string, versionId?: string): { headRevisionId: string | null; title: TitleIdentity | null } {
+// Resolve the protected USER override/current-formulation decision once for all
+// canonical readers and the derived indexed-search projection.
+function readTitleIdentity(db: Database, sourceId: string, itemId?: string, versionId?: string): { headRevisionId: string | null; title: TitleIdentity | null } {
   const row = db.query<{ entityId: string; headRevisionId: string; revisionId: string; author: "user" | "ai"; formulationId: string | null }, [string]>(`
     SELECT e.id AS entityId,h.revision_id AS headRevisionId,r.id AS revisionId,r.author,r.formulation_id AS formulationId
     FROM title_entities e JOIN title_heads h ON h.entity_id=e.id

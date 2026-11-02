@@ -1,13 +1,15 @@
 ---
 title: Thoughtloom ordered fuzzy retrieval
 date: 2026-11-01
-status: approved
+status: archived
 tags: [thoughtloom, search, fuzzy-retrieval, provenance, sqlite]
 modules: [daemon, contracts, agent-tools, web]
 related: [.lore/work/design/thoughtloom-mvp.md, .lore/work/concept/thoughtloom-concept.md]
 ---
 
 # Thoughtloom ordered fuzzy retrieval
+
+> **ARCHIVED / SUPERSEDED — not the current search contract.** The user has selected [indexed SQLite FTS5 search with prefixes and bounded typo tolerance](thoughtloom-search-retrieval.md) and authorized that fix. The ordered-character/strict-whitespace interpretation below, exhaustive DP, exact global ranking and later passage/fzf alternatives are abandoned, not prerequisites for current work. The body preserves historical decisions and phase 1–4 evidence only; its earlier approval, pause and next-step statements are not current execution authority. Source/history/provenance and read-before-link protections carry forward. This archive does not establish completion or live activation of the FTS fix.
 
 ## Decision and authority
 

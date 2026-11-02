@@ -5,7 +5,7 @@ import { KnowledgeService } from "../../apps/daemon/src/knowledge";
 import { NativeWeavingAdapter, type NativeClientPort, type NativeSession } from "../../apps/daemon/src/native-adapter";
 import { runScope } from "../../apps/daemon/src/run-scope";
 import { openDatabase, saveCapture } from "../../apps/daemon/src/storage";
-import { refreshItemProjection, refreshTitleProjection } from "../../apps/daemon/src/fuzzy-projection";
+import { refreshItemSearch, refreshTitleSearch } from "../../apps/daemon/src/search-projection";
 import { createToolApp } from "../../apps/daemon/src/tool-boundary";
 import { WeavingWorker, type WeavingRun } from "../../apps/daemon/src/weaving";
 import { ABANDONMENT_ACKNOWLEDGEMENT, WeavingAbandonmentService } from "../../apps/daemon/src/weaving-abandonment";
@@ -161,7 +161,7 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
           const revisionId = crypto.randomUUID();
           db.run("INSERT INTO title_revisions(id,entity_id,text,author,formulation_id,created_at) VALUES (?,?,?,'ai',?,'2030-01-01T00:00:00.000Z')", [revisionId, entity.id, text, versionId]);
           db.run("INSERT INTO title_heads(entity_id,revision_id,user_revision_id) VALUES (?,?,NULL) ON CONFLICT(entity_id) DO UPDATE SET revision_id=excluded.revision_id", [entity.id, revisionId]);
-          refreshTitleProjection(db, target.sourceId, itemId);
+          refreshTitleSearch(db, target.sourceId, itemId);
           return { revisionId, itemId, versionId, sourceId: target.sourceId };
         }).immediate();
       } finally { db.close(); }
@@ -196,7 +196,7 @@ export async function createDialogueWorld(databasePath: string, scenario: Browse
             db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES (?,'interpretation',?)", [id, root.id]);
             db.run("INSERT INTO formulations(id,item_id,text,author,operation_id) VALUES (?,?,?,'ai',?)", [version, id, text, `${id}-operation`]);
             db.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES (?,?,0)", [version, root.id]);
-            refreshItemProjection(db, id);
+            refreshItemSearch(db, id);
           }
         }).immediate();
       } finally { db.close(); }

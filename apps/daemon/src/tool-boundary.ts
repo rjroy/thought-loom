@@ -6,8 +6,7 @@ import { isAbsolute, normalize } from "node:path";
 import { isLegacyNativeAction, NATIVE_CAPABILITY_ACTIONS, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, parseSearchInput, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
 import { KnowledgeError, KnowledgeService, readItem, readRelationship, type KnowledgeContext } from "./knowledge";
 import { openDatabase, sourceRecord } from "./storage";
-import { createSearchService, type SearchService } from "./search";
-import { FuzzySearchError } from "./fuzzy-retrieval";
+import { createSearchService, SearchError, type SearchService } from "./search";
 import type { WeavingRun } from "./weaving";
 import { runScope, type RunScope } from "./run-scope";
 import { dialogueHeader } from "./dialogue-data";
@@ -201,7 +200,7 @@ export function createToolApp(options: { databasePath: string; transportCredenti
   });
   app.use("/internal/tools/*", bodyLimit({ maxSize: 65_536, onError: (context) => context.json({ error: "Tool request too large" }, 413) }));
   app.onError((error, context) => {
-    const code = error instanceof FuzzySearchError ? error.code === "invalid" ? "invalid_input" : error.code : error instanceof KnowledgeError ? error.code : "storage_error";
+    const code = error instanceof SearchError ? error.code === "invalid" ? "invalid_input" : error.code : error instanceof KnowledgeError ? error.code : "storage_error";
     console.error("tools.request failed", { category: code });
     const status = code === "forbidden" ? 403 : code === "operation_conflict" || code === "version_conflict" ? 409 : code === "invalid_input" || code === "invalid_reference" ? 400 : 503;
     return context.json({ error: code }, status);

@@ -1,10 +1,12 @@
 # Opt-in Thoughtloom plugin witness
 
-## Fuzzy-retrieval candidate and historical fixture evidence
+## Indexed-search candidate and historical fixture evidence
 
-The current candidate marker is `thoughtloom-fuzzy-retrieval-v1`. Its six-source
+The current candidate marker is `thoughtloom-indexed-search-v2`. Its six-source
 and bundle pins in `plugin-provenance.ts` are offline review inputs, not proof
-of executing bytes. No native witness has been run for this search bundle.
+of executing bytes. No native witness has been run for this search bundle. The
+previous `thoughtloom-fuzzy-retrieval-v1` candidate and its offline pin checks
+describe earlier bytes, not execution or validation of this indexed bundle.
 
 The historical `thoughtloom-generated-titles-v1` isolated source title fixture
 passed for its then-final bundle: `/tmp/opencode/title-native-witness-rerun.log`
@@ -27,9 +29,9 @@ Offline reproduction: from the isolated copy, `bun --no-env-file run
 tests/native/plugin-provenance-report.ts`. Source closure is `plugin.ts`,
 `capabilities.ts`, `contracts/src/tools.ts`, `native-capabilities.ts`,
 `inspection.ts` and `search.ts`; candidate bundle A is
-`ff8ff61b62a2fb412bc8e55aaabc7f28405d62fa3e2101d368f00a3110b5a6de`,
+`d3a2042f7452926d7f41e3ccd772267969748eb7f4f5ced303fb4b52eaf93c4b`,
 test-marker B is
-`79a77ebd74f00b771a10f5f035acba951796090f03f85ea3bb0a59fa66e9b375`.
+`3da5c7a7b9aff8c23918be374afefcaca21c9d8bbfa53f1c07e34e17d5821c84`.
 The embedded marker is a reviewed identifier, not an executing-byte hash.
 
 ### Source-title fixture — historical isolated execution

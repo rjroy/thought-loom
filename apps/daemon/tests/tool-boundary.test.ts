@@ -64,7 +64,7 @@ test("generated title endpoint rejects a legacy owned grant without mutating tit
   const f = await fixture(); await f.activate();
   const read = new Database(f.databasePath, { readonly: true });
   try {
-    const queries = ["SELECT * FROM sources ORDER BY id", "SELECT * FROM jobs ORDER BY id", "SELECT * FROM owned_grants ORDER BY session_id", "SELECT * FROM native_commands ORDER BY run_id", "SELECT * FROM title_entities ORDER BY id", "SELECT * FROM title_revisions ORDER BY id", "SELECT * FROM title_heads ORDER BY entity_id", "SELECT * FROM title_receipts ORDER BY idempotency_key", "SELECT * FROM fuzzy_targets ORDER BY target_kind,target_id", "SELECT * FROM fuzzy_fields ORDER BY target_kind,target_id,field_kind", "SELECT * FROM fuzzy_chunks ORDER BY target_kind,target_id,field_kind,ordinal"];
+    const queries = ["SELECT * FROM sources ORDER BY id", "SELECT * FROM jobs ORDER BY id", "SELECT * FROM owned_grants ORDER BY session_id", "SELECT * FROM native_commands ORDER BY run_id", "SELECT * FROM title_entities ORDER BY id", "SELECT * FROM title_revisions ORDER BY id", "SELECT * FROM title_heads ORDER BY entity_id", "SELECT * FROM title_receipts ORDER BY idempotency_key", "SELECT * FROM search_fields ORDER BY target_kind,target_id,field_kind", "SELECT rowid,text FROM search_fts ORDER BY rowid", "SELECT * FROM search_alias_keys ORDER BY alias_id,side"];
     const before = queries.map((query) => read.query(query).all());
     const response = await f.tools.request("/internal/tools/record-title-v1", { method: "POST", headers: { authorization: "Bearer test-only-credential", "content-type": "application/json" }, body: JSON.stringify({ action: "record_title_v1", native: f.native, input: { rootSourceId: f.source.id, target: { kind: "source" }, text: "Generated title", expectedTitleRevisionId: null } }) });
     expect(response.status).toBe(403);
@@ -92,7 +92,7 @@ for (const scenario of ["no-command", "missing-proof", "proof-without-title", "w
     }
     const db = new Database(f.databasePath, { readonly: true });
     try {
-      const queries = ["SELECT * FROM owned_grants", "SELECT * FROM title_entities", "SELECT * FROM title_revisions", "SELECT * FROM title_heads", "SELECT * FROM title_receipts", "SELECT * FROM fuzzy_targets", "SELECT * FROM fuzzy_fields", "SELECT * FROM fuzzy_chunks"];
+      const queries = ["SELECT * FROM owned_grants", "SELECT * FROM title_entities", "SELECT * FROM title_revisions", "SELECT * FROM title_heads", "SELECT * FROM title_receipts", "SELECT * FROM search_fields", "SELECT rowid,text FROM search_fts", "SELECT * FROM search_alias_keys"];
       const before = queries.map((query) => db.query(query).all());
       expect(() => f.grants.bind({ ...f.grant, operations: [...actions] })).toThrow();
       expect(queries.map((query) => db.query(query).all())).toEqual(before);

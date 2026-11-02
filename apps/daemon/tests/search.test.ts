@@ -33,7 +33,7 @@ async function fixture() {
 }
 
 type SearchResponse = {
-  results: Array<{ sourceId: string; matchOrigin: "source" | "annotation" | "alias"; match: { class: string; route: string } }>;
+  results: Array<{ sourceId: string; matchOrigin: "source" | "annotation" | "alias"; match: { kind: string } }>;
 };
 
 test("source search ranks an exact token above a prefix and excludes unrelated sources", async () => {
@@ -42,8 +42,8 @@ test("source search ranks an exact token above a prefix and excludes unrelated s
   expect(response.status).toBe(200);
   const { results } = await response.json() as SearchResponse;
   expect(results[0]).toMatchObject({ sourceId: exact.id, matchOrigin: "source" });
-  expect(results[0].match).toMatchObject({ class: "whole-word", route: "direct" });
-  expect(results.find((result) => result.sourceId === prefix.id)?.match).toMatchObject({ class: "contiguous", route: "direct" });
+  expect(results[0].match).toMatchObject({ kind: "exact" });
+  expect(results.find((result) => result.sourceId === prefix.id)?.match).toMatchObject({ kind: "prefix" });
   expect(results).toEqual(expect.arrayContaining([
     expect.objectContaining({ sourceId: prefix.id, matchOrigin: "source" }),
   ]));

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { openDatabase } from "./storage";
 import { parseIdea, parseIdeaDerivation, type IdeaInput, type IdeaDerivation } from "@thoughtloom/contracts";
 import { enqueueUserFollowUp } from "./follow-up";
-import { refreshAliasProjection, refreshItemProjection } from "./fuzzy-projection";
+import { refreshAliasSearch, refreshItemSearch } from "./search-projection";
 export type KnowledgeContext =
   | { actor: "user"; operationId: string }
   | { actor: "ai"; operationId: string; runId: string };
@@ -126,7 +126,7 @@ function appendFormulation(db: Database, context: KnowledgeContext, itemId: stri
   db.run("INSERT INTO formulations (id,item_id,text,author,operation_id,run_id,restored_from) VALUES (?,?,?,?,?,?,?)",
     [id, itemId, text, context.actor, context.operationId, context.actor === "ai" ? context.runId : null, restoredFrom]);
   ids.forEach((sourceId, position) => db.run("INSERT INTO formulation_evidence (formulation_id,source_id,position) VALUES (?,?,?)", [id, sourceId, position]));
-  refreshItemProjection(db, itemId);
+  refreshItemSearch(db, itemId);
 }
 
 function appendRelationship(db: Database, context: KnowledgeContext, relationshipId: string, status: RelationshipRevision["status"], rationale: string, ids: string[], restoredFrom: string | null = null) {
@@ -203,7 +203,7 @@ export class KnowledgeService {
       const id = crypto.randomUUID();
       db.run("INSERT INTO search_aliases(id,alias,expansion,author,operation_id,run_id) VALUES (?,?,?,?,?,?)", [id, alias.join(" "), expansion.join(" "), context.actor, context.operationId, context.actor === "ai" ? context.runId : null]);
       input.evidenceSourceIds.forEach((sourceId, position) => db.run("INSERT INTO alias_evidence(alias_id,source_id,position) VALUES (?,?,?)", [id, sourceId, position]));
-      refreshAliasProjection(db, id);
+      refreshAliasSearch(db, id);
       return readAlias(db, { resultId: id, revisionId: null });
     }, (result) => ({ resultId: result.id, revisionId: null }), readAlias);
   }

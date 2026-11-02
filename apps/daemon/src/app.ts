@@ -2,9 +2,7 @@ import { Hono } from "hono";
 import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, parseSearchParameters, SPRINGBOARD_RECENT_MAX, SPRINGBOARD_RANDOM_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
 import { readInquiry } from "./inquiry";
 import { findSource, saveCapture } from "./storage";
-import { createSearchService } from "./search";
-import { FuzzySearchError } from "./fuzzy-retrieval";
-import type { FuzzyReadPolicy } from "./fuzzy-search-work";
+import { createSearchService, SearchError } from "./search";
 import { createToolApp } from "./tool-boundary";
 import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
 import { createDialogueApp } from "./dialogue-http";
@@ -13,9 +11,9 @@ import { createFollowUpHttpApp } from "./follow-up-http";
 import { readRecentThoughts, readSpringboard } from "./springboard";
 import { createTitleHttpApp } from "./title-http";
 
-export function createApp(options: WeavingHttpOptions & { searchPolicy?: FuzzyReadPolicy; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
+export function createApp(options: WeavingHttpOptions & { followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
-  const search = createSearchService({ databasePath: options.databasePath, policy: options.searchPolicy });
+  const search = createSearchService({ databasePath: options.databasePath });
   app.use("*", async (context, next) => {
     if (!isLocalRequest(context.req.raw)) return new Response("Forbidden", { status: 403, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     await next();
@@ -79,7 +77,7 @@ export function createApp(options: WeavingHttpOptions & { searchPolicy?: FuzzyRe
     try {
       return context.json(await search.search(input, context.req.raw.signal), 200);
     } catch (error) {
-      const code = error instanceof FuzzySearchError ? error.code : "unavailable";
+      const code = error instanceof SearchError ? error.code : "unavailable";
       return context.json({ error: code === "invalid" ? "invalid_input" : code }, code === "invalid" ? 400 : 503);
     }
   });

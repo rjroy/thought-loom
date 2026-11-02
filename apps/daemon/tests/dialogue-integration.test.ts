@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Service } from "@opencode/client/service";
 import type { OpenCodeClient } from "@opencode/client";
+import { parseSearchResponse } from "@thoughtloom/contracts";
 import { createApp } from "../src/app";
 import { KnowledgeService } from "../src/knowledge";
 import { NativeWeavingAdapter, createMaintainedClient, type MaintainedClientHooks, type NativeClientPort, type NativeSession } from "../src/native-adapter";
@@ -63,7 +64,7 @@ test("optional dialogue creation idempotency key replays the same identity and c
   const { create, itemSelection, root } = await fixture();
   const first = await create(itemSelection, "create-dialogue-key");
   expect(first.status).toBe(201);
-  const saved = await first.json();
+  const saved = await first.json() as { id: string; current: { id: string } };
   const replay = await create(itemSelection, "create-dialogue-key");
   expect([200, 201]).toContain(replay.status);
   expect(await replay.json()).toEqual(saved);
@@ -151,7 +152,19 @@ test("a dialogue-scoped tool records a developing idea with original and turn de
   expect(await (await post(input)).json()).toEqual(saved);
   expect((await post({ ...input, text: "Different payload" })).status).toBe(409);
   const search = await app.request("/search?q=intent-preservation");
-  expect((await search.json() as { results: unknown[] }).results).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: root.id, item: expect.objectContaining({ text: input.text }) })]));
+  expect(search.status).toBe(200);
+  const searchResult = parseSearchResponse(await search.json());
+  expect(searchResult).not.toBeNull();
+  const hit = searchResult?.results.find((result) => result.item?.id === saved.id);
+  expect(hit).toMatchObject({ sourceId: root.id, source: { provenance: root.provenance }, matchOrigin: "interpretation",
+    item: { id: saved.id, formulationId: saved.current.id, kind: "developing-idea", author: "ai" },
+    match: { field: "formulation-body", fieldRevisionId: saved.current.id } });
+  expect(hit?.passage.fragments.map((fragment) => fragment.text).join("")).toContain("intent-preservation");
+  for (const fragment of hit?.passage.fragments ?? []) expect(input.text).toContain(fragment.text);
+  const full = await app.request(`/sources/${root.id}/inquiry?${new URLSearchParams({ itemId: saved.id, versionId: saved.current.id })}`);
+  expect(full.status).toBe(200);
+  expect(await full.json()).toMatchObject({ source: { id: root.id, text: root.text, provenance: root.provenance },
+    selectedTarget: { id: saved.id, versionId: saved.current.id, text: input.text, author: "ai" } });
   const view = await app.request(`/dialogues/${dialogue.id}`);
   expect(await view.json()).toMatchObject({ turns: [{ id: turn.id, changes: [expect.objectContaining({ kind: "developing-idea" })] }] });
 });

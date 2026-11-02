@@ -21,12 +21,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   return (
     <main id="main" className="workspace search-workspace" tabIndex={-1}>
       <div className="page-intro"><h1>Find a thought</h1></div>
-      {result.kind === "invalid" ? <div className="notice error-notice" role="alert"><StatusIcon kind="error" /><p>This search is invalid. Use up to 512 characters and a result limit from 1 to 200.</p></div>
+      {result.kind === "invalid" ? <div className="notice error-notice" role="alert"><StatusIcon kind="error" /><p>This search is invalid. Use up to 512 characters, 32 distinct terms and a result limit from 1 to 200.</p></div>
         : result.kind === "unavailable" ? <div className="search-recovery"><div className="notice error-notice" role="alert"><StatusIcon kind="error" /><p>Search is temporarily unavailable. Your saved originals have not been changed.</p></div><a className="text-link" href={searchHref(query)}>Try this search again</a></div>
         : <section aria-label="Search results" className="search-results">
           {result.value.hasMore && <p className="section-context" role="status">More matches available. Narrow the search to see others.</p>}
+          {result.value.searchTruncated && <p className="section-context" role="status">Search was limited. Narrow the search to check more thoughts.</p>}
           {result.value.aliasExpansionTruncated && <p className="section-context" role="status">Some recorded alias expansions were not searched.</p>}
-          {result.value.results.length === 0 ? <div role="status" className="empty-guidance"><h2>No thoughts found</h2><p>Try a shorter fragment or wording from an original.</p></div>
+          {result.value.results.length === 0 ? <div role="status" className="empty-guidance"><h2>{result.value.searchTruncated ? "No thoughts found in this search" : "No thoughts found"}</h2><p>Try a shorter fragment or wording from an original.</p></div>
             : <><h2 className="result-count">{result.value.hasMore ? "First " : ""}{result.value.results.length} {result.value.results.length === 1 ? "match" : "matches"} for “{query}”</h2>
               {result.value.results.map((hit) => <SearchResultReading key={hit.item ? `item-${hit.item.id}` : `source-${hit.sourceId}`} hit={hit} query={query} />)}</>}
         </section>}

@@ -22,37 +22,39 @@ test("late original passage highlights original Unicode graphemes and escapes li
   const match = "e\u0301👩‍💻<needle>";
   const text = `${"Prelude content without the token. ".repeat(20)}${match} end of source.`;
   const source = await capture(request, "fuzzy-unicode-source", text);
-  const query = "É👩‍💻<needle>";
+  const query = "É needle";
   await page.goto(`/search?${new URLSearchParams({ q: query })}`);
   const result = page.locator("article.search-result").filter({ has: page.locator(`a[href*="/sources/${source.id}/"]`) });
   const excerpt = result.locator(".result-excerpt");
   await expect(excerpt).toContainText(match);
-  await expect(excerpt.locator("mark")).toHaveText(["e\u0301👩‍💻<needle>"]);
+  await expect(excerpt.locator("mark")).toHaveText(["e\u0301", "needle"]);
   await expect(excerpt.locator("needle")).toHaveCount(0);
   expect((await excerpt.innerText()).length).toBeLessThan(text.length);
   await result.getByRole("button", { name: "Read full text", exact: true }).click();
   await expect(result.getByText(text, { exact: true })).toBeVisible();
 });
 
-test("widely separated match fragments are labeled as noncontiguous", async ({ page, request }) => {
+test("a misspelled token finds the indexed source and labels its correction", async ({ page, request }) => {
   await control(request, "world", { empty: true });
-  const text = `🟢${" distant ordinary filler ".repeat(80)}🟣`;
-  const source = await capture(request, "fuzzy-separated-source", text);
-  await page.goto(`/search?${new URLSearchParams({ q: "🟢🟣" })}`);
+  const text = `Fixture original ${"ordinary filler ".repeat(30)}software development kit.`;
+  const source = await capture(request, "indexed-typo-source", text);
+  await page.goto(`/search?${new URLSearchParams({ q: "softwsre development" })}`);
   const result = page.locator("article.search-result").filter({ has: page.locator(`a[href*="/sources/${source.id}/"]`) });
-  await expect(result.locator("mark")).toHaveText(["🟢", "🟣"]);
-  await expect(result.getByText("Match spans separated passages.", { exact: true })).toBeVisible();
-  await expect(result.locator(".result-excerpt")).toContainText("…");
+  await expect(result.locator("mark")).toHaveText(["software"]);
+  await expect(result.getByText("Including “software” for “softwsre”.", { exact: true })).toBeVisible();
+  await expect(result.getByText("Preview shortened.", { exact: true })).toBeVisible();
   expect((await result.locator(".result-excerpt").innerText()).length).toBeLessThan(text.length);
+  await result.getByRole("button", { name: "Read full text", exact: true }).click();
+  await expect(result.getByText(text, { exact: true })).toBeVisible();
 });
 
-test("an oversized matched whitespace run is honestly marked as omitted", async ({ page, request }) => {
+test("a bounded oversized-token preview remains explicit and reveals the exact original", async ({ page, request }) => {
   await control(request, "world", { empty: true });
-  const text = `🟠${" ".repeat(5000)}🟤`;
-  const source = await capture(request, "fuzzy-omitted-source", text);
-  await page.goto(`/search?${new URLSearchParams({ q: "🟠 🟤" })}`);
+  const text = `fixture ${"b".repeat(5000)} end`;
+  const source = await capture(request, "indexed-omitted-source", text);
+  await page.goto(`/search?${new URLSearchParams({ q: "bbb" })}`);
   const result = page.locator("article.search-result").filter({ has: page.locator(`a[href*="/sources/${source.id}/"]`) });
-  await expect(result.getByText("Some matched text is outside this preview.", { exact: true })).toBeVisible();
+  await expect(result.getByText(/Preview (shortened|unavailable)\./)).toBeVisible();
   await result.getByRole("button", { name: "Read full text", exact: true }).click();
   await expect(result.getByText(text, { exact: true })).toBeVisible();
 });

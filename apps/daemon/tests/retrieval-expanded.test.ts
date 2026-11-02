@@ -39,7 +39,7 @@ test("search returns source display context without replacing the original", asy
   expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, matchOrigin: "source", source: expect.objectContaining({ provenance: source.provenance, createdAt: source.createdAt, excerpt: expect.stringContaining("lantern") }) })]));
 });
 
-test("SDK directly matches its expansion while reverse alias preserves provenance", async () => {
+test("SDK alias finds its expansion while reverse alias preserves provenance", async () => {
   const { capture, search, knowledge } = await fixture();
   const short = await capture("short", "The SDK simplifies integration.");
   const long = await capture("long", "A software development kit helps builders.");
@@ -48,17 +48,17 @@ test("SDK directly matches its expansion while reverse alias preserves provenanc
   expect(alias).toMatchObject({ alias: "SDK", expansion: "software development kit", author: "user", evidenceSourceIds: [long.id] });
   const acronymResults = await search("SDK");
   const expansionResults = await search("software development kit");
-  expect(acronymResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: short.id, match: expect.objectContaining({ route: "direct" }) }), expect.objectContaining({ sourceId: long.id, matchOrigin: "source", match: expect.objectContaining({ route: "direct" }) })]));
+  expect(acronymResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: short.id, match: expect.objectContaining({ kind: "exact" }) }), expect.objectContaining({ sourceId: long.id, matchOrigin: "alias", alias: expect.objectContaining({ id: alias.id, direction: "alias-to-expansion" }) })]));
   expect(expansionResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: long.id }), expect.objectContaining({ sourceId: short.id, matchOrigin: "alias", alias: expect.objectContaining({ id: alias.id, direction: "expansion-to-alias", expandedQuery: "SDK", evidenceSourceIds: [long.id] }) })]));
   expect(acronymResults.map((result) => result.sourceId)).not.toContain(unrelated.id);
 });
 
-test("an inserted query character is not repaired while candidate-character skipping remains possible", async () => {
+test("bounded typo repair handles an inserted or missing character without unrelated hits", async () => {
   const { capture, search } = await fixture();
   const relevant = await capture("relevant", "A telescope reveals distant stars.");
   const other = await capture("other", "A tomato ripens in the garden.");
   const results = await search("telescoppe");
-  expect(results.map((result) => result.sourceId)).not.toContain(relevant.id);
+  expect(results.map((result) => result.sourceId)).toContain(relevant.id);
   expect(results.map((result) => result.sourceId)).not.toContain(other.id);
   expect((await search("telscope")).map((result) => result.sourceId)).toContain(relevant.id);
   expect(await search("xylophonically")).toEqual([]);
@@ -94,8 +94,8 @@ test("rebuilding a discarded projection restores source and interpretation searc
   const source = await capture("rebuild", "A compass points north.");
   const item = knowledge.createItem({ actor: "ai", operationId: "annotation", runId: "fixture-run" }, { kind: "interpretation", sourceId: source.id, text: "Orientation can reduce uncertainty.", evidenceSourceIds: [source.id] });
   const db = openDatabase(path);
-  try { db.run("DELETE FROM fuzzy_targets WHERE target_kind='source' AND target_id=?", [source.id]); } finally { db.close(); }
-  expect((await createApp({ databasePath: path }).request("/search?q=compass")).status).toBe(503);
+  try { db.run("DELETE FROM search_fields WHERE source_id=?", [source.id]); } finally { db.close(); }
+  expect((await search("compass")).map((result) => result.sourceId)).not.toContain(source.id);
   rebuildSearchIndex(path);
   expect((await search("compass")).map((result) => result.sourceId)).toContain(source.id);
   expect(await search("uncertainty")).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, item: expect.objectContaining({ id: item.id }) })]));

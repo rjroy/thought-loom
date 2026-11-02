@@ -4,12 +4,11 @@ import { parseSourceRecord, type CaptureInput, type Source } from "@thoughtloom/
 import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
 import { migrateTitles } from "./title-schema";
 import { readTitle } from "./title-projection";
-import { migrateFuzzyProjection, retireLexicalSearch } from "./fuzzy-projection-schema";
-import { rebuildFuzzyProjection, refreshSourceProjection } from "./fuzzy-projection";
+import { migrateIndexedSearch, rebuildSearchProjection, refreshSourceSearch } from "./search-projection";
 import { sourceOrigin } from "./source-origin";
 export { sourceOrigin } from "./source-origin";
 
-export const CURRENT_DATABASE_VERSION = 21;
+export const CURRENT_DATABASE_VERSION = 22;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -35,8 +34,7 @@ function migrateFollowUpJobs(db: Database) {
 
 export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
-  let fuzzyMigrationAttempted = false;
-  let lexicalRetirementAttempted = false;
+  let searchMigrationAttempted = false;
   try {
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA busy_timeout = 5000");
@@ -539,28 +537,22 @@ export function openDatabase(path: string): Database {
         migrateTitles(db);
         db.run("PRAGMA user_version = 19");
       }
-      if (version && version.user_version < 20) {
-        fuzzyMigrationAttempted = true;
-        console.info("fuzzy.projection.migrate attempt", { schemaVersion: 20 });
-        migrateFuzzyProjection(db);
-        db.run("PRAGMA user_version = 20");
+      // Versions 20/21 added/retired disposable search projections only. Build
+      // version 22 from canonical data, without retaining their abandoned engine.
+      if (version && version.user_version < 22) {
+        searchMigrationAttempted = true;
+        console.info("search.projection.migrate attempt", { schemaVersion: 22 });
+        migrateIndexedSearch(db);
+        db.run("PRAGMA user_version = 22");
       }
-      if (version && version.user_version < 21) {
-        lexicalRetirementAttempted = true;
-        console.info("search.lexical.retire attempt", { schemaVersion: 21 });
-        retireLexicalSearch(db);
-        db.run("PRAGMA user_version = 21");
-      }
-      if ((migrating || fuzzyMigrationAttempted || lexicalRetirementAttempted) && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
+      if ((migrating || searchMigrationAttempted) && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();
     db.run("PRAGMA foreign_keys = ON");
     if (db.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1) throw new Error("Foreign keys unavailable");
-    if (fuzzyMigrationAttempted) console.info("fuzzy.projection.migrate succeeded", { schemaVersion: 20 });
-    if (lexicalRetirementAttempted) console.info("search.lexical.retire succeeded", { schemaVersion: 21 });
+    if (searchMigrationAttempted) console.info("search.projection.migrate succeeded", { schemaVersion: 22 });
     return db;
   } catch (error) {
-    if (fuzzyMigrationAttempted) console.error("fuzzy.projection.migrate failed", { category: "storage_error" });
-    if (lexicalRetirementAttempted) console.error("search.lexical.retire failed", { category: "storage_error" });
+    if (searchMigrationAttempted) console.error("search.projection.migrate failed", { category: "storage_error" });
     db.close();
     throw error;
   }
@@ -597,7 +589,7 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
       };
       db.run("INSERT INTO sources (id, text, provenance, created_at) VALUES (?, ?, ?, ?)",
         [source.id, source.text, source.provenance, source.createdAt]);
-      refreshSourceProjection(db, source.id);
+      refreshSourceSearch(db, source.id);
       db.run("INSERT INTO jobs (id, source_id, status) VALUES (?, ?, ?)",
         [crypto.randomUUID(), source.id, "queued"]);
       db.run("INSERT INTO capture_receipts (idempotency_key, payload_hash, source_id,response_version) VALUES (?, ?, ?,2)",
@@ -615,9 +607,7 @@ export function rebuildSearchIndex(path: string): void {
   try {
     const opened = openDatabase(path);
     db = opened;
-    // Retain the path-level recovery API, but rebuild only the authoritative
-    // derived fuzzy projection. It owns atomic publication/rollback itself.
-    rebuildFuzzyProjection(opened);
+    rebuildSearchProjection(opened);
     console.info("search.rebuild succeeded");
   } catch {
     console.error("search.rebuild failed", { category: "storage_error" });

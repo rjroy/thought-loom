@@ -20,13 +20,13 @@ test("web search adapter preserves the daemon's bounded alias disclosure and raw
     requested = new URL(String(input));
     expect(init?.redirect).toBe("error");
     expect(init?.cache).toBe("no-store");
-    return Response.json({ engineVersion: 1, results: [], hasMore: false, aliasExpansionTruncated: true });
+    return Response.json({ engineVersion: 2, results: [], hasMore: false, searchTruncated: true, aliasExpansionTruncated: true });
   }, { preconnect: originalFetch.preconnect });
   const result = await readSearch({ query: " alias ", limit: 3 });
   expect(requested?.pathname).toBe("/search");
   expect(requested?.searchParams.get("q")).toBe(" alias ");
   expect(requested?.searchParams.get("limit")).toBe("3");
-  expect(result).toEqual({ kind: "found", value: { engineVersion: 1, results: [], hasMore: false, aliasExpansionTruncated: true } });
+  expect(result).toEqual({ kind: "found", value: { engineVersion: 2, results: [], hasMore: false, searchTruncated: true, aliasExpansionTruncated: true } });
 });
 
 test("daemon busy 503 is unavailable rather than an empty successful search", async () => {

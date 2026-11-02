@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Source } from "../../packages/contracts/src";
+import { parseSearchResponse, type Source } from "../../packages/contracts/src";
 import { inquiryExample as example } from "../fixtures/inquiry-content";
 
 const daemonURL = `http://127.0.0.1:${process.env.THOUGHTLOOM_E2E_DAEMON_PORT ?? "4318"}`;
@@ -19,7 +19,7 @@ async function assertNoHorizontalOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-test("search finds SDK originals directly, restores the query, and tolerates a missing candidate character", async ({ page }) => {
+test("search finds SDK and its recorded expansion, restores the query, and tolerates a missing character", async ({ page, request }) => {
   await page.goto("/");
   // Intended first RED: phase 1 is runnable, but has no search entry field.
   const results = await search(page, "SDK");
@@ -28,7 +28,7 @@ test("search finds SDK originals directly, restores the query, and tolerates a m
   await expect(originalHit).toBeVisible();
   await expect(originalHit.getByText("Matched original", { exact: true })).toBeVisible();
   await expect(expandedHit).toBeVisible();
-  await expect(expandedHit.getByText("Matched original", { exact: true })).toBeVisible();
+  await expect(expandedHit.getByText("Matched recorded alias", { exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
   const open = originalHit.getByRole("link", { name: /^Open thought/ });
@@ -42,8 +42,46 @@ test("search finds SDK originals directly, restores the query, and tolerates a m
   await expect(page.getByRole("searchbox", { name: "Search thoughts", exact: true })).toHaveValue("SDK");
   await expect(page.getByRole("region", { name: "Search results", exact: true }).getByText(example.sdk, { exact: true })).toBeVisible();
 
+  const exact = await request.get(`${daemonURL}/search?q=coordination`);
+  expect(exact.status()).toBe(200);
+  const exactBody = parseSearchResponse(await exact.json());
+  const originals = exactBody?.results.filter((hit) => !hit.item && hit.match.kind === "exact" && hit.match.field === "source-body" && hit.passage.fragments.some((fragment) => fragment.text.includes("coordination"))) ?? [];
+  expect(originals).toHaveLength(1);
+  const sourceId = originals[0].sourceId;
+  const originalRead = await request.get(`${daemonURL}/sources/${sourceId}`);
+  expect(originalRead.status()).toBe(200);
+  expect(await originalRead.json()).toMatchObject({ id: sourceId, text: example.original, provenance: example.provenance });
+  const typoResponse = await request.get(`${daemonURL}/search?q=coordinaton`);
+  expect(typoResponse.status()).toBe(200);
+  const typoBody = parseSearchResponse(await typoResponse.json());
+  const represented = typoBody?.results.find((hit) => hit.sourceId === sourceId && !hit.item);
+  expect(represented).toMatchObject({ sourceId, matchOrigin: "source", source: { provenance: example.provenance }, match: { kind: "typo", field: "source-body", fieldRevisionId: sourceId } });
+  const correction = represented?.match.correctedTerms[0];
+  expect(represented?.match.correctedTerms).toHaveLength(1);
+  expect(correction?.from).toBe("coordinaton");
+  expect(["coordination", "coordinator"]).toContain(correction?.to);
+  if (!correction) throw new Error("Missing fixture correction");
+  let sourceReads = 0;
+  page.on("request", (req) => { if (new URL(req.url()).pathname === `/api/sources/${sourceId}`) sourceReads++; });
   const typoResults = await search(page, "coordinaton");
-  await expect(typoResults.getByText(example.originalLead, { exact: false })).toBeVisible();
+  const typoHit = typoResults.getByRole("article").filter({ has: page.locator(`a[href^="/sources/${sourceId}/inquiry?"]`) });
+  await expect(typoHit.getByText("Matched original", { exact: true })).toBeVisible();
+  await expect(typoHit.locator("mark")).toHaveText(correction.to);
+  await expect(typoHit.getByText(`Including “${correction.to}” for “coordinaton”.`, { exact: true })).toBeVisible();
+  const link = typoHit.getByRole("link", { name: "Open thought", exact: true });
+  const href = await link.getAttribute("href"); if (!href) throw new Error("Missing source link");
+  const target = new URL(href, page.url());
+  expect(target.pathname).toBe(`/sources/${sourceId}/inquiry`); expect(target.searchParams.get("q")).toBe("coordinaton");
+  const originalURL = page.url(), beforeReads = sourceReads;
+  await typoHit.getByRole("button", { name: "Read full text", exact: true }).click();
+  await expect(typoHit.getByText(example.original, { exact: true })).toBeVisible();
+  expect(sourceReads).toBe(beforeReads + 1); expect(page.url()).toBe(originalURL);
+  await expect(link).toHaveAttribute("href", href);
+  await typoHit.getByRole("button", { name: "Show less", exact: true }).click();
+  await typoHit.getByRole("button", { name: "Read full text", exact: true }).click();
+  await expect(typoHit.getByText(example.original, { exact: true })).toBeVisible();
+  expect(sourceReads).toBe(beforeReads + 1); expect(page.url()).toBe(originalURL);
+  await expect(page.getByRole("searchbox", { name: "Search thoughts", exact: true })).toHaveValue("coordinaton");
   await assertNoHorizontalOverflow(page);
 });
 

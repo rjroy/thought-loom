@@ -192,7 +192,7 @@ test("the current exact sources reproduce the reviewed bundle without native exe
   const text = await reviewedBundle(repo);
   expect(createHash("sha256").update(text).digest("hex")).toBe(BUNDLE_SHA256);
   const other = fixtureBuildB(text);
-  expect(createHash("sha256").update(other).digest("hex")).toBe("79a77ebd74f00b771a10f5f035acba951796090f03f85ea3bb0a59fa66e9b375");
+  expect(createHash("sha256").update(other).digest("hex")).toBe("3da5c7a7b9aff8c23918be374afefcaca21c9d8bbfa53f1c07e34e17d5821c84");
   expect(() => fixtureBuildB("unreviewed fixture")).toThrow();
   await expect(reviewedBundle(`${repo}/other`)).rejects.toThrow();
 });

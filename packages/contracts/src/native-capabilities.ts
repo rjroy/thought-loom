@@ -10,7 +10,7 @@ export const NATIVE_CAPABILITY_ACTIONS = [...LEGACY_NATIVE_ACTIONS, "record_titl
 export type NativeCapabilityAction = typeof NATIVE_CAPABILITY_ACTIONS[number];
 // Reviewed release identifier, embedded in the executing bundle. NOT its SHA256.
 // Bundle provenance/pins must separately cover every transitive source input.
-export const NATIVE_PLUGIN_BUILD_ID = "thoughtloom-fuzzy-retrieval-v1";
+export const NATIVE_PLUGIN_BUILD_ID = "thoughtloom-indexed-search-v2";
 export const NATIVE_CAPABILITY_RPC_ID = "thoughtloom.capabilities";
 export type NativeCapabilities = {
   protocol: 1; nonce: string; buildId: string; setupId: string;

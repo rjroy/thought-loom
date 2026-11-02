@@ -8,6 +8,8 @@ related: [.lore/work/concept/thoughtloom-concept.md, PRODUCT.md]
 
 # Thoughtloom MVP boundary
 
+**Current search direction:** [Indexed SQLite FTS5 search, prefixes and bounded typo tolerance](thoughtloom-search-retrieval.md). The fix is implemented and source-verified; live activation remains separate. This MVP discussion is historical context for the product loop, not authority to reinstate the abandoned ordered-character or passage/fzf attempt. Its broad source/idea/history goals remain unchanged.
+
 This records the MVP discussion accepted by the user with “Perfect,” followed by a request to document it. The scope below reflects that agreement; this newly written document has not received separate review or approval. It is not an implementation plan or authorization to build. The initial test corpus and concrete experiment criteria remain undecided.
 
 ## What we are testing

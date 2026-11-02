@@ -1,0 +1,7 @@
+{
+  "manifestSHA256": "d8173698e639e6a3303874f160f906d1bf7565262b4aa1e92ad744d832c551dc",
+  "profile": "10k",
+  "exitCode": 1,
+  "message": "EXPERIMENT STOPPED: RuntimeError: 10k refused before fixtures: fresh independent safety review is required",
+  "newFixtureOrRunDirectoryCreated": false
+}

@@ -106,7 +106,7 @@ for (const [label, text] of invalidUnicodeTitles) {
   test(`TITLE-01 HTTP rejects ${label} without changing durable state`, async () => {
     const f = await fixture(), db = new Database(f.databasePath, { readonly: true });
     try {
-      const queries = ["SELECT * FROM sources ORDER BY id", "SELECT * FROM jobs ORDER BY id", "SELECT * FROM title_entities ORDER BY id", "SELECT * FROM title_revisions ORDER BY id", "SELECT * FROM title_heads ORDER BY entity_id", "SELECT * FROM title_receipts ORDER BY idempotency_key", "SELECT * FROM fuzzy_targets ORDER BY target_kind,target_id", "SELECT * FROM fuzzy_fields ORDER BY target_kind,target_id,field_kind", "SELECT * FROM fuzzy_chunks ORDER BY target_kind,target_id,field_kind,ordinal"];
+      const queries = ["SELECT * FROM sources ORDER BY id", "SELECT * FROM jobs ORDER BY id", "SELECT * FROM title_entities ORDER BY id", "SELECT * FROM title_revisions ORDER BY id", "SELECT * FROM title_heads ORDER BY entity_id", "SELECT * FROM title_receipts ORDER BY idempotency_key", "SELECT * FROM search_fields ORDER BY target_kind,target_id,field_kind", "SELECT rowid,text FROM search_fts ORDER BY rowid", "SELECT * FROM search_alias_keys ORDER BY alias_id,side"];
       const before = queries.map((query) => db.query(query).all());
       const response = await edit(f, "title-invalid-unicode", { kind: "source" }, text, null);
       expect(response.status).toBe(400);

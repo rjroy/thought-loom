@@ -47,7 +47,8 @@ test("daemon mutations reject hostile Host or Origin and preserve fixture data",
     expect(response.status).toBe(403);
   }
   const search = await f.request("/search?q=hostile-insert-marker", { headers: { host: "127.0.0.1:4318" } });
-  expect(await search.json()).toEqual({ results: [] });
+  expect(search.status).toBe(200);
+  expect(await search.json()).toEqual({ engineVersion: 2, results: [], hasMore: false, searchTruncated: false, aliasExpansionTruncated: false });
 });
 
 test("hostile Origin cannot read private daemon data even with a local Host", async () => {

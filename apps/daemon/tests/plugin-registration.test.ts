@@ -83,14 +83,14 @@ test("phase3-portable registered search converter and forwarder preserve input w
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     expect(String(url)).toBe("http://127.0.0.1:4321/internal/tools/search");
     if (typeof init?.body !== "string") throw new Error("Missing forwarded search body");
-    forwarded.push(JSON.parse(init.body)); return Response.json({ results: [], engineVersion: 1, hasMore: false, aliasExpansionTruncated: false });
+    forwarded.push(JSON.parse(init.body)); return Response.json({ results: [], engineVersion: 2, hasMore: false, searchTruncated: false, aliasExpansionTruncated: false });
   }, { preconnect: globalThis.fetch.preconnect }));
   try {
     const output = await tool.execute({ query, limit: 2, runId: "forged-run", sourceId: "forged-source", transportCredential: "forged-secret" }, native);
     expect(forwarded).toEqual([{ action: "search", native: { sessionID: native.sessionID, agent: native.agent, messageID: native.messageID, callID: native.id }, input: { query, limit: 2 } }]);
     expect(permissions).toEqual([expect.objectContaining({ action: "search", sessionID: native.sessionID, agent: native.agent, resources: ["*"] })]);
     if (typeof output.content !== "string") throw new Error("Expected JSON search tool content");
-    expect(JSON.parse(output.content)).toEqual({ results: [], engineVersion: 1, hasMore: false, aliasExpansionTruncated: false });
+    expect(JSON.parse(output.content)).toEqual({ results: [], engineVersion: 2, hasMore: false, searchTruncated: false, aliasExpansionTruncated: false });
     await tool.execute({ query }, native);
     expect(forwarded[1]).toEqual({ action: "search", native: { sessionID: native.sessionID, agent: native.agent, messageID: native.messageID, callID: native.id }, input: { query } });
     await expect(tool.execute({ query: "bad\ud800", limit: 2 }, native)).rejects.toThrow();

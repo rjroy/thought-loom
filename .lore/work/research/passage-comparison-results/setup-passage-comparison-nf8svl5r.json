@@ -1,0 +1,62 @@
+{
+  "workspace": "/tmp/opencode/passage-comparison-nf8svl5r",
+  "source": "/home/rjroy/Projects/writing/thought-loom/tests/performance/passage-comparison",
+  "pin": {
+    "harnessVersion": "repo-owned-v1",
+    "name": "fzf",
+    "version": "0.5.2",
+    "registry": "https://registry.npmjs.org/fzf/0.5.2",
+    "repository": "git+https://github.com/ajitid/fzf-for-js.git",
+    "gitHead": "357c8aedaeff3f1af190049fab1c8d03609e7aee",
+    "tarball": "https://registry.npmjs.org/fzf/-/fzf-0.5.2.tgz",
+    "integrity": "sha512-Tt4kuxLXFKHy8KT40zwsUPUkg1CrsgY25FxA2U/j/0WgEDCk3ddc/zLTCCcbSHX9FcKtLuVaDGtGE/STWC+j3Q==",
+    "bundleSHA256": "15ca63bc5ea4b2be409c74643056fd5f98b6b3b54b7ee0e908177ca8eea67b2e",
+    "bunVersion": "1.4.3"
+  },
+  "manifest": {
+    "sha256": "d8173698e639e6a3303874f160f906d1bf7565262b4aa1e92ad744d832c551dc",
+    "files": {
+      "run.py": "2d5ee29ed694b68826efdaa07ded405f45e45595ca5b28bb4dbd1f337599194a",
+      "harness.ts": "788a0569ee337fa34318b251471b45bdad22da8b4aacb468d5a13fe3375594cf",
+      "regressions.ts": "97e266083f891486286adaed2295c15a892fd8999c1ee0457222ca9e1c07d85d",
+      "worker.ts": "7fa710f3631ba0037eaa4b51df8a422f3cedc54416c8342b711a15f102d05f27",
+      "package.json": "9addd8c076834302157010df604bdbf540d1a9b2ddcb92764eff3a3b7438bd42",
+      "bun.lock": "de138af81807a865ab40b05d574ad57c36efbfa62a56bc610016134b6e8fa12d",
+      "package-pin.json": "acf04900815beb497a75f43b05549bc391c568fd81f3d9e8764951b6f8b3625d",
+      "README.md": "b2ff502b35c3c74054f960704f5a36b5cfc1e140c4c2f6286151bcc69249ddec",
+      "node_modules/fzf/dist/fzf.es.js": "15ca63bc5ea4b2be409c74643056fd5f98b6b3b54b7ee0e908177ca8eea67b2e"
+    }
+  },
+  "installedFilesCompared": 18,
+  "signatures": "SRI/installed payload verified; registry signatures not authenticated",
+  "lifecycleScripts": "disabled",
+  "capacityPreflight": {
+    "totalBytes": 16626835456,
+    "availableBytes": 16567775232
+  },
+  "hostNode": "v26.13.0",
+  "projectPackageHashes": {
+    "package.json": "79cc39af8ff2403a8f1b69adabd463cf2ee1b84a4505c28a58f5dc59c1644758",
+    "bun.lock": "bbd5eee2bc3ecfc582747b2cec7229adac9271a534a7ce414a3c2f6492b0d4a1"
+  },
+  "requiresFreshReview": true,
+  "productionAdoption": false,
+  "installCommand": [
+    "/home/rjroy/.local/share/mise/installs/bun/1.4.3/bin/bun",
+    "--no-env-file",
+    "install",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+    "--registry",
+    "https://registry.npmjs.org",
+    "--cache-dir",
+    "/tmp/opencode/passage-comparison-nf8svl5r/cache",
+    "--no-progress",
+    "--network-concurrency",
+    "2"
+  ],
+  "stagedSourceUpdated": [
+    "run.py",
+    "README.md"
+  ]
+}

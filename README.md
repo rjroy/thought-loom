@@ -96,6 +96,32 @@ not that the weaving worker is available or working. No background manager or cr
 stop command is provided. Port checks reduce accidental conflicts but cannot
 reserve the ports until the child services bind.
 
+#### Indexed-search upgrade and existing native setup
+
+Updating the checkout alone does not activate every part of indexed search.
+The foreground launcher starts the current daemon but uses the **existing web
+build**; it builds neither the web application nor the native plugin. A complete
+upgrade needs a matching web build and, if using native agent tools, a matching
+plugin bundle at the existing fixed location. The installed bundle and live
+service state have not been checked by this source audit.
+
+In particular, a daemon expecting capability marker
+`thoughtloom-indexed-search-v2` does not accept the older
+`thoughtloom-generated-titles-v1` or `thoughtloom-fuzzy-retrieval-v1` marker as
+proof for new generated-title grants; those runs use the baseline ten-action
+scope instead. Manual titles and proof replay for saved older runs are unchanged.
+Older plugins can forward search responses but may retain older search input
+validation or descriptions, so they are not full search parity.
+
+Before changing an existing native bundle, obtain the operator's approval, hold
+admissions and check that work has drained or been resolved. Preserve the
+existing connection, credentials and fixed location; use a controlled update
+of the reviewed plugin bundle and verify a fresh capability RPC reports the
+current marker and expected actions. This repository does not provide a
+documented in-place update command here. Do not substitute a fresh setup,
+silently rekey, weaken capability checks, or restart a shared service. A web
+rebuild and launcher restart alone do not establish native compatibility.
+
 ### Back up and inspect a restored copy
 
 These commands back up **only the Thoughtloom application SQLite database**,
@@ -226,8 +252,13 @@ to find your words later. There is deliberately no permanent all-notes list.
 ### Find and inspect a thought
 
 1. Capture an original containing a distinctive word or phrase. Use **Search
-   thoughts** in the header to find it. Search accepts fragments, recorded
-   aliases/acronyms, and a bounded single-typo fallback; it is not agentic search.
+   thoughts** in the header to find it. Search uses SQLite FTS5 for words and
+   word prefixes, with recorded aliases as an optional supplement. The app adds
+   bounded typo correction: one insertion, deletion, substitution or adjacent
+   transposition for eligible words of 4–32 characters that retain their first
+   character. Correction and result limits may truncate the search, which is
+   reported; not every typo is guaranteed to match. FTS5 itself does not correct
+   spelling, and this is keyword retrieval, not semantic or agentic search.
 2. Select **Open thought**. The inquiry view keeps the original, its date/origin,
    and any recorded interpretations and connections distinct. Expand **Read
    full original** to inspect every character, or **Open saved original** for
