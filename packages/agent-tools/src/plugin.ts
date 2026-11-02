@@ -5,6 +5,7 @@ import { open } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { loopbackOrigin, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, toolId, toolRecord, type ToolAction } from "../../contracts/src/tools";
 import { NATIVE_PLUGIN_BUILD_ID } from "../../contracts/src/native-capabilities";
+import { parseSearchInput, SEARCH_MAX_LIMIT, SEARCH_QUERY_MAX_LENGTH } from "../../contracts/src/search";
 import { registerCapabilities } from "./capabilities";
 
 export type NativeToolContext = ToolContext;
@@ -107,10 +108,10 @@ function project(action: ToolAction, value: unknown) {
     case "record_relationship": return parseRelationship(value, false);
     case "revise_interpretation": return parseInterpretationRevision(value, false);
     case "revise_relationship": return parseRelationshipRevision(value, false);
+    case "search": return parseSearchInput(value, false);
     default: {
-      const field = action === "read_source" ? "sourceId" : action === "read_item" ? "itemId" : action === "read_relationship" ? "relationshipId" : "query";
-      if (!toolRecord(value) || typeof value[field] !== "string" || (action !== "search" && !toolId(value[field])) ||
-          (action === "search" && (String(value[field]).length > 512 || (String(value[field]).match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) > 16))) return null;
+      const field = action === "read_source" ? "sourceId" : action === "read_item" ? "itemId" : "relationshipId";
+      if (!toolRecord(value) || !toolId(value[field])) return null;
       return { [field]: value[field] };
     }
   }
@@ -137,7 +138,7 @@ async function forward(action: ToolAction, value: unknown, native: NativeToolCon
 
 const string = { type: "string" as const };
 const evidence = { type: "array" as const, items: string, minItems: 1, maxItems: 16 };
-type Property = { type: "string"; enum?: string[]; minLength?: number; maxLength?: number } | typeof evidence | { type: "null" } | { anyOf: Property[] } | { oneOf: Property[] } | { type: "object"; properties: Record<string, Property>; required: string[]; additionalProperties: boolean };
+type Property = { type: "string"; enum?: string[]; minLength?: number; maxLength?: number } | { type: "integer"; minimum: number; maximum: number } | typeof evidence | { type: "null" } | { anyOf: Property[] } | { oneOf: Property[] } | { type: "object"; properties: Record<string, Property>; required: string[]; additionalProperties: boolean };
 function schema(properties: Record<string, Property>) {
   return { type: "object" as const, properties, required: Object.keys(properties), additionalProperties: false };
 }
@@ -145,7 +146,8 @@ const definitions: Array<{ name: ToolAction; description: string; input: ReturnT
   { name: "read_source", description: "Read immutable original evidence anywhere in the corpus before citing it. Includes titleState: canonical headRevisionId and effective title (possibly a protected USER label). Read access does not grant writes there.", input: schema({ sourceId: string }) },
   { name: "read_item", description: "Read a knowledge item, its exact current version, attribution and source evidence. Includes titleState: canonical headRevisionId separately from the effective title and its attribution.", input: schema({ itemId: string }) },
   { name: "read_relationship", description: "Read a relationship's endpoints, current version, rationale and evidence.", input: schema({ relationshipId: string }) },
-  { name: "search", description: "Search sources and attributable annotations for candidate connections; similarity is not evidence.", input: schema({ query: string }) },
+  { name: "search", description: "Find ordered-character matches across full current thoughts and titles; typed spaces require whitespace. Returns bounded passages and exact IDs, not read witnesses or meaningful connections. Optional limit defaults to 50.",
+    input: { ...schema({ query: { type: "string", maxLength: SEARCH_QUERY_MAX_LENGTH }, limit: { type: "integer", minimum: 1, maximum: SEARCH_MAX_LIMIT } }), required: ["query"] } },
   { name: "record_interpretation", description: "Record a tentative interpretation anchored to this run's original source.", input: schema({ sourceId: string, text: string, evidenceSourceIds: evidence }) },
   { name: "record_idea", description: "During dialogue only, record a developing idea with original/user-turn evidence and explicit derivation. Saved immediately; no Keep approval.",
     input: { ...schema({ rootSourceId: string, turnSourceId: string, dialogueId: string, turnId: string, text: string, evidenceSourceIds: evidence, derivedFrom: schema({ itemId: string, versionId: string }) }),

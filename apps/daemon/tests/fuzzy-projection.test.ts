@@ -6,7 +6,10 @@ import { openDatabase, saveCapture } from "../src/storage";
 import { KnowledgeService } from "../src/knowledge";
 import { DialogueService } from "../src/dialogue";
 import { writeTitle } from "../src/title-write";
-import { rebuildFuzzyProjection, verifyFuzzyProjectionIntegrity } from "../src/fuzzy-projection";
+import { backfillFuzzyProjection, rebuildFuzzyProjection, verifyFuzzyProjectionIntegrity } from "../src/fuzzy-projection";
+import { createHash } from "node:crypto";
+import { createApp } from "../src/app";
+import { parseSearchResponse } from "@thoughtloom/contracts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -60,7 +63,7 @@ async function projected(db: Database): Promise<Array<{ target: ProjectionField[
 test("phase2-schema fresh database publishes complete source projection on capture", async () => {
   const databasePath = await path(), sourceText = `  Fixture original ${"chunk text ".repeat(2000)}end 🌱  `;
   const db = openDatabase(databasePath);
-  try { expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 20 }); }
+  try { expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 }); }
   finally { db.close(); }
   const created = saveCapture(databasePath, "projection-fresh-capture", { text: sourceText, provenance: "fixture" });
   if (created.kind !== "created") throw new Error("Fresh capture not created");
@@ -92,7 +95,7 @@ test("phase2-schema fixed v19 data upgrades with exact current body and user tit
   } finally { legacy.close(); }
   const upgraded = openDatabase(databasePath);
   try {
-    expect(upgraded.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+    expect(upgraded.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
     const fields = await projected(upgraded);
     expect(fields).toContainEqual({ target: expect.objectContaining({ kind: "source", sourceId: "legacy-source" }), kind: "source-body", text: sourceText });
     expect(fields).toContainEqual({ target: expect.objectContaining({ kind: "item", sourceId: "legacy-source", itemId: "legacy-item", formulationId: "legacy-current" }), kind: "formulation-body", text: "Current formulation Ω" });
@@ -342,4 +345,90 @@ test("phase2-integrity failed rebuild rolls back the complete old projection and
     expect(await projected(db)).toEqual(fields); expect(canonicalSnapshot(db)).toEqual(before);
     expect(verifyFuzzyProjectionIntegrity(db)).toMatchObject({ valid: true, checkedTargets: 2 });
   } finally { db.close(); }
+});
+
+// Fixed schema 20 DDL, paired with the fixed v18 fixture and v19 title DDL
+// above. Never derive historical fixtures by removing current-schema objects.
+const projectionSchema20 = `
+CREATE TABLE fuzzy_projection_state (singleton INTEGER PRIMARY KEY CHECK(singleton=1), format_version INTEGER NOT NULL CHECK(format_version>0));
+CREATE TABLE fuzzy_targets (target_kind TEXT NOT NULL CHECK(target_kind IN ('source','item')), target_id TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES sources(id), item_id TEXT REFERENCES knowledge_items(id), formulation_id TEXT REFERENCES formulations(id), title_revision_id TEXT REFERENCES title_revisions(id), PRIMARY KEY(target_kind,target_id), CHECK((target_kind='source' AND target_id=source_id AND item_id IS NULL AND formulation_id IS NULL) OR (target_kind='item' AND target_id=item_id AND item_id IS NOT NULL AND formulation_id IS NOT NULL))) WITHOUT ROWID;
+CREATE TABLE fuzzy_fields (target_kind TEXT NOT NULL, target_id TEXT NOT NULL, field_kind TEXT NOT NULL CHECK(field_kind IN ('source-body','formulation-body','title')), original_length INTEGER NOT NULL CHECK(original_length>=0), chunk_count INTEGER NOT NULL CHECK(chunk_count>=0), PRIMARY KEY(target_kind,target_id,field_kind), FOREIGN KEY(target_kind,target_id) REFERENCES fuzzy_targets(target_kind,target_id) ON DELETE CASCADE, CHECK(field_kind='title' OR (target_kind='source' AND field_kind='source-body') OR (target_kind='item' AND field_kind='formulation-body'))) WITHOUT ROWID;
+CREATE TABLE fuzzy_chunks (target_kind TEXT NOT NULL, target_id TEXT NOT NULL, field_kind TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK(ordinal>=0), start_offset INTEGER NOT NULL CHECK(start_offset>=0), utf16_length INTEGER NOT NULL CHECK(utf16_length>0), text TEXT NOT NULL, PRIMARY KEY(target_kind,target_id,field_kind,ordinal), FOREIGN KEY(target_kind,target_id,field_kind) REFERENCES fuzzy_fields(target_kind,target_id,field_kind) ON DELETE CASCADE) WITHOUT ROWID;
+CREATE TABLE fuzzy_alias_keys (alias_id TEXT NOT NULL REFERENCES search_aliases(id) ON DELETE CASCADE, side TEXT NOT NULL CHECK(side IN ('alias','expansion')), normalized_key TEXT NOT NULL, PRIMARY KEY(alias_id,side)) WITHOUT ROWID;
+CREATE INDEX fuzzy_alias_lookup ON fuzzy_alias_keys(normalized_key,alias_id,side);
+PRAGMA user_version=20;`;
+
+function legacyFtsObjects(db: Database) {
+  return db.query<{ name: string }, []>(`SELECT name FROM sqlite_master WHERE type IN ('table','trigger') AND (
+    name IN ('source_search','formulation_search','item_search','title_search','source_vocabulary','formulation_vocabulary','title_vocabulary')
+    OR name GLOB 'source_search_*' OR name GLOB 'formulation_search_*' OR name GLOB 'item_search_*' OR name GLOB 'title_search_*'
+    OR (type='trigger' AND (sql LIKE '%source_search%' OR sql LIKE '%formulation_search%' OR sql LIKE '%title_search%')))
+    ORDER BY name`).all();
+}
+
+test("phase3-retirement fresh schema removes all legacy FTS and vocabulary objects", async () => {
+  const databasePath = await path(), db = openDatabase(databasePath);
+  try {
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+    expect(legacyFtsObjects(db)).toEqual([]);
+    expect(verifyFuzzyProjectionIntegrity(db)).toMatchObject({ valid: true });
+  } finally { db.close(); }
+});
+
+test("phase3-retirement upgrades fixed schema 20 without altering canonical or fuzzy data", async () => {
+  const databasePath = await path(), legacy = new Database(databasePath, { create: true });
+  const text = `  ${"q".repeat(300)} SoftwareDevelopmentKit  `, provenance = "fixture";
+  const hash = createHash("sha256").update(JSON.stringify([text, provenance])).digest("hex");
+  let before: unknown[][], beforeExtras: unknown[][], beforeFields: Awaited<ReturnType<typeof projected>>;
+  const extraQueries = ["SELECT * FROM jobs ORDER BY id", "SELECT * FROM search_aliases ORDER BY id", "SELECT * FROM alias_evidence ORDER BY alias_id", "SELECT * FROM fuzzy_alias_keys ORDER BY alias_id,side"];
+  try {
+    legacy.exec(await readFile(new URL("../../../tests/fixtures/thoughtloom-schema-v18.sql", import.meta.url), "utf8"));
+    legacy.exec(titleSchema19); legacy.exec(projectionSchema20); legacy.run("PRAGMA foreign_keys=ON");
+    expect(legacy.query("PRAGMA user_version").get()).toEqual({ user_version: 20 });
+    legacy.run("INSERT INTO sources(id,text,provenance,created_at) VALUES (?,?,?,?)", ["retirement-source", text, provenance, "2001-01-01T00:00:00.000Z"]);
+    legacy.run("INSERT INTO capture_receipts(idempotency_key,payload_hash,source_id,response_version) VALUES (?,?,?,2)", ["retirement-capture", hash, "retirement-source"]);
+    legacy.run("INSERT INTO jobs(id,source_id,status,priority,kind) VALUES ('retirement-job','retirement-source','queued',0,'capture')");
+    legacy.run("INSERT INTO knowledge_items(id,kind,source_id,created_at) VALUES ('retirement-item','interpretation','retirement-source',NULL)");
+    legacy.run("INSERT INTO formulations(id,item_id,text,author,operation_id,run_id) VALUES ('retirement-old','retirement-item','Old formulation','ai','old-op','fixture-run')");
+    legacy.run("INSERT INTO formulations(id,item_id,text,author,operation_id,run_id) VALUES ('retirement-current','retirement-item','Current sdk thought','ai','current-op','fixture-run')");
+    legacy.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES ('retirement-current','retirement-source',0)");
+    legacy.run("INSERT INTO title_entities(id,item_id) VALUES ('retirement-entity','retirement-item')");
+    legacy.run("INSERT INTO title_revisions(id,entity_id,text,author,formulation_id,created_at) VALUES ('retirement-title','retirement-entity','User label','user','retirement-old','2001-01-01T00:00:00.000Z')");
+    legacy.run("INSERT INTO title_heads(entity_id,revision_id,user_revision_id) VALUES ('retirement-entity','retirement-title','retirement-title')");
+    legacy.run("INSERT INTO title_receipts(idempotency_key,payload_hash,revision_id) VALUES ('retirement-title-receipt','fixture-hash','retirement-title')");
+    legacy.run("INSERT INTO search_aliases(id,alias,expansion,author,operation_id,run_id) VALUES ('retirement-alias','ZXQ','orange orchard','user','alias-op',NULL)");
+    legacy.run("INSERT INTO alias_evidence(alias_id,source_id,position) VALUES ('retirement-alias','retirement-source',0)");
+    legacy.run("INSERT INTO source_search(source_id,text) VALUES (?,?)", ["retirement-source", text]);
+    legacy.run("INSERT INTO formulation_search(item_id,text) VALUES ('retirement-item','Current sdk thought')");
+    legacy.run("INSERT INTO title_search(entity_id,text) VALUES ('retirement-entity','User label')");
+    backfillFuzzyProjection(legacy);
+    legacy.run("INSERT INTO fuzzy_projection_state(singleton,format_version) VALUES (1,1)");
+    expect(legacyFtsObjects(legacy).length).toBeGreaterThan(0);
+    expect(legacy.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    before = canonicalSnapshot(legacy); beforeExtras = extraQueries.map((sql) => legacy.query(sql).all()); beforeFields = await projected(legacy);
+  } finally { legacy.close(); }
+  const migrated = openDatabase(databasePath);
+  try {
+    expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+    expect(legacyFtsObjects(migrated)).toEqual([]);
+    expect(canonicalSnapshot(migrated)).toEqual(before);
+    expect(extraQueries.map((sql) => migrated.query(sql).all())).toEqual(beforeExtras);
+    expect(await projected(migrated)).toEqual(beforeFields);
+    expect(verifyFuzzyProjectionIntegrity(migrated)).toMatchObject({ valid: true });
+    expect(migrated.query("SELECT id,alias,expansion FROM search_aliases").all()).toEqual([{ id: "retirement-alias", alias: "ZXQ", expansion: "orange orchard" }]);
+    expect(migrated.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { migrated.close(); }
+  expect(saveCapture(databasePath, "retirement-capture", { text, provenance })).toMatchObject({ kind: "replayed", source: { id: "retirement-source", text } });
+  const newCapture = saveCapture(databasePath, "retirement-new-capture", { text: "A new post-migration source.", provenance });
+  if (newCapture.kind !== "created") throw new Error("Post-migration capture was not created");
+  const knowledge = new KnowledgeService(databasePath);
+  const newItem = knowledge.createItem({ actor: "ai", operationId: "retirement-new-item", runId: "fixture-run" }, { kind: "interpretation", sourceId: newCapture.source.id, text: "A new current reading.", evidenceSourceIds: [newCapture.source.id] });
+  title(databasePath, newCapture.source.id, newItem.id, newItem.current.id, "user", "Post-migration label", "retirement-new-title", null);
+  const check = openDatabase(databasePath);
+  try { expect(legacyFtsObjects(check)).toEqual([]); expect(verifyFuzzyProjectionIntegrity(check)).toMatchObject({ valid: true }); }
+  finally { check.close(); }
+  const response = await createApp({ databasePath }).request("/search?q=sdk"); expect(response.status).toBe(200);
+  const result = parseSearchResponse(await response.json()); expect(result).not.toBeNull();
+  expect(result?.results.some((entry) => entry.sourceId === "retirement-source" && !entry.item && entry.passage.matchStart > 240)).toBe(true);
+  expect(result?.results.some((entry) => entry.item?.id === "retirement-item" && entry.item.formulationId === "retirement-current" && entry.title?.revisionId === "retirement-title" && entry.title.author === "user")).toBe(true);
 });

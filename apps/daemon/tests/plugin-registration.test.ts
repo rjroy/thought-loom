@@ -46,6 +46,58 @@ test("CAP-01 native Effect converter accepts valid capability RPC output", () =>
   expect(decodePortableRpc(nativeCapabilityDefinition.methods.inspect.output, output)).toEqual(output);
 });
 
+test("phase3-contract registered search schema accepts an optional bounded integer limit", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "thoughtloom-search-plugin-")); directories.push(directory);
+  const connectionFile = join(directory, "connection.json");
+  await writeFile(connectionFile, JSON.stringify({ url: "http://127.0.0.1:4321", transportCredential: "fixture-only-secret", location: directory }), { mode: 0o600 });
+  const registered: Registered[] = [], editor = { add(tool: Registered) { registered.push(tool); } } as Editor;
+  const context = { options: { connectionFile }, location: { directory }, permission: { async assert() {} },
+    tool: { async transform(callback: (value: Editor) => void) { callback(editor); return { async dispose() {} }; }, async list() { return registered.map((tool) => ({ ...tool, id: tool.name })); } },
+    rpc: { async register(_definition: unknown, _handlers: unknown) { return { async dispose() {}, events: { async emit() {} } }; } } };
+  await Reflect.apply(plugin.setup, undefined, [context]);
+  const tool = registered.find((entry) => entry.name === "search"); if (!tool) throw new Error("Missing registered search tool");
+  expect(tool.input).toMatchObject({ type: "object", required: ["query"], additionalProperties: false, properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } });
+});
+
+test("phase3-portable registered search converter and forwarder preserve input without model authority", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "thoughtloom-portable-search-")); directories.push(directory);
+  const connectionFile = join(directory, "connection.json");
+  await writeFile(connectionFile, JSON.stringify({ url: "http://127.0.0.1:4321", transportCredential: "fixture-only-secret", location: directory }), { mode: 0o600 });
+  const registered: Registered[] = [], editor = { add(tool: Registered) { registered.push(tool); } } as Editor;
+  const permissions: unknown[] = [], forwarded: unknown[] = [];
+  const context = { options: { connectionFile }, location: { directory }, permission: { async assert(input: unknown) { permissions.push(input); } },
+    tool: { async transform(callback: (value: Editor) => void) { callback(editor); return { async dispose() {} }; }, async list() { return registered.map((tool) => ({ ...tool, id: tool.name })); } },
+    rpc: { async register(_definition: unknown, _handlers: unknown) { return { async dispose() {}, events: { async emit() {} } }; } } };
+  await Reflect.apply(plugin.setup, undefined, [context]);
+  const tool = registered.find((entry) => entry.name === "search"); if (!tool) throw new Error("Missing registered search tool");
+  const query = "  Café sdk\t ";
+  expect(decodePortableRpc(tool.input, { query })).toEqual({ query });
+  expect(decodePortableRpc(tool.input, { query, limit: 2 })).toEqual({ query, limit: 2 });
+  let projectedUnknown: unknown;
+  try { projectedUnknown = decodePortableRpc(tool.input, { query, limit: 2, runId: "forged" }); }
+  catch { /* Strict rejection also prevents unknown authority from passing. */ }
+  if (projectedUnknown !== undefined) expect(projectedUnknown).toEqual({ query, limit: 2 });
+  expect(() => decodePortableRpc(tool.input, { query, limit: 0 })).toThrow();
+  expect(() => decodePortableRpc(tool.input, { query, limit: 201 })).toThrow();
+  const native: NativeToolContext = { sessionID: Session.ID.make("ses_fixture_search"), agent: Agent.ID.make("weaver"), messageID: SessionMessage.ID.make("msg_fixture_search"), id: Tool.CallID.make("call_fixture_search"), signal: new AbortController().signal, async progress() {} };
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    expect(String(url)).toBe("http://127.0.0.1:4321/internal/tools/search");
+    if (typeof init?.body !== "string") throw new Error("Missing forwarded search body");
+    forwarded.push(JSON.parse(init.body)); return Response.json({ results: [], engineVersion: 1, hasMore: false, aliasExpansionTruncated: false });
+  }, { preconnect: globalThis.fetch.preconnect }));
+  try {
+    const output = await tool.execute({ query, limit: 2, runId: "forged-run", sourceId: "forged-source", transportCredential: "forged-secret" }, native);
+    expect(forwarded).toEqual([{ action: "search", native: { sessionID: native.sessionID, agent: native.agent, messageID: native.messageID, callID: native.id }, input: { query, limit: 2 } }]);
+    expect(permissions).toEqual([expect.objectContaining({ action: "search", sessionID: native.sessionID, agent: native.agent, resources: ["*"] })]);
+    if (typeof output.content !== "string") throw new Error("Expected JSON search tool content");
+    expect(JSON.parse(output.content)).toEqual({ results: [], engineVersion: 1, hasMore: false, aliasExpansionTruncated: false });
+    await tool.execute({ query }, native);
+    expect(forwarded[1]).toEqual({ action: "search", native: { sessionID: native.sessionID, agent: native.agent, messageID: native.messageID, callID: native.id }, input: { query } });
+    await expect(tool.execute({ query: "bad\ud800", limit: 2 }, native)).rejects.toThrow();
+    expect(forwarded).toHaveLength(2); expect(permissions).toHaveLength(2);
+  } finally { fetchSpy.mockRestore(); }
+});
+
 test("V2 setup registers direct domain tools with native runtime permission checks and no authority arguments", async () => {
   const directory = await mkdtemp(join(tmpdir(), "thoughtloom-plugin-registration-"));
   directories.push(directory);

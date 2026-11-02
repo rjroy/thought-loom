@@ -150,7 +150,6 @@ export class DialogueService {
       const command = JSON.stringify({ dialogueId: id, turnId, rootSourceId: dialogue.sourceId, turnSourceId: sourceId,
         sourceIds: [dialogue.sourceId, sourceId], selection: dialogue.selection, selectedContext: dialogue.selectedContext, text: input.text });
       db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES (?,?,'discussion-turn',?)", [sourceId, input.text, createdAt]);
-      db.run("INSERT INTO source_search(source_id,text) VALUES (?,?)", [sourceId, input.text]);
       db.run("INSERT INTO jobs(id,source_id,status,priority,kind) VALUES (?,?,'queued',1,'dialogue')", [jobId, dialogue.sourceId]);
       db.run("INSERT INTO dialogue_turns(id,dialogue_id,source_id,job_id,position,created_at) VALUES (?,?,?,?,?,?)", [turnId, id, sourceId, jobId, position, createdAt]);
       db.run("INSERT INTO dialogue_turn_receipts(idempotency_key,payload_hash,turn_id,command) VALUES (?,?,?,?)", [key, hash, turnId, command]);

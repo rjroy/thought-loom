@@ -15,7 +15,7 @@ import { startOwnedNative } from "./owned-native";
 import { reviewedBundle } from "./plugin-bundle";
 
 const BUILD_B = "thoughtloom-witness-B-rpc-v1";
-const B_SHA256 = "1b4eaea29e41bac3f108a3d1c307073484fe9ff9384f9cf9a8db735a8fa292e1";
+const B_SHA256 = "79a77ebd74f00b771a10f5f035acba951796090f03f85ea3bb0a59fa66e9b375";
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 function check(value: unknown, code: string): asserts value { if (!value) throw new WitnessGuardError(code); }
 

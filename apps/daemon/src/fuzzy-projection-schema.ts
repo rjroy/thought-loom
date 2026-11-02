@@ -39,3 +39,18 @@ export function migrateFuzzyProjection(db: Database): void {
   backfillFuzzyProjection(db);
   db.run("INSERT INTO fuzzy_projection_state(singleton,format_version) VALUES (1,?)", [FUZZY_PROJECTION_FORMAT_VERSION]);
 }
+
+// Schema 21 runs AFTER the historical migrations/backfill, in the same owning
+// transaction. Only disposable lexical-search objects are retired. Dropping an
+// FTS5 virtual table also removes its own shadow tables/indexes; never glob-drop
+// schema objects or canonical history/authority triggers. Historical versions
+// maintained FTS explicitly in writers, not with canonical-table FTS triggers.
+export function retireLexicalSearch(db: Database): void {
+  for (const name of ["source_vocabulary", "formulation_vocabulary", "title_vocabulary", "item_vocabulary",
+    "source_search", "formulation_search", "item_search", "title_search"]) {
+    db.run(`DROP TABLE IF EXISTS "${name}"`);
+  }
+  // The old lowercase exact-alias path is replaced by fuzzy_alias_lookup's
+  // whole normalized keys. Keep search_aliases/alias_evidence and their data.
+  for (const name of ["alias_lookup", "expansion_lookup"]) db.run(`DROP INDEX IF EXISTS "${name}"`);
+}

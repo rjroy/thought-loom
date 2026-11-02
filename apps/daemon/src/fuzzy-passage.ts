@@ -2,20 +2,15 @@ import { createAlignmentReconstructor, type AlignmentRange, type CompiledQuery, 
 import { consumeField, readFieldChunks } from "./fuzzy-field-reader";
 import type { ProjectionField } from "./fuzzy-projection";
 import type { FuzzySearchWork } from "./fuzzy-search-work";
+import { SEARCH_PASSAGE_GRAPHEMES, SEARCH_PASSAGE_UTF16, type SearchPassage, type SearchPassageFragment } from "@thoughtloom/contracts";
 
 // All offsets are half-open original-field UTF-16 offsets. Highlights alone are
 // fragment-local. Display limits never constrain match admission or its span.
-export type FuzzyPassageFragment = Readonly<{
-  start: number; end: number; text: string;
-  highlights: readonly Readonly<{ start: number; end: number }>[];
-}>;
-export type FuzzyPassage = Readonly<{
-  matchStart: number; matchEnd: number; matchedKeyCount: number;
-  omittedMatchedCharacters: boolean; fragments: readonly FuzzyPassageFragment[];
-}>;
+export type FuzzyPassageFragment = Readonly<SearchPassageFragment>;
+export type FuzzyPassage = Readonly<SearchPassage>;
 
 const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
-const GRAPHEME_BUDGET = 240, PAYLOAD_BUDGET = 4_096;
+const GRAPHEME_BUDGET = SEARCH_PASSAGE_GRAPHEMES, PAYLOAD_BUDGET = SEARCH_PASSAGE_UTF16;
 type Window = { start: number; end: number };
 
 function centeredWindow(start: number, end: number, budget: number, total: number): Window {
@@ -115,4 +110,20 @@ export async function buildPassage(
   return { matchStart: first.start, matchEnd: last.end, matchedKeyCount: alignment.ranges.length,
     omittedMatchedCharacters: alignment.ranges.some((range) => !fragments.some((fragment) =>
       fragment.start <= range.start && fragment.end >= range.end)), fragments };
+}
+
+// Separate, explicitly original context for item/title hits. Selection already
+// drained/validated the complete field in this snapshot; an excerpt can stop at
+// its display budget without making that budget a retrieval window.
+export async function boundedSourceExcerpt(field: ProjectionField, work: FuzzySearchWork): Promise<string> {
+  const pieces: string[] = [];
+  let graphemes = 0, payload = 0;
+  for await (const chunk of readFieldChunks(field, work)) {
+    for (const part of segmenter.segment(chunk.text)) {
+      if (graphemes >= GRAPHEME_BUDGET || payload + part.segment.length > PAYLOAD_BUDGET) return pieces.join("");
+      pieces.push(part.segment); graphemes++; payload += part.segment.length;
+      if (work.record(1)) await work.yield();
+    }
+  }
+  return pieces.join("");
 }

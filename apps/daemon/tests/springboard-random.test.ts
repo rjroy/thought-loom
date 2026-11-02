@@ -8,6 +8,7 @@ import { createApp } from "../src/app";
 import { DialogueService } from "../src/dialogue";
 import { KnowledgeService } from "../src/knowledge";
 import { openDatabase } from "../src/storage";
+import { refreshItemProjection, refreshSourceProjection } from "../src/fuzzy-projection";
 import { WeavingWorker } from "../src/weaving";
 
 const directories: string[] = [];
@@ -23,14 +24,17 @@ async function fixture(populate = true) {
   if (!populate) return { databasePath, app };
   const db = openDatabase(databasePath);
   try {
-    for (const [id, text, date] of [["old-source", "Original old source", "2001-01-01T00:00:00.000Z"], ["new-source", "Original later source", "2002-01-01T00:00:00.000Z"]]) {
-      db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES (?,?,?,?)", [id, text, "fixture", date]);
-      db.run("INSERT INTO source_search(source_id,text) VALUES (?,?)", [id, text]);
-    }
-    // This deliberately reconstructed legacy item has no known created_at.
-    db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES ('legacy-item','interpretation','old-source')");
-    db.run("INSERT INTO formulations(id,item_id,text,author,operation_id) VALUES ('legacy-formulation','legacy-item','Unknown-date legacy reading','ai','legacy-op')");
-    db.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES ('legacy-formulation','old-source',0)");
+    db.transaction(() => {
+      for (const [id, text, date] of [["old-source", "Original old source", "2001-01-01T00:00:00.000Z"], ["new-source", "Original later source", "2002-01-01T00:00:00.000Z"]]) {
+        db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES (?,?,?,?)", [id, text, "fixture", date]);
+        refreshSourceProjection(db, id);
+      }
+      // This deliberately reconstructed legacy item has no known created_at.
+      db.run("INSERT INTO knowledge_items(id,kind,source_id) VALUES ('legacy-item','interpretation','old-source')");
+      db.run("INSERT INTO formulations(id,item_id,text,author,operation_id) VALUES ('legacy-formulation','legacy-item','Unknown-date legacy reading','ai','legacy-op')");
+      db.run("INSERT INTO formulation_evidence(formulation_id,source_id,position) VALUES ('legacy-formulation','old-source',0)");
+      refreshItemProjection(db, "legacy-item");
+    }).immediate();
   } finally { db.close(); }
   const knowledge = new KnowledgeService(databasePath), clock = spyOn(Date, "now");
   try {

@@ -57,7 +57,7 @@ test("search source excerpt reveals the exact full original without replacing th
   expect(page.url()).toBe(url); expect(reads.count()).toBe(1);
 });
 
-test("search item formulation already contains its full text and keeps its exact version link", async ({ page, request }) => {
+test("search item passage expands its exact formulation and keeps its version link", async ({ page, request }) => {
   const { root } = await world(request);
   const item = await (await control(request, "seed-recent-reading", { longText: true })).json() as { id: string; current: { id: string; text: string } };
   expect(item.current.text.length).toBeGreaterThan(240);
@@ -65,11 +65,21 @@ test("search item formulation already contains its full text and keeps its exact
   await page.goto("/search?q=interpretation");
   const result = page.getByRole("region", { name: "Search results", exact: true }).locator("article").filter({ has: page.locator(`a[href*="item=${item.id}"]`) });
   const formulation = result.locator(".result-formulation a");
-  await expect(formulation).toHaveText(item.current.text);
+  await expect(formulation).toContainText("Fixture long interpretation");
+  expect((await formulation.innerText()).length).toBeLessThan(item.current.text.length);
   const href = await formulation.getAttribute("href"); if (!href) throw new Error("Missing item link");
   const url = new URL(href, page.url());
   expect(url.searchParams.get("item")).toBe(item.id); expect(url.searchParams.get("version")).toBe(item.current.id);
   expect(reads.count()).toBe(0);
+  const requests: URL[] = [];
+  page.on("request", (req) => { const address = new URL(req.url()); if (address.pathname === `/api/sources/${root.id}/inquiry`) requests.push(address); });
+  const disclosure = result.locator(".source-excerpt-disclosure").first();
+  await disclosure.getByRole("button", { name: "Read full text", exact: true }).click();
+  await expect(disclosure.getByText(item.current.text, { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].searchParams.get("itemId")).toBe(item.id); expect(requests[0].searchParams.get("versionId")).toBe(item.current.id);
+  expect(reads.count()).toBe(0);
+  await expect(result.getByRole("link", { name: "Open thought", exact: true })).toHaveAttribute("href", href);
 });
 
 test("evidence for an idea expands the exact originating turn, not the root source", async ({ page, request }) => {

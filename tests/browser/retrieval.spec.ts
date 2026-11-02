@@ -19,16 +19,16 @@ async function assertNoHorizontalOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-test("search finds SDK originals and recorded aliases, restores the query, and tolerates a typo", async ({ page }) => {
+test("search finds SDK originals directly, restores the query, and tolerates a missing candidate character", async ({ page }) => {
   await page.goto("/");
   // Intended first RED: phase 1 is runnable, but has no search entry field.
   const results = await search(page, "SDK");
   const originalHit = results.getByRole("article").filter({ hasText: example.sdk });
-  const aliasHit = results.getByRole("article").filter({ hasText: example.expandedSDK });
+  const expandedHit = results.getByRole("article").filter({ hasText: example.expandedSDK });
   await expect(originalHit).toBeVisible();
   await expect(originalHit.getByText("Matched original", { exact: true })).toBeVisible();
-  await expect(aliasHit).toBeVisible();
-  await expect(aliasHit.getByText("Matched recorded alias", { exact: true })).toBeVisible();
+  await expect(expandedHit).toBeVisible();
+  await expect(expandedHit.getByText("Matched original", { exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
   const open = originalHit.getByRole("link", { name: /^Open thought/ });

@@ -1,5 +1,5 @@
 import "server-only";
-import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, parseRecentThoughts, parseSpringboardView, type CaptureInput, type Source, type InquiryView, type SearchResult } from "@thoughtloom/contracts";
+import { isRecordId, parseCaptureInput, parseInquiryView, parseSearchResponse, resolveSearchInput, parseRecentThoughts, parseSpringboardView, type CaptureInput, type Source, type InquiryView, type SearchResponse } from "@thoughtloom/contracts";
 import { isSourceId, parseSource } from "./source";
 import { isIdempotencyKey, parseWeavingRetryInput, parseWeavingRetryReceipt, parseWeavingStatusView, type WeavingStatusView } from "@thoughtloom/contracts";
 
@@ -96,14 +96,12 @@ export async function readProjection<T>(operation: string, path: string, parse: 
   }
 }
 
-export function validSearchQuery(query: string): boolean {
-  return query.length <= 512 && (query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) <= 16;
-}
-
-export async function readSearch(query: string): Promise<{ kind: "found"; results: SearchResult[] } | { kind: "invalid" } | { kind: "unavailable" }> {
-  if (!validSearchQuery(query)) return { kind: "invalid" };
-  const response = await readProjection("bff.search.read", `/search?q=${encodeURIComponent(query)}`, parseSearchResponse);
-  return response.kind === "found" ? { kind: "found", results: response.value.results } : { kind: "unavailable" };
+export async function readSearch(value: unknown): Promise<{ kind: "found"; value: SearchResponse } | { kind: "invalid" } | { kind: "unavailable" }> {
+  const input = resolveSearchInput(value);
+  if (!input) return { kind: "invalid" };
+  const parameters = new URLSearchParams({ q: input.query, limit: String(input.limit) });
+  const response = await readProjection("bff.search.read", `/search?${parameters}`, parseSearchResponse);
+  return response.kind === "found" ? response : { kind: "unavailable" };
 }
 
 export async function readRecentThoughts() {

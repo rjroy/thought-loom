@@ -17,6 +17,6 @@ for (const name of Object.keys(SOURCE_HASHES)) {
 }
 const build = await Bun.build({ entrypoints: [join(repo, PLUGIN_PROVENANCE.entrypoint)], ...PLUGIN_PROVENANCE.build });
 if (!build.success || build.outputs.length !== 1 || !build.outputs[0]) throw new Error("Bundle build failed");
-const bundle = await build.outputs[0].text(), a = "thoughtloom-generated-titles-v1", b = "thoughtloom-witness-B-rpc-v1", parts = bundle.split(a);
+const bundle = await build.outputs[0].text(), a = "thoughtloom-fuzzy-retrieval-v1", b = "thoughtloom-witness-B-rpc-v1", parts = bundle.split(a);
 if (parts.length !== 2) throw new Error("Expected exactly one embedded build marker");
 console.log(JSON.stringify({ runtime: `bun@${Bun.version}`, sources, bundleSha256: digest(bundle), watcherFixtureBSha256: digest(parts.join(b)), buildId: a }, null, 2));

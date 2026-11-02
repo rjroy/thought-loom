@@ -20,7 +20,14 @@ export async function* readFieldChunks(field: ProjectionField, work: FuzzySearch
 type FieldConsumer = { append(text: string, final: boolean): void; step(maxUpdates: number): MatcherStep };
 
 export async function consumeField(field: ProjectionField, consumer: FieldConsumer, work: FuzzySearchWork): Promise<void> {
-  async function drain(): Promise<void> {
+  return consumeFieldVariants(field, [consumer], work);
+}
+
+// Reuse each fetched chunk for all bounded query variants. Prefix work still
+// goes through the same resumable kernel/budget; no corpus text is cached and
+// there is no separate alias scoring or candidate-admission engine.
+export async function consumeFieldVariants(field: ProjectionField, consumers: readonly FieldConsumer[], work: FuzzySearchWork): Promise<void> {
+  async function drain(consumer: FieldConsumer): Promise<void> {
     while (true) {
       const step = consumer.step(work.remainingUpdates);
       const due = work.record(step.updates);
@@ -29,11 +36,15 @@ export async function consumeField(field: ProjectionField, consumer: FieldConsum
     }
   }
   for await (const chunk of readFieldChunks(field, work)) {
-    consumer.append(chunk.text, chunk.ordinal === field.chunkCount - 1);
-    await drain();
+    for (const consumer of consumers) {
+      consumer.append(chunk.text, chunk.ordinal === field.chunkCount - 1);
+      await drain(consumer);
+    }
   }
   if (field.chunkCount === 0) {
-    consumer.append("", true);
-    await drain();
+    for (const consumer of consumers) {
+      consumer.append("", true);
+      await drain(consumer);
+    }
   }
 }

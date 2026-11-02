@@ -126,8 +126,6 @@ function appendFormulation(db: Database, context: KnowledgeContext, itemId: stri
   db.run("INSERT INTO formulations (id,item_id,text,author,operation_id,run_id,restored_from) VALUES (?,?,?,?,?,?,?)",
     [id, itemId, text, context.actor, context.operationId, context.actor === "ai" ? context.runId : null, restoredFrom]);
   ids.forEach((sourceId, position) => db.run("INSERT INTO formulation_evidence (formulation_id,source_id,position) VALUES (?,?,?)", [id, sourceId, position]));
-  db.run("DELETE FROM formulation_search WHERE item_id = ?", [itemId]);
-  db.run("INSERT INTO formulation_search (item_id,text) VALUES (?,?)", [itemId, text]);
   refreshItemProjection(db, itemId);
 }
 

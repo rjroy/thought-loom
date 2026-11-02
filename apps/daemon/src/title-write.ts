@@ -51,8 +51,6 @@ export function writeTitle(db: Database, input: TitleWrite): ThoughtTitle {
   db.run("INSERT INTO title_receipts(idempotency_key,payload_hash,revision_id) VALUES (?,?,?)", [input.key, input.payloadHash, revisionId]);
   const effective = readTitle(db, sourceId, itemId, versionId).title;
   if (!effective) throw new KnowledgeError("storage_error");
-  db.run("DELETE FROM title_search WHERE entity_id=?", [entity.id]);
-  db.run("INSERT INTO title_search(entity_id,text) VALUES (?,?)", [entity.id, effective.text]);
   refreshTitleProjection(db, sourceId, itemId);
   return { revisionId, text: input.text, author: input.author };
 }

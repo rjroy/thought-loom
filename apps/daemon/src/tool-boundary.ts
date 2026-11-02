@@ -3,9 +3,11 @@ import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
-import { isLegacyNativeAction, NATIVE_CAPABILITY_ACTIONS, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
+import { isLegacyNativeAction, NATIVE_CAPABILITY_ACTIONS, parseGeneratedTitle, parseIdea, parseAlias, parseInterpretation, parseInterpretationRevision, parseRelationship, parseRelationshipRevision, parseNativeIdentity, parseSearchInput, toolId, toolKeys, toolRecord, type NativeIdentity, type ToolAction } from "@thoughtloom/contracts";
 import { KnowledgeError, KnowledgeService, readItem, readRelationship, type KnowledgeContext } from "./knowledge";
-import { openDatabase, searchSources, sourceRecord } from "./storage";
+import { openDatabase, sourceRecord } from "./storage";
+import { createSearchService, type SearchService } from "./search";
+import { FuzzySearchError } from "./fuzzy-retrieval";
 import type { WeavingRun } from "./weaving";
 import { runScope, type RunScope } from "./run-scope";
 import { dialogueHeader } from "./dialogue-data";
@@ -176,11 +178,12 @@ function relationshipScope(db: Database, grant: GrantRow, fromId: string, toId: 
   return { from, to };
 }
 
-export function createToolApp(options: { databasePath: string; transportCredential: string; location: string }) {
+export function createToolApp(options: { databasePath: string; transportCredential: string; location: string; search?: SearchService }) {
   if (!options.transportCredential || !isAbsolute(options.location) || normalize(options.location) !== options.location) {
     throw new Error("Invalid internal tool configuration");
   }
   const app = new Hono();
+  const search = options.search ?? createSearchService({ databasePath: options.databasePath });
   const credential = createHash("sha256").update(`Bearer ${options.transportCredential}`).digest();
   app.use("/internal/tools/*", async (context, next) => {
     console.info("tools.request attempt");
@@ -198,7 +201,7 @@ export function createToolApp(options: { databasePath: string; transportCredenti
   });
   app.use("/internal/tools/*", bodyLimit({ maxSize: 65_536, onError: (context) => context.json({ error: "Tool request too large" }, 413) }));
   app.onError((error, context) => {
-    const code = error instanceof KnowledgeError ? error.code : "storage_error";
+    const code = error instanceof FuzzySearchError ? error.code === "invalid" ? "invalid_input" : error.code : error instanceof KnowledgeError ? error.code : "storage_error";
     console.error("tools.request failed", { category: code });
     const status = code === "forbidden" ? 403 : code === "operation_conflict" || code === "version_conflict" ? 409 : code === "invalid_input" || code === "invalid_reference" ? 400 : 503;
     return context.json({ error: code }, status);
@@ -393,10 +396,15 @@ export function createToolApp(options: { databasePath: string; transportCredenti
   }
   app.post("/internal/tools/search", async (context) => {
     const body = await envelope(context.req.raw, "search");
-    if (!toolRecord(body.input) || !toolKeys(body.input, ["query"]) || typeof body.input.query !== "string" || body.input.query.length > 512 ||
-        (body.input.query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) > 16) throw new KnowledgeError("invalid_input");
+    const input = parseSearchInput(body.input);
+    if (!input) throw new KnowledgeError("invalid_input");
     storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "search"));
-    return context.json({ results: searchSources(options.databasePath, body.input.query) });
+    const result = await search.search(input, context.req.raw.signal);
+    // Cooperative scanning introduces await boundaries. A revoked/settled grant
+    // cannot receive a successful response just because it was valid at admission.
+    storage(options.databasePath, false, (db) => authorize(db, body.native, options.location, "search"));
+    context.header("cache-control", "no-store");
+    return context.json(result);
   });
   return app;
 }

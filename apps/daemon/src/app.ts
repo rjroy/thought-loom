@@ -1,8 +1,10 @@
 import { Hono } from "hono";
-import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, SPRINGBOARD_RECENT_MAX, SPRINGBOARD_RANDOM_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
+import { isIdempotencyKey, isLocalRequest, isRecordId, parseCaptureInput, parseSearchParameters, SPRINGBOARD_RECENT_MAX, SPRINGBOARD_RANDOM_MAX, type FollowUpLimits } from "@thoughtloom/contracts";
 import { readInquiry } from "./inquiry";
-import { findSource, saveCapture, searchSources } from "./storage";
-import type { SearchLimits } from "./storage";
+import { findSource, saveCapture } from "./storage";
+import { createSearchService } from "./search";
+import { FuzzySearchError } from "./fuzzy-retrieval";
+import type { FuzzyReadPolicy } from "./fuzzy-search-work";
 import { createToolApp } from "./tool-boundary";
 import { createWeavingHttpApp, type WeavingHttpOptions } from "./weaving-http";
 import { createDialogueApp } from "./dialogue-http";
@@ -11,13 +13,14 @@ import { createFollowUpHttpApp } from "./follow-up-http";
 import { readRecentThoughts, readSpringboard } from "./springboard";
 import { createTitleHttpApp } from "./title-http";
 
-export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial<SearchLimits>; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
+export function createApp(options: WeavingHttpOptions & { searchPolicy?: FuzzyReadPolicy; followUpLimits?: Partial<FollowUpLimits>; tools?: { transportCredential: string; location: string } }) {
   const app = new Hono();
+  const search = createSearchService({ databasePath: options.databasePath, policy: options.searchPolicy });
   app.use("*", async (context, next) => {
     if (!isLocalRequest(context.req.raw)) return new Response("Forbidden", { status: 403, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     await next();
   });
-  if (options.tools) app.route("/", createToolApp({ databasePath: options.databasePath, ...options.tools }));
+  if (options.tools) app.route("/", createToolApp({ databasePath: options.databasePath, ...options.tools, search }));
   else app.all("/internal/tools/*", (context) => context.json({ error: "Unauthorized" }, 401));
   app.route("/", createWeavingHttpApp(options));
   app.route("/", createFollowUpHttpApp(options));
@@ -69,19 +72,15 @@ export function createApp(options: WeavingHttpOptions & { searchLimits?: Partial
     }
   });
 
-  app.get("/search", (context) => {
-    const query = context.req.query("q") ?? "";
-    if (query.length > 512 || (query.match(/[\p{L}\p{N}\p{M}]+/gu)?.length ?? 0) > 16) {
-      return context.json({ error: "Search query is too long" }, 400);
-    }
-    console.info("source.search attempt");
+  app.get("/search", async (context) => {
+    context.header("cache-control", "no-store");
+    const input = parseSearchParameters(new URL(context.req.url).searchParams);
+    if (!input) return context.json({ error: "invalid_input" }, 400);
     try {
-      const results = searchSources(options.databasePath, query, options.searchLimits);
-      console.info("source.search completed", { count: results.length });
-      return context.json({ results }, 200);
-    } catch {
-      console.error("source.search failed", { category: "storage_error" });
-      return context.json({ error: "Search unavailable" }, 500);
+      return context.json(await search.search(input, context.req.raw.signal), 200);
+    } catch (error) {
+      const code = error instanceof FuzzySearchError ? error.code : "unavailable";
+      return context.json({ error: code === "invalid" ? "invalid_input" : code }, code === "invalid" ? 400 : 503);
     }
   });
 

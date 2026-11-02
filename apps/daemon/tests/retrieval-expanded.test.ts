@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { SearchResult, Source } from "@thoughtloom/contracts";
 import { createApp } from "../src/app";
 import { KnowledgeService } from "../src/knowledge";
-import { rebuildSearchIndex } from "../src/storage";
+import { openDatabase, rebuildSearchIndex } from "../src/storage";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -39,7 +39,7 @@ test("search returns source display context without replacing the original", asy
   expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, matchOrigin: "source", source: expect.objectContaining({ provenance: source.provenance, createdAt: source.createdAt, excerpt: expect.stringContaining("lantern") }) })]));
 });
 
-test("a recorded acronym expands both directions across distinct sources", async () => {
+test("SDK directly matches its expansion while reverse alias preserves provenance", async () => {
   const { capture, search, knowledge } = await fixture();
   const short = await capture("short", "The SDK simplifies integration.");
   const long = await capture("long", "A software development kit helps builders.");
@@ -48,18 +48,19 @@ test("a recorded acronym expands both directions across distinct sources", async
   expect(alias).toMatchObject({ alias: "SDK", expansion: "software development kit", author: "user", evidenceSourceIds: [long.id] });
   const acronymResults = await search("SDK");
   const expansionResults = await search("software development kit");
-  expect(acronymResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: short.id }), expect.objectContaining({ sourceId: long.id, matchOrigin: "alias" })]));
-  expect(expansionResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: long.id }), expect.objectContaining({ sourceId: short.id, matchOrigin: "alias" })]));
+  expect(acronymResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: short.id, match: expect.objectContaining({ route: "direct" }) }), expect.objectContaining({ sourceId: long.id, matchOrigin: "source", match: expect.objectContaining({ route: "direct" }) })]));
+  expect(expansionResults).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: long.id }), expect.objectContaining({ sourceId: short.id, matchOrigin: "alias", alias: expect.objectContaining({ id: alias.id, direction: "expansion-to-alias", expandedQuery: "SDK", evidenceSourceIds: [long.id] }) })]));
   expect(acronymResults.map((result) => result.sourceId)).not.toContain(unrelated.id);
 });
 
-test("one typo can retrieve a source without matching an unrelated term", async () => {
+test("an inserted query character is not repaired while candidate-character skipping remains possible", async () => {
   const { capture, search } = await fixture();
   const relevant = await capture("relevant", "A telescope reveals distant stars.");
   const other = await capture("other", "A tomato ripens in the garden.");
   const results = await search("telescoppe");
-  expect(results.map((result) => result.sourceId)).toContain(relevant.id);
+  expect(results.map((result) => result.sourceId)).not.toContain(relevant.id);
   expect(results.map((result) => result.sourceId)).not.toContain(other.id);
+  expect((await search("telscope")).map((result) => result.sourceId)).toContain(relevant.id);
   expect(await search("xylophonically")).toEqual([]);
 });
 
@@ -68,7 +69,8 @@ test("current AI interpretation is searchable through its source even when the o
   const source = await capture("original", "The original mentions a winding river.");
   const item = knowledge.createItem({ actor: "ai", operationId: "interpret", runId: "fixture-run" }, { kind: "interpretation", sourceId: source.id, text: "This suggests resilience under pressure.", evidenceSourceIds: [source.id] });
   const results = await search("resilience");
-  expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, matchOrigin: "interpretation", item: expect.objectContaining({ id: item.id, formulationId: item.current.id, text: item.current.text, author: "ai" }), source: expect.objectContaining({ provenance: source.provenance, createdAt: source.createdAt }) })]));
+  expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, matchOrigin: "interpretation", item: expect.objectContaining({ id: item.id, formulationId: item.current.id, author: "ai" }), passage: expect.objectContaining({ fragments: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining("resilience") })]) }), source: expect.objectContaining({ provenance: source.provenance, createdAt: source.createdAt }) })]));
+  expect(results.find((result) => result.item?.id === item.id)?.item).not.toHaveProperty("text");
   knowledge.reviseItem({ actor: "ai", operationId: "revision", runId: "fixture-run" }, { itemId: item.id, expectedVersionId: item.current.id, text: "An evolving adaptation.", evidenceSourceIds: [source.id] });
   expect((await search("resilience")).map((result) => result.sourceId)).not.toContain(source.id);
   expect((await search("adaptation")).map((result) => result.sourceId)).toContain(source.id);
@@ -91,8 +93,9 @@ test("rebuilding a discarded projection restores source and interpretation searc
   const { path, capture, search, knowledge } = await fixture();
   const source = await capture("rebuild", "A compass points north.");
   const item = knowledge.createItem({ actor: "ai", operationId: "annotation", runId: "fixture-run" }, { kind: "interpretation", sourceId: source.id, text: "Orientation can reduce uncertainty.", evidenceSourceIds: [source.id] });
-  const db = new Database(path);
-  try { db.run("DELETE FROM source_search"); } finally { db.close(); }
+  const db = openDatabase(path);
+  try { db.run("DELETE FROM fuzzy_targets WHERE target_kind='source' AND target_id=?", [source.id]); } finally { db.close(); }
+  expect((await createApp({ databasePath: path }).request("/search?q=compass")).status).toBe(503);
   rebuildSearchIndex(path);
   expect((await search("compass")).map((result) => result.sourceId)).toContain(source.id);
   expect(await search("uncertainty")).toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: source.id, item: expect.objectContaining({ id: item.id }) })]));

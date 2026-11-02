@@ -17,6 +17,10 @@ export class FuzzySearchWork {
   targets = 0;
   chunks = 0;
   updates = 0;
+  aliasRecords = 0;
+  aliasVariants = 0;
+  aliasKeys = 0;
+  aliasExpansionTruncated = false;
   private sinceYield = 0;
   private retainedBytes = 0;
 
@@ -44,9 +48,12 @@ export class FuzzySearchWork {
 
   release(bytes: number): void { this.retainedBytes -= bytes; }
 
-  checkChunk(utf16Length: number): void {
+  checkChunk(utf16Length: number, normalizationCopies = 1): void {
     this.check();
-    const bytes = utf16Length * 16;
+    // Each active matcher can retain its own normalized trailing grapheme/key.
+    // Multiply the conservative chunk allowance before loading huge clusters;
+    // sharing the original TEXT does not make those normalized copies free.
+    const bytes = utf16Length * 16 * normalizationCopies;
     if (!Number.isSafeInteger(bytes) || bytes + this.retainedBytes > this.policy.workingSetBytes) {
       throw new FuzzySearchError("memory", "Search chunk exceeds working-set budget");
     }

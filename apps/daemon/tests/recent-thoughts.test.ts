@@ -7,6 +7,7 @@ import { createApp } from "../src/app";
 import { DialogueService } from "../src/dialogue";
 import { KnowledgeService } from "../src/knowledge";
 import { openDatabase } from "../src/storage";
+import { refreshSourceProjection } from "../src/fuzzy-projection";
 import { WeavingWorker } from "../src/weaving";
 import { INQUIRY_LIMITS, parseInquiryView } from "@thoughtloom/contracts";
 
@@ -75,9 +76,11 @@ async function fixture() {
   const db = openDatabase(databasePath);
   // Reconstructed old capture: fixture-owned date, not the machine clock.
   try {
-    db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES ('old-source','Old source retained exactly','fixture','2001-01-01T00:00:00.000Z')");
-    db.run("INSERT INTO source_search(source_id,text) VALUES ('old-source','Old source retained exactly')");
-    db.run("INSERT INTO jobs(id,source_id,status,kind) VALUES ('old-job','old-source','completed','capture')");
+    db.transaction(() => {
+      db.run("INSERT INTO sources(id,text,provenance,created_at) VALUES ('old-source','Old source retained exactly','fixture','2001-01-01T00:00:00.000Z')");
+      refreshSourceProjection(db, "old-source");
+      db.run("INSERT INTO jobs(id,source_id,status,kind) VALUES ('old-job','old-source','completed','capture')");
+    }).immediate();
   } finally { db.close(); }
   return { databasePath, app, knowledge: new KnowledgeService(databasePath), root: "old-source" };
 }

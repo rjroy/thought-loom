@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { isRecordId } from "@thoughtloom/contracts";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { readInquiry, readWeaving, validSearchQuery } from "../../../../lib/daemon";
+import { readInquiry, readWeaving } from "../../../../lib/daemon";
+import { pageSearchRequest } from "../../../../lib/search-query";
 import { firstParameter, inquiryHref, searchHref } from "../../../../lib/links";
 import InquiryContext from "../../../ui/inquiry-context";
 import StatusIcon from "../../../ui/status-icon";
@@ -19,8 +20,8 @@ function SelectedUnavailable({ id, query }: { id: string; query: string }) {
 export default async function InquiryPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
   const parameters = await searchParams;
-  const rawQuery = firstParameter(parameters.q), rawItem = firstParameter(parameters.item), rawVersion = firstParameter(parameters.version), rawDialogue = firstParameter(parameters.dialogue);
-  const query = validSearchQuery(rawQuery) ? rawQuery : "", selectedId = isRecordId(rawItem) ? rawItem : "";
+  const rawItem = firstParameter(parameters.item), rawVersion = firstParameter(parameters.version), rawDialogue = firstParameter(parameters.dialogue);
+  const query = pageSearchRequest({ q: parameters.q })?.query ?? "", selectedId = isRecordId(rawItem) ? rawItem : "";
   const requestedItem = parameters.item !== undefined, requestedVersion = parameters.version !== undefined;
   if (Array.isArray(parameters.item) || Array.isArray(parameters.version) || (requestedItem && !isRecordId(rawItem)) || (requestedVersion && (!requestedItem || !isRecordId(rawVersion)))) return <SelectedUnavailable id={id} query={query} />;
   const target = requestedVersion ? { itemId: selectedId, versionId: rawVersion } : undefined;

@@ -26,16 +26,7 @@ export * from "./user-commands";
 export * from "./follow-up";
 export * from "./local-request";
 export * from "./springboard";
-
-// Expanded search response contract; source text is an excerpt, not a replacement
-// for fetching the immutable original. Knowledge is present for formulation hits.
-export type SearchResult = {
-  sourceId: string;
-  matchOrigin: "source" | "interpretation" | "alias" | "title";
-  title?: ThoughtTitle;
-  source: { excerpt: string; provenance: string; createdAt: string; origin?: SourceOrigin };
-  item?: { id: string; kind: "interpretation" | "developing-idea"; formulationId: string; text: string; author: "user" | "ai" };
-};
+export * from "./search";
 
 export function parseCaptureInput(value: unknown): CaptureInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

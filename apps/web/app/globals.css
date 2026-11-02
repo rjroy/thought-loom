@@ -130,6 +130,8 @@ textarea:read-only { opacity: .9; cursor: wait; }
 .result-formulation a:hover, .result-excerpt a:hover { text-decoration: underline; }
 .result-excerpt, .result-formulation { font-size: 21px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .result-formulation { margin: 8px 0 18px; }
+.search-result mark { background: var(--lantern); color: var(--night); font-weight: 600; }
+.result-context-label { margin-top: 16px; }
 .excerpt-label { font-size: 15px; color: var(--supporting); margin-bottom: 5px; }
 .result-provenance { display: flex; flex-wrap: wrap; gap: 6px 24px; color: var(--supporting); font-size: 15px; margin-top: 16px; }
 .match-explanation { color: var(--supporting); font-size: 16px; margin-top: 12px; }

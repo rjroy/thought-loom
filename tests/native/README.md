@@ -1,38 +1,41 @@
 # Opt-in Thoughtloom plugin witness
 
-## Generated-title fixture evidence and limits
+## Fuzzy-retrieval candidate and historical fixture evidence
 
-The reviewed production source marker is `thoughtloom-generated-titles-v1`;
-the five-source and bundle pins in `plugin-provenance.ts` are freshly regenerated
-reviewed inputs, not cryptographic proof of executing bytes. The isolated source
-title fixture passed with the final bundle: `/tmp/opencode/title-native-witness-rerun.log`
+The current candidate marker is `thoughtloom-fuzzy-retrieval-v1`. Its six-source
+and bundle pins in `plugin-provenance.ts` are offline review inputs, not proof
+of executing bytes. No native witness has been run for this search bundle.
+
+The historical `thoughtloom-generated-titles-v1` isolated source title fixture
+passed for its then-final bundle: `/tmp/opencode/title-native-witness-rerun.log`
 records OpenCode 2.2.2, verified RPC, frozen command/grant, a completed native
 title tool, AI revision, preserved USER override and original, zero semantic
 changes and follow-up jobs, revoked grant, four fake-provider requests and
 completed cleanup. Its test-specific permission ceiling does not prove the
 production setup permits title calls.
 
-The final-bundle watcher fixture also passed: `/tmp/opencode/finalbundle-watch-witness.log`
+The historical title-bundle watcher fixture also passed: `/tmp/opencode/finalbundle-watch-witness.log`
 records A→B at the same PID/location, changed setup ID, fresh client/new nonce,
 11 expected actions, zero provider requests and completed cleanup. The malformed
 swap established only no B observed, not a witnessed failed setup. Neither test
 proves native exact-item title invocation or authorizes live rollout. The accepted
 64-artifact manifest SHA-256 is `4aafd83fe75f2386e91aa26c8d0c75a77b7b2b80639af9e02d8e5d3f1d0888a9`.
-The historical baseline fixture is not a substitute for these results.
+Neither historical receipt is evidence of the current search bundle. The
+historical baseline fixture is not a substitute for these results.
 
 Offline reproduction: from the isolated copy, `bun --no-env-file run
 tests/native/plugin-provenance-report.ts`. Source closure is `plugin.ts`,
-`capabilities.ts`, `contracts/src/tools.ts`, `native-capabilities.ts` and
-`inspection.ts`; candidate bundle A is
-`45cdf149bc2c5ddb5f16eb3ebecc925794c88604d2205455996a0e02d7f200da`,
+`capabilities.ts`, `contracts/src/tools.ts`, `native-capabilities.ts`,
+`inspection.ts` and `search.ts`; candidate bundle A is
+`ff8ff61b62a2fb412bc8e55aaabc7f28405d62fa3e2101d368f00a3110b5a6de`,
 test-marker B is
-`1b4eaea29e41bac3f108a3d1c307073484fe9ff9384f9cf9a8db735a8fa292e1`.
+`79a77ebd74f00b771a10f5f035acba951796090f03f85ea3bb0a59fa66e9b375`.
 The embedded marker is a reviewed identifier, not an executing-byte hash.
 
-### Source-title fixture — reviewed isolated execution
+### Source-title fixture — historical isolated execution
 
-The following is the isolated command used for the final witness, not permission
-to rerun against a live application or change a shared native service:
+The following is the isolated command used for the historical title-bundle witness,
+not permission to rerun the current bundle or change a shared native service:
 
 ```sh
 THOUGHTLOOM_PLUGIN_WITNESS=1 THOUGHTLOOM_TITLE_WITNESS=1 \
@@ -98,9 +101,9 @@ native process or provider/model call. The real-source bundle check uses
 test writes only a fresh private temporary fixture and removes it afterward;
 it checks that production setup and the exact guarded documents agree.
 
-## Watcher capability fixture — reviewed isolated execution
+## Watcher capability fixture — historical isolated execution
 
-The final-bundle watcher pass above used the separate profile below. Any future
+The historical title-bundle watcher pass above used the separate profile below. Any future
 execution requires applicable safety review and authorization; isolated fixture
 approval is not live-rollout authorization:
 
@@ -146,7 +149,7 @@ witness failure is a failure, not permission to relax isolation or retry a promp
 * `plugin-isolation.ts` defines exact baseline and separately opted-in watcher environment profiles.
   `node-io.ts` supplies metadata/hash checks. `owned-native.ts` is the only spawn
   site, reached through `guardedLaunch` after all guards.
-* `plugin-provenance.ts` pins the plugin, capability module, and their two contract
+* `plugin-provenance.ts` pins the plugin, capability module, and their four contract
   inputs. `plugin-bundle.ts` checks canonical
   source paths/hashes and reproduces the pinned in-memory bundle. The harness
   never learns a hash from current files and then approves it automatically.

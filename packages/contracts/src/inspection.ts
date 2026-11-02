@@ -1,4 +1,4 @@
-import type { SearchResult, Source, SourceOrigin, ThoughtTitle } from "./index";
+import type { Source, SourceOrigin, ThoughtTitle } from "./index";
 import type { IdeaDerivation } from "./tools";
 
 export const INQUIRY_LIMITS = { rootItems: 64, relationships: 64, history: 32, evidencePerVersion: 32, evidenceSources: 512 } as const;
@@ -136,25 +136,4 @@ export function parseInquiryView(value: unknown): InquiryView | null {
     selectedTarget = { kind: "item", id: target.id, versionId: target.versionId, text: target.text, author: target.author, evidenceSourceIds: ids, ...(title ? { title } : {}) };
   }
   return { source, items, relationships, evidenceSources, truncated: value.truncated, ...(selectedTarget ? { selectedTarget } : {}) };
-}
-
-function searchResult(value: unknown): SearchResult | null {
-  if (!record(value) || !isRecordId(value.sourceId) || !record(value.source) || typeof value.source.excerpt !== "string" || !text(value.source.provenance) || !date(value.source.createdAt)) return null;
-  if (value.matchOrigin !== "source" && value.matchOrigin !== "interpretation" && value.matchOrigin !== "alias" && value.matchOrigin !== "title") return null;
-  let foundItem: SearchResult["item"];
-  if (value.item !== undefined) {
-    const entry = value.item;
-    if (!record(entry) || !isRecordId(entry.id) || !isRecordId(entry.formulationId) || !text(entry.text) || !author(entry.author) || (entry.kind !== "interpretation" && entry.kind !== "developing-idea")) return null;
-    foundItem = { id: entry.id, kind: entry.kind, formulationId: entry.formulationId, text: entry.text, author: entry.author };
-  }
-  if (value.matchOrigin === "interpretation" && !foundItem) return null;
-  const origin = value.source.origin === undefined ? undefined : parseSourceOrigin(value.source.origin);
-  const title = value.title === undefined ? undefined : parseThoughtTitle(value.title);
-  if (origin === null || title === null || (value.matchOrigin === "title" && !title)) return null;
-  return { sourceId: value.sourceId, matchOrigin: value.matchOrigin, source: { excerpt: value.source.excerpt, provenance: value.source.provenance, createdAt: value.source.createdAt, ...(origin ? { origin } : {}) }, ...(foundItem ? { item: foundItem } : {}), ...(title ? { title } : {}) };
-}
-export function parseSearchResponse(value: unknown): { results: SearchResult[] } | null {
-  if (!record(value)) return null;
-  const results = list(value.results, searchResult, 200);
-  return results ? { results } : null;
 }

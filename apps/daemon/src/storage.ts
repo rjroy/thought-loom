@@ -1,13 +1,15 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, type SourceOrigin, type SearchResult } from "@thoughtloom/contracts";
+import { parseSourceRecord, type CaptureInput, type Source } from "@thoughtloom/contracts";
 import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
 import { migrateTitles } from "./title-schema";
 import { readTitle } from "./title-projection";
-import { migrateFuzzyProjection } from "./fuzzy-projection-schema";
-import { refreshSourceProjection } from "./fuzzy-projection";
+import { migrateFuzzyProjection, retireLexicalSearch } from "./fuzzy-projection-schema";
+import { rebuildFuzzyProjection, refreshSourceProjection } from "./fuzzy-projection";
+import { sourceOrigin } from "./source-origin";
+export { sourceOrigin } from "./source-origin";
 
-export const CURRENT_DATABASE_VERSION = 20;
+export const CURRENT_DATABASE_VERSION = 21;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -34,6 +36,7 @@ function migrateFollowUpJobs(db: Database) {
 export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
   let fuzzyMigrationAttempted = false;
+  let lexicalRetirementAttempted = false;
   try {
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA busy_timeout = 5000");
@@ -542,14 +545,22 @@ export function openDatabase(path: string): Database {
         migrateFuzzyProjection(db);
         db.run("PRAGMA user_version = 20");
       }
-      if ((migrating || fuzzyMigrationAttempted) && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
+      if (version && version.user_version < 21) {
+        lexicalRetirementAttempted = true;
+        console.info("search.lexical.retire attempt", { schemaVersion: 21 });
+        retireLexicalSearch(db);
+        db.run("PRAGMA user_version = 21");
+      }
+      if ((migrating || fuzzyMigrationAttempted || lexicalRetirementAttempted) && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();
     db.run("PRAGMA foreign_keys = ON");
     if (db.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1) throw new Error("Foreign keys unavailable");
     if (fuzzyMigrationAttempted) console.info("fuzzy.projection.migrate succeeded", { schemaVersion: 20 });
+    if (lexicalRetirementAttempted) console.info("search.lexical.retire succeeded", { schemaVersion: 21 });
     return db;
   } catch (error) {
     if (fuzzyMigrationAttempted) console.error("fuzzy.projection.migrate failed", { category: "storage_error" });
+    if (lexicalRetirementAttempted) console.error("search.lexical.retire failed", { category: "storage_error" });
     db.close();
     throw error;
   }
@@ -586,7 +597,6 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
       };
       db.run("INSERT INTO sources (id, text, provenance, created_at) VALUES (?, ?, ?, ?)",
         [source.id, source.text, source.provenance, source.createdAt]);
-      db.run("INSERT INTO source_search (source_id, text) VALUES (?, ?)", [source.id, source.text]);
       refreshSourceProjection(db, source.id);
       db.run("INSERT INTO jobs (id, source_id, status) VALUES (?, ?, ?)",
         [crypto.randomUUID(), source.id, "queued"]);
@@ -599,123 +609,15 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
   }
 }
 
-export type SearchLimits = { results: number; aliases: number; typoCandidates: number };
-
-export function searchSources(path: string, query: string, overrides: Partial<SearchLimits> = {}): SearchResult[] {
-  const limits: SearchLimits = { results: 50, aliases: 100, typoCandidates: 256, ...overrides };
-  if (Object.values(limits).some((value) => !Number.isSafeInteger(value) || value < 1)) throw new Error("Invalid search limits");
-  const tokens = query.match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
-  if (tokens.length === 0) return [];
-
-  const db = openDatabase(path);
-  try {
-    return db.transaction(() => {
-    type SourceRow = { sourceId: string; text: string; provenance: string; createdAt: string };
-    type ItemRow = SourceRow & { itemId: string; kind: "interpretation" | "developing-idea"; formulationId: string; formulationText: string; author: "user" | "ai" };
-    const sourceStatement = db.query<SourceRow, [string, number]>(`SELECT s.id AS sourceId, s.text, s.provenance, s.created_at AS createdAt
-      FROM source_search JOIN sources s ON s.id=source_search.source_id
-      WHERE source_search MATCH ? ORDER BY bm25(source_search),s.id LIMIT ?`);
-    const itemStatement = db.query<ItemRow, [string, number]>(`SELECT s.id AS sourceId,s.text,s.provenance,s.created_at AS createdAt,
-      i.id AS itemId,i.kind,f.id AS formulationId,f.text AS formulationText,f.author
-      FROM formulation_search JOIN knowledge_items i ON i.id=formulation_search.item_id
-      JOIN sources s ON s.id=i.source_id JOIN formulations f ON f.item_id=i.id
-      WHERE formulation_search MATCH ? AND f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=i.id)
-      ORDER BY bm25(formulation_search),i.id LIMIT ?`);
-    type TitleRow = SourceRow & { itemId: string | null; kind: "interpretation" | "developing-idea" | null; formulationId: string | null; formulationText: string | null; author: "user" | "ai" | null; titleRevisionId: string; titleText: string; titleAuthor: "user" | "ai" };
-    const titleStatement = db.query<TitleRow, [string, number]>(`SELECT s.id AS sourceId,s.text,s.provenance,s.created_at AS createdAt,
-      i.id AS itemId,i.kind,f.id AS formulationId,f.text AS formulationText,f.author,
-      r.id AS titleRevisionId,r.text AS titleText,r.author AS titleAuthor
-      FROM title_search JOIN title_entities e ON e.id=title_search.entity_id
-      JOIN title_heads h ON h.entity_id=e.id JOIN title_revisions r ON r.id=COALESCE(h.user_revision_id,h.revision_id)
-      LEFT JOIN knowledge_items i ON i.id=e.item_id
-      LEFT JOIN formulations f ON f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=i.id)
-      JOIN sources s ON s.id=COALESCE(e.source_id,i.source_id)
-      WHERE title_search MATCH ? AND (r.author='user' OR i.id IS NULL OR r.formulation_id=f.id)
-      ORDER BY bm25(title_search),e.id LIMIT ?`);
-    const seen = new Set<string>();
-    const results: SearchResult[] = [];
-    const add = (terms: string[], prefix: boolean, alias: boolean) => {
-      const expression = terms.map((token) => `"${token}"${prefix ? "*" : ""}`).join(" AND ");
-      for (const row of sourceStatement.all(expression, limits.results)) {
-        const key = `source:${row.sourceId}`;
-        if (!seen.has(key) && results.length < limits.results) {
-          seen.add(key);
-          results.push({ sourceId: row.sourceId, matchOrigin: alias ? "alias" : "source", source: { excerpt: row.text.slice(0, 240), provenance: row.provenance, createdAt: row.createdAt } });
-        }
-      }
-      for (const row of itemStatement.all(expression, limits.results)) {
-        const key = `item:${row.itemId}`;
-        if (!seen.has(key) && results.length < limits.results) {
-          seen.add(key);
-          results.push({ sourceId: row.sourceId, matchOrigin: alias ? "alias" : "interpretation", source: { excerpt: row.text.slice(0, 240), provenance: row.provenance, createdAt: row.createdAt }, item: { id: row.itemId, kind: row.kind, formulationId: row.formulationId, text: row.formulationText, author: row.author } });
-        }
-      }
-      for (const row of titleStatement.all(expression, limits.results)) {
-        const key = row.itemId ? `item:${row.itemId}` : `source:${row.sourceId}`;
-        if (seen.has(key) || results.length >= limits.results) continue;
-        if (row.itemId && (!row.kind || !row.formulationId || !row.formulationText || !row.author)) continue;
-        seen.add(key);
-        results.push({ sourceId: row.sourceId, matchOrigin: "title", title: { revisionId: row.titleRevisionId, text: row.titleText, author: row.titleAuthor }, source: { excerpt: row.text.slice(0, 240), provenance: row.provenance, createdAt: row.createdAt },
-          ...(row.itemId && row.kind && row.formulationId && row.formulationText && row.author ? { item: { id: row.itemId, kind: row.kind, formulationId: row.formulationId, text: row.formulationText, author: row.author } } : {}) });
-      }
-    };
-    add(tokens, false, false);
-    add(tokens, true, false);
-    const normalized = tokens.join(" ").toLowerCase();
-    const aliases = db.query<{ alias: string; expansion: string }, [string, string, number]>(
-      "SELECT alias, expansion FROM search_aliases WHERE lower(alias)=? OR lower(expansion)=? ORDER BY id LIMIT ?",
-    ).all(normalized, normalized, limits.aliases);
-    for (const row of aliases) {
-      const other = row.alias.toLowerCase() === normalized ? row.expansion : row.alias;
-      const words = other.match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
-      if (words.length) add(words, false, true);
-    }
-    if (results.length === 0 && tokens.length === 1 && tokens[0] && tokens[0].length >= 4) {
-      const word = tokens[0].toLowerCase();
-      const candidates = db.query<{ term: string }, [string, string, number, number, string, string, number, number, string, string, number, number, number]>(
-        `SELECT term FROM source_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ?
-         UNION SELECT term FROM formulation_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ?
-         UNION SELECT term FROM title_vocabulary WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ? LIMIT ?`,
-      ).all(word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, word[0] ?? "", `${word[0]}\uffff`, word.length - 1, word.length + 1, limits.typoCandidates);
-      for (const { term } of candidates) if (oneEditAway(word, term)) add([term], false, false);
-    }
-    return results.map((result) => {
-      const title = readTitle(db, result.sourceId, result.item?.id, result.item?.formulationId).title;
-      return { ...result, ...(title ? { title } : {}), source: { ...result.source, origin: sourceOrigin(db, result.sourceId) } };
-    });
-    }).deferred();
-  } finally {
-    db.close();
-  }
-}
-
-function oneEditAway(a: string, b: string): boolean {
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0, j = 0, edits = 0;
-  while (i < a.length && j < b.length) {
-    if (a[i] === b[j]) { i++; j++; continue; }
-    if (++edits > 1) return false;
-    if (a.length >= b.length) i++;
-    if (b.length >= a.length) j++;
-  }
-  return edits + (i < a.length || j < b.length ? 1 : 0) <= 1;
-}
-
 export function rebuildSearchIndex(path: string): void {
   console.info("search.rebuild attempt");
   let db: Database | undefined;
   try {
     const opened = openDatabase(path);
     db = opened;
-    opened.transaction(() => {
-      opened.run("DELETE FROM source_search");
-      opened.run("INSERT INTO source_search(source_id,text) SELECT id,text FROM sources");
-      opened.run("DELETE FROM formulation_search");
-      opened.run(`INSERT INTO formulation_search(item_id,text) SELECT f.item_id,f.text FROM formulations f
-        WHERE f.rowid=(SELECT MAX(f2.rowid) FROM formulations f2 WHERE f2.item_id=f.item_id)`);
-      opened.run("DELETE FROM title_search");
-      opened.run(`INSERT INTO title_search(entity_id,text) SELECT h.entity_id,r.text FROM title_heads h JOIN title_revisions r ON r.id=COALESCE(h.user_revision_id,h.revision_id)`);
-    }).immediate();
+    // Retain the path-level recovery API, but rebuild only the authoritative
+    // derived fuzzy projection. It owns atomic publication/rollback itself.
+    rebuildFuzzyProjection(opened);
     console.info("search.rebuild succeeded");
   } catch {
     console.error("search.rebuild failed", { category: "storage_error" });
@@ -732,15 +634,6 @@ export function findSource(path: string, id: string): Source | null {
   }
 }
 
-// Origin is authoritative relational context, never inferred from a client-set
-// provenance label. Legacy capture receipts retain their earlier wire shape.
-export function sourceOrigin(db: Database, id: string): SourceOrigin {
-  const turn = db.query<{ dialogueId: string; turnId: string; rootSourceId: string }, [string]>(`SELECT t.dialogue_id AS dialogueId,t.id AS turnId,d.source_id AS rootSourceId
-    FROM dialogue_turns t JOIN dialogues d ON d.id=t.dialogue_id WHERE t.source_id=?`).get(id);
-  const origin = parseSourceOrigin(turn ? { kind: "discussion-turn", ...turn } : { kind: "capture" });
-  if (!origin) throw new Error("Invalid source origin");
-  return origin;
-}
 export function sourceRecord(db: Database, id: string): Source | null {
   const row = db.query<Source, [string]>("SELECT id,text,provenance,created_at AS createdAt FROM sources WHERE id=?").get(id);
   if (!row) return null;

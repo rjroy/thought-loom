@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 import { readInquiry, readSource, readWeaving } from "../../../lib/daemon";
 import StatusIcon from "../../ui/status-icon";
 import WeavingStatus from "../../ui/weaving-status";
-import { discussionHref, firstParameter } from "../../../lib/links";
-import { validSearchQuery } from "../../../lib/daemon";
+import { discussionHref } from "../../../lib/links";
+import { pageSearchRequest } from "../../../lib/search-query";
 import FollowUpStatus from "../../ui/follow-up-status";
 import ThoughtContent from "../../ui/thought-content";
 
@@ -26,7 +26,7 @@ export default async function SourcePage({ params, searchParams }: { params: Pro
     );
   }
   const { source } = result;
-  const rawQuery = firstParameter((await searchParams).q), query = validSearchQuery(rawQuery) ? rawQuery : "";
+  const query = pageSearchRequest({ q: (await searchParams).q })?.query ?? "";
   const origin = source.origin, discussionInput = origin?.kind === "discussion-turn";
   const weaving = discussionInput ? null : await readWeaving(id);
   const context = discussionInput ? null : await readInquiry(id);
