@@ -6,6 +6,7 @@ import { DIALOGUE_LIMITS, isIdempotencyKey, isRecordId, parseDialogueInput, pars
 import { openDatabase, sourceOrigin } from "./storage";
 import { dialogueHeader, snapshotContext, dialogueChanges } from "./dialogue-data";
 import { KnowledgeError } from "./knowledge";
+import { refreshSourceProjection } from "./fuzzy-projection";
 
 export class DialogueError extends Error {
   constructor(readonly code: "invalid_input" | "invalid_selection" | "not_found" | "turn_conflict" | "operation_conflict" | "storage_error") {
@@ -153,6 +154,7 @@ export class DialogueService {
       db.run("INSERT INTO jobs(id,source_id,status,priority,kind) VALUES (?,?,'queued',1,'dialogue')", [jobId, dialogue.sourceId]);
       db.run("INSERT INTO dialogue_turns(id,dialogue_id,source_id,job_id,position,created_at) VALUES (?,?,?,?,?,?)", [turnId, id, sourceId, jobId, position, createdAt]);
       db.run("INSERT INTO dialogue_turn_receipts(idempotency_key,payload_hash,turn_id,command) VALUES (?,?,?,?)", [key, hash, turnId, command]);
+      refreshSourceProjection(db, sourceId);
       return { kind: "created", receipt: saved };
     });
     console.info("dialogue.turn saved", { dialogueId: id, turnId: result.receipt.id, sourceId: result.receipt.sourceId, jobId: result.receipt.jobId, outcome: result.kind });

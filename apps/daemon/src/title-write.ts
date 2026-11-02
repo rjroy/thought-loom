@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { ThoughtTitle } from "@thoughtloom/contracts";
 import { KnowledgeError } from "./knowledge";
 import { readTitle } from "./title-projection";
+import { refreshTitleProjection } from "./fuzzy-projection";
 
 export type TitleTarget = { kind: "source" } | { kind: "item"; itemId: string; versionId: string };
 type TitleWrite = {
@@ -52,5 +53,6 @@ export function writeTitle(db: Database, input: TitleWrite): ThoughtTitle {
   if (!effective) throw new KnowledgeError("storage_error");
   db.run("DELETE FROM title_search WHERE entity_id=?", [entity.id]);
   db.run("INSERT INTO title_search(entity_id,text) VALUES (?,?)", [entity.id, effective.text]);
+  refreshTitleProjection(db, sourceId, itemId);
   return { revisionId, text: input.text, author: input.author };
 }

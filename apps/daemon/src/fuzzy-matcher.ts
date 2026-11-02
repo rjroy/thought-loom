@@ -239,9 +239,8 @@ export function createFieldMatcher(query: CompiledQuery): FieldMatcher {
   return new StreamingFieldMatcher(query);
 }
 
-// Whole-string convenience for current callers/tests, with O(query) extra state.
-// SQL must use a future resumable, pinned-span reconstruction adapter rather than
-// materialize an entire large body merely to call this synchronous helper.
+// Whole-string convenience for bounded callers/tests. SQL uses the incremental
+// reconstructor below rather than materializing a whole body for this helper.
 export function reconstructAlignment(
   query: CompiledQuery,
   text: string,
@@ -266,6 +265,103 @@ export function reconstructAlignment(
     if (ranges.length === query.keys.length) return ranges;
   }
   throw new Error("Match does not describe this field");
+}
+
+export type AlignmentRange = OriginalRange & Readonly<{ graphemeStart: number; graphemeEnd: number }>;
+export type FieldAlignment = Readonly<{ ranges: readonly AlignmentRange[]; graphemeCount: number }>;
+export type AlignmentReconstructor = {
+  // As with FieldMatcher, chunks end at grapheme boundaries and must be drained.
+  append(chunk: string, final: boolean): void;
+  step(maxUpdates: number): MatcherStep;
+  result(): FieldAlignment;
+};
+
+// A second pinned read reconstructs only O(query) ranges. Each update consumes
+// one original grapheme or a chunk boundary, including within long whitespace
+// runs. No full field, token array or document-length backpointers are retained.
+class StreamingAlignment implements AlignmentReconstructor {
+  private input: Iterator<Intl.SegmentData> | null = null;
+  private pending: Unit | null = null;
+  private previous: LetterContext | null = null;
+  private pendingStart = 0;
+  private pendingEnd = 0;
+  private graphemeCount = 0;
+  private originalLength = 0;
+  private chunkBase = 0;
+  private position = 0;
+  private finalChunk = false;
+  private ended = false;
+  private readonly ranges: AlignmentRange[] = [];
+
+  constructor(private readonly query: CompiledQuery, private readonly match: FieldMatch) {
+    if (!query.keys.length || !Number.isSafeInteger(match.start) || !Number.isSafeInteger(match.end) ||
+        match.start < 0 || match.end <= match.start || match.end - match.start - query.keys.length !== match.skipped) {
+      throw new RangeError("Invalid alignment span");
+    }
+  }
+
+  append(chunk: string, final: boolean): void {
+    if (this.input || this.ended) throw new Error("Alignment chunk is not ready");
+    if (!Number.isSafeInteger(this.originalLength + chunk.length)) throw new RangeError("Field offsets overflow");
+    this.chunkBase = this.originalLength;
+    this.originalLength += chunk.length;
+    this.finalChunk = final;
+    this.input = segmenter.segment(chunk)[Symbol.iterator]();
+  }
+
+  step(maxUpdates: number): MatcherStep {
+    if (!Number.isSafeInteger(maxUpdates) || maxUpdates < 1) throw new RangeError("Invalid alignment work budget");
+    let updates = 0;
+    while (updates < maxUpdates && this.input) {
+      const part = this.input.next();
+      updates++;
+      if (part.done) {
+        this.input = null;
+        if (this.finalChunk) {
+          if (this.pending) this.consume(this.pending, null);
+          this.pending = null;
+          this.ended = true;
+        }
+      } else {
+        const next = normalizeUnit(part.value.segment, this.chunkBase + part.value.index);
+        const index = this.graphemeCount++;
+        if (this.pending?.whitespace && next.whitespace) {
+          this.pending = extendWhitespace(this.pending, next);
+          this.pendingEnd = this.graphemeCount;
+        } else {
+          if (this.pending) this.consume(this.pending, next);
+          this.pending = next;
+          this.pendingStart = index;
+          this.pendingEnd = this.graphemeCount;
+        }
+      }
+    }
+    return { done: this.input === null, updates };
+  }
+
+  result(): FieldAlignment {
+    if (!this.ended || this.ranges.length !== this.query.keys.length) throw new Error("Incomplete field alignment");
+    return { ranges: this.ranges, graphemeCount: this.graphemeCount };
+  }
+
+  private consume(unit: Unit, next: Unit | null): void {
+    const current = token(unit, this.position++, this.previous, next);
+    this.previous = context(unit);
+    if (current.position < this.match.start || current.position >= this.match.end) return;
+    const j = this.ranges.length;
+    if (j >= this.query.keys.length || (j === 0 && current.position !== this.match.start) ||
+        (j === this.query.keys.length - 1 && current.position !== this.match.end - 1)) return;
+    if (this.query.keys[j] !== current.key ||
+        (this.match.class === "initials" && !current.whitespace && !current.initial)) return;
+    if (this.match.class === "whole-word" && ((j === 0 && !current.startEdge) ||
+        (j === this.query.keys.length - 1 && !current.endEdge))) return;
+    this.ranges.push({ start: current.start, end: current.end,
+      graphemeStart: this.pendingStart, graphemeEnd: this.pendingEnd });
+  }
+}
+
+export function createAlignmentReconstructor(query: CompiledQuery, match: FieldMatch): AlignmentReconstructor {
+  return new StreamingAlignment(query, match);
 }
 
 function binaryCompare(left: string, right: string): number {

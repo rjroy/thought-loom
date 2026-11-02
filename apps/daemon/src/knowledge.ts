@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { openDatabase } from "./storage";
 import { parseIdea, parseIdeaDerivation, type IdeaInput, type IdeaDerivation } from "@thoughtloom/contracts";
 import { enqueueUserFollowUp } from "./follow-up";
+import { refreshAliasProjection, refreshItemProjection } from "./fuzzy-projection";
 export type KnowledgeContext =
   | { actor: "user"; operationId: string }
   | { actor: "ai"; operationId: string; runId: string };
@@ -127,6 +128,7 @@ function appendFormulation(db: Database, context: KnowledgeContext, itemId: stri
   ids.forEach((sourceId, position) => db.run("INSERT INTO formulation_evidence (formulation_id,source_id,position) VALUES (?,?,?)", [id, sourceId, position]));
   db.run("DELETE FROM formulation_search WHERE item_id = ?", [itemId]);
   db.run("INSERT INTO formulation_search (item_id,text) VALUES (?,?)", [itemId, text]);
+  refreshItemProjection(db, itemId);
 }
 
 function appendRelationship(db: Database, context: KnowledgeContext, relationshipId: string, status: RelationshipRevision["status"], rationale: string, ids: string[], restoredFrom: string | null = null) {
@@ -203,12 +205,16 @@ export class KnowledgeService {
       const id = crypto.randomUUID();
       db.run("INSERT INTO search_aliases(id,alias,expansion,author,operation_id,run_id) VALUES (?,?,?,?,?,?)", [id, alias.join(" "), expansion.join(" "), context.actor, context.operationId, context.actor === "ai" ? context.runId : null]);
       input.evidenceSourceIds.forEach((sourceId, position) => db.run("INSERT INTO alias_evidence(alias_id,source_id,position) VALUES (?,?,?)", [id, sourceId, position]));
+      refreshAliasProjection(db, id);
       return readAlias(db, { resultId: id, revisionId: null });
     }, (result) => ({ resultId: result.id, revisionId: null }), readAlias);
   }
 
   private mutate<T>(name: string, context: KnowledgeContext, input: unknown, action: (db: Database) => T,
     reference: (result: T) => ReceiptRef, restore: (db: Database, ref: ReceiptRef) => T): T {
+    const identity: { operationId?: string; runId?: string } = {};
+    if (typeof context?.operationId === "string") identity.operationId = context.operationId;
+    if (context?.actor === "ai" && typeof context.runId === "string") identity.runId = context.runId;
     return this.execute(name, true, (db) => {
       this.authorize?.(db);
       validateContext(context);
@@ -228,21 +234,22 @@ export class KnowledgeService {
         enqueueUserFollowUp(db, context.operationId);
       }
       return result;
-    });
+    }, identity);
   }
 
-  private execute<T>(name: string, write: boolean, action: (db: Database) => T): T {
-    console.info("knowledge.operation attempt", { operation: name });
+  private execute<T>(name: string, write: boolean, action: (db: Database) => T,
+    identity: Readonly<{ operationId?: string; runId?: string }> = {}): T {
+    console.info("knowledge.operation attempt", { operation: name, ...identity });
     let db: Database | undefined;
     try {
       const opened = openDatabase(this.databasePath);
       db = opened;
       const result = write ? opened.transaction(() => action(opened)).immediate() : action(opened);
-      console.info("knowledge.operation succeeded", { operation: name });
+      console.info("knowledge.operation succeeded", { operation: name, ...identity });
       return result;
     } catch (error) {
       const code = error instanceof KnowledgeError ? error.code : "storage_error";
-      console.error("knowledge.operation failed", { operation: name, category: code });
+      console.error("knowledge.operation failed", { operation: name, ...identity, category: code });
       throw error instanceof KnowledgeError ? error : new KnowledgeError("storage_error");
     } finally { db?.close(); }
   }

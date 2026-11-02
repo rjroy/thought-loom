@@ -4,8 +4,10 @@ import { parseSourceOrigin, parseSourceRecord, type CaptureInput, type Source, t
 import { migrateWeavingAbandonment } from "./weaving-abandonment-schema";
 import { migrateTitles } from "./title-schema";
 import { readTitle } from "./title-projection";
+import { migrateFuzzyProjection } from "./fuzzy-projection-schema";
+import { refreshSourceProjection } from "./fuzzy-projection";
 
-export const CURRENT_DATABASE_VERSION = 19;
+export const CURRENT_DATABASE_VERSION = 20;
 
 function migrateFollowUpJobs(db: Database) {
   // Rebuild only jobs to widen its kind constraint. Preserve rowids (queue
@@ -31,6 +33,7 @@ function migrateFollowUpJobs(db: Database) {
 
 export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
+  let fuzzyMigrationAttempted = false;
   try {
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA busy_timeout = 5000");
@@ -533,12 +536,20 @@ export function openDatabase(path: string): Database {
         migrateTitles(db);
         db.run("PRAGMA user_version = 19");
       }
-      if (migrating && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
+      if (version && version.user_version < 20) {
+        fuzzyMigrationAttempted = true;
+        console.info("fuzzy.projection.migrate attempt", { schemaVersion: 20 });
+        migrateFuzzyProjection(db);
+        db.run("PRAGMA user_version = 20");
+      }
+      if ((migrating || fuzzyMigrationAttempted) && db.query("PRAGMA foreign_key_check").get()) throw new Error("Database foreign key check failed");
     }).immediate();
     db.run("PRAGMA foreign_keys = ON");
     if (db.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1) throw new Error("Foreign keys unavailable");
+    if (fuzzyMigrationAttempted) console.info("fuzzy.projection.migrate succeeded", { schemaVersion: 20 });
     return db;
   } catch (error) {
+    if (fuzzyMigrationAttempted) console.error("fuzzy.projection.migrate failed", { category: "storage_error" });
     db.close();
     throw error;
   }
@@ -576,6 +587,7 @@ export function saveCapture(path: string, key: string, input: CaptureInput): Cap
       db.run("INSERT INTO sources (id, text, provenance, created_at) VALUES (?, ?, ?, ?)",
         [source.id, source.text, source.provenance, source.createdAt]);
       db.run("INSERT INTO source_search (source_id, text) VALUES (?, ?)", [source.id, source.text]);
+      refreshSourceProjection(db, source.id);
       db.run("INSERT INTO jobs (id, source_id, status) VALUES (?, ?, ?)",
         [crypto.randomUUID(), source.id, "queued"]);
       db.run("INSERT INTO capture_receipts (idempotency_key, payload_hash, source_id,response_version) VALUES (?, ?, ?,2)",
