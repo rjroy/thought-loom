@@ -19,4 +19,4 @@ Preserve the user's original words. Identify AI contributions. Make interpretati
 
 Success is a useful, non-obvious connection that survives examination, leads to further thinking, and can be found and used again. Drawing a graph, collecting notes, or producing more AI text is not success by itself.
 
-These eight files preserve product intent for a fresh start. They do not prescribe an architecture, database schema, agent protocol, or implementation plan. Unresolved behavior is marked as such.
+These context files preserve product intent for a fresh start, including [basic shared navigation](shared-navigation.md). The [architecture and working agreement](architecture.md) records the agreed technology, client/daemon boundary, and separate work scopes. A complete architecture, database schema, agent protocol, and implementation plan remain undefined. Unresolved behavior is marked as such.

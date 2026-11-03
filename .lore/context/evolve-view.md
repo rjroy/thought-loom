@@ -46,6 +46,12 @@ A normal exchange often produces one useful development, but it may produce none
 
 Background findings can be offered separately for inspection. They must not silently replace the discussion's focus or appear as if the conversational agent just said them.
 
+The mockup's repeated **Evolve this idea** button within Evolve is a mistake, not an additional action. That action belongs in Idea, where it opens a new conversation.
+
+## Future functionality
+
+Attachments are outside the scope of 1.0. The mockup's paperclip control represents possible future functionality and must not be included as an active 1.0 control. Attachment behavior and supported formats remain undefined.
+
 ## Boundaries
 
 Original notes remain intact. The agent cannot silently rewrite user history or turn its suggestions into user-endorsed beliefs. User-visible response, durable knowledge changes, and execution status remain distinguishable. Detailed recovery mechanics and the authority to revise user-corrected material need explicit design, not assumptions hidden inside the UX implementation.

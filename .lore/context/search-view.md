@@ -25,6 +25,14 @@ Search should reach original captures, user discussion contributions, retained A
 
 Retrieval finds candidates. The agent's separate job is to examine material and establish whether a meaningful connection exists. A good textual match is not semantic confidence or proof of a connection.
 
+## Filters and sorting
+
+Include the mockup's filter sidebar and sort control in 1.0. These are approved search features, not incidental mockup decoration.
+
+The sidebar offers authorship and kind-of-material filters, date presets and a custom date range, result counts beside filter options, and a Clear filters action. Use the [data model](data-model.md) to keep authorship and material kind distinct; the mockup's exact labels and choices are not a finalized taxonomy.
+
+Allow the user to choose the result order, with relevance among the choices. The complete sort options, date semantics, filter-combination behavior, and count semantics still need definition. Recency must not be treated as a measure of an idea's value.
+
 ## Result presentation
 
 Show a readable vertical list of compact cards. Each card has:
@@ -42,7 +50,7 @@ Use recorded relationship rationale or provenance wording to explain that contex
 
 ## Actions and empty results
 
-Search, change the query, expand text, open a result or its connected thought, and return without losing place. Searching or reading does not accept, promote, or modify an AI interpretation.
+Search, change the query, filter and sort results, clear filters, expand text, open a result or its connected thought, and return without losing the query, filters, sort selection, or place. Searching or reading does not accept, promote, or modify an AI interpretation.
 
 If nothing matches, say so plainly and allow another query. Do not fabricate content or silently substitute unrelated recent notes.
 
