@@ -5,7 +5,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "daemon": "bun run src/daemon/main.ts"
+    "daemon": "bun run src/daemon/main.ts",
+    "api": "bun run scripts/api.ts",
+    "demo": "bun run scripts/demo.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
