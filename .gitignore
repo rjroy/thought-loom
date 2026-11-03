@@ -60,3 +60,4 @@ yarn-error.log*
 .beads-credential-key
 .beads/proxieddb/
 /.lore/local/
+.slim/deepwork/

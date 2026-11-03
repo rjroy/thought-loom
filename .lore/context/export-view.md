@@ -27,7 +27,9 @@ Skip rejected thoughts without cutting off traversal: active descendants beyond 
 
 The user provides a question or request and an effort level. The agent investigates relevant, non-rejected material and builds a Markdown report that gathers and connects existing thinking. The purpose is export, not new idea development.
 
-Effort controls the extent of investigation and may also select a model variant. It is not primarily a request for more speculative analysis or new developments. Exact effort levels and any model mapping remain to be defined.
+The effort levels are **Quick**, **Standard** (default), and **Thorough**. They request the model's effort/thoroughness and may map to a supported model effort setting or variant. They do not impose application-defined turn, token, cost, search-count, or note-count quotas. “Investigation budget” is not the intended contract. Normal transport failure detection and user-requested cancellation are separate from effort.
+
+Effort is not a request for more speculative analysis or new developments. Exact supported model/variant mappings are deployment configuration rather than extra investigation limits.
 
 Cite the source thoughts behind the report so the user can trace its claims back into Thoughtloom. Distinguish recorded material from the report's connective explanation; do not invent evidence or imply user endorsement of AI-authored claims.
 
@@ -39,4 +41,4 @@ Preserve authorship, provenance, and uncertainty sufficiently to understand the 
 
 ## Still to decide
 
-The exact export entry points and preview/download UX, plus the available Agentic effort levels. These do not reopen the agreed scope, Markdown format, tree-only Simple traversal, or read-only Agentic behavior.
+The exact visual export entry points and preview/download UX remain for the client design phase. These do not reopen the agreed effort labels, Markdown format, tree-only Simple traversal, or read-only Agentic behavior.

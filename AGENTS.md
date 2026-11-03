@@ -78,4 +78,4 @@ Preserve user changes and untracked assets. Do not read, log, or commit `.env`, 
 
 Use non-interactive shell operations; aliased `cp`, `mv`, and `rm` may prompt. Force flags prevent prompts but do not authorize destructive actions: verify the target set and scope before overwriting or removing files.
 
-`CLAUDE.md` points here so different agent hosts use one maintained policy. Update this guidance when repository conventions change; keep transient plans and completion histories in Beads.
+Maintain project guidance in this file. Update it when repository conventions change; keep transient plans and completion histories in Beads.

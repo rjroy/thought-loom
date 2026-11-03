@@ -36,7 +36,7 @@ Original idea → user contribution → recorded development → next user contr
 
 Any point can be selected as the starting idea for further exploration, creating a branch without rewriting the existing path. Multiple recorded developments can branch from a user contribution. The latest issued development is the default continuation point; the user can select a different one with a simple control.
 
-The agent's full conversational response is normally an addendum to its recorded development, not another step in the evolution chain or an attachment to the user contribution. How a shared response is associated when it produces several developments remains to be defined; the default continuation point does not decide that association. If the agent records no separate development, retain the full response attached to the user contribution and treat that response as the developed idea, preserving the chain. Every agent response is searchable, including addenda. See [Evolve](evolve-view.md).
+The agent's full conversational response is normally an addendum to its recorded development, not another step in the evolution chain or an attachment to the user contribution. When one reply produces several developments, each links to the same retained full response, making its explanation available from any of them without duplicating it. Search opens the latest associated development eligible under the current read scope, with the full reply available there, rather than requiring a selection step. If the agent records no separate development, retain the full response attached to the user contribution and treat that response as the developed idea, preserving the chain. Every agent response is searchable, including addenda. See [Evolve](evolve-view.md).
 
 ## Information retained about a note
 
@@ -67,6 +67,8 @@ Only the user may reject or restore material. Neither the weaver nor the evoluti
 Branch operations never follow weaver-discovered connections. The one-parent rule makes evolution a tree, not a graph of shared evolution descendants.
 
 Rejected material is hidden from ordinary views but remains inspectable through idea history and Search's **Show rejected** toggle. For every AI agent, rejected notes and connections are effectively nonexistent: exclude them from retrieval, context, and reasoning, even when the user is inspecting them. Active descendants of a rejected thought remain usable without supplying the rejected ancestor's content to the AI.
+
+If a reply is shared by several developments and any of them is rejected, exclude that entire reply from AI access, even through another active development. Other active thoughts remain usable; users can still inspect the retained reply deliberately.
 
 Connections associated with restored ideas become available again only when their participating thoughts are active. Connections explicitly rejected separately stay rejected until separately restored. Restoring one thought must not expose another still-rejected thought to the AI through a connection.
 

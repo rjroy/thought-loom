@@ -31,7 +31,7 @@ Retain each user contribution as an immutable thought whose evolution parent is 
 
 Show what was actually recorded or changed, with attribution and access to the supporting material. Do not mistake an agent's statement that it saved something for proof that it did. The conversational explanation may be longer or different from a saved formulation.
 
-An exchange can produce one or several recorded developments. The agent's conversational response is an addendum to its recorded development, rather than a separate evolution node or an attachment to the user message. The full response remains retained and searchable.
+An exchange can produce one or several recorded developments. The agent's conversational response is an addendum to its recorded developments, rather than a separate evolution node or an attachment to the user message. If several developments are produced, each links to the same retained full response. That response is available from any of them and remains searchable.
 
 If the agent provides a response but records no separate development, attach the full response to the user contribution and treat that response as the developed idea. This includes clarifying questions. Preserve the chain rather than losing useful information because it is not an ideal formulation. A failed or still-uncertain run is not the same as a completed response with no separately recorded development.
 
@@ -43,7 +43,7 @@ The user can also select any earlier point as the starting idea for a new branch
 
 When Search matches an agent-response addendum, open its associated recorded development with the full response available there. Earlier exchanges remain available through the thoughts and their history; branching from a selected point is not automatic resumption of an opaque old agent session.
 
-When one response produces several developments, the exact addendum association and search destination remain to be defined. Do not infer them from the latest-development continuation default.
+When Search matches a response shared by several developments, open the latest associated development eligible under the current read scope, with the full reply available there. Do not add a mandatory selection step or duplicate the response.
 
 ## Actions
 
@@ -53,6 +53,10 @@ When one response produces several developments, the exact addendum association 
 - Inspect and challenge what the AI recorded through further development; keep user contributions distinct from AI conjectures.
 - Leave for a selected thought's Idea view. Choosing Evolve there begins a new conversation about that thought rather than silently retargeting the current one.
 - Stop active work, check an uncertain result, or retry a clearly failed operation without silently duplicating saved input or execution.
+
+The daemon owns active work. Leaving the conversation or closing the browser does not stop the agent; returning observes the same run and its existing results. Cancellation requires an explicit Stop action.
+
+Stopping prevents further work but retains the user's contribution and any developments already confirmed saved. Mark an unfinished reply as interrupted rather than treating it as a completed response. Do not undo or reject saved thoughts automatically. An uncertain timeout or disconnect calls for checking the existing run before offering a retry, not silently submitting a replacement.
 
 Background findings can be offered separately for inspection. They must not silently replace the discussion's focus or appear as if the conversational agent just said them.
 
@@ -64,4 +68,4 @@ Attachments are outside the scope of 1.0. The mockup's paperclip control represe
 
 ## Boundaries
 
-All thoughts remain immutable. Neither agent may edit existing thoughts, reject material, or restore it. Rejected notes and connections are excluded from AI retrieval, context, and reasoning; an active descendant does not authorize use of a rejected ancestor. The agent cannot turn its suggestions into user-endorsed beliefs. User-visible response, durable knowledge additions, and execution status remain distinguishable. Detailed stop/failure/retry behavior still needs design; it must not silently duplicate input or developments.
+Thought content and ancestry remain immutable; title metadata follows its separately defined edit/fill rules. Neither agent may rewrite thought content, reject material, or restore it. Rejected notes and connections are excluded from AI retrieval, context, and reasoning; an active descendant does not authorize use of a rejected ancestor. A reply shared by several developments is unavailable to AI if any associated development is rejected. The agent cannot turn its suggestions into user-endorsed beliefs. User-visible response, durable knowledge additions, and execution status remain distinguishable; recovery must preserve confirmed work and avoid duplicate input or developments.
