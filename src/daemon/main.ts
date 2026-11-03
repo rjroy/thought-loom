@@ -1,4 +1,4 @@
-import { parseConfig } from "./config";
+import { ConfigError, parseConfig } from "./config";
 import { startDaemon } from "./runtime";
 
 if (import.meta.main) {
@@ -15,8 +15,9 @@ if (import.meta.main) {
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
-  } catch {
-    console.error(JSON.stringify({ operation: "start", phase: "outcome", success: false }));
+  } catch (error) {
+    console.error(JSON.stringify({ operation: "start", phase: "outcome", success: false,
+      message: error instanceof ConfigError ? error.message : "Daemon startup failed" }));
     process.exitCode = 1;
   }
 }

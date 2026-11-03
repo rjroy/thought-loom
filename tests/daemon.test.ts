@@ -13,10 +13,14 @@ const config = (dbPath: string, port = 0): DaemonConfig => ({ dbPath, port, cred
 const thought = (id: string, parentId: string | null, sourceIds: string[] = []) => ({ id, parentId, sourceIds, text: `private content ${id}`, title: null, kind: "developing-idea", createdAt: "2026-01-01T00:00:00Z", origin: "integration-test" });
 const link = { id: "link", fromId: "root", toId: "child", category: "supports", explanation: "private link rationale", sourceIds: ["root"] };
 const invalidConfigs = [
-  { THOUGHTLOOM_USER_TOKEN: undefined }, { THOUGHTLOOM_AI_TOKEN: "" },
-  { THOUGHTLOOM_USER_TOKEN: "short" }, { THOUGHTLOOM_AI_TOKEN: "   " },
-  { THOUGHTLOOM_AI_TOKEN: userToken }, { THOUGHTLOOM_DB_PATH: undefined }, { THOUGHTLOOM_DB_PATH: " " },
-  ...["", "-1", "65536", "1.5", "3abc", "1e3", "NaN"].map(port => ({ THOUGHTLOOM_PORT: port })),
+  { changes: { THOUGHTLOOM_USER_TOKEN: undefined }, fields: [/THOUGHTLOOM_USER_TOKEN/] },
+  { changes: { THOUGHTLOOM_AI_TOKEN: "" }, fields: [/THOUGHTLOOM_AI_TOKEN/] },
+  { changes: { THOUGHTLOOM_USER_TOKEN: "z9!" }, fields: [/THOUGHTLOOM_USER_TOKEN/, /32/] },
+  { changes: { THOUGHTLOOM_AI_TOKEN: "   " }, fields: [/THOUGHTLOOM_AI_TOKEN/] },
+  { changes: { THOUGHTLOOM_AI_TOKEN: userToken }, fields: [/THOUGHTLOOM_USER_TOKEN/, /THOUGHTLOOM_AI_TOKEN/, /distinct|different/i] },
+  { changes: { THOUGHTLOOM_DB_PATH: undefined }, fields: [/THOUGHTLOOM_DB_PATH/] },
+  { changes: { THOUGHTLOOM_DB_PATH: " " }, fields: [/THOUGHTLOOM_DB_PATH/] },
+  ...["", "-1", "65536", "1.5", "3abc", "1e3", "NaN", "/test/private-token-database.sqlite"].map(port => ({ changes: { THOUGHTLOOM_PORT: port }, fields: [/THOUGHTLOOM_PORT/, /integer/i, /\b0\b/, /65535/] })),
 ];
 
 async function withDirectory(action: (dir: string) => Promise<void>) {
@@ -53,6 +57,47 @@ async function startupUrl(reader: ReadableStreamDefaultReader<Uint8Array>): Prom
   throw new Error("Daemon startup timed out");
 }
 
+async function collectOutput(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder();
+  let output = "";
+  for (;;) {
+    const chunk = await bounded(reader.read(), 3000, "child output");
+    if (chunk.done) return output + decoder.decode();
+    output += decoder.decode(chunk.value, { stream: true });
+    if (output.length > 65536) throw new Error("Child output exceeds limit");
+  }
+}
+
+async function failedEntrypoint(dir: string, variables: Record<string, string>) {
+  const entrypoint = fileURLToPath(new URL("../src/daemon/main.ts", import.meta.url));
+  const child = Bun.spawn([process.execPath, "run", entrypoint], { cwd: dir, env: variables, stdout: "pipe", stderr: "pipe" });
+  const stdoutReader = child.stdout.getReader();
+  const stderrReader = child.stderr.getReader();
+  const output = Promise.all([collectOutput(stdoutReader), collectOutput(stderrReader)]);
+  try {
+    const [exitCode, [stdout, stderr]] = await bounded(Promise.all([child.exited, output]), 4000, "failed entrypoint");
+    return { exitCode, stdout, stderr };
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    try { await bounded(child.exited, 3000, "child reap"); }
+    finally {
+      await Promise.all([
+        bounded(stdoutReader.cancel(), 1000, "stdout cleanup"),
+        bounded(stderrReader.cancel(), 1000, "stderr cleanup"),
+      ]);
+    }
+  }
+}
+
+function hasStartFailure(output: string): boolean {
+  return output.split("\n").some(line => {
+    let event: unknown;
+    try { event = JSON.parse(line); } catch { return false; }
+    return typeof event === "object" && event !== null && "operation" in event && event.operation === "start" &&
+      "phase" in event && event.phase === "outcome" && "success" in event && event.success === false;
+  });
+}
+
 function client(daemon: RunningDaemon) {
   return (path: string, actor: "user" | "ai" | "none" = "user", method = "GET", body?: unknown) => {
     const headers: Record<string, string> = {};
@@ -82,8 +127,13 @@ describe("daemon configuration", () => {
     expect(parseConfig({ ...env, THOUGHTLOOM_PORT: "65535" }).port).toBe(65535);
   });
 
-  test.each(invalidConfigs)("rejects invalid config with ConfigError: %j", changes => {
-    expect(() => parseConfig({ ...env, ...changes })).toThrow(ConfigError);
+  test.each(invalidConfigs)("rejects invalid config with safe field diagnostic", ({ changes, fields }) => {
+    let failure: unknown;
+    try { parseConfig({ ...env, ...changes }); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(ConfigError);
+    if (!(failure instanceof ConfigError)) throw new Error("Expected ConfigError");
+    for (const field of fields) expect(failure.message).toMatch(field);
+    for (const secret of [userToken, aiToken, env.THOUGHTLOOM_DB_PATH, "z9!", "/test/private-token-database.sqlite"]) expect(failure.message).not.toContain(secret);
   });
 
   test("invalid runtime config fails before creating database directories", async () => {
@@ -95,6 +145,34 @@ describe("daemon configuration", () => {
       expect(JSON.stringify(events)).not.toContain(aiToken);
     });
   });
+
+  test("entrypoint reports invalid port field and range without printing its value or credentials", async () => {
+    await withDirectory(async dir => {
+      const path = join(dir, "sensitive-db-token-sentinel.sqlite");
+      const result = await failedEntrypoint(dir, { ...env, THOUGHTLOOM_DB_PATH: path, THOUGHTLOOM_PORT: path });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toMatch(/THOUGHTLOOM_PORT/);
+      expect(result.stderr).toMatch(/integer/i);
+      expect(result.stderr).toMatch(/\b0\b/);
+      expect(result.stderr).toMatch(/65535/);
+      const combined = result.stdout + result.stderr;
+      expect(hasStartFailure(combined)).toBe(true);
+      for (const secret of [path, "sensitive-db-token-sentinel", userToken, aiToken]) expect(combined).not.toContain(secret);
+      await expect(stat(path)).rejects.toThrow();
+    });
+  }, 10000);
+
+  test("entrypoint sanitizes unexpected SQLite startup failures", async () => {
+    await withDirectory(async dir => {
+      // A directory cannot be opened as a SQLite database; its path is a test-owned sentinel.
+      const result = await failedEntrypoint(dir, { ...env, THOUGHTLOOM_DB_PATH: dir, THOUGHTLOOM_PORT: "0" });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toMatch(/failed|error/i);
+      const combined = result.stdout + result.stderr;
+      expect(hasStartFailure(combined)).toBe(true);
+      for (const secret of [dir, userToken, aiToken, "SQLITE_CANTOPEN", "unable to open database file"]) expect(combined).not.toContain(secret);
+    });
+  }, 10000);
 });
 
 describe("real HTTP and SQLite daemon", () => {
