@@ -21,7 +21,7 @@ Acronym matching requires an alternate-name/expansion mechanism; ordinary full-t
 
 The previously chosen baseline was indexed full-text search with prefix and bounded typo handling. This preserves that level of behavior, not a requirement to rebuild a custom matcher or choose a particular search library. Ordinary search is not required to invoke an agent or understand an unrestricted natural-language request.
 
-Search should reach original captures, user discussion contributions, retained AI interpretations/developing ideas, and their effective titles. Historical versions remain available through history; searching every historical revision or relationship explanation is not assumed.
+Search should reach original captures, user discussion contributions, retained AI interpretations/developing ideas, every agent response, and effective titles. Full responses remain searchable even when they are addenda rather than evolution nodes. If an addendum matches, open its associated recorded development with the full response available there. There are no historical note revisions; earlier thoughts remain distinct searchable material unless rejected. Searching every relationship explanation is not assumed.
 
 Retrieval finds candidates. The agent's separate job is to examine material and establish whether a meaningful connection exists. A good textual match is not semantic confidence or proof of a connection.
 
@@ -31,7 +31,11 @@ Include the mockup's filter sidebar and sort control in 1.0. These are approved 
 
 The sidebar offers authorship and kind-of-material filters, date presets and a custom date range, result counts beside filter options, and a Clear filters action. Use the [data model](data-model.md) to keep authorship and material kind distinct; the mockup's exact labels and choices are not a finalized taxonomy.
 
-Allow the user to choose the result order, with relevance among the choices. The complete sort options, date semantics, filter-combination behavior, and count semantics still need definition. Recency must not be treated as a measure of an idea's value.
+The sort options are **Relevance**, **Newest first**, and **Oldest first**. Date filters and chronological sorting use thought creation date, not a last-edited date. Recency must not be treated as a measure of an idea's value.
+
+Selections within a filter group combine as **OR**; different filter groups combine as **AND**. For example, You or AI, and Developing idea, and created in the last 30 days. Each option's count shows how many matching results that option would include under the current query and other filter groups.
+
+Add a **Show rejected** on/off toggle with no count. Off by default, it excludes rejected material from ordinary search processing, not merely from client-side display. Enabling it adds rejected thoughts alongside active results, rather than showing only rejected thoughts. Do not run an additional rejected-material count query merely to populate this toggle. User access to rejected material never makes it available to AI agents.
 
 ## Result presentation
 
@@ -46,6 +50,8 @@ Where text is truncated, a clickable `…` expands the complete text in place. O
 
 For contextual material, prefer an eligible directly connected thought that also matches the query. Otherwise, the immediate recorded predecessor can explain where the thought developed from. If neither is suitable, omit context. Do not replace the result with its neighbor, display the whole ancestry, or manufacture an explanation.
 
+Rejected notes and connections are not ordinary surrounding context. They remain available for deliberate user inspection through Show rejected and idea history.
+
 Use recorded relationship rationale or provenance wording to explain that context. Ordinary search must not generate new AI interpretations on each query. Search ranking, connection confidence, and provenance are different things.
 
 ## Actions and empty results
@@ -56,4 +62,4 @@ If nothing matches, say so plainly and allow another query. Do not fabricate con
 
 ## Still to decide
 
-Final ranking and tie-breakers, precise connection eligibility, and whether an explicitly separate agentic search mode is useful. Agentic search is not a prerequisite for the basic experience.
+Final relevance ranking and tie-breakers, and any further connection-eligibility rules beyond the recorded-context and rejection boundaries above. An explicitly separate agentic search mode is not required for 1.0; Agentic export is a different, approved workflow.

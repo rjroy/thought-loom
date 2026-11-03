@@ -21,11 +21,11 @@ Exact scheduling, affected scope, retries, and cost bounds remain implementation
 
 ## What a pass does
 
-1. Read the new or changed material and preserve its original wording and provenance.
+1. Read newly retained, non-rejected material and preserve its original wording and provenance.
 2. Search the existing collection for candidate notes and ideas, using useful retrieval rather than relying only on what was preloaded into a prompt.
 3. Read candidate material and relevant context before asserting a connection. A search result alone is not evidence.
 4. Record a useful interpretation where warranted, clearly AI-authored.
-5. Record meaningful connections with an explanation and supporting references. Notice support, tension, contradiction, extension, or dependencies when the material warrants them.
+5. Record meaningful connections with an explanation and supporting references, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
 6. Record useful alternate terminology for later retrieval where appropriate. An alias is not a conceptual connection.
 
 Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
@@ -40,7 +40,7 @@ The conversational agent can make relevant knowledge changes during interaction.
 
 Show simple processing state where useful: pending, working, finished, or failed. Successful capture remains successful even if weaving fails. Retry must not silently duplicate the same changes.
 
-Preserve attribution, sources, and meaningful change history. The user can challenge an interpretation or connection without losing the original material. Do not overwrite user corrections or rejected claims through unattended work; the exact revision authority needs to be settled explicitly.
+Preserve attribution, sources, and evolution history. All thoughts, including AI interpretations, are immutable; further thinking creates new material rather than overwriting old material. Rejection and restoration belong only to the user. For the weaver, rejected notes and connections are effectively nonexistent: do not retrieve them, include them as context, or reason from them. An active descendant does not make a rejected ancestor available again. These rules also apply to the evolution agent and the read-only Agentic export agent.
 
 ## Future possibilities, not requirements yet
 

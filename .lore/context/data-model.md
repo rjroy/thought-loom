@@ -18,37 +18,61 @@ For product discussion, “note” is an umbrella term. Original source material
 ## Kinds of material
 
 - **Captured original:** what the user entered, with its date and provenance. This is a historical record, not text the AI may silently improve or replace.
-- **User contribution during development:** a question, challenge, correction, or new thought entered in a discussion. Retain the user's actual words and the context in which they were contributed.
+- **User contribution during development:** a question, challenge, or new thought entered in a discussion. Retain the user's actual words and the context in which they were contributed. Disagreement or correction is expressed as a new thought, not an edit to an existing one.
 - **AI interpretation:** an attributed reading of existing material. It is a hypothesis about meaning, not a replacement original or an assertion that the user agrees.
-- **Developing idea:** a retained formulation emerging from interpretation or dialogue. It may be AI-authored or user-authored; kind and authorship are separate facts. It can develop over time without erasing what came before.
+- **Developing idea:** a retained thought emerging from interpretation or dialogue. It may be AI-authored or user-authored; kind and authorship are separate facts. Further development creates new thoughts, not new versions of this one.
 
-A captured note can contain several ideas. Several notes can contribute to one developing idea. Not every capture needs a separate interpretation, and not every discussion message needs a new durable idea.
+A captured note can contain several ideas. Other notes can provide supporting context without becoming additional evolution parents. Not every capture needs a separate interpretation.
+
+## Immutable thoughts and evolution trees
+
+Every recorded thought is immutable, whether authored by the user or AI. There is no versioning, direct-edit action, or in-place correction. The user can capture a new idea or evolve an existing one. A contradiction of an earlier thought is another thought in its own right.
+
+Each non-root thought has exactly one evolution parent. A typical path is:
+
+```text
+Original idea → user contribution → recorded development → next user contribution
+```
+
+Any point can be selected as the starting idea for further exploration, creating a branch without rewriting the existing path. Multiple recorded developments can branch from a user contribution. The latest issued development is the default continuation point; the user can select a different one with a simple control.
+
+The agent's full conversational response is normally an addendum to its recorded development, not another step in the evolution chain or an attachment to the user contribution. How a shared response is associated when it produces several developments remains to be defined; the default continuation point does not decide that association. If the agent records no separate development, retain the full response attached to the user contribution and treat that response as the developed idea, preserving the chain. Every agent response is searchable, including addenda. See [Evolve](evolve-view.md).
 
 ## Information retained about a note
 
-Keep its identity, actual text, available title, authorship, relevant dates, and origin. For interpreted or developed material, retain the sources or contributions that informed it and meaningful revision history. A title labels the text; it does not replace it. Alternate names or acronyms can help retrieval but are not new notes or conceptual connections.
+Keep its identity, actual text, available title, authorship, creation date, and origin. Retain its evolution parent where applicable, supporting sources, and agent-response addenda. History is the tree of distinct thoughts and their provenance, not revisions of a single note. A title labels the text; it does not replace it. Alternate names or acronyms can help retrieval but are not new notes or conceptual connections.
 
 If a note has no title, its first five words provide the display label. Do not require a person to write a title before saving.
 
-Original user wording remains recoverable after a correction or later development. AI suggestions and user-confirmed corrections remain distinguishable. Rejection is not the same as deleting the historical record.
+Rejection changes availability, not the recorded wording or evolution ancestry. It is not deletion of the historical record.
+
+## Rejection and restoration
+
+Only the user may reject or restore material. Neither the weaver nor the evolution agent may do so. Any note, including the user's own, and any connection can be rejected and restored.
+
+- **Reject this idea:** reject only the selected thought. Descendants stay active; they may contradict or supersede the rejected thought.
+- **Reject idea branch:** reject the selected thought and its evolution descendants. Show the affected idea count and ask for confirmation before applying this dangerous action, for example, “This will reject 101 ideas. Are you sure?”
+- **Restore idea branch:** use the same evolution-tree walk from the selected point to restore that portion of the branch. The user can reject a large branch and later restore only a later subtree. Restoration is not limited to undoing an entire earlier action.
+
+Branch operations never follow weaver-discovered connections. The one-parent rule makes evolution a tree, not a graph of shared evolution descendants.
+
+Rejected material is hidden from ordinary views but remains inspectable through idea history and Search's **Show rejected** toggle. For every AI agent, rejected notes and connections are effectively nonexistent: exclude them from retrieval, context, and reasoning, even when the user is inspecting them. Active descendants of a rejected thought remain usable without supplying the rejected ancestor's content to the AI.
+
+Connections associated with restored ideas become available again only when their participating thoughts are active. Connections explicitly rejected separately stay rejected until separately restored. Restoring one thought must not expose another still-rejected thought to the AI through a connection.
 
 ## Connections
 
 Two different questions must remain separate:
 
-1. **Where did this come from?** Source and development links describe provenance: material interpreted, a contribution that prompted a formulation, or an earlier formulation that was revised.
-2. **Why might these thoughts matter together?** A conceptual connection describes a meaningful relationship, with its rationale and supporting material. It is a revisable hypothesis, not proof.
+1. **Where did this come from?** The evolution parent identifies the preceding thought in the chain. Additional source references explain supporting context without creating more evolution parents.
+2. **Why might these thoughts matter together?** A separately stored conceptual connection describes a meaningful relationship, with its rationale and supporting material. It is a hypothesis, not proof.
 
-Possible meanings include supporting, challenging, extending, depending on, or resembling another thought. These are examples, not a finalized exhaustive taxonomy. Direction matters when the meaning is directional; a supporting claim and the claim it supports are not interchangeable.
+The initial connection categories are **supports**, **contradicts**, **extends**, and **related**. Categories aid the UX; retain a plain-language explanation and supporting material as well. Direction matters when the meaning is directional; a supporting claim and the claim it supports are not interchangeable.
 
-A connection should identify the thoughts involved, who proposed it, why it was proposed, and what supports it. Preserve meaningful corrections or rejection of that connection. Similar wording, a search match, a retrieval alias, or visual proximity does not by itself establish a connection.
+A connection should identify the thoughts involved, who proposed it, why it was proposed, and what supports it. Preserve its rejection/restoration state. Similar wording, a search match, a retrieval alias, or visual proximity does not by itself establish a connection.
 
 ## Discussion is related to knowledge, not identical to it
 
-Retain the user/AI exchange and enough context to understand it. An AI conversational response is not automatically a saved interpretation or developing idea. The system must distinguish what the agent said from what it actually recorded or changed.
+Retain the user/AI exchange and enough context to understand it. Distinguish the full conversational response from the recorded development it accompanies. When no separate development is recorded, the full response is the fallback development, not lost conversation content.
 
-Conversation context and knowledge provenance serve different purposes. A conversation can use several relevant thoughts without requiring a single authoritative knowledge parent for every reply. This description does not require primary-development nominations, root ownership hierarchies, or a particular attachment protocol.
-
-## Still to decide
-
-Precise idea identity; when formulations become separate ideas; split/merge behavior; the final connection vocabulary; deletion and archival semantics; and authority over later AI revisions and user corrections. These need product decisions, not assumptions inferred from a mockup.
+Conversation context and knowledge provenance serve different purposes. A conversation can use several relevant thoughts as context while each new thought still has only one evolution parent. No merge or multi-parent evolution behavior is specified.

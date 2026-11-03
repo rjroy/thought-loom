@@ -1,35 +1,42 @@
 ---
-title: Export view — TBD
+title: Export / Use
 date: 2026-11-03
 status: draft
-tags: [thoughtloom, restart, product, tbd]
+tags: [thoughtloom, restart, product]
 ---
 
 # Export / Use
 
-**Status: needed, not designed.**
+Thoughtloom should help someone use their thinking outside the application. Both **Simple** and **Agentic** export are included in 1.0, and both produce Markdown.
 
-## Why it belongs
+## Simple export
 
-Thoughtloom should help someone do something with the thinking it develops. Useful ideas and unexpected connections must not be trapped inside the application or left useful only as another conversation to reread.
+The user chooses:
 
-Export is the bridge from exploration and development to writing, decisions, experiments, or other work outside Thoughtloom. This need belongs in the product even though its view and behavior remain undefined.
+- A starting idea, which becomes the root of this export.
+- A maximum number of thoughts to export.
+- Breadth-first or depth-first traversal.
 
-## Starting possibility, not a chosen workflow
+Walk the selected idea's evolution tree until the requested count is reached or there are no more eligible thoughts. Do not follow weaver-discovered connections.
 
-One idea previously raised was a thought collector: add selected user- or AI-authored material while exploring, then export the collection as downloadable Markdown. This is a hypothesis to discuss, not an approved feature specification or the only possible direction.
+Export the recorded thoughts, not their full agent-response addenda. When a full response was retained as the fallback development because no separate development was recorded, it is itself the thought's text and is included.
 
-## Questions for design
+Skip rejected thoughts without cutting off traversal: active descendants beyond a rejected thought can still be exported. Rejected thoughts do not consume the exported-thought count.
 
-- What is exported: selected notes, a connected chain, sources and rationale, conversation excerpts, a synthesized document, or some combination?
-- Does the user collect material while working or choose it at export time?
-- Is the output a faithful packet of recorded material, an edited narrative, or optional AI synthesis?
-- How are order, context, attribution, sources, exact versions, and uncertainty carried into the output?
-- Which formats and destinations are genuinely useful? Markdown is a candidate, not a settled exclusive format.
-- What preview or editing does the user need before taking the output away?
+## Agentic export
 
-## Boundaries to preserve
+The user provides a question or request and an effort level. The agent investigates relevant, non-rejected material and builds a Markdown report that gathers and connects existing thinking. The purpose is export, not new idea development.
 
-Distinguish original user text, AI interpretation, and any newly generated synthesis. Do not imply endorsement, invent continuity, or strip the provenance needed to understand an exported claim. Export should not silently rewrite or delete the stored material.
+Effort controls the extent of investigation and may also select a model variant. It is not primarily a request for more speculative analysis or new developments. Exact effort levels and any model mapping remain to be defined.
 
-No layout, collector model, automatic agent workflow, publishing integration, or export implementation is specified here. The first step is to discuss what the user wants to produce and why.
+Cite the source thoughts behind the report so the user can trace its claims back into Thoughtloom. Distinguish recorded material from the report's connective explanation; do not invent evidence or imply user endorsement of AI-authored claims.
+
+This agent is strictly read-only. It must not create or change stored thoughts or connections, reject or restore material, or otherwise develop the knowledge base. Rejected notes and connections are excluded from its retrieval, context, and reasoning, just as for the other agents.
+
+## Shared boundaries
+
+Preserve authorship, provenance, and uncertainty sufficiently to understand the exported material. Export does not rewrite or remove stored material. A collector, additional formats, or publishing integrations are not prerequisites for these two workflows.
+
+## Still to decide
+
+The exact export entry points and preview/download UX, plus the available Agentic effort levels. These do not reopen the agreed scope, Markdown format, tree-only Simple traversal, or read-only Agentic behavior.

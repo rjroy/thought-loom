@@ -9,11 +9,11 @@ tags: [thoughtloom, restart, product]
 
 ## Purpose
 
-Develop thinking through dialogue. The user can challenge an interpretation, propose an alternative, explore a connection, sharpen a distinction, or follow an unexpected idea. The value is the thinking retained afterward, not simply another chat transcript.
+Develop thinking through dialogue. The user can challenge an interpretation, propose an alternative, explore a connection, sharpen a distinction, or follow an unexpected idea. Development adds immutable thoughts to a branching evolution tree, not revisions of existing notes.
 
 ## First appearance
 
-Enter from a selected thought in [Idea](idea-view.md). Show enough of that thought and its attribution to make the starting context clear, with a way to open the full text and sources. Present a composer for the user's contribution.
+Enter from a selected thought in [Idea](idea-view.md), including an earlier point in its evolution tree. Show enough of that thought and its attribution to make the starting context clear, with a way to open the full text and sources. Present a composer for the user's contribution.
 
 This starts a new conversational workspace about the selected thought. Do not automatically resume an old opaque agent session or invent a greeting, response, or development merely because the view opened.
 
@@ -27,20 +27,30 @@ The agent receives the selected thought, relevant source/connection context, and
 
 ## Conversation and durable development
 
-Retain the user's contributions as source material. The agent can use bounded application operations to record interpretations, revised formulations, new developing ideas, or meaningful connections during the interaction. Such results should survive the conversation and be discoverable later.
+Retain each user contribution as an immutable thought whose evolution parent is the selected continuation point. The agent can use bounded application operations to record new interpretations, developing ideas, or meaningful connections during the interaction. A recorded development has the user contribution as its one evolution parent. Supporting sources do not become additional parents.
 
 Show what was actually recorded or changed, with attribution and access to the supporting material. Do not mistake an agent's statement that it saved something for proof that it did. The conversational explanation may be longer or different from a saved formulation.
 
-A normal exchange often produces one useful development, but it may produce none or several. Do not fabricate a note to fill a gap or force a routine internal-model choice on the user. No recorded development is different from a failed or still-uncertain run.
+An exchange can produce one or several recorded developments. The agent's conversational response is an addendum to its recorded development, rather than a separate evolution node or an attachment to the user message. The full response remains retained and searchable.
 
-**Unresolved for the restart:** how successive contributions are associated with earlier developments, especially when several exist. This description does not choose a single primary development, nomination tool, ownership hierarchy, or authoritative parent protocol. Conversation context and knowledge provenance must be considered separately before deciding whether any such mechanism is needed.
+If the agent provides a response but records no separate development, attach the full response to the user contribution and treat that response as the developed idea. This includes clarifying questions. Preserve the chain rather than losing useful information because it is not an ideal formulation. A failed or still-uncertain run is not the same as a completed response with no separately recorded development.
+
+## Continuing and branching
+
+Default the next user contribution to the latest issued recorded development. If several developments exist, allow the user to select another with a simple UX; do not make selection a cumbersome required step on every turn.
+
+The user can also select any earlier point as the starting idea for a new branch. Clearly distinguish the current continuation point from the action to explore from another point, using simple iconography rather than complicated workflow language. Do not silently retarget the current continuation point when the user merely inspects another thought.
+
+When Search matches an agent-response addendum, open its associated recorded development with the full response available there. Earlier exchanges remain available through the thoughts and their history; branching from a selected point is not automatic resumption of an opaque old agent session.
+
+When one response produces several developments, the exact addendum association and search destination remain to be defined. Do not infer them from the latest-development continuation default.
 
 ## Actions
 
 - Send a question, challenge, correction, or new thought.
 - Read the developing response and continue the discussion.
 - Open sources, recorded developments, or related thoughts.
-- Inspect and challenge what the AI recorded; keep user contributions distinct from AI conjectures.
+- Inspect and challenge what the AI recorded through further development; keep user contributions distinct from AI conjectures.
 - Leave for a selected thought's Idea view. Choosing Evolve there begins a new conversation about that thought rather than silently retargeting the current one.
 - Stop active work, check an uncertain result, or retry a clearly failed operation without silently duplicating saved input or execution.
 
@@ -54,4 +64,4 @@ Attachments are outside the scope of 1.0. The mockup's paperclip control represe
 
 ## Boundaries
 
-Original notes remain intact. The agent cannot silently rewrite user history or turn its suggestions into user-endorsed beliefs. User-visible response, durable knowledge changes, and execution status remain distinguishable. Detailed recovery mechanics and the authority to revise user-corrected material need explicit design, not assumptions hidden inside the UX implementation.
+All thoughts remain immutable. Neither agent may edit existing thoughts, reject material, or restore it. Rejected notes and connections are excluded from AI retrieval, context, and reasoning; an active descendant does not authorize use of a rejected ancestor. The agent cannot turn its suggestions into user-endorsed beliefs. User-visible response, durable knowledge additions, and execution status remain distinguishable. Detailed stop/failure/retry behavior still needs design; it must not silently duplicate input or developments.

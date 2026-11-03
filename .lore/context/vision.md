@@ -11,11 +11,11 @@ tags: [thoughtloom, restart, product]
 
 Thoughtloom is an experiment in agentic note management: can an AI help someone discover and develop thinking they would otherwise have missed?
 
-Capture rough thoughts without ceremony. Let a background weaver suggest interpretations and explainable connections. Search to rediscover material, follow useful connections, and develop ideas through dialogue. Eventually, take that thinking out of the system and use it elsewhere.
+Capture rough thoughts without ceremony. Let a background weaver suggest interpretations and explainable connections. Search to rediscover material, follow useful connections, and develop ideas through dialogue. Take that thinking out of the system through Simple or Agentic Markdown export; both belong in 1.0.
 
 The notes are what matter, not the machinery connecting them. The interface should invite exploration rather than recreate a familiar filing cabinet with an AI sidebar. Productive unfamiliarity is welcome; confusing controls and unnecessary explanation are not.
 
-Preserve the user's original words. Identify AI contributions. Make interpretations and connections inspectable and challengeable. The system helps develop knowledge; it does not decide what the user believes.
+Keep every recorded thought immutable, whether authored by the user or AI. Development forms branching trees of distinct thoughts, not versions of notes. Identify AI contributions. Make interpretations and connections inspectable and challengeable. Users alone may reject and restore material; rejected notes and connections are excluded from AI use. The system helps develop knowledge; it does not decide what the user believes.
 
 Success is a useful, non-obvious connection that survives examination, leads to further thinking, and can be found and used again. Drawing a graph, collecting notes, or producing more AI text is not success by itself.
 

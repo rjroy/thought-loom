@@ -17,9 +17,9 @@ The selected thought is the focal content: prominent title, actual text, and cle
 
 Below or alongside it, show a compact amount of useful recorded context: a related interpretation, implication, tension, question, or connected thought. Explain connections in ordinary language using recorded material. Do not generate fresh significance merely because the page was opened.
 
-The underlying user source must not be confused with the AI's reading of it. A historical version remains that exact version; an available newer formulation can be offered explicitly rather than silently substituted.
+The underlying user source must not be confused with the AI's reading of it. Each thought is immutable and remains that exact thought. Later developments are separate thoughts in an evolution tree, not newer versions silently substituted for the selected thought.
 
-Sources, dates, revision history, and the explanation/evidence behind a connection are available on demand. They should not dominate the first view. Do not require a graph, node taxonomy, ancestor chain, or relationship-management vocabulary to understand the content.
+Sources, creation dates, evolution history, agent-response addenda, and the explanation/evidence behind a connection are available on demand. History also allows inspection of rejected material. These details should not dominate the first view. Do not require a graph, node taxonomy, ancestor chain, or relationship-management vocabulary to understand the content. Mockup references to versions or revision counts must be interpreted as distinct earlier thoughts and evolution history, not note versioning.
 
 ## Actions
 
@@ -28,9 +28,10 @@ Sources, dates, revision history, and the explanation/evidence behind a connecti
 - Inspect original sources, attribution, development history, or connection rationale.
 - Choose **Evolve this idea** to open a new [Evolve](evolve-view.md) conversation about this selected thought.
 - Return to Search or the previous thought without losing the exploration path.
-- Access contextual correction or rejection of an AI interpretation/connection, and inspect earlier material. These are secondary actions rather than a mandatory approval inbox.
+- Reject or restore any note, including the user's own, or any connection; inspect earlier material. These are user-only secondary actions rather than a mandatory approval inbox.
+- Reject or restore an evolution branch from the selected point, following only evolution descendants. Branch rejection must show the affected idea count and request confirmation.
 
-The user must be able to challenge an AI claim. The precise direct-edit, correction, rejection, and restoration controls need definition for a new implementation; do not infer unrestricted overwrite or permanent deletion from those intentions.
+There is no edit or correction action on a saved thought. To express a different thought, capture a new idea or choose Evolve. Rejection is not deletion: **Reject this idea** leaves descendants active, while **Reject idea branch** includes them. Restoration can begin at a later point to recover only that subtree. A separately rejected connection stays rejected when its associated ideas are restored. See the [data model](data-model.md) for the shared rules.
 
 ## Reading is not agreement
 

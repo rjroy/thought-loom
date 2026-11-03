@@ -12,6 +12,7 @@ tags: [thoughtloom, restart, architecture, workflow]
 - **Website:** Next.js with React.
 - **Daemon:** Hono.
 - **Runtime and tooling:** Bun.
+- **Storage:** a SQL database. The engine and full schema remain undecided. Each non-root thought has one evolution parent; weaver-discovered connections are stored in a separate linking table, not as additional evolution parents.
 
 ## Client and daemon boundary
 
