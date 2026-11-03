@@ -10,6 +10,10 @@ node_modules
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+**/.next/
+/apps/web/next-env.d.ts
 
 # production
 /build
@@ -44,5 +48,15 @@ yarn-error.log*
 *.tsbuildinfo
 
 # local
+/.data/
 *.local.json
 *.local.md
+*.local.sh
+.env
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+/.lore/local/

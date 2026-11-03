@@ -1,0 +1,47 @@
+---
+title: Background weaver agent
+date: 2026-11-03
+status: draft
+tags: [thoughtloom, restart, product]
+---
+
+# The weaver
+
+## Purpose
+
+The weaver is a non-interactive background agent that examines captured and developed material, records possible interpretations, and discovers meaningful connections. The user does not need to sit in a chat or answer questions for a capture to be processed.
+
+Its task is not to organize every note into a predetermined taxonomy. It should help reveal relationships that ordinary note storage or textual search would miss.
+
+## When it works
+
+The baseline loop is capture followed by asynchronous weaving, and targeted follow-up weaving after meaningful discussion changes. The application schedules and deduplicates work and tracks its state; the agent does the interpretive work.
+
+Exact scheduling, affected scope, retries, and cost bounds remain implementation decisions to design explicitly. A permanently running model, periodic full-corpus sweep, or scheduled aging process is not assumed.
+
+## What a pass does
+
+1. Read the new or changed material and preserve its original wording and provenance.
+2. Search the existing collection for candidate notes and ideas, using useful retrieval rather than relying only on what was preloaded into a prompt.
+3. Read candidate material and relevant context before asserting a connection. A search result alone is not evidence.
+4. Record a useful interpretation where warranted, clearly AI-authored.
+5. Record meaningful connections with an explanation and supporting references. Notice support, tension, contradiction, extension, or dependencies when the material warrants them.
+6. Record useful alternate terminology for later retrieval where appropriate. An alias is not a conceptual connection.
+
+Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
+
+The weaver may record AI hypotheses without requiring an approval click for each one. That does not make them accepted user beliefs. They must remain inspectable and challengeable through [Idea](idea-view.md) and [Evolve](evolve-view.md).
+
+## After dialogue
+
+The conversational agent can make relevant knowledge changes during interaction. Background follow-up can then examine wider implications: connections to independent notes, tensions with earlier ideas, or another framing worth considering. It should not merely duplicate the immediate response or silently change the conversation's focus.
+
+## Trust and visibility
+
+Show simple processing state where useful: pending, working, finished, or failed. Successful capture remains successful even if weaving fails. Retry must not silently duplicate the same changes.
+
+Preserve attribution, sources, and meaningful change history. The user can challenge an interpretation or connection without losing the original material. Do not overwrite user corrections or rejected claims through unattended work; the exact revision authority needs to be settled explicitly.
+
+## Future possibilities, not requirements yet
+
+Periodic revisiting could reveal neglected questions, emerging themes, or several old notes describing the same problem. Aging, autonomous gardening, resurfacing schedules, and synthesized cross-note ideas need further discussion. Inactivity or age alone must not weaken an idea, imply low value, or justify deletion.
