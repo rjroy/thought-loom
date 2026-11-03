@@ -10,6 +10,7 @@ From the project root:
 
 ```sh
 bun install --frozen-lockfile
+bun run build:spellfix
 bun test
 bun run typecheck
 ```
@@ -23,12 +24,16 @@ bun --no-env-file run typecheck
 
 Tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service.
 
+Search integration tests also need the [native extension build prerequisites](server-startup.md#native-spelling-extension). Run `bun run build:spellfix` before tests that use the default project artifact, including `search-contract` and `search-scopes`; that ignored artifact is absent on a fresh checkout and is not built automatically by the test command. Separate native pipeline tests compile the pinned vendored source into owned temporary outputs, verify its hash, load it through Bun SQLite, and check tamper and missing-artifact failures. Those temporary builds do not populate the default artifact. No system extension is assumed.
+
 ## Test boundaries
 
 | Boundary | What the tests establish | Files |
 | --- | --- | --- |
 | Domain | Validation, immutable content, single-parent traversal, semantic creation, title authority, shared-response visibility, run identities and recovery using controlled inputs and repository/dispatcher doubles. | `domain`, `creation`, `rejection-domain`, `titles-domain`, `shared-responses-domain`, `runs-domain` |
 | SQLite | Foreign keys, immutable-record triggers, source/response seals, atomic admission and receipts, rejection persistence, migrations and reopen behavior. | `sqlite`, `rejection-sqlite`, `titles-sqlite`, `shared-responses-sqlite`, `runs-sqlite` |
+| Indexed search | FTS5 backfill and transactional title/reply maintenance, scoped retrieval and vocabulary, interrupted replies, rejection/restoration, unchanged-cache reuse and native extension build/load failures. | `search-index`, `search-scopes`, `search-efficiency`, `search-native` |
+| Simple export | Evolution-only breadth/depth traversal, count semantics, traversal through rejected intermediates, addendum exclusion, Markdown attribution, read-only behavior and user-only HTTP authorization. | `simple-export` |
 | Hono request API | Authentication, role restrictions, strict request bodies, response/status contracts, scoped data and sanitized logging without a network listener. | `api` |
 | Native daemon | Real HTTP plus SQLite, startup validation, persistence across restart, concurrent captures, port conflicts, bounded failure cases and process signals. | `daemon` |
 | Scripts | Request validation and diagnostics with injected fetch, plus a real isolated walkthrough and cleanup on success/failure. | `scripts` |
@@ -70,9 +75,12 @@ Actual weaver title generation is not covered because the weaver is not implemen
 
 Run tests use a controlled `NativeDispatcher`, not the real OpenCode client. They establish domain/storage recovery and fencing, not worker scheduling or native service compatibility. Claim generation is not an expiry-based lease or a model effort quota.
 
+Search tests exercise actual FTS5 and spellfix1 using test-owned records. Retained interrupted fallback replies remain searchable through their associated input without becoming completed developments. Efficiency checks observe graph-snapshot and vocabulary-rebuild boundaries rather than asserting machine-dependent timing. `search-contract` covers filter combinations and option counts, creation-date sorting, response metadata, modest query correction, and strict authenticated HTTP search. These checks do not establish browser behavior or final relevance tuning.
+
 ## Isolated walkthrough
 
 ```sh
+bun run build:spellfix
 bun run demo
 ```
 
@@ -85,6 +93,8 @@ It demonstrates:
 3. Single-note rejection with an active descendant still usable by AI, with rejected provenance redacted.
 4. Branch preview and confirmed rejection.
 5. Restoration of a later subtree without restoring the rejected root or independently rejected connection.
+6. Authorship/kind-filtered search with option counts, spellfix typo retrieval, and rejected-material visibility.
+7. Simple Markdown export, with before/after thought and connection history checks confirming read-only behavior.
 
 It checks returned records as well as statuses, reports milestones, and removes its listener and temporary data on success or failure. It never attaches to the daemon configured in your shell. Exit status `0` means the scenario succeeded; nonzero means a scenario, request, or cleanup failure.
 
@@ -99,7 +109,7 @@ bun run api --role user POST /thoughts '{"text":"An idea to explore"}'
 
 Unlike `demo`, this helper uses `THOUGHTLOOM_DAEMON_URL` and your selected role's credential. **It can modify persistent data. Use a disposable database for experiments.** It neither starts nor resets that daemon.
 
-The helper prints the HTTP status and readable JSON. HTTP, transport, timeout and input failures return nonzero; credentials are not printed, redirects are not followed, and requests/body reads have a five-second timeout. See [manual request examples](daemon-api.md#manual-requests) for title editing, evolution, inspection and rejection.
+The helper prints the HTTP status and readable JSON, or the Markdown body for a successful `text/markdown` response. Configured tokens are redacted from output. Invalid JSON responses still fail when JSON is expected. HTTP, transport, timeout and input failures return nonzero; redirects are not followed, and requests/body reads have a five-second timeout. See [manual request examples](daemon-api.md#manual-requests) for title editing, evolution, inspection and rejection, and the search/export sections for those commands.
 
 ## What a green run does not prove
 

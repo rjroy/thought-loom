@@ -23,6 +23,15 @@ export interface RejectionTransaction {
 export interface RejectionRepository {
   snapshot(): RejectionSnapshot;
   transaction<T>(action: (tx: RejectionTransaction) => T): T;
+  exportTree?(rootId: string): readonly ExportTreeNode[];
+}
+
+/** Internal ancestry includes rejected nodes only as traversal links, never as content. */
+export interface ExportTreeNode {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly createdAt: string;
+  readonly thought: Thought | null;
 }
 
 /** Count is the number of currently active thoughts that would change state. */
@@ -87,6 +96,43 @@ function sameIds(actual: unknown, expected: readonly string[]): boolean {
 /** Consumer boundary: no unscoped reads. Raw repository access is internal only. */
 export class RejectionService {
   constructor(private readonly repository: RejectionRepository) {}
+
+  /** User-only active output; rejected ancestry is traversed but never returned. */
+  exportThoughts(actor: Actor, rootId: string, count: number, traversal: "breadth" | "depth"): readonly Thought[] | null {
+    requireUser(actor);
+    let nodes: readonly ExportTreeNode[];
+    if (this.repository.exportTree) nodes = this.repository.exportTree(rootId);
+    else {
+      const snapshot = this.repository.snapshot();
+      const rejected = new Set(snapshot.rejectedThoughtIds);
+      nodes = snapshot.thoughts.map(thought => ({ id: thought.id, parentId: thought.parentId, createdAt: thought.createdAt,
+        thought: rejected.has(thought.id) ? null : { ...thought, sourceIds: thought.sourceIds.filter(id => !rejected.has(id)) } }));
+    }
+    const root = nodes.find(node => node.id === rootId);
+    if (!root?.thought) return null;
+    const children = new Map<string, ExportTreeNode[]>();
+    for (const node of nodes) if (node.parentId !== null) {
+      const siblings = children.get(node.parentId) ?? [];
+      siblings.push(node);
+      children.set(node.parentId, siblings);
+    }
+    const compare = (a: ExportTreeNode, b: ExportTreeNode) => a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    for (const siblings of children.values()) siblings.sort(compare);
+    const pending = [root];
+    let cursor = 0;
+    const visited = new Set<string>();
+    const result: Thought[] = [];
+    while ((traversal === "breadth" ? cursor < pending.length : pending.length > 0) && result.length < count) {
+      const node = traversal === "breadth" ? pending[cursor++] : pending.pop();
+      if (!node || visited.has(node.id)) continue;
+      visited.add(node.id);
+      if (node.thought) result.push(node.thought);
+      const next = children.get(node.id) ?? [];
+      if (traversal === "breadth") for (const child of next) pending.push(child);
+      else for (let i = next.length - 1; i >= 0; i--) { const child = next[i]; if (child) pending.push(child); }
+    }
+    return result;
+  }
 
   previewBranch(actor: Actor, rootId: string): BranchPreview {
     requireUser(actor);

@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Server startup](server-startup.md) · [Database schema](database-schema.md) · [Testing](testing.md)
 
-This is the current loopback Hono API. Route definitions are in [`src/daemon/app.ts`](../src/daemon/app.ts); business creation and title rules live in [`creation.ts`](../src/domain/creation.ts) and [`title.ts`](../src/domain/title.ts). There is no version prefix, search endpoint, export endpoint, or real agent invocation yet. Durable run storage is internal groundwork; there are no public run/admission/Stop/recovery endpoints yet.
+This is the current loopback Hono API. Route definitions are in [`src/daemon/app.ts`](../src/daemon/app.ts); business creation and title rules live in [`creation.ts`](../src/domain/creation.ts) and [`title.ts`](../src/domain/title.ts). There is no version prefix or real agent invocation yet. Durable run storage is internal groundwork; there are no public run/admission/Stop/recovery endpoints yet.
 
 ## Authentication
 
@@ -20,9 +20,9 @@ These are server-side service credentials, not user accounts. The future browser
 
 - Commands with JSON input require an object. Unknown body properties are rejected rather than silently accepted.
 - Text and reference fields must satisfy domain validation. Most creation fields are assigned by commands, not supplied by clients.
-- Read routes accept only the optional `scope` query parameter, once. The command routes below reject query parameters.
+- Record read routes accept only the optional `scope` query parameter, once. Search has its own parameters below. The command routes below reject query parameters.
 - Successful creates return `201` with the created record; reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
-- Collections are plain arrays. Pagination and search parameters are not implemented.
+- Record collections are plain arrays. Search returns results and filter counts. Pagination is not implemented.
 
 ### Read scopes
 
@@ -59,6 +59,59 @@ All accept the read scopes above and return `200` JSON:
 | GET | `/connections` | Connection array. |
 | GET | `/connections/:id` | One visible connection; otherwise `404`. |
 | GET | `/responses/:id` | One visible retained response; otherwise `404`. |
+
+## Search: `GET /search`
+
+Both authenticated roles can search; AI callers may use only normal scope. Unknown parameters and repeated singleton parameters are rejected.
+
+| Parameter | Values and default |
+| --- | --- |
+| `q` | Required nonempty search text. Words combine with AND and match prefixes. |
+| `scope` | One read scope above; default `normal`. |
+| `author` | Repeatable `user` or `ai`; omitted means either. |
+| `kind` | Repeatable `captured-original`, `user-contribution`, `ai-interpretation`, `developing-idea`; omitted means any. |
+| `from`, `to` | Optional inclusive creation-time bounds. Accept `YYYY-MM-DD` or UTC timestamps ending in `Z`, with seconds and optional 1–3 fractional digits. Date-only bounds include the whole UTC day. `from` must not exceed `to`. |
+| `sort` | `relevance` (default), `newest`, `oldest`. Chronological sorts use creation time. |
+
+Selections within one filter group combine with OR; groups combine with AND. Date presets are client choices expressed as these date bounds, not separate daemon settings.
+
+The response is `{results, counts: {authors, kinds}}`. Each result has:
+
+- `kind`: match identity, `thought` or `response`; `id`: that record's ID.
+- `thoughtId`: eligible destination for opening the result.
+- `text`: full original matching record text; `snippet`: its first 160 characters, not a generated summary.
+- `title`: destination thought's current title or first-five-word fallback.
+- `author`: matching record's author. Response hits are AI-authored even when their destination is a user contribution.
+- `materialKind`, `createdAt`: destination thought's classification and creation time.
+
+Thought and response matches are distinct results. A shared response opens its latest eligible association; an interrupted fallback opens its associated input without becoming a completed development. Response visibility follows the read-scope rules above.
+
+Author counts apply the query, dates and kind filter, but omit the selected author filter. Kind counts similarly omit the selected kind filter. Both maps include zero-valued options. Counts count matching records, not unique destination thoughts. There is no count for Show rejected: user `scope=show-rejected` adds rejected material alongside active results, while normal search excludes it server-side.
+
+FTS5 retrieves words and prefixes. If the original query has no scoped hits, search can retry with modest spellfix1 corrections drawn only from scope-visible vocabulary. This does not invoke an agent, expand acronyms or modify saved text. A query requiring spelling support fails with sanitized `500` if the [native extension](server-startup.md#native-spelling-extension) is unavailable; it does not silently substitute another search engine.
+
+```sh
+bun run api --role user GET '/search?q=thinking&author=user&sort=newest'
+bun run api --role user GET '/search?q=thinking&scope=show-rejected'
+```
+
+## Simple export: `POST /exports/simple`
+
+**Role:** user. **Body:** exactly `rootId`, `count`, and `traversal`. Query parameters are not accepted.
+
+```json
+{"rootId":"<thought-id>","count":20,"traversal":"breadth"}
+```
+
+`count` is a positive integer. `traversal` is `breadth` or `depth`. The root must exist and be normally visible; a missing or rejected root returns `404`. AI access returns `403`; invalid requests return `400`.
+
+Success returns `200` with `Content-Type: text/markdown`. The root counts toward the limit. Only evolution descendants are visited, never discovered connections. Rejected descendants are omitted without consuming the count, but traversal continues through them to active descendants. Full response addenda are excluded; a retained fallback recorded as thought text is included like any other thought.
+
+Each Markdown section includes the current title or first-five-word fallback, thought ID, immutable author, material kind, creation time, origin, eligible source IDs, and original text. Rejected source IDs are omitted. Export reads knowledge without creating or changing thoughts, titles, connections or rejection state. Agentic report export is not implemented yet.
+
+```sh
+bun run api --role user POST /exports/simple '{"rootId":"<thought-id>","count":20,"traversal":"depth"}'
+```
 
 ## Creation commands
 

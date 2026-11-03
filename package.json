@@ -7,7 +7,8 @@
     "typecheck": "tsc --noEmit",
     "daemon": "bun run src/daemon/main.ts",
     "api": "bun run scripts/api.ts",
-    "demo": "bun run scripts/demo.ts"
+    "demo": "bun run scripts/demo.ts",
+    "build:spellfix": "bash scripts/build-spellfix.sh"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",

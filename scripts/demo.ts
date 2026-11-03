@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { bounded, requestJson } from "./api";
+import { bounded, requestContent } from "./api";
 import type { HttpFetch } from "./api";
 
 export interface DemoDependencies {
@@ -30,13 +30,13 @@ export async function runDemo(deps: DemoDependencies): Promise<number> {
     const credentials = { user: randomBytes(32).toString("hex"), ai: randomBytes(32).toString("hex") };
     daemon = await deps.start({ dbPath: join(directory, "demo.sqlite"), port: 0, credentials }, () => {});
     const base = new URL(daemon.url);
-    const request = async (role: "user" | "ai", method: string, path: string, expected: number, body?: unknown): Promise<unknown> => {
+    const request = async (role: "user" | "ai", method: string, path: string, expected: number, body?: unknown, format: "json" | "markdown" = "json"): Promise<unknown> => {
       const headers: Record<string, string> = { authorization: `Bearer ${credentials[role]}` };
       if (body !== undefined) headers["content-type"] = "application/json";
-      const response = await requestJson(deps.fetch, new URL(path, base), {
+      const response = await requestContent(deps.fetch, new URL(path, base), {
         method, headers, body: body === undefined ? undefined : JSON.stringify(body),
       }, deps.timeoutMs);
-      if (response.status !== expected) throw new Error("Unexpected HTTP status");
+      if (response.status !== expected || response.format !== format) throw new Error("Unexpected HTTP response");
       return response.value;
     };
     const create = async (role: "user" | "ai", parentId: string | null, text: string, sourceIds?: string[]): Promise<string> => {
@@ -63,9 +63,33 @@ export async function runDemo(deps: DemoDependencies): Promise<number> {
     const contributionPath = `/thoughts/${encodeURIComponent(contribution)}`;
     const developmentPath = `/thoughts/${encodeURIComponent(development)}`;
     deps.stdout("Separate connection created.");
+    const filtered = object(await request("user", "GET", "/search?q=simulated&author=ai&kind=developing-idea", 200));
+    const filteredCounts = object(filtered.counts);
+    const authorCounts = object(filteredCounts.authors);
+    const kindCounts = object(filteredCounts.kinds);
+    if (!Array.isArray(filtered.results) || !filtered.results.some(item => {
+      const hit = object(item);
+      return hit.id === development && hit.kind === "thought" && hit.author === "ai" && hit.materialKind === "developing-idea";
+    }) || typeof authorCounts.ai !== "number" || authorCounts.ai < 1 || typeof kindCounts["developing-idea"] !== "number" || kindCounts["developing-idea"] < 1) throw new Error("Filtered search failed");
+    deps.stdout("Filtered search returned the simulated AI development with counts.");
+    const typo = object(await request("user", "GET", "/search?q=simuluted", 200));
+    if (!Array.isArray(typo.results) || !typo.results.some(item => object(item).id === development)) throw new Error("Typo search failed");
+    deps.stdout("Typo search found the simulated development.");
+    const beforeThoughts = await request("user", "GET", "/thoughts?scope=history", 200);
+    const beforeConnections = await request("user", "GET", "/connections?scope=history", 200);
+    const markdown = await request("user", "POST", "/exports/simple", 200, { rootId: original, count: 5, traversal: "breadth" }, "markdown");
+    if (typeof markdown !== "string" || !markdown.includes(original) || !markdown.includes("A captured original idea") || !markdown.includes(development)) throw new Error("Markdown export failed");
+    const afterThoughts = await request("user", "GET", "/thoughts?scope=history", 200);
+    const afterConnections = await request("user", "GET", "/connections?scope=history", 200);
+    if (JSON.stringify(beforeThoughts) !== JSON.stringify(afterThoughts) || JSON.stringify(beforeConnections) !== JSON.stringify(afterConnections)) throw new Error("Export changed knowledge");
+    deps.stdout("Markdown export retained the tree without changing thoughts or connections.");
     await request("user", "POST", `/connections/${linkId}/reject`, 204);
     await request("user", "POST", `${rootPath}/reject`, 204);
     await request("ai", "GET", rootPath, 404);
+    const normalSearch = object(await request("ai", "GET", "/search?q=captured", 200));
+    const inspectedSearch = object(await request("user", "GET", "/search?q=captured&scope=history", 200));
+    if (!Array.isArray(normalSearch.results) || normalSearch.results.some(item => object(item).id === original) ||
+        !Array.isArray(inspectedSearch.results) || !inspectedSearch.results.some(item => object(item).id === original)) throw new Error("Search scope failed");
     const child = object(await request("ai", "GET", contributionPath, 200));
     if (child.id !== contribution || child.parentId !== null || !Array.isArray(child.sourceIds) || child.sourceIds.includes(original)) throw new Error("Child redaction failed");
     deps.stdout("Single reject hides the original; its active child remains usable with redacted provenance.");

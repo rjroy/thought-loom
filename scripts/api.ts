@@ -22,20 +22,28 @@ export async function bounded<T>(operation: Promise<T>, timeoutMs: number, abort
   } finally { if (timer !== undefined) clearTimeout(timer); }
 }
 
-export async function requestJson(fetcher: HttpFetch, url: URL, init: RequestInit, timeoutMs: number): Promise<{ status: number; value: unknown }> {
+export async function requestContent(fetcher: HttpFetch, url: URL, init: RequestInit, timeoutMs: number): Promise<{ status: number; value: unknown; format: "json" | "markdown" }> {
   const controller = new AbortController();
   try {
     return await bounded((async () => {
       const response = await fetcher(url, { ...init, redirect: "error", signal: controller.signal });
       const text = await response.text();
+      const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (response.ok && mediaType === "text/markdown") return { status: response.status, value: text, format: "markdown" as const };
       let value: unknown = null;
       if (text) {
         try { value = JSON.parse(text); }
         catch { throw new InvalidJsonResponse(response.status); }
       }
-      return { status: response.status, value };
+      return { status: response.status, value, format: "json" as const };
     })(), timeoutMs, () => controller.abort());
   } finally { controller.abort(); }
+}
+
+export async function requestJson(fetcher: HttpFetch, url: URL, init: RequestInit, timeoutMs: number): Promise<{ status: number; value: unknown }> {
+  const response = await requestContent(fetcher, url, init, timeoutMs);
+  if (response.format !== "json") throw new InvalidJsonResponse(response.status);
+  return response;
 }
 
 /** CLI shape: --role user|ai METHOD /path[?query] [JSON]. Returns a process exit code. */
@@ -60,8 +68,8 @@ export async function runApi(args: readonly string[], env: Readonly<Record<strin
   const headers: Record<string, string> = { authorization: `Bearer ${token}` };
   if (json !== undefined) headers["content-type"] = "application/json";
   try {
-    const result = await requestJson(deps.fetch, url, { method: args[2], headers, body: json }, deps.timeoutMs);
-    const content = result.value === null ? "" : `\n${JSON.stringify(result.value, null, 2)}`;
+    const result = await requestContent(deps.fetch, url, { method: args[2], headers, body: json }, deps.timeoutMs);
+    const content = result.format === "markdown" ? `\n${result.value}` : result.value === null ? "" : `\n${JSON.stringify(result.value, null, 2)}`;
     // A server response may echo a credential; never print configured secrets.
     let output = `${result.status}${content}`;
     for (const secret of [env.THOUGHTLOOM_USER_TOKEN, env.THOUGHTLOOM_AI_TOKEN]) {

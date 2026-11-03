@@ -14,6 +14,20 @@ bun install --frozen-lockfile
 
 Use the committed lockfile. SQLite support comes from Bun's built-in `bun:sqlite`; a separate database server is not required.
 
+### Native spelling extension
+
+The internal spelling-suggestion service uses SQLite's public-domain spellfix1 extension. Build it locally with:
+
+```sh
+bun run build:spellfix
+```
+
+The build verifies the vendored source hash, then invokes `${CC:-cc}` with `-O2 -fPIC -shared`. It requires Bash, `sha256sum`, a C compiler and compatible SQLite extension headers (`sqlite3ext.h` and `sqlite3.h`). The current build is verified on Linux x86_64; other platforms require their own compatibility validation. It does not install a system extension or link a second SQLite runtime.
+
+The generated `build/sqlite/spellfix.so` is ignored by Git. Rebuild it for the target environment. Source is pinned to SQLite revision `6932c59ee5c280599dfae9e7b431698a7cab9687`; the build script records its URL and SHA-256.
+
+Loading is lazy when spelling support is requested, not part of daemon readiness or exact/prefix FTS5 retrieval. Search can request it when the original query has no scoped hits. A missing or incompatible artifact fails internally with: `Unable to load spellfix1; run bun run build:spellfix and verify compatible SQLite headers and runtime`. HTTP callers receive a sanitized `500`. There is no alternate fuzzy-search fallback. Build the extension before testing typo-tolerant [public search](daemon-api.md#search-get-search).
+
 ## Configure
 
 | Variable | Required | Meaning |

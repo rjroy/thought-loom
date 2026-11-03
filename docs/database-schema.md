@@ -198,6 +198,23 @@ There are no immutable-row triggers here because drafts and finalization bookkee
 
 Stop retains confirmed developments and can persist an existing draft as an interrupted response using durable associations. It does not invent an association if none can be derived safely. Final response persistence and local completion commit together. Observed native completion instead produces a reconciliation handoff with action `finalize`; it does not claim the local response is already committed. Recovery returns `{run, claim, action}` using `finalize`, `resume`, or `observe`, without replacing the stored external identities.
 
+## Search indexes and vocabulary cache
+
+Core migration creates these derived FTS5 virtual tables:
+
+| Table | Columns |
+| --- | --- |
+| `thought_search_fts` | `thought_id UNINDEXED`, `text`, `title` |
+| `response_search_fts` | `response_id UNINDEXED`, `text` |
+
+Title metadata insert/update/delete triggers maintain thought index entries. Every supported thought creation includes its title metadata row, even when untitled. A response-insert trigger indexes retained reply text. Migration rebuilds both indexes from canonical records on each open; existing thoughts and replies are backfilled without changing their content.
+
+Indexes include rejected records. Scoped retrieval applies rejection rules in SQL before returning text or selecting a reply's latest eligible association. AI access excludes an entire shared reply if any associated thought is rejected. Retained interrupted fallback replies remain searchable through their eligible associated input; this does not promote unfinished output to a completed development.
+
+`search_revision(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL)` contains one row, initially `(1,0)`. Triggers increment it transactionally for title metadata insert/update/delete, response insert, response-association insert/update/delete, and thought rejection/restoration. Thought text is immutable; connections are not part of this search corpus.
+
+Suggestion vocabularies use connection-local temporary FTS5 and spellfix1 tables, separated into AI, normal-user and user-inspection scopes. An unchanged revision reuses the vocabulary. A changed revision rebuilds that scope's vocabulary from eligible text and titles in a consistent transaction, including changes committed through another connection. These temporary tables are not durable knowledge or public API tables.
+
 ## Constraints and access boundaries
 
 Migration enables `PRAGMA foreign_keys = ON` and verifies it, and also enables `PRAGMA recursive_triggers = ON` for the connection. In addition to indexes created for primary-key and unique constraints, the run schema defines the unique `run_receipt_result` index.
@@ -223,4 +240,4 @@ Subsequent opens do not recopy cleared titles or response associations. Existing
 
 Core migration also initializes run storage; callers do not need a separate run-repository initialization step. For an older run schema, missing input/native-state fields are added without guessing an Evolve input. An unmapped legacy Evolve run cannot safely resume. When issued membership is first introduced, existing receipt rows are backfilled in their persisted insertion order, not sorted by identity or timestamp. Repository migration delegates to the same authoritative core path.
 
-Back up valuable data before upgrading and stop the daemon before replacing a disposable database. No FTS5/search tables or automatic weaver execution are part of this schema yet.
+Back up valuable data before upgrading and stop the daemon before replacing a disposable database. Automatic weaver execution is not part of this schema yet.

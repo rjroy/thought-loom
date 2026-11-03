@@ -1,0 +1,70 @@
+import { ForbiddenActorError, type ReadScope } from "./rejection";
+import { nonEmpty, ValidationError } from "./validation";
+import type { Author, MaterialKind } from "./thought";
+
+/** A response hit points to its latest eligible associated thought. */
+export interface SearchHit {
+  readonly kind: "thought" | "response";
+  readonly id: string;
+  readonly thoughtId: string;
+  readonly text: string;
+}
+export interface SearchRepository {
+  search(scope: ReadScope, query: string): readonly SearchHit[];
+  suggest(scope: ReadScope, term: string): readonly string[];
+  query(scope: ReadScope, query: string, options: SearchOptions): SearchPage;
+}
+export interface SearchOptions {
+  readonly authors?: readonly Author[];
+  readonly kinds?: readonly MaterialKind[];
+  readonly from?: string;
+  readonly to?: string;
+  readonly sort?: "relevance" | "newest" | "oldest";
+}
+export interface SearchResult extends SearchHit {
+  readonly title: string;
+  readonly author: Author;
+  readonly materialKind: MaterialKind;
+  readonly createdAt: string;
+  readonly snippet: string;
+}
+export interface SearchPage {
+  readonly results: readonly SearchResult[];
+  readonly counts: { readonly authors: Readonly<Record<Author, number>>; readonly kinds: Readonly<Record<MaterialKind, number>> };
+}
+
+/** Retrieval and vocabulary must be scoped before publication. */
+export class SearchService {
+  constructor(private readonly repository: SearchRepository) {}
+  query(scope: ReadScope, query: string, options: SearchOptions = {}): SearchPage {
+    this.validate(scope);
+    nonEmpty(query, "query");
+    if (options.authors && (!Array.isArray(options.authors) || options.authors.some(value => value !== "user" && value !== "ai"))) throw new ValidationError("Invalid author");
+    if (options.kinds && (!Array.isArray(options.kinds) || options.kinds.some(value => !["captured-original", "user-contribution", "ai-interpretation", "developing-idea"].includes(value)))) throw new ValidationError("Invalid kind");
+    if (options.sort !== undefined && !["relevance", "newest", "oldest"].includes(options.sort)) throw new ValidationError("Invalid sort");
+    const from = options.from === undefined ? undefined : searchDate(options.from, false);
+    const to = options.to === undefined ? undefined : searchDate(options.to, true);
+    if (from && to && from > to) throw new ValidationError("Invalid date range");
+    return this.repository.query(scope, query, { ...options, from, to });
+  }
+  private validate(scope: ReadScope): void {
+    if (!scope || (scope.actor !== "user" && scope.actor !== "ai") ||
+        (scope.mode !== "normal" && scope.mode !== "history" && scope.mode !== "show-rejected") ||
+        (scope.actor === "ai" && scope.mode !== "normal")) throw new ForbiddenActorError("Invalid read scope");
+  }
+  search(scope: ReadScope, query: string): readonly SearchHit[] {
+    this.validate(scope);
+    return this.repository.search(scope, nonEmpty(query, "query"));
+  }
+  suggest(scope: ReadScope, term: string): readonly string[] {
+    this.validate(scope);
+    return this.repository.suggest(scope, nonEmpty(term, "term"));
+  }
+}
+
+function searchDate(value: string, endOfDay: boolean): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)?$/.test(value)) throw new ValidationError("Invalid date");
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString().slice(0, 10) !== value.slice(0, 10)) throw new ValidationError("Invalid date");
+  return new Date(milliseconds + (endOfDay && value.length === 10 ? 86_399_999 : 0)).toISOString();
+}

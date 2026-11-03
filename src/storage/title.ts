@@ -16,13 +16,15 @@ export class SqliteTitleRepository implements TitleRepository {
         },
         set: (id, state) => {
           if (state.titleAuthor === "ai") {
-            const result = this.db.run(`UPDATE thought_titles SET title = ?, title_author = 'ai'
+            this.db.run(`UPDATE thought_titles SET title = ?, title_author = 'ai'
               WHERE thought_id = ? AND title IS NULL AND NOT EXISTS
               (SELECT 1 FROM rejected_thoughts WHERE thought_id = ?)`, [state.title, id, id]);
-            if (result.changes !== 1) throw new TitleConflictError();
+            const result = this.db.query("SELECT changes() AS count").get() as { count: number };
+            if (result.count !== 1) throw new TitleConflictError();
           } else {
-            const result = this.db.run("UPDATE thought_titles SET title = ?, title_author = ? WHERE thought_id = ?", [state.title, state.titleAuthor, id]);
-            if (result.changes !== 1) throw new TitleNotFoundError();
+            this.db.run("UPDATE thought_titles SET title = ?, title_author = ? WHERE thought_id = ?", [state.title, state.titleAuthor, id]);
+            const result = this.db.query("SELECT changes() AS count").get() as { count: number };
+            if (result.count !== 1) throw new TitleNotFoundError();
           }
         },
       })).immediate();

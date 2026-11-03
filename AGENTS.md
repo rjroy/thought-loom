@@ -50,6 +50,7 @@ Thoughtloom captures and develops connected thinking. Keep the business model in
 
 ```sh
 bun install --frozen-lockfile
+bun run build:spellfix
 bun --no-env-file test
 bun --no-env-file run typecheck
 ```

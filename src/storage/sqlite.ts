@@ -134,6 +134,41 @@ export function migrate(db: Database): void {
         CREATE TRIGGER IF NOT EXISTS response_seals_immutable_delete BEFORE DELETE ON response_seals
         BEGIN SELECT RAISE(ABORT, 'response seals are immutable'); END;
       `);
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS thought_search_fts USING fts5(thought_id UNINDEXED, text, title);
+        CREATE VIRTUAL TABLE IF NOT EXISTS response_search_fts USING fts5(response_id UNINDEXED, text);
+        CREATE TRIGGER IF NOT EXISTS thought_search_title_insert AFTER INSERT ON thought_titles BEGIN
+          INSERT INTO thought_search_fts(thought_id,text,title)
+            SELECT t.id,t.text,NEW.title FROM thoughts t WHERE t.id=NEW.thought_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS thought_search_title_update AFTER UPDATE ON thought_titles BEGIN
+          DELETE FROM thought_search_fts WHERE thought_id=OLD.thought_id;
+          INSERT INTO thought_search_fts(thought_id,text,title)
+            SELECT t.id,t.text,NEW.title FROM thoughts t WHERE t.id=NEW.thought_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS thought_search_title_delete AFTER DELETE ON thought_titles BEGIN
+          DELETE FROM thought_search_fts WHERE thought_id=OLD.thought_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS response_search_insert AFTER INSERT ON responses BEGIN
+          INSERT INTO response_search_fts(response_id,text) VALUES (NEW.id,NEW.text);
+        END;
+        DELETE FROM thought_search_fts;
+        INSERT INTO thought_search_fts(thought_id,text,title)
+          SELECT t.id,t.text,m.title FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id;
+        DELETE FROM response_search_fts;
+        INSERT INTO response_search_fts(response_id,text) SELECT id,text FROM responses;
+        CREATE TABLE IF NOT EXISTS search_revision (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
+        INSERT OR IGNORE INTO search_revision(id,revision) VALUES (1,0);
+        CREATE TRIGGER IF NOT EXISTS search_revision_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_title_update AFTER UPDATE ON thought_titles BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_title_delete AFTER DELETE ON thought_titles BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_response_insert AFTER INSERT ON responses BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_link_insert AFTER INSERT ON response_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_link_update AFTER UPDATE ON response_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_link_delete AFTER DELETE ON response_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_reject_insert AFTER INSERT ON rejected_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS search_revision_reject_delete AFTER DELETE ON rejected_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
+      `);
       migrateRunSchema(db);
     }).immediate();
   });

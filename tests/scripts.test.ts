@@ -88,6 +88,25 @@ describe("api script", () => {
     expect(output).not.toContain(sentinel);
   });
 
+  test("successful Markdown export prints status and exact Markdown rather than parsing JSON", async () => {
+    const markdown = "# A title\n\n- source: note-1\n\nOriginal *thinking*.\n";
+    const fixture = apiFixture(async () => new Response(markdown, { status: 200, headers: { "content-type": "text/markdown; charset=utf-8" } }));
+    expect(await runApi(["--role", "user", "POST", "/exports/simple", '{"rootId":"note-1","count":1,"traversal":"depth"}'], env, fixture.deps)).toBe(0);
+    expect(fixture.out).toEqual([`200\n${markdown}`]);
+    expect(fixture.err).toEqual([]);
+  });
+
+  test("Markdown output redacts configured tokens; malformed JSON remains an error", async () => {
+    const markdown = apiFixture(async () => new Response(`# Retained\n${userToken}`, { headers: { "content-type": "text/markdown" } }));
+    expect(await runApi(["--role", "user", "POST", "/exports/simple", "{}"], env, markdown.deps)).toBe(0);
+    expect(markdown.out.join("\n")).toContain("[redacted]");
+    expect(JSON.stringify([markdown.out, markdown.err])).not.toContain(userToken);
+    const invalid = apiFixture(async () => new Response("{broken", { status: 200, headers: { "content-type": "application/json" } }));
+    expect(await runApi(["--role", "user", "GET", "/thoughts"], env, invalid.deps)).not.toBe(0);
+    expect(invalid.err.join(" ")).toMatch(/200.*invalid json/i);
+    expect(invalid.out).toEqual([]);
+  });
+
   test("bounds both stalled fetch and stalled response body", async () => {
     const stalled = apiFixture(() => new Promise<Response>(() => {}));
     expect(await runApi(["--role", "user", "GET", "/thoughts"], env, stalled.deps)).not.toBe(0);
@@ -95,6 +114,9 @@ describe("api script", () => {
     const body = apiFixture(async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("{")); } })));
     expect(await runApi(["--role", "user", "GET", "/thoughts"], env, body.deps)).not.toBe(0);
     expect(body.err.join(" ")).toMatch(/timeout|timed out/i);
+    const markdown = apiFixture(async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("# partial")); } }), { headers: { "content-type": "text/markdown" } }));
+    expect(await runApi(["--role", "user", "POST", "/exports/simple", "{}"], env, markdown.deps)).not.toBe(0);
+    expect(markdown.err.join(" ")).toMatch(/timeout|timed out/i);
   }, 2000);
 });
 
@@ -112,8 +134,9 @@ describe("isolated demo", () => {
     await withRoot(async root => {
       const output: string[] = [];
       const errors: string[] = [];
-      const calls: { method: string; path: string; query: string; authorization: string | null; status: number; body: unknown; result: unknown }[] = [];
+      const calls: { method: string; path: string; query: string; authorization: string | null; status: number; body: unknown; result: unknown; contentType: string }[] = [];
       const credentials: { user: string; ai: string }[] = [];
+      const exportSnapshots: { before: unknown; after: unknown }[] = [];
       let daemon: RunningDaemon | undefined;
       let daemonUrl = "";
       const deps: DemoDependencies = {
@@ -130,9 +153,20 @@ describe("isolated demo", () => {
         fetch: async (input, init) => {
           const url = new URL(String(input));
           expect(url.origin).toBe(new URL(daemonUrl).origin);
+          const knowledge = async () => {
+            const headers = { authorization: `Bearer ${credentials[0]?.user}` };
+            const thoughts = await fetch(new URL("/thoughts?scope=history", daemonUrl), { headers, signal: AbortSignal.timeout(2000) });
+            const connections = await fetch(new URL("/connections?scope=history", daemonUrl), { headers, signal: AbortSignal.timeout(2000) });
+            expect(thoughts.status).toBe(200);
+            expect(connections.status).toBe(200);
+            return { thoughts: await thoughts.json(), connections: await connections.json() };
+          };
+          const before = url.pathname === "/exports/simple" ? await knowledge() : undefined;
           const response = await fetch(input, { ...init, signal: AbortSignal.timeout(2000) });
-          const result: unknown = response.status === 204 ? null : await response.clone().json();
-          calls.push({ method: init?.method ?? "GET", path: url.pathname, query: url.search, authorization: new Headers(init?.headers).get("authorization"), status: response.status, body: typeof init?.body === "string" ? JSON.parse(init.body) : null, result });
+          const contentType = response.headers.get("content-type") ?? "";
+          const result: unknown = response.status === 204 ? null : contentType.toLowerCase().startsWith("text/markdown") ? await response.clone().text() : await response.clone().json();
+          if (before !== undefined) exportSnapshots.push({ before, after: await knowledge() });
+          calls.push({ method: init?.method ?? "GET", path: url.pathname, query: url.search, authorization: new Headers(init?.headers).get("authorization"), status: response.status, body: typeof init?.body === "string" ? JSON.parse(init.body) : null, result, contentType });
           return response;
         },
         stdout: value => output.push(value), stderr: value => errors.push(value),
@@ -147,7 +181,7 @@ describe("isolated demo", () => {
           if (token === undefined) throw new Error("Demo did not supply credentials");
           expect(JSON.stringify([output, errors])).not.toContain(token);
         }
-        for (const milestone of [/original/i, /contribution/i, /simulated.*ai/i, /sibling/i, /connection/i, /single.*reject/i, /active.*child/i, /preview/i, /branch.*reject/i, /partial.*restor/i]) expect(report).toMatch(milestone);
+        for (const milestone of [/original/i, /contribution/i, /simulated.*ai/i, /sibling/i, /connection/i, /single.*reject/i, /active.*child/i, /preview/i, /branch.*reject/i, /partial.*restor/i, /(?:filtered.*search|search.*filter)/i, /(?:typo.*search|search.*typo)/i, /(?:markdown.*export|export.*markdown)/i]) expect(report).toMatch(milestone);
         const creates = calls.filter(call => call.method === "POST" && (call.path === "/thoughts" || /^\/thoughts\/[^/]+\/(contributions|developments)$/.test(call.path)) && call.status === 201);
         expect(creates.length).toBeGreaterThanOrEqual(5);
         expect(new Set(creates.map(call => call.authorization)).size).toBe(2);
@@ -156,6 +190,31 @@ describe("isolated demo", () => {
         expect(typeof captureBody?.text).toBe("string");
         expect(Object.keys(captureBody ?? {}).every(key => ["text", "title"].includes(key))).toBe(true);
         const ids = new Set(creates.map(call => object(call.result)?.id));
+        const filtered = calls.find(call => {
+          const params = new URLSearchParams(call.query);
+          return call.path === "/search" && call.method === "GET" && call.status === 200 && params.get("q") === "simulated" && params.getAll("author").includes("ai") && params.getAll("kind").includes("developing-idea");
+        });
+        const typo = calls.find(call => call.path === "/search" && call.method === "GET" && call.status === 200 && new URLSearchParams(call.query).get("q") === "simuluted");
+        for (const call of [filtered, typo]) {
+          expect(call).toBeDefined();
+          const page = object(call?.result);
+          expect(Array.isArray(page?.results)).toBe(true);
+          if (!Array.isArray(page?.results)) throw new Error("Expected search results");
+          expect(page.results.some(item => { const hit = object(item); return hit?.kind === "thought" && ids.has(hit.id) && typeof hit.text === "string" && /simulated ai development/i.test(hit.text); })).toBe(true);
+        }
+        const exported = calls.find(call => call.path === "/exports/simple" && call.method === "POST" && call.status === 200);
+        expect(exported?.contentType).toMatch(/^text\/markdown\b/i);
+        expect(exported?.authorization).toBe(`Bearer ${credentials[0]?.user}`);
+        const exportBody = object(exported?.body);
+        expect(typeof exportBody?.rootId).toBe("string");
+        expect(ids.has(exportBody?.rootId)).toBe(true);
+        const exportRoot = creates.map(call => object(call.result)).find(item => item?.id === exportBody?.rootId);
+        expect(typeof exported?.result).toBe("string");
+        if (typeof exported?.result !== "string" || typeof exportRoot?.id !== "string" || typeof exportRoot.text !== "string") throw new Error("Expected exported root and Markdown");
+        expect(exported.result).toContain(exportRoot.id);
+        expect(exported.result).toContain(exportRoot.text);
+        expect(exportSnapshots).toHaveLength(1);
+        expect(exportSnapshots[0]?.after).toEqual(exportSnapshots[0]?.before);
         for (const call of creates.filter(item => item.path !== "/thoughts")) {
           const body = object(call.body);
           expect(typeof body?.text).toBe("string");

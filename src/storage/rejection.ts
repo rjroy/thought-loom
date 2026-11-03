@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { RejectionRepository, RejectionSnapshot, RejectionTransaction } from "../domain/rejection";
+import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionTransaction } from "../domain/rejection";
 import { createThought } from "../domain/thought";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
@@ -29,6 +29,30 @@ function sourcesByOwner(rows: { ownerId: string; sourceId: string }[]): Map<stri
 /** Internal adapter; expose scoped RejectionService reads to consumers instead. */
 export class SqliteRejectionRepository implements RejectionRepository {
   constructor(private readonly db: Database) {}
+
+  exportTree(rootId: string): readonly ExportTreeNode[] {
+    return boundary("export tree", () => this.db.transaction(() => {
+      const tree = `WITH RECURSIVE tree(id) AS (SELECT id FROM thoughts WHERE id=? UNION SELECT t.id FROM thoughts t JOIN tree p ON t.parent_id=p.id)`;
+      const sources = sourcesByOwner(this.db.query(`${tree}
+        SELECT s.thought_id AS ownerId,s.source_id AS sourceId FROM thought_sources s JOIN tree ON tree.id=s.thought_id
+        LEFT JOIN rejected_thoughts ownerRejected ON ownerRejected.thought_id=s.thought_id
+        LEFT JOIN rejected_thoughts sourceRejected ON sourceRejected.thought_id=s.source_id
+        WHERE ownerRejected.thought_id IS NULL AND sourceRejected.thought_id IS NULL ORDER BY s.thought_id,s.position`).all(rootId) as { ownerId: string; sourceId: string }[]);
+      const rows = this.db.query(`${tree}
+        SELECT t.id,t.parent_id AS parentId,t.created_at AS createdAt,
+          CASE WHEN r.thought_id IS NULL THEN t.text END AS text,
+          CASE WHEN r.thought_id IS NULL THEN m.title END AS title,
+          CASE WHEN r.thought_id IS NULL THEN m.title_author END AS titleAuthor,
+          CASE WHEN r.thought_id IS NULL THEN t.author END AS author,
+          CASE WHEN r.thought_id IS NULL THEN t.kind END AS kind,
+          CASE WHEN r.thought_id IS NULL THEN t.origin END AS origin,
+          r.thought_id IS NOT NULL AS rejected
+        FROM tree JOIN thoughts t ON t.id=tree.id JOIN thought_titles m ON m.thought_id=t.id
+        LEFT JOIN rejected_thoughts r ON r.thought_id=t.id`).all(rootId) as { id: string; parentId: string | null; createdAt: string; rejected: number }[];
+      return rows.map(row => ({ id: row.id, parentId: row.parentId, createdAt: row.createdAt,
+        thought: row.rejected ? null : createThought({ ...row, sourceIds: sources.get(row.id) ?? [] }) }));
+    })());
+  }
 
   private readSnapshot(): RejectionSnapshot {
     const thoughtSources = sourcesByOwner(this.db.query("SELECT thought_id AS ownerId, source_id AS sourceId FROM thought_sources ORDER BY thought_id, position").all() as { ownerId: string; sourceId: string }[]);

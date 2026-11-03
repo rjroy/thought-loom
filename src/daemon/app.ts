@@ -4,6 +4,8 @@ import { nonEmpty, nullableString, oneOf, record, references, ValidationError } 
 import type { Context } from "hono";
 import { CreationForbiddenError, CreationNotFoundError, type CreationService, type ThoughtInput } from "../domain/creation";
 import { TitleConflictError, TitleForbiddenError, TitleNotFoundError, type TitleService } from "../domain/title";
+import type { SearchService } from "../domain/search";
+import { SimpleExportNotFoundError, type SimpleExportService } from "../domain/simple-export";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -18,6 +20,8 @@ export interface AppOptions {
   readonly logger: (event: BoundaryEvent) => void;
   readonly creation: CreationService;
   readonly titles: TitleService;
+  readonly search?: SearchService;
+  readonly simpleExport?: SimpleExportService;
 }
 
 type AppEnv = { Variables: { actor: Actor } };
@@ -28,9 +32,9 @@ class ApiError extends Error {
   constructor(readonly status: ErrorStatus) { super(); }
 }
 
-function scope(c: ApiContext): ReadScope {
+function scope(c: ApiContext, allowed: readonly string[] = []): ReadScope {
   const params = new URL(c.req.url).searchParams;
-  if ([...params.keys()].some(key => key !== "scope")) throw new ApiError(400);
+  if ([...params.keys()].some(key => key !== "scope" && !allowed.includes(key))) throw new ApiError(400);
   const values = params.getAll("scope");
   if (values.length > 1) throw new ApiError(400);
   const mode = values[0] ?? "normal";
@@ -69,6 +73,8 @@ function thoughtInput(data: Record<string, unknown>): ThoughtInput {
 
 function safePath(path: string): string {
   const parts = path.split("/");
+  if (path === "/search") return "/search";
+  if (path === "/exports/simple") return "/exports/simple";
   if (!["thoughts", "connections", "responses"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
@@ -86,7 +92,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     const status: ErrorStatus = error instanceof ApiError ? error.status :
       error instanceof BranchConfirmationError || error instanceof TitleConflictError ? 409 :
       error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError ? 403 :
-      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError ? 404 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError ? 404 :
       error instanceof ValidationError ? 400 : 500;
     return c.json({ error: status === 500 ? "Internal server error" :
       ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict" } as const)[status] }, status);
@@ -104,6 +110,33 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
       logger({ phase: "outcome", ...event, status: c.res.status });
     }
   });
+
+  if (options.search) {
+    const search = options.search;
+    app.get("/search", c => {
+      const params = new URL(c.req.url).searchParams;
+      const readScope = scope(c, ["q", "author", "kind", "from", "to", "sort"]);
+      for (const key of ["q", "from", "to", "sort"]) if (params.getAll(key).length > 1) throw new ApiError(400);
+      const q = nonEmpty(params.get("q"), "q");
+      const authors = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai"]));
+      const kinds = params.getAll("kind").map(value => oneOf(value, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"]));
+      const sortValue = params.get("sort");
+      const sort = sortValue === null ? undefined : oneOf(sortValue, "sort", ["relevance", "newest", "oldest"]);
+      return c.json(search.query(readScope, q, { authors, kinds, from: params.get("from") ?? undefined, to: params.get("to") ?? undefined, sort }));
+    });
+  }
+
+  if (options.simpleExport) {
+    const simpleExport = options.simpleExport;
+    app.post("/exports/simple", async c => {
+      user(c); noQuery(c);
+      const data = await body(c, ["rootId", "count", "traversal"]);
+      const rootId = nonEmpty(data.rootId, "rootId");
+      if (typeof data.count !== "number" || !Number.isInteger(data.count) || data.count <= 0) throw new ApiError(400);
+      const traversal = oneOf(data.traversal, "traversal", ["breadth", "depth"]);
+      return c.body(simpleExport.render("user", { rootId, count: data.count, traversal }), 200, { "content-type": "text/markdown; charset=utf-8" });
+    });
+  }
 
   app.get("/thoughts", c => c.json(rejection.listThoughts(scope(c))));
   app.get("/thoughts/:id", c => {

@@ -4,8 +4,11 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { CreationService } from "../domain/creation";
 import { RejectionService } from "../domain/rejection";
+import { SearchService } from "../domain/search";
+import { SimpleExportService } from "../domain/simple-export";
 import { TitleService } from "../domain/title";
 import { SqliteRejectionRepository } from "../storage/rejection";
+import { SqliteSearchRepository } from "../storage/search";
 import { SqliteTitleRepository } from "../storage/title";
 import { migrate, SqliteStore } from "../storage/sqlite";
 import { createApp, type BoundaryEvent } from "./app";
@@ -39,7 +42,9 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       createThought: thought => store.saveThought(thought), createConnection: connection => store.saveConnection(connection),
     } });
     const titles = new TitleService(new SqliteTitleRepository(db));
-    const app = createApp({ rejection, creation, titles, credentials: valid.credentials, logger });
+    const search = new SearchService(new SqliteSearchRepository(db));
+    const simpleExport = new SimpleExportService(rejection);
+    const app = createApp({ rejection, creation, titles, search, simpleExport, credentials: valid.credentials, logger });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: app.fetch });
     const url = server.url.toString();
     const runningServer = server;
