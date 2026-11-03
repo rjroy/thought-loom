@@ -1,18 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { createApp, type BoundaryEvent, type CreationPort } from "../src/daemon/app";
+import { createApp, type BoundaryEvent } from "../src/daemon/app";
 import { RejectionService } from "../src/domain/rejection";
 import type { Thought } from "../src/domain/thought";
 import type { Connection } from "../src/domain/connection";
 import { MemoryRepository } from "./rejection-fixtures";
+import { CreationService, type CreationWrites } from "../src/domain/creation";
+import { TitleService, type TitleRecord } from "../src/domain/title";
 
 // Contract: bare JSON records/arrays; ?scope=normal|history|show-rejected.
-// POST /thoughts, /connections; GET collections and /:id; GET /responses/:id.
+// POST /thoughts, /thoughts/:id/contributions, /thoughts/:id/developments, /connections.
+// PUT /thoughts/:id/title and POST /thoughts/:id/title/fill return full joined thoughts.
+// GET collections and /:id; GET /responses/:id.
 // POST /thoughts/:id/{reject,restore}, /connections/:id/{reject,restore};
 // GET /thoughts/:id/branch/preview; POST /thoughts/:id/branch/{reject,restore}.
 // Branch reject body is the exact preview, including rootId, branchIds, affectedIds and count.
 const credentials = { user: "user-secret-token", ai: "ai-secret-token" };
-const thoughtInput = { id: "new", text: "sensitive new text", title: null, kind: "developing-idea", createdAt: "2026-01-01T00:00:00Z", origin: "test", parentId: "root", sourceIds: ["outside"] } satisfies Omit<Thought, "author">;
-const connectionInput = { id: "new-link", fromId: "root", toId: "outside", category: "supports", explanation: "sensitive rationale", sourceIds: ["child"] } satisfies Omit<Connection, "proposedBy">;
+const thoughtInput = { text: "sensitive new text" };
+const connectionInput = { fromId: "root", toId: "outside", category: "supports", explanation: "sensitive rationale", sourceIds: ["child"] } as const;
 
 function setup(failWrites = false) {
   const repo = new MemoryRepository();
@@ -20,11 +24,18 @@ function setup(failWrites = false) {
   const createdThoughts: Thought[] = [];
   const createdConnections: Connection[] = [];
   const events: BoundaryEvent[] = [];
-  const writes: CreationPort = {
+  const writes: CreationWrites = {
     createThought: thought => { if (failWrites) throw new Error("SQL secret internal failure"); createdThoughts.push(thought); },
     createConnection: connection => { createdConnections.push(connection); },
   };
-  const app = createApp({ rejection, writes, credentials, logger: event => events.push(event) });
+  let sequence = 0;
+  const creation = new CreationService({ rejection, writes, id: () => `generated-${++sequence}`, now: () => "2030-01-02T03:04:05.000Z" });
+  const titles = new Map<string, TitleRecord>(repo.snapshot().thoughts.map(item => [item.id, { title: item.title, titleAuthor: item.titleAuthor ?? null, rejected: false }]));
+  const titleService = new TitleService({ transaction: action => action({ get: id => {
+    const value = titles.get(id);
+    return value ? { ...value, rejected: repo.snapshot().rejectedThoughtIds.includes(id) } : null;
+  }, set: (id, value) => { titles.set(id, { ...value, rejected: false }); } }) });
+  const app = createApp({ rejection, creation, titles: titleService, credentials, logger: event => events.push(event) });
   function request(path: string, options: { actor?: "user" | "ai" | "bad" | "none"; method?: string; body?: unknown; raw?: string; headers?: Record<string, string> } = {}) {
     const actor = options.actor ?? "user";
     const headers: Record<string, string> = { ...options.headers };
@@ -38,22 +49,51 @@ function setup(failWrites = false) {
 }
 
 describe("daemon API contract", () => {
-  test("creates immutable domain values with identity from credentials, never request authorship", async () => {
+  test("semantic commands derive immutable identity, attribution and provenance", async () => {
     const t = setup();
-    const result = await t.request("/thoughts", { method: "POST", actor: "ai", body: thoughtInput });
+    const result = await t.request("/thoughts", { method: "POST", body: { ...thoughtInput, title: "Label" } });
     expect(result.status).toBe(201);
-    expect(await result.json()).toEqual({ ...thoughtInput, author: "ai" });
-    expect(t.createdThoughts).toEqual([{ ...thoughtInput, author: "ai" }]);
+    expect(await result.json()).toEqual({ ...thoughtInput, id: "generated-1", title: "Label", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030-01-02T03:04:05.000Z", origin: "capture", parentId: null, sourceIds: [] });
+    expect(t.createdThoughts).toHaveLength(1);
     expect(Object.isFrozen(t.createdThoughts[0])).toBe(true);
     const link = await t.request("/connections", { method: "POST", body: connectionInput });
     expect(link.status).toBe(201);
-    expect(await link.json()).toEqual({ ...connectionInput, proposedBy: "user" });
+    expect(await link.json()).toEqual({ ...connectionInput, id: "generated-2", proposedBy: "user" });
     expect(Object.isFrozen(t.createdConnections[0])).toBe(true);
-    expect((await t.request("/thoughts", { method: "POST", actor: "ai", body: { ...thoughtInput, author: "user" } })).status).toBe(400);
+    expect((await t.request("/thoughts", { method: "POST", actor: "ai", body: thoughtInput })).status).toBe(403);
     expect((await t.request("/connections", { method: "POST", actor: "ai", body: { ...connectionInput, proposedBy: "user" } })).status).toBe(400);
     expect(t.createdThoughts).toHaveLength(1);
     expect(t.createdConnections).toHaveLength(1);
     expect((await t.request("/thoughts/root", { method: "PATCH", body: { text: "edit" } })).status).toBe(404);
+  });
+
+  test("title commands preserve thought attribution and enforce fill eligibility", async () => {
+    const t = setup();
+    const edited = await t.request("/thoughts/child/title", { method: "PUT", body: { title: "Human label" } });
+    expect(edited.status).toBe(200);
+    expect(await edited.json()).toEqual({ ...t.rejection.listThoughts({ actor: "user", mode: "normal" }).find(item => item.id === "child"), title: "Human label", titleAuthor: "user" });
+    expect((await t.request("/thoughts/child/title/fill", { method: "POST", actor: "ai", body: { title: "late" } })).status).toBe(409);
+    expect((await t.request("/thoughts/child/title", { method: "PUT", actor: "ai", body: { title: null } })).status).toBe(403);
+    const cleared = await t.request("/thoughts/child/title", { method: "PUT", body: { title: null } });
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).titleAuthor).toBeNull();
+    const filled = await t.request("/thoughts/child/title/fill", { method: "POST", actor: "ai", body: { title: "AI label" } });
+    expect(filled.status).toBe(200);
+    expect(await filled.json()).toEqual({ ...t.rejection.listThoughts({ actor: "user", mode: "normal" }).find(item => item.id === "child"), title: "AI label", titleAuthor: "ai" });
+    t.rejection.rejectThought("user", "root");
+    expect((await t.request("/thoughts/root/title/fill", { method: "POST", actor: "ai", body: { title: "hidden" } })).status).toBe(404);
+    expect((await t.request("/thoughts/root/title", { method: "PUT", body: { title: "human" } })).status).toBe(200);
+  });
+
+  test("contributions and developments require the correct actor and selected parent", async () => {
+    const t = setup();
+    expect((await t.request("/thoughts/root/contributions", { method: "POST", actor: "ai", body: thoughtInput })).status).toBe(403);
+    expect((await t.request("/thoughts/child/developments", { method: "POST", body: thoughtInput })).status).toBe(403);
+    expect((await t.request("/thoughts/root/title", { method: "PUT", actor: "none", body: { title: "x" } })).status).toBe(401);
+    expect(t.createdThoughts).toEqual([]);
+    const contribution = await t.request("/thoughts/root/contributions", { method: "POST", body: thoughtInput });
+    expect(contribution.status).toBe(201);
+    expect(await contribution.json()).toEqual({ ...thoughtInput, id: "generated-1", title: null, titleAuthor: null, author: "user", kind: "user-contribution", createdAt: "2030-01-02T03:04:05.000Z", origin: "contribution", parentId: "root", sourceIds: [] });
   });
 
   test("reads a tree and separate connections through scoped domain results", async () => {
@@ -122,22 +162,21 @@ describe("daemon API contract", () => {
   test("AI cannot reference rejected material on either write path", async () => {
     const t = setup();
     t.rejection.rejectThought("user", "root");
-    const allowedThought = { ...thoughtInput, parentId: "child", sourceIds: ["outside"] };
+    const allowedThought = { ...thoughtInput, sourceIds: ["outside"] };
     const allowedConnection = { ...connectionInput, fromId: "child", sourceIds: ["outside"] };
-    const thoughtResponse = await t.request("/thoughts", { actor: "ai", method: "POST", body: allowedThought });
+    const thoughtResponse = await t.request("/thoughts/child/developments", { actor: "ai", method: "POST", body: allowedThought });
     expect(thoughtResponse.status).toBe(201);
-    expect(await thoughtResponse.json()).toEqual({ ...allowedThought, author: "ai" });
+    expect(await thoughtResponse.json()).toEqual({ ...allowedThought, id: "generated-1", title: null, titleAuthor: null, author: "ai", kind: "developing-idea", createdAt: "2030-01-02T03:04:05.000Z", origin: "development", parentId: "child" });
     const connectionResponse = await t.request("/connections", { actor: "ai", method: "POST", body: allowedConnection });
     expect(connectionResponse.status).toBe(201);
-    expect(await connectionResponse.json()).toEqual({ ...allowedConnection, proposedBy: "ai" });
-    for (const body of [{ ...thoughtInput, parentId: "root" }, { ...thoughtInput, parentId: null, sourceIds: ["root"] }]) {
-      expect((await t.request("/thoughts", { actor: "ai", method: "POST", body })).status).toBe(404);
-    }
+    expect(await connectionResponse.json()).toEqual({ ...allowedConnection, id: "generated-2", proposedBy: "ai" });
+    expect((await t.request("/thoughts/root/developments", { actor: "ai", method: "POST", body: thoughtInput })).status).toBe(404);
+    expect((await t.request("/thoughts/child/developments", { actor: "ai", method: "POST", body: { ...thoughtInput, sourceIds: ["root"] } })).status).toBe(404);
     for (const body of [connectionInput, { ...connectionInput, fromId: "outside", toId: "child", sourceIds: ["root"] }]) {
       expect((await t.request("/connections", { actor: "ai", method: "POST", body })).status).toBe(404);
     }
-    expect(t.createdThoughts).toEqual([{ ...allowedThought, author: "ai" }]);
-    expect(t.createdConnections).toEqual([{ ...allowedConnection, proposedBy: "ai" }]);
+    expect(t.createdThoughts).toHaveLength(1);
+    expect(t.createdConnections).toHaveLength(1);
   });
 
   test("single and branch state changes use exact current preview confirmation", async () => {
@@ -164,15 +203,15 @@ describe("daemon API contract", () => {
     expect((await t.request("/thoughts/missing/reject", { method: "POST" })).status).toBe(404);
   });
 
-  test("malformed requests, missing references and duplicate identifiers fail before writes", async () => {
+  test("malformed requests, spoofed internals and missing references fail before writes", async () => {
     const t = setup();
     expect((await t.request("/thoughts", { method: "POST", raw: "{" })).status).toBe(400);
     expect((await t.request("/thoughts", { method: "POST", body: { ...thoughtInput, text: 7 } })).status).toBe(400);
     expect((await t.request("/connections", { method: "POST", body: { ...connectionInput, sourceIds: "root" } })).status).toBe(400);
-    expect((await t.request("/thoughts", { method: "POST", body: { ...thoughtInput, parentId: "missing" } })).status).toBe(404);
+    expect((await t.request("/thoughts/missing/contributions", { method: "POST", body: thoughtInput })).status).toBe(404);
     expect((await t.request("/connections", { method: "POST", body: { ...connectionInput, toId: "missing" } })).status).toBe(404);
-    expect((await t.request("/thoughts", { method: "POST", body: { ...thoughtInput, id: "root" } })).status).toBe(409);
-    expect((await t.request("/connections", { method: "POST", body: { ...connectionInput, id: "cross" } })).status).toBe(409);
+    for (const field of ["id", "createdAt", "author", "kind", "origin", "parentId"]) expect((await t.request("/thoughts", { method: "POST", body: { ...thoughtInput, [field]: "spoof" } })).status).toBe(400);
+    expect((await t.request("/connections", { method: "POST", body: { ...connectionInput, id: "cross" } })).status).toBe(400);
     expect(t.createdThoughts).toEqual([]);
     expect(t.createdConnections).toEqual([]);
   });

@@ -16,6 +16,7 @@ const child: Thought = {
   kind: "developing-idea", createdAt: "2026-01-02T00:00:00.000Z",
   origin: "test discussion", parentId: "root", sourceIds: [],
 };
+const snapshot = (thought: Thought, titleAuthor: "user" | "ai" | null) => ({ ...thought, titleAuthor });
 const databases: Database[] = [];
 const directories: string[] = [];
 function open(path = ":memory:"): { db: Database; store: SqliteStore } {
@@ -36,12 +37,15 @@ describe("SQLite foundation", () => {
     migrate(db);
     expect(db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     const columns = db.query("PRAGMA table_info(thoughts)").all() as { name: string }[];
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "title", "author", "kind", "created_at", "origin", "parent_id"]));
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "author", "kind", "created_at", "origin", "parent_id"]));
+    expect(columns.map(column => column.name)).not.toContain("title");
+    const titleColumns = db.query("PRAGMA table_info(thought_titles)").all() as { name: string }[];
+    expect(titleColumns.map(column => column.name)).toEqual(["thought_id", "title", "title_author"]);
     const store = new SqliteStore(db);
     store.saveThought(root);
     migrate(db);
     expect(db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
-    expect(store.getThought(root.id)).toEqual(root);
+    expect(store.getThought(root.id)).toEqual(snapshot(root, null));
   });
 
   test("bootstraps idempotently, enables foreign keys and preserves branching and sources", () => {
@@ -52,9 +56,9 @@ describe("SQLite foundation", () => {
     store.saveThought(branch);
     migrate(db);
     expect(db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
-    expect(store.getThought("root")).toEqual(root);
-    expect(store.getThought("child")).toEqual(child);
-    expect(store.getThought("branch")).toEqual(branch);
+    expect(store.getThought("root")).toEqual(snapshot(root, null));
+    expect(store.getThought("child")).toEqual(snapshot(child, "ai"));
+    expect(store.getThought("branch")).toEqual(snapshot(branch, "user"));
     expect(store.getThought("missing")).toBeNull();
     expect(() => store.saveThought({ ...child, id: "orphan", parentId: "missing" })).toThrow(/foreign key constraint failed/i);
     expect(() => store.saveThought({ ...child, id: "bad-source", sourceIds: ["missing"] })).toThrow(/foreign key constraint failed/i);
@@ -69,7 +73,7 @@ describe("SQLite foundation", () => {
       store.saveConnection(connection);
       expect(store.getConnection(category)).toEqual(connection);
     }
-    expect(store.getThought("child")).toEqual(child);
+    expect(store.getThought("child")).toEqual(snapshot(child, "ai"));
     expect(() => store.saveConnection({ id: "bad", fromId: "child", toId: "missing", category: "related", proposedBy: "user", explanation: "reason", sourceIds: [] })).toThrow(/foreign key constraint failed/i);
     expect(() => store.saveConnection({ id: "bad-origin", fromId: "missing", toId: "root", category: "related", proposedBy: "user", explanation: "reason", sourceIds: [] })).toThrow(/foreign key constraint failed/i);
     expect(() => store.saveConnection({ id: "bad-source", fromId: "child", toId: "root", category: "related", proposedBy: "user", explanation: "reason", sourceIds: ["missing"] })).toThrow(/foreign key constraint failed/i);
@@ -103,8 +107,8 @@ describe("SQLite foundation", () => {
     first.db.close();
     databases.splice(databases.indexOf(first.db), 1);
     const second = open(path);
-    expect(second.store.getThought("root")).toEqual(root);
-    expect(second.store.getThought("child")).toEqual(sourcedChild);
+    expect(second.store.getThought("root")).toEqual(snapshot(root, null));
+    expect(second.store.getThought("child")).toEqual(snapshot(sourcedChild, "ai"));
     expect(second.store.getConnection(connection.id)).toEqual(connection);
     expect(second.store.getResponse(addendum.id)).toEqual(addendum);
   });
@@ -128,8 +132,8 @@ describe("SQLite foundation", () => {
       { thought_id: "child", position: 0, source_id: "root" },
     ]);
     expect(() => db.run(sql)).toThrow(/immutable/i);
-    expect(store.getThought("child")).toEqual(sourcedChild);
-    expect(store.getThought("other")).toEqual(other);
+    expect(store.getThought("child")).toEqual(snapshot(sourcedChild, "ai"));
+    expect(store.getThought("other")).toEqual(snapshot(other, null));
   });
 
   test("adding a separate connection does not alter saved thought provenance", () => {
@@ -140,7 +144,7 @@ describe("SQLite foundation", () => {
     const connection: Connection = { id: "later-link", fromId: "child", toId: "root", category: "related", proposedBy: "user", explanation: "A separate link", sourceIds: ["root"] };
     store.saveConnection(connection);
     expect(store.getConnection(connection.id)).toEqual(connection);
-    expect(store.getThought("child")).toEqual(sourcedChild);
+    expect(store.getThought("child")).toEqual(snapshot(sourcedChild, "ai"));
   });
 
   test.each([
@@ -185,13 +189,14 @@ describe("SQLite foundation", () => {
     store.saveThought(child);
     // The storage contract exposes the thoughts table for database-level invariants.
     const columns = db.query("PRAGMA table_info(thoughts)").all() as { name: string }[];
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "title", "author", "kind", "created_at", "origin", "parent_id"]));
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "author", "kind", "created_at", "origin", "parent_id"]));
+    expect(columns.map(column => column.name)).not.toContain("title");
+    expect(db.query("SELECT thought_id, title, title_author FROM thought_titles WHERE thought_id = 'child'").get()).toEqual({ thought_id: "child", title: "Development", title_author: "ai" });
     expect(db.query("SELECT id, text, author, created_at, parent_id FROM thoughts WHERE id = ?").get("child")).toEqual({
       id: child.id, text: child.text, author: child.author, created_at: child.createdAt, parent_id: child.parentId,
     });
     for (const sql of [
       "UPDATE thoughts SET text = 'rewritten' WHERE id = 'child'",
-      "UPDATE thoughts SET title = 'rewritten' WHERE id = 'child'",
       "UPDATE thoughts SET parent_id = NULL WHERE id = 'child'",
       "UPDATE thoughts SET author = 'user' WHERE id = 'child'",
       "UPDATE thoughts SET kind = 'user-contribution' WHERE id = 'child'",
@@ -202,9 +207,9 @@ describe("SQLite foundation", () => {
     ]) {
       // Trigger diagnostics distinguish the intended invariant from SQL or schema errors.
       expect(() => db.run(sql)).toThrow(/immutable/i);
-      expect(store.getThought("child")).toEqual(child);
+      expect(store.getThought("child")).toEqual(snapshot(child, "ai"));
     }
     expect(() => store.saveThought({ ...child, text: "overwrite" })).toThrow(/unique constraint failed|immutable/i);
-    expect(store.getThought("child")).toEqual(child);
+    expect(store.getThought("child")).toEqual(snapshot(child, "ai"));
   });
 });

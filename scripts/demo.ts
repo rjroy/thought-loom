@@ -39,47 +39,51 @@ export async function runDemo(deps: DemoDependencies): Promise<number> {
       if (response.status !== expected) throw new Error("Unexpected HTTP status");
       return response.value;
     };
-    const create = async (id: string, parentId: string | null, sourceIds: string[], role: "user" | "ai", text: string) => {
-      const value = object(await request(role, "POST", "/thoughts", 201, {
-        id, parentId, sourceIds, text, title: null, kind: "developing-idea", createdAt: new Date().toISOString(), origin: "demo",
-      }));
-      if (value.id !== id || value.parentId !== parentId || value.author !== role) throw new Error("Unexpected created thought");
+    const create = async (role: "user" | "ai", parentId: string | null, text: string, sourceIds?: string[]): Promise<string> => {
+      const path = parentId === null ? "/thoughts" : `/thoughts/${encodeURIComponent(parentId)}/${role === "ai" ? "developments" : "contributions"}`;
+      const value = object(await request(role, "POST", path, 201, { text, ...(sourceIds ? { sourceIds } : {}) }));
+      if (typeof value.id !== "string" || !value.id || value.parentId !== parentId || value.author !== role || value.text !== text) throw new Error("Unexpected created thought");
+      return value.id;
     };
-    await create("original", null, [], "user", "A captured original idea");
+    const original = await create("user", null, "A captured original idea");
     deps.stdout("Original captured.");
-    await create("contribution", "original", ["original"], "user", "A user contribution");
+    const contribution = await create("user", original, "A user contribution");
     deps.stdout("User contribution added.");
-    await create("development", "contribution", ["contribution"], "ai", "A simulated AI development");
+    const development = await create("ai", contribution, "A simulated AI development", [original, contribution]);
     deps.stdout("Simulated AI development added.");
-    await create("continuation", "development", ["development"], "user", "A later user continuation");
-    await create("sibling", "original", [], "user", "A sibling thought");
+    await create("user", development, "A later user continuation");
+    const sibling = await create("user", original, "A sibling thought");
     deps.stdout("Later continuation and sibling added.");
     const link = object(await request("user", "POST", "/connections", 201, {
-      id: "connection", fromId: "development", toId: "sibling", category: "related", explanation: "A separate conceptual connection", sourceIds: [],
+      fromId: development, toId: sibling, category: "related", explanation: "A separate conceptual connection", sourceIds: [],
     }));
-    if (link.id !== "connection") throw new Error("Unexpected connection");
+    if (typeof link.id !== "string" || !link.id || link.fromId !== development || link.toId !== sibling) throw new Error("Unexpected connection");
+    const linkId = encodeURIComponent(link.id);
+    const rootPath = `/thoughts/${encodeURIComponent(original)}`;
+    const contributionPath = `/thoughts/${encodeURIComponent(contribution)}`;
+    const developmentPath = `/thoughts/${encodeURIComponent(development)}`;
     deps.stdout("Separate connection created.");
-    await request("user", "POST", "/connections/connection/reject", 204);
-    await request("user", "POST", "/thoughts/original/reject", 204);
-    await request("ai", "GET", "/thoughts/original", 404);
-    const child = object(await request("ai", "GET", "/thoughts/contribution", 200));
-    if (child.id !== "contribution" || child.parentId !== null || !Array.isArray(child.sourceIds) || child.sourceIds.includes("original")) throw new Error("Child redaction failed");
+    await request("user", "POST", `/connections/${linkId}/reject`, 204);
+    await request("user", "POST", `${rootPath}/reject`, 204);
+    await request("ai", "GET", rootPath, 404);
+    const child = object(await request("ai", "GET", contributionPath, 200));
+    if (child.id !== contribution || child.parentId !== null || !Array.isArray(child.sourceIds) || child.sourceIds.includes(original)) throw new Error("Child redaction failed");
     deps.stdout("Single reject hides the original; its active child remains usable with redacted provenance.");
     const history = await request("user", "GET", "/thoughts?scope=history", 200);
-    if (!Array.isArray(history) || !history.some(item => object(item).id === "original")) throw new Error("History inspection failed");
-    const preview = object(await request("user", "GET", "/thoughts/original/branch/preview", 200));
-    if (preview.rootId !== "original" || !Array.isArray(preview.branchIds) || !preview.branchIds.includes("development") || !Array.isArray(preview.affectedIds) || !preview.affectedIds.includes("development")) throw new Error("Unexpected branch preview");
+    if (!Array.isArray(history) || !history.some(item => object(item).id === original)) throw new Error("History inspection failed");
+    const preview = object(await request("user", "GET", `${rootPath}/branch/preview`, 200));
+    if (preview.rootId !== original || !Array.isArray(preview.branchIds) || !preview.branchIds.includes(development) || !Array.isArray(preview.affectedIds) || !preview.affectedIds.includes(development)) throw new Error("Unexpected branch preview");
     deps.stdout("Branch preview received.");
-    await request("user", "POST", "/thoughts/original/branch/reject", 204, preview);
-    await request("ai", "GET", "/thoughts/development", 404);
+    await request("user", "POST", `${rootPath}/branch/reject`, 204, preview);
+    await request("ai", "GET", developmentPath, 404);
     deps.stdout("Branch reject confirmed.");
-    await request("user", "POST", "/thoughts/development/branch/restore", 204);
-    const restored = object(await request("ai", "GET", "/thoughts/development", 200));
-    if (restored.id !== "development") throw new Error("Subtree restore failed");
-    await request("ai", "GET", "/thoughts/original", 404);
-    await request("ai", "GET", "/connections/connection", 404);
-    const connectionHistory = object(await request("user", "GET", "/connections/connection?scope=history", 200));
-    if (connectionHistory.id !== "connection") throw new Error("Connection history failed");
+    await request("user", "POST", `${developmentPath}/branch/restore`, 204);
+    const restored = object(await request("ai", "GET", developmentPath, 200));
+    if (restored.id !== development) throw new Error("Subtree restore failed");
+    await request("ai", "GET", rootPath, 404);
+    await request("ai", "GET", `/connections/${linkId}`, 404);
+    const connectionHistory = object(await request("user", "GET", `/connections/${linkId}?scope=history`, 200));
+    if (connectionHistory.id !== link.id) throw new Error("Connection history failed");
     deps.stdout("Partial restore completed; the original and independently rejected connection remain hidden.");
   } catch {
     failed = true;

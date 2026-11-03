@@ -26,6 +26,7 @@ Exact scheduling, affected scope, retries, and cost bounds remain implementation
 3. Read candidate material and relevant context before asserting a connection. A search result alone is not evidence.
 4. Record a useful interpretation where warranted, clearly AI-authored.
 5. Record meaningful connections with an explanation and supporting references, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
+6. Generate a concise, clearly AI-authored title for untitled notes. Capture must not require the client or user to supply one; use the first-five-word display fallback until a title is available. Store the title as separate metadata, never a rewrite of the original thought text or ancestry. The user may edit or clear the title, and clearing invites regeneration. Only fill a title that is still absent when the result is saved; a late result must not overwrite a user-supplied title. Rejected notes remain excluded from all weaver work, including title generation.
 
 Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
 

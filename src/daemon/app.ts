@@ -1,15 +1,9 @@
 import { Hono } from "hono";
-import { createThought, type Thought } from "../domain/thought";
-import { createConnection, type Connection } from "../domain/connection";
 import { BranchConfirmationError, ForbiddenActorError, type Actor, type BranchPreview, type ReadScope, type RejectionService } from "../domain/rejection";
-import { record, ValidationError } from "../domain/validation";
+import { nonEmpty, nullableString, oneOf, record, references, ValidationError } from "../domain/validation";
 import type { Context } from "hono";
-
-/** Writes receive validated domain values; reference checks remain an API precondition. */
-export interface CreationPort {
-  createThought(thought: Thought): void;
-  createConnection(connection: Connection): void;
-}
+import { CreationForbiddenError, CreationNotFoundError, type CreationService, type ThoughtInput } from "../domain/creation";
+import { TitleConflictError, TitleForbiddenError, TitleNotFoundError, type TitleService } from "../domain/title";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -20,9 +14,10 @@ export interface BoundaryEvent {
 
 export interface AppOptions {
   readonly rejection: RejectionService;
-  readonly writes: CreationPort;
   readonly credentials: { readonly user: string; readonly ai: string };
   readonly logger: (event: BoundaryEvent) => void;
+  readonly creation: CreationService;
+  readonly titles: TitleService;
 }
 
 type AppEnv = { Variables: { actor: Actor } };
@@ -64,6 +59,14 @@ function user(c: ApiContext): void {
   if (c.get("actor") !== "user") throw new ApiError(403);
 }
 
+function ai(c: ApiContext): void {
+  if (c.get("actor") !== "ai") throw new ApiError(403);
+}
+
+function thoughtInput(data: Record<string, unknown>): ThoughtInput {
+  return { text: nonEmpty(data.text, "text"), ...(data.title === undefined ? {} : { title: nullableString(data.title, "title") }) };
+}
+
 function safePath(path: string): string {
   const parts = path.split("/");
   if (!["thoughts", "connections", "responses"].includes(parts[1] ?? "")) return "/other";
@@ -74,15 +77,16 @@ function safePath(path: string): string {
 
 /** Construct a server-side transport around scoped reads and validated commands. */
 export function createApp(options: AppOptions): Hono<AppEnv> {
-  const { rejection, writes, credentials, logger } = options;
+  const { rejection, creation, titles, credentials, logger } = options;
   if (!credentials.user.trim() || !credentials.ai.trim() || credentials.user === credentials.ai) {
     throw new Error("Invalid credentials configuration");
   }
   const app = new Hono<AppEnv>();
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError ? error.status :
-      error instanceof BranchConfirmationError ? 409 :
-      error instanceof ForbiddenActorError ? 403 :
+      error instanceof BranchConfirmationError || error instanceof TitleConflictError ? 409 :
+      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError ? 403 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError ? 404 :
       error instanceof ValidationError ? 400 : 500;
     return c.json({ error: status === 500 ? "Internal server error" :
       ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict" } as const)[status] }, status);
@@ -120,29 +124,43 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   });
 
   app.post("/thoughts", async c => {
-    noQuery(c);
-    const data = await body(c, ["id", "text", "title", "kind", "createdAt", "origin", "parentId", "sourceIds"]);
-    const actor = c.get("actor");
-    const thought = createThought({ ...data, author: actor });
-    const visible = rejection.listThoughts({ actor, mode: "normal" });
-    const ids = new Set(visible.map(item => item.id));
-    if ((thought.parentId !== null && !ids.has(thought.parentId)) || thought.sourceIds.some(id => !ids.has(id))) throw new ApiError(404);
-    const existing = actor === "user" ? rejection.listThoughts({ actor, mode: "history" }) : visible;
-    if (existing.some(item => item.id === thought.id)) throw new ApiError(409);
-    writes.createThought(thought);
-    return c.json(thought, 201);
+    user(c); noQuery(c);
+    return c.json(creation.capture("user", thoughtInput(await body(c, ["text", "title"]))), 201);
+  });
+  app.post("/thoughts/:id/contributions", async c => {
+    user(c); noQuery(c);
+    return c.json(creation.contribute("user", c.req.param("id"), thoughtInput(await body(c, ["text", "title"]))), 201);
+  });
+  app.post("/thoughts/:id/developments", async c => {
+    ai(c); noQuery(c);
+    const data = await body(c, ["text", "title", "sourceIds"]);
+    return c.json(creation.develop("ai", c.req.param("id"), { ...thoughtInput(data),
+      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) }), 201);
   });
   app.post("/connections", async c => {
     noQuery(c);
-    const data = await body(c, ["id", "fromId", "toId", "category", "explanation", "sourceIds"]);
-    const actor = c.get("actor");
-    const connection = createConnection({ ...data, proposedBy: actor });
-    const ids = new Set(rejection.listThoughts({ actor, mode: "normal" }).map(item => item.id));
-    if (![connection.fromId, connection.toId, ...connection.sourceIds].every(id => ids.has(id))) throw new ApiError(404);
-    const existing = actor === "user" ? rejection.listConnections({ actor, mode: "history" }) : rejection.listConnections({ actor, mode: "normal" });
-    if (existing.some(item => item.id === connection.id)) throw new ApiError(409);
-    writes.createConnection(connection);
-    return c.json(connection, 201);
+    const data = await body(c, ["fromId", "toId", "category", "explanation", "sourceIds"]);
+    return c.json(creation.connect(c.get("actor"), { fromId: nonEmpty(data.fromId, "fromId"), toId: nonEmpty(data.toId, "toId"),
+      category: oneOf(data.category, "category", ["supports", "contradicts", "extends", "related"]),
+      explanation: nonEmpty(data.explanation, "explanation"),
+      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) }), 201);
+  });
+
+  app.put("/thoughts/:id/title", async c => {
+    user(c); noQuery(c);
+    const data = await body(c, ["title"]);
+    const state = titles.setUser("user", c.req.param("id"), nullableString(data.title, "title"));
+    const thought = rejection.listThoughts({ actor: "user", mode: "history" }).find(item => item.id === c.req.param("id"));
+    if (!thought) throw new ApiError(404);
+    return c.json({ ...thought, ...state });
+  });
+  app.post("/thoughts/:id/title/fill", async c => {
+    ai(c); noQuery(c);
+    const data = await body(c, ["title"]);
+    const state = titles.fillAi("ai", c.req.param("id"), nonEmpty(data.title, "title"));
+    const thought = rejection.listThoughts({ actor: "ai", mode: "normal" }).find(item => item.id === c.req.param("id"));
+    if (!thought) throw new ApiError(404);
+    return c.json({ ...thought, ...state });
   });
 
   app.get("/thoughts/:id/branch/preview", c => {

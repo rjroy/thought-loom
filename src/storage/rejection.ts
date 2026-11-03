@@ -33,7 +33,7 @@ export class SqliteRejectionRepository implements RejectionRepository {
   private readSnapshot(): RejectionSnapshot {
     const thoughtSources = sourcesByOwner(this.db.query("SELECT thought_id AS ownerId, source_id AS sourceId FROM thought_sources ORDER BY thought_id, position").all() as { ownerId: string; sourceId: string }[]);
     const connectionSources = sourcesByOwner(this.db.query("SELECT connection_id AS ownerId, source_id AS sourceId FROM connection_sources ORDER BY connection_id, position").all() as { ownerId: string; sourceId: string }[]);
-    const thoughts = this.db.query(`SELECT id, text, title, author, kind, created_at AS createdAt, origin, parent_id AS parentId FROM thoughts`).all() as { id: string }[];
+    const thoughts = this.db.query(`SELECT t.id, t.text, m.title, m.title_author AS titleAuthor, t.author, t.kind, t.created_at AS createdAt, t.origin, t.parent_id AS parentId FROM thoughts t JOIN thought_titles m ON m.thought_id = t.id`).all() as { id: string }[];
     const connections = this.db.query(`SELECT id, from_id AS fromId, to_id AS toId, category, proposed_by AS proposedBy, explanation FROM connections`).all() as { id: string }[];
     const responses = this.db.query("SELECT id, thought_id AS thoughtId, text, role FROM responses").all();
     const rejectedThoughts = this.db.query("SELECT thought_id AS id FROM rejected_thoughts").all() as { id: string }[];

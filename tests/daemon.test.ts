@@ -250,45 +250,49 @@ describe("real HTTP and SQLite daemon", () => {
         expect(Number(new URL(daemon.url).port)).toBeGreaterThan(0);
         let request = client(daemon);
         expect((await request("/thoughts", "none")).status).toBe(401);
-        const root = thought("root", null);
-        const child = thought("child", "root", ["root"]);
-        expect((await request("/thoughts", "user", "POST", root)).status).toBe(201);
-        const createdChild = await request("/thoughts", "ai", "POST", child);
+        const createdRoot = await request("/thoughts", "user", "POST", { text: "private content root" });
+        expect(createdRoot.status).toBe(201);
+        const root = await createdRoot.json();
+        expect(root).toMatchObject({ text: "private content root", title: null, titleAuthor: null, author: "user", kind: "captured-original", parentId: null, sourceIds: [] });
+        const createdChild = await request(`/thoughts/${root.id}/developments`, "ai", "POST", { text: "private content child", sourceIds: [root.id] });
         expect(createdChild.status).toBe(201);
-        expect(await createdChild.json()).toEqual({ ...child, author: "ai" });
-        const createdLink = await request("/connections", "ai", "POST", link);
+        const child = await createdChild.json();
+        expect(child).toMatchObject({ text: "private content child", title: null, titleAuthor: null, author: "ai", kind: "developing-idea", parentId: root.id, sourceIds: [root.id] });
+        const linkInput = { fromId: root.id, toId: child.id, category: "supports", explanation: link.explanation, sourceIds: [root.id] };
+        const createdLink = await request("/connections", "ai", "POST", linkInput);
         expect(createdLink.status).toBe(201);
-        expect(await createdLink.json()).toEqual({ ...link, proposedBy: "ai" });
-        expect((await request("/connections/link/reject", "user", "POST")).status).toBe(204);
-        expect((await request("/thoughts/root/reject", "user", "POST")).status).toBe(204);
-        expect((await request("/thoughts/root", "ai")).status).toBe(404);
-        const visibleChild = await request("/thoughts/child", "ai");
+        const savedLink = await createdLink.json();
+        expect(savedLink).toEqual({ ...linkInput, id: savedLink.id, proposedBy: "ai" });
+        expect((await request(`/connections/${savedLink.id}/reject`, "user", "POST")).status).toBe(204);
+        expect((await request(`/thoughts/${root.id}/reject`, "user", "POST")).status).toBe(204);
+        expect((await request(`/thoughts/${root.id}`, "ai")).status).toBe(404);
+        const visibleChild = await request(`/thoughts/${child.id}`, "ai");
         expect(visibleChild.status).toBe(200);
-        expect(await visibleChild.json()).toEqual({ ...child, parentId: null, sourceIds: [], author: "ai" });
+        expect(await visibleChild.json()).toEqual({ ...child, parentId: null, sourceIds: [] });
         const history = await request("/thoughts?scope=history");
         expect(history.status).toBe(200);
-        expect(await history.json()).toEqual(expect.arrayContaining([{ ...root, author: "user" }, { ...child, author: "ai" }]));
-        const previewResponse = await request("/thoughts/root/branch/preview");
+        expect(await history.json()).toEqual(expect.arrayContaining([root, child]));
+        const previewResponse = await request(`/thoughts/${root.id}/branch/preview`);
         expect(previewResponse.status).toBe(200);
         const preview = await previewResponse.json();
-        expect(preview).toEqual({ rootId: "root", branchIds: ["child", "root"], affectedIds: ["child"], count: 1 });
-        expect((await request("/thoughts/root/branch/reject", "user", "POST", preview)).status).toBe(204);
-        expect((await request("/thoughts/child", "ai")).status).toBe(404);
+        expect(preview).toEqual({ rootId: root.id, branchIds: [root.id, child.id].sort(), affectedIds: [child.id], count: 1 });
+        expect((await request(`/thoughts/${root.id}/branch/reject`, "user", "POST", preview)).status).toBe(204);
+        expect((await request(`/thoughts/${child.id}`, "ai")).status).toBe(404);
         await stop(daemon);
         await stop(daemon);
         daemon = await startDaemon(config(dbPath), event => events.push(event));
         request = client(daemon);
-        expect((await request("/thoughts/root", "ai")).status).toBe(404);
-        expect((await request("/thoughts/child", "ai")).status).toBe(404);
-        expect((await request("/thoughts/root/branch/restore", "user", "POST")).status).toBe(204);
-        expect(await (await request("/thoughts/child", "ai")).json()).toEqual({ ...child, author: "ai" });
-        expect((await request("/connections/link", "ai")).status).toBe(404);
-        expect(await (await request("/connections/link?scope=history")).json()).toEqual({ ...link, proposedBy: "ai" });
+        expect((await request(`/thoughts/${root.id}`, "ai")).status).toBe(404);
+        expect((await request(`/thoughts/${child.id}`, "ai")).status).toBe(404);
+        expect((await request(`/thoughts/${root.id}/branch/restore`, "user", "POST")).status).toBe(204);
+        expect(await (await request(`/thoughts/${child.id}`, "ai")).json()).toEqual(child);
+        expect((await request(`/connections/${savedLink.id}`, "ai")).status).toBe(404);
+        expect(await (await request(`/connections/${savedLink.id}?scope=history`)).json()).toEqual(savedLink);
         await stop(daemon);
         daemon = await startDaemon(config(dbPath), event => events.push(event));
         request = client(daemon);
-        expect(await (await request("/thoughts/root", "ai")).json()).toEqual({ ...root, author: "user" });
-        expect((await request("/connections/link", "ai")).status).toBe(404);
+        expect(await (await request(`/thoughts/${root.id}`, "ai")).json()).toEqual(root);
+        expect((await request(`/connections/${savedLink.id}`, "ai")).status).toBe(404);
       } finally {
         if (daemon) await stop(daemon);
       }
@@ -303,28 +307,23 @@ describe("real HTTP and SQLite daemon", () => {
     });
   });
 
-  test("duplicate and concurrent writes never replace immutable records; hidden collisions are sanitized", async () => {
+  test("concurrent identical captures get distinct identities and do not overwrite records", async () => {
     await withDirectory(async dir => {
       const events: DaemonEvent[] = [];
       const daemon = await startDaemon(config(join(dir, "db.sqlite")), event => events.push(event));
       try {
         const request = client(daemon);
-        const original = thought("same", null);
-        expect((await request("/thoughts", "user", "POST", original)).status).toBe(201);
-        expect((await request("/thoughts", "user", "POST", { ...original, text: "replacement" })).status).toBe(409);
-        const raced = await Promise.all(["first", "second"].map(text => request("/thoughts", "user", "POST", { ...thought("race", null), text })));
-        expect(raced.map(response => response.status).sort()).toEqual([201, 409]);
-        const winner = await (await request("/thoughts/race")).json();
-        expect(["first", "second"]).toContain(winner.text);
-        expect((await request("/thoughts/same/reject", "user", "POST")).status).toBe(204);
-        const collision = await request("/thoughts", "ai", "POST", { ...original, text: "attacker replacement" });
-        expect(collision.status).toBe(500);
-        const error = await collision.text();
-        for (const secret of [original.text, "attacker replacement", "SQLITE", userToken, aiToken]) {
-          expect(error).not.toContain(secret);
-          expect(JSON.stringify(events)).not.toContain(secret);
-        }
-        expect(await (await request("/thoughts/same?scope=history")).json()).toEqual({ ...original, author: "user" });
+        const input = { text: "private duplicate content" };
+        const raced = await Promise.all([request("/thoughts", "user", "POST", input), request("/thoughts", "user", "POST", input)]);
+        expect(raced.map(response => response.status)).toEqual([201, 201]);
+        const first = await raced[0]?.json();
+        const second = await raced[1]?.json();
+        expect(typeof first.id).toBe("string");
+        expect(typeof second.id).toBe("string");
+        expect(first.id).not.toBe(second.id);
+        expect(await (await request(`/thoughts/${first.id}`)).json()).toEqual(first);
+        expect(await (await request(`/thoughts/${second.id}`)).json()).toEqual(second);
+        expect(JSON.stringify(events)).not.toContain(input.text);
       } finally { await stop(daemon); }
     });
   });

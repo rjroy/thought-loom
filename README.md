@@ -7,6 +7,7 @@ A daemon-first application for capturing and developing connected thoughts. Prod
 The Bun/TypeScript foundation and Hono API provide:
 
 - Immutable thoughts with single-parent evolution trees.
+- Daemon-generated identities and creation times, plus separate editable title metadata.
 - Separate categorized connections and retained response addenda.
 - User-only rejection and restoration of thoughts, connections, and evolution subtrees.
 - Branch rejection previews and confirmation, with transactional state changes.
@@ -64,34 +65,56 @@ bun run api --role user GET /thoughts
 
 The format is `bun run api --role user|ai METHOD /path [JSON]`. Output includes the HTTP status and readable JSON; errors return a nonzero exit code. Only loopback daemon URLs are accepted, and redirects are not followed. The helper selects `THOUGHTLOOM_USER_TOKEN` or `THOUGHTLOOM_AI_TOKEN` from the role; it does not print the credential.
 
-For a small manual tree, use fresh IDs if you repeat the example. The timestamps below are example test data. Do not send `author`; the daemon derives it from your credential.
+### Capture
 
 ```sh
-bun run api --role user POST /thoughts '{"id":"manual-root","text":"An idea to explore","title":null,"kind":"developing-idea","createdAt":"2026-01-01T00:00:00Z","origin":"manual","parentId":null,"sourceIds":[]}'
-bun run api --role user POST /thoughts '{"id":"manual-child","text":"A development of that idea","title":null,"kind":"developing-idea","createdAt":"2026-01-01T00:00:00Z","origin":"manual","parentId":"manual-root","sourceIds":["manual-root"]}'
-bun run api --role user POST /connections '{"id":"manual-link","fromId":"manual-root","toId":"manual-child","category":"related","explanation":"Related ideas","sourceIds":[]}'
+bun run api --role user POST /thoughts '{"text":"An idea to explore"}'
 
-# Rejecting only the root leaves the child active.
-bun run api --role user POST /thoughts/manual-root/reject
-bun run api --role ai GET /thoughts
+# Or supply an optional title at capture time.
+bun run api --role user POST /thoughts '{"text":"Another thought","title":"A working title"}'
+```
+
+Capture accepts only `text` and optional `title`. The daemon assigns the ID, creation timestamp, authenticated authorship, kind, and origin, and returns the full saved record with status `201`. Copy the returned `id` for later commands. Caller-supplied storage fields are rejected; repeating a capture creates another distinct thought.
+
+### Titles
+
+Replace the placeholder below with an ID returned by capture:
+
+```sh
+THOUGHT_ID='paste-the-returned-id'
+bun run api --role user PUT "/thoughts/$THOUGHT_ID/title" '{"title":"A better title"}'
+bun run api --role user PUT "/thoughts/$THOUGHT_ID/title" '{"title":null}'
+```
+
+Title editing changes metadata, not the thought's text or evolution chain. Reads include the current `title` and `titleAuthor` alongside the immutable record. Clearing invites future weaver regeneration; until a title is available, use the first-five-word display fallback.
+
+**The weaver is not implemented yet.** No title is automatically generated today. The AI-only `POST /thoughts/:id/title/fill` operation accepts a supplied title for future integration and simulated tests; it does not call a model. It can only fill a still-untitled, non-rejected thought and cannot overwrite a user's title.
+
+Existing SQLite titles migrate to separate metadata on daemon startup. Back up any database you care about before upgrading.
+
+### Develop and inspect
+
+These commands branch from the selected thought, using its returned ID:
+
+```sh
+bun run api --role user POST "/thoughts/$THOUGHT_ID/contributions" '{"text":"A challenge or further thought"}'
+
+# Simulate an agent development without calling a model.
+bun run api --role ai POST "/thoughts/$THOUGHT_ID/developments" '{"text":"A possible development"}'
+
+bun run api --role user GET /thoughts
 bun run api --role user GET '/thoughts?scope=show-rejected'
 bun run api --role user GET '/thoughts?scope=history'
+bun run api --role ai GET /thoughts
 
-# Preview all descendants before confirming branch rejection.
-bun run api --role user GET /thoughts/manual-root/branch/preview
+# Reject just this thought; its descendants remain active.
+bun run api --role user POST "/thoughts/$THOUGHT_ID/reject"
+bun run api --role user GET "/thoughts/$THOUGHT_ID/branch/preview"
 ```
 
-To confirm, POST the exact current preview JSON body (`rootId`, `branchIds`, `affectedIds`, `count`) to `/thoughts/manual-root/branch/reject` using the helper's optional JSON argument. Copy only the JSON body, not the printed HTTP status. A stale or changed preview is rejected.
+To reject the entire branch, POST the exact current preview JSON body (`rootId`, `branchIds`, `affectedIds`, `count`) to `/thoughts/:id/branch/reject`. Copy only the JSON body, not the printed HTTP status. A stale or changed preview is rejected. `POST /thoughts/:id/branch/restore` restores the subtree beginning at the chosen point, not necessarily the original root.
 
-```sh
-# Restore only the later subtree, leaving its rejected ancestor unchanged.
-bun run api --role user POST /thoughts/manual-child/branch/restore
-
-# Explicit connection rejection remains independent of idea restoration.
-bun run api --role user POST /connections/manual-link/reject
-bun run api --role user POST /thoughts/manual-root/branch/restore
-bun run api --role user GET /connections
-```
+Connections remain separate: `POST /connections` takes `fromId`, `toId`, `category`, `explanation`, and optional `sourceIds`, and returns the connection with its daemon-generated ID. `POST /connections/:id/reject` and `/restore` affect only that connection; a separately rejected connection stays rejected when its ideas are restored. Use `bun run demo` for a complete isolated branch-and-connection example.
 
 ## Boundaries
 

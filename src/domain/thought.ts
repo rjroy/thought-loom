@@ -1,4 +1,4 @@
-import { nonEmpty, nullableString, oneOf, record, references } from "./validation";
+import { nonEmpty, nullableString, oneOf, record, references, ValidationError } from "./validation";
 
 export type Author = "user" | "ai";
 export type MaterialKind = "captured-original" | "user-contribution" | "ai-interpretation" | "developing-idea";
@@ -7,6 +7,7 @@ export interface Thought {
   readonly id: string;
   readonly text: string;
   readonly title: string | null;
+  readonly titleAuthor?: Author | null;
   readonly author: Author;
   readonly kind: MaterialKind;
   readonly createdAt: string;
@@ -18,10 +19,14 @@ export interface Thought {
 /** Validate and construct a thought from data crossing a storage boundary. */
 export function createThought(input: unknown): Thought {
   const data = record(input);
+  const title = nullableString(data.title, "title");
+  const titleAuthor = data.titleAuthor === undefined ? undefined : data.titleAuthor === null ? null : oneOf(data.titleAuthor, "titleAuthor", ["user", "ai"]);
+  if (titleAuthor !== undefined && ((title === null) !== (titleAuthor === null))) throw new ValidationError("Title attribution is invalid");
   return Object.freeze({
     id: nonEmpty(data.id, "id"),
     text: nonEmpty(data.text, "text"),
-    title: nullableString(data.title, "title"),
+    title,
+    ...(titleAuthor === undefined ? {} : { titleAuthor }),
     author: oneOf(data.author, "author", ["user", "ai"]),
     kind: oneOf(data.kind, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"]),
     createdAt: nonEmpty(data.createdAt, "createdAt"),

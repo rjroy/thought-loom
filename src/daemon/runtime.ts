@@ -1,8 +1,12 @@
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { CreationService } from "../domain/creation";
 import { RejectionService } from "../domain/rejection";
+import { TitleService } from "../domain/title";
 import { SqliteRejectionRepository } from "../storage/rejection";
+import { SqliteTitleRepository } from "../storage/title";
 import { migrate, SqliteStore } from "../storage/sqlite";
 import { createApp, type BoundaryEvent } from "./app";
 import { validateConfig, type DaemonConfig } from "./config";
@@ -31,10 +35,11 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     migrate(db);
     const store = new SqliteStore(db);
     const rejection = new RejectionService(new SqliteRejectionRepository(db));
-    const app = createApp({ rejection, credentials: valid.credentials, logger, writes: {
-      createThought: thought => store.saveThought(thought),
-      createConnection: connection => store.saveConnection(connection),
+    const creation = new CreationService({ rejection, id: randomUUID, now: () => new Date().toISOString(), writes: {
+      createThought: thought => store.saveThought(thought), createConnection: connection => store.saveConnection(connection),
     } });
+    const titles = new TitleService(new SqliteTitleRepository(db));
+    const app = createApp({ rejection, creation, titles, credentials: valid.credentials, logger });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: app.fetch });
     const url = server.url.toString();
     const runningServer = server;

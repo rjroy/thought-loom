@@ -26,7 +26,7 @@ A captured note can contain several ideas. Other notes can provide supporting co
 
 ## Immutable thoughts and evolution trees
 
-Every recorded thought is immutable, whether authored by the user or AI. There is no versioning, direct-edit action, or in-place correction. The user can capture a new idea or evolve an existing one. A contradiction of an earlier thought is another thought in its own right.
+Every recorded thought's content and evolution ancestry are immutable, whether authored by the user or AI. There is no thought versioning, direct text-edit action, or in-place correction. The user can capture a new idea or evolve an existing one. A contradiction of an earlier thought is another thought in its own right. Editable title metadata is separate from this immutable record.
 
 Each non-root thought has exactly one evolution parent. A typical path is:
 
@@ -42,7 +42,17 @@ The agent's full conversational response is normally an addendum to its recorded
 
 Keep its identity, actual text, available title, authorship, creation date, and origin. Retain its evolution parent where applicable, supporting sources, and agent-response addenda. History is the tree of distinct thoughts and their provenance, not revisions of a single note. A title labels the text; it does not replace it. Alternate names or acronyms can help retrieval but are not new notes or conceptual connections.
 
-If a note has no title, its first five words provide the display label. Do not require a person to write a title before saving.
+The daemon generates the identity and creation timestamp when creating a thought and returns the created values in its response. Public callers must not need to generate these values.
+
+## Editable title metadata
+
+Store titles separately from immutable thoughts, with one title-metadata record per thought rather than a general-purpose metadata system. Return the current title alongside the thought in the ordinary API response; clients should not need a separate request to assemble it.
+
+Capture normally has no title, though a user-supplied title is allowed. The weaver generates a title when a note has none. Until a title is available, its first five words provide the display label. Do not require a person to write a title before saving.
+
+The user can edit or clear a note's title without changing its text, identity, authorship, creation time, or evolution ancestry, and without creating an evolution step. Track whether the current title is user-authored or AI-authored separately from the thought's authorship.
+
+Clearing a title invites the weaver to generate another; it does not opt out of title generation. The first-five-word fallback applies while regeneration is pending. A late weaver result must not overwrite a current user-supplied title: generation only fills a title that is still absent when the result is saved.
 
 Rejection changes availability, not the recorded wording or evolution ancestry. It is not deletion of the historical record.
 

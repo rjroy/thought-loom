@@ -24,6 +24,7 @@ Sources, creation dates, evolution history, agent-response addenda, and the expl
 ## Actions
 
 - Read or expand the selected thought and contextual text.
+- Edit or clear its title metadata. Clearing invites the weaver to generate another; show the first-five-word fallback in the meantime.
 - Open a connected thought, making it the new focus.
 - Inspect original sources, attribution, development history, or connection rationale.
 - Choose **Evolve this idea** to open a new [Evolve](evolve-view.md) conversation about this selected thought.
@@ -31,7 +32,7 @@ Sources, creation dates, evolution history, agent-response addenda, and the expl
 - Reject or restore any note, including the user's own, or any connection; inspect earlier material. These are user-only secondary actions rather than a mandatory approval inbox.
 - Reject or restore an evolution branch from the selected point, following only evolution descendants. Branch rejection must show the affected idea count and request confirmation.
 
-There is no edit or correction action on a saved thought. To express a different thought, capture a new idea or choose Evolve. Rejection is not deletion: **Reject this idea** leaves descendants active, while **Reject idea branch** includes them. Restoration can begin at a later point to recover only that subtree. A separately rejected connection stays rejected when its associated ideas are restored. See the [data model](data-model.md) for the shared rules.
+There is no edit or correction action on a saved thought's text. Title editing changes separate metadata, not the thought or its evolution chain. To express a different thought, capture a new idea or choose Evolve. Rejection is not deletion: **Reject this idea** leaves descendants active, while **Reject idea branch** includes them. Restoration can begin at a later point to recover only that subtree. A separately rejected connection stays rejected when its associated ideas are restored. See the [data model](data-model.md) for the shared rules.
 
 ## Reading is not agreement
 

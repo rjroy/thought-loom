@@ -23,9 +23,9 @@ describe("api script", () => {
       calls.push({ url: String(input), init });
       return Response.json({ id: "created" }, { status: 201 });
     });
-    expect(await runApi(["--role", "ai", "POST", "/thoughts", '{"text":"hello"}'], env, fixture.deps)).toBe(0);
+    expect(await runApi(["--role", "ai", "POST", "/thoughts/parent/developments", '{"text":"hello"}'], env, fixture.deps)).toBe(0);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("http://127.0.0.1:3001/thoughts");
+    expect(calls[0]?.url).toBe("http://127.0.0.1:3001/thoughts/parent/developments");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe(`Bearer ${aiToken}`);
     expect(new Headers(calls[0]?.init?.headers).get("content-type")).toContain("application/json");
@@ -148,9 +148,21 @@ describe("isolated demo", () => {
           expect(JSON.stringify([output, errors])).not.toContain(token);
         }
         for (const milestone of [/original/i, /contribution/i, /simulated.*ai/i, /sibling/i, /connection/i, /single.*reject/i, /active.*child/i, /preview/i, /branch.*reject/i, /partial.*restor/i]) expect(report).toMatch(milestone);
-        const creates = calls.filter(call => call.method === "POST" && call.path === "/thoughts" && call.status === 201);
+        const creates = calls.filter(call => call.method === "POST" && (call.path === "/thoughts" || /^\/thoughts\/[^/]+\/(contributions|developments)$/.test(call.path)) && call.status === 201);
         expect(creates.length).toBeGreaterThanOrEqual(5);
         expect(new Set(creates.map(call => call.authorization)).size).toBe(2);
+        const capture = creates.find(call => call.path === "/thoughts");
+        const captureBody = object(capture?.body);
+        expect(typeof captureBody?.text).toBe("string");
+        expect(Object.keys(captureBody ?? {}).every(key => ["text", "title"].includes(key))).toBe(true);
+        const ids = new Set(creates.map(call => object(call.result)?.id));
+        for (const call of creates.filter(item => item.path !== "/thoughts")) {
+          const body = object(call.body);
+          expect(typeof body?.text).toBe("string");
+          expect(Object.keys(body ?? {}).every(key => ["text", "title", "sourceIds"].includes(key))).toBe(true);
+          expect(ids.has(call.path.split("/")[2])).toBe(true);
+          expect(call.authorization).toBe(call.path.endsWith("/developments") ? `Bearer ${credentials[0]?.ai}` : `Bearer ${credentials[0]?.user}`);
+        }
         expect(calls.some(call => call.path === "/connections" && call.method === "POST" && call.status === 201)).toBe(true);
         expect(calls.some(call => call.path.endsWith("/branch/preview") && call.status === 200)).toBe(true);
         expect(calls.some(call => call.path.endsWith("/branch/reject") && call.status === 204)).toBe(true);

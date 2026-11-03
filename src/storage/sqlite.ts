@@ -22,11 +22,11 @@ export function migrate(db: Database): void {
     db.exec("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON;");
     const foreignKeys = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number };
     if (foreignKeys.foreign_keys !== 1) throw new Error("SQLite foreign keys could not be enabled");
-    db.transaction(() => db.exec(`
+    db.transaction(() => {
+      db.exec(`
       CREATE TABLE IF NOT EXISTS thoughts (
         id TEXT PRIMARY KEY NOT NULL,
         text TEXT NOT NULL,
-        title TEXT,
         author TEXT NOT NULL CHECK (author IN ('user', 'ai')),
         kind TEXT NOT NULL CHECK (kind IN ('captured-original', 'user-contribution', 'ai-interpretation', 'developing-idea')),
         created_at TEXT NOT NULL,
@@ -38,6 +38,12 @@ export function migrate(db: Database): void {
       BEGIN SELECT RAISE(ABORT, 'thoughts are immutable'); END;
       CREATE TRIGGER IF NOT EXISTS thoughts_immutable_delete BEFORE DELETE ON thoughts
       BEGIN SELECT RAISE(ABORT, 'thoughts are immutable'); END;
+      CREATE TABLE IF NOT EXISTS thought_titles (
+        thought_id TEXT PRIMARY KEY NOT NULL REFERENCES thoughts(id),
+        title TEXT,
+        title_author TEXT CHECK (title_author IN ('user', 'ai')),
+        CHECK ((title IS NULL AND title_author IS NULL) OR (title IS NOT NULL AND title_author IS NOT NULL))
+      );
       CREATE TABLE IF NOT EXISTS thought_sources (
         thought_id TEXT NOT NULL REFERENCES thoughts(id),
         position INTEGER NOT NULL,
@@ -90,7 +96,14 @@ export function migrate(db: Database): void {
       CREATE TABLE IF NOT EXISTS rejected_connections (
         connection_id TEXT PRIMARY KEY NOT NULL REFERENCES connections(id)
       );
-    `))();
+      `);
+      const columns = db.query("PRAGMA table_info(thoughts)").all() as { name: string }[];
+      if (columns.some(column => column.name === "title")) {
+        db.exec(`INSERT INTO thought_titles (thought_id, title, title_author)
+          SELECT id, title, CASE WHEN title IS NULL THEN NULL ELSE author END FROM thoughts;
+          ALTER TABLE thoughts DROP COLUMN title;`);
+      }
+    }).immediate();
   });
 }
 
@@ -102,8 +115,10 @@ export class SqliteStore {
     boundary("save thought", () => {
       const thought = createThought(input);
       this.db.transaction(() => {
-        this.db.run("INSERT INTO thoughts (id, text, title, author, kind, created_at, origin, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [thought.id, thought.text, thought.title, thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
+        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [thought.id, thought.text, thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
+        this.db.run("INSERT INTO thought_titles (thought_id, title, title_author) VALUES (?, ?, ?)",
+          [thought.id, thought.title, thought.title === null ? null : thought.titleAuthor ?? thought.author]);
         const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");
         thought.sourceIds.forEach((id, index) => insert.run(thought.id, index, id));
         this.db.run("INSERT INTO thought_source_seals (thought_id) VALUES (?)", [thought.id]);
@@ -114,8 +129,8 @@ export class SqliteStore {
   getThought(id: string): Thought | null {
     return boundary("get thought", () => {
       nonEmpty(id, "id");
-      const row = this.db.query(`SELECT id, text, title, author, kind, created_at AS createdAt,
-        origin, parent_id AS parentId FROM thoughts WHERE id = ?`).get(id);
+      const row = this.db.query(`SELECT t.id, t.text, m.title, m.title_author AS titleAuthor, t.author, t.kind, t.created_at AS createdAt,
+        t.origin, t.parent_id AS parentId FROM thoughts t JOIN thought_titles m ON m.thought_id = t.id WHERE t.id = ?`).get(id);
       if (!row) return null;
       const sources = this.db.query("SELECT source_id AS id FROM thought_sources WHERE thought_id = ? ORDER BY position").all(id) as { id: string }[];
       return createThought({ ...row, sourceIds: sources.map(source => source.id) });
