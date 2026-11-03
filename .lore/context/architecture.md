@@ -49,4 +49,12 @@ Once the foundations work, add agent integration through the same domain operati
 
 The domain model describes thoughts and their behavior, not screen layouts or cards. A visual change may require a different query or response shape, but must not automatically trigger a domain-model rewrite. If it exposes a genuinely missing business capability, stop and discuss it under the working agreement above.
 
+## Visual-client design gate
+
+Immediately before starting Next.js client implementation (Phase 5), go through an **Impeccable comp-led design phase for each screen** with the user. This follows the daemon/agent phases; it is not permission to start visual work during them.
+
+The designer owns this work using the Impeccable workflow. Establish the screen inventory and shared visual direction, then review and agree screen comps before implementing the client. The existing mockups establish desired layouts, not approved colors or imagery. Settings contents remain undecided rather than being invented to complete a comp.
+
+Any daemon capability gap exposed by design still requires discussion, not a silent domain rewrite or an out-of-scope daemon change.
+
 These are the agreed starting constraints and development direction, not a complete architecture or implementation plan. Further architecture decisions remain open for discussion.
