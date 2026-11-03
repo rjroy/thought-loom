@@ -26,7 +26,6 @@ Exact scheduling, affected scope, retries, and cost bounds remain implementation
 3. Read candidate material and relevant context before asserting a connection. A search result alone is not evidence.
 4. Record a useful interpretation where warranted, clearly AI-authored.
 5. Record meaningful connections with an explanation and supporting references, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
-6. Record useful alternate terminology for later retrieval where appropriate. An alias is not a conceptual connection.
 
 Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
 
@@ -43,5 +42,7 @@ Show simple processing state where useful: pending, working, finished, or failed
 Preserve attribution, sources, and evolution history. All thoughts, including AI interpretations, are immutable; further thinking creates new material rather than overwriting old material. Rejection and restoration belong only to the user. For the weaver, rejected notes and connections are effectively nonexistent: do not retrieve them, include them as context, or reason from them. An active descendant does not make a rejected ancestor available again. These rules also apply to the evolution agent and the read-only Agentic export agent.
 
 ## Future possibilities, not requirements yet
+
+Acronym expansion and alternate-terminology/alias recording for retrieval are future enhancements, not V1 weaver responsibilities. An alias is not a conceptual connection.
 
 Periodic revisiting could reveal neglected questions, emerging themes, or several old notes describing the same problem. Aging, autonomous gardening, resurfacing schedules, and synthesized cross-note ideas need further discussion. Inactivity or age alone must not weaken an idea, imply low value, or justify deletion.

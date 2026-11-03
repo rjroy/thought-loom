@@ -13,6 +13,15 @@ tags: [thoughtloom, restart, architecture, workflow]
 - **Daemon:** Hono.
 - **Runtime and tooling:** Bun.
 - **Storage:** SQLite through Bun's built-in `bun:sqlite`, selected for the Phase 1 foundation. Each non-root thought has one evolution parent; weaver-discovered connections are stored in a separate linking table, not as additional evolution parents.
+- **Agent runtime:** OpenCode, for weaving, evolution, and Agentic export.
+
+## OpenCode integration and compatibility
+
+Use the maintained `@opencode/client` from the daemon to attach to the configured operator-managed OpenCode service. Keep service credentials and the client server-side. The application does not own the shared service's startup, shutdown, or upgrades.
+
+OpenCode **2.2.2** is an allowed integration baseline; targeting a newer release is also allowed. Do not reject a service merely because its version is newer than the development baseline. Avoid exact-version equality checks or discovery constraints that silently enforce that restriction. Validate the API capabilities actually needed, and report a concrete incompatibility if one exists; accepting newer versions is not a claim that every future API will be compatible.
+
+Reuse the prior [2.2.2 integration validation](../work/research/opencode-2.2.2-validation.md) and [restricted-generation research](../work/research/opencode-2.2.2-restricted-generation.md) as starting evidence. Their pinned versions and exact-version discovery examples describe historical fixtures, not production version gates. Revalidate relevant behavior with a focused compatibility smoke when integrating or changing versions; do not repeat broad research or alter the operator's service merely to reproduce the baseline.
 
 ## Client and daemon boundary
 

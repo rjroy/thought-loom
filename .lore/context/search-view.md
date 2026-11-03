@@ -15,11 +15,13 @@ The person searches for something they remember or want to investigate. Results 
 
 ## How retrieval works
 
-Use useful basic text retrieval rather than exact-string-only matching: search words and titles, support prefixes and modest typo tolerance, and recognize recorded alternate terminology or acronym expansions. For example, “SDK” should be able to find “software development kit.”
+Use useful basic text retrieval rather than exact-string-only matching: search words and titles, and support prefixes and modest typo tolerance.
 
-Acronym matching requires an alternate-name/expansion mechanism; ordinary full-text matching does not magically supply it. Aliases aid retrieval and are not evidence of a conceptual relationship.
+Acronym expansion and alternate-terminology/alias matching are future enhancements, not V1 requirements. Do not let their efficiency or implementation complexity impede V1. For example, finding “software development kit” from “SDK” is not a V1 acceptance criterion. Aliases, if added later, aid retrieval and are not evidence of a conceptual relationship.
 
-The previously chosen baseline was indexed full-text search with prefix and bounded typo handling. This preserves that level of behavior, not a requirement to rebuild a custom matcher or choose a particular search library. Ordinary search is not required to invoke an agent or understand an unrestricted natural-language request.
+Use SQLite **FTS5** as the full-text search foundation. Prefix matching and modest bounded typo handling remain the described behavior; FTS5 alone does not provide typo tolerance, so that needs complementary handling. Do not rebuild a custom full-text engine or require acronym/alias infrastructure for V1. Ordinary search is not required to invoke an agent or understand an unrestricted natural-language request.
+
+Start the typo-tolerance work from SQLite **spellfix1**, the user's reference point from the previous search implementation that worked reasonably well. Evaluate FTS5 plus spellfix1 before introducing a different approach. Verify extension availability and Bun/SQLite integration when implementing search; spellfix1 must not be assumed built in. The final integration details are implementation choices, not a reason to recreate search from scratch.
 
 Search should reach original captures, user discussion contributions, retained AI interpretations/developing ideas, every agent response, and effective titles. Full responses remain searchable even when they are addenda rather than evolution nodes. If an addendum matches, open its associated recorded development with the full response available there. There are no historical note revisions; earlier thoughts remain distinct searchable material unless rejected. Searching every relationship explanation is not assumed.
 
