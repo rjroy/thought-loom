@@ -83,13 +83,13 @@ describe("SQLite foundation", () => {
     const { store } = open();
     store.saveThought(root);
     store.saveThought(child);
-    const addendum = { id: "r1", thoughtId: "child", text: "Full AI response accompanying development", role: "addendum" } as const;
-    const fallback = { id: "r2", thoughtId: "root", text: "Full response where no development was recorded", role: "fallback" } as const;
+    const addendum = { id: "r1", thoughtIds: ["child"], state: "complete", text: "Full AI response accompanying development", role: "addendum" } as const;
+    const fallback = { id: "r2", thoughtIds: ["root"], state: "complete", text: "Full response where no development was recorded", role: "fallback" } as const;
     store.saveResponse(addendum);
     store.saveResponse(fallback);
     expect(store.getResponse("r1")).toEqual(addendum);
     expect(store.getResponse("r2")).toEqual(fallback);
-    expect(() => store.saveResponse({ ...addendum, id: "bad", thoughtId: "missing" })).toThrow(/foreign key constraint failed/i);
+    expect(() => store.saveResponse({ ...addendum, id: "bad", thoughtIds: ["missing"] })).toThrow(/foreign key constraint failed/i);
   });
 
   test("persists data across close and reopen", () => {
@@ -100,7 +100,7 @@ describe("SQLite foundation", () => {
     first.store.saveThought(root);
     const sourcedChild = { ...child, sourceIds: ["root"] };
     const connection: Connection = { id: "persistent-link", fromId: "child", toId: "root", category: "supports", proposedBy: "ai", explanation: "supporting context", sourceIds: ["root"] };
-    const addendum = { id: "persistent-response", thoughtId: "child", text: "Full response", role: "addendum" } as const;
+    const addendum = { id: "persistent-response", thoughtIds: ["child"], state: "complete", text: "Full response", role: "addendum" } as const;
     first.store.saveThought(sourcedChild);
     first.store.saveConnection(connection);
     first.store.saveResponse(addendum);
@@ -149,24 +149,44 @@ describe("SQLite foundation", () => {
 
   test.each([
     ["text", "UPDATE responses SET text = 'rewritten' WHERE id = 'response'"],
-    ["owner", "UPDATE responses SET thought_id = 'child' WHERE id = 'response'"],
     ["identity", "UPDATE responses SET id = 'rewritten' WHERE id = 'response'"],
     ["role", "UPDATE responses SET role = 'addendum' WHERE id = 'response'"],
+    ["state", "UPDATE responses SET state = 'interrupted' WHERE id = 'response'"],
+    ["replacement", "INSERT OR REPLACE INTO responses (id,text,role,state) VALUES ('response','rewritten','fallback','complete')"],
     ["deletion", "DELETE FROM responses WHERE id = 'response'"],
   ])("prevents fallback response %s changes", (_description, sql) => {
     const { db, store } = open();
     store.saveThought(root);
     store.saveThought(child);
-    const fallback = { id: "response", thoughtId: "root", text: "Recorded fallback development", role: "fallback" } as const;
+    const fallback = { id: "response", thoughtIds: ["root"], state: "complete", text: "Recorded fallback development", role: "fallback" } as const;
     store.saveResponse(fallback);
     const columns = db.query("PRAGMA table_info(responses)").all() as { name: string }[];
-    expect(columns.map(column => column.name)).toEqual(expect.arrayContaining(["id", "thought_id", "text", "role"]));
-    expect(db.query("SELECT id, thought_id, text, role FROM responses WHERE id = 'response'").get()).toEqual({
-      id: "response", thought_id: "root", text: fallback.text, role: "fallback",
+    expect(columns.map(column => column.name)).toEqual(expect.arrayContaining(["id", "text", "role", "state"]));
+    expect(columns.map(column => column.name)).not.toContain("thought_id");
+    expect(db.query("SELECT id, text, role, state FROM responses WHERE id = 'response'").get()).toEqual({
+      id: "response", text: fallback.text, role: "fallback", state: "complete",
     });
+    expect(db.query("SELECT response_id, thought_id, position FROM response_thoughts WHERE response_id='response'").all()).toEqual([{ response_id: "response", thought_id: "root", position: 0 }]);
     expect(() => db.run(sql)).toThrow(/immutable/i);
     expect(store.getResponse("response")).toEqual(fallback);
     expect(store.getResponse("rewritten")).toBeNull();
+  });
+
+  test.each([
+    ["replace the thought", "UPDATE response_thoughts SET thought_id='child' WHERE response_id='response' AND position=0"],
+    ["move to another response", "UPDATE response_thoughts SET response_id='other' WHERE response_id='response' AND position=0"],
+  ])("cannot %s a saved response association", (_description, sql) => {
+    const { db, store } = open();
+    store.saveThought(root);
+    store.saveThought(child);
+    const response = { id: "response", thoughtIds: ["root"], state: "complete", text: "Recorded fallback development", role: "fallback" } as const;
+    const other = { id: "other", thoughtIds: ["child"], state: "complete", text: "Another response", role: "fallback" } as const;
+    store.saveResponse(response);
+    store.saveResponse(other);
+    expect(db.query("SELECT response_id,thought_id,position FROM response_thoughts WHERE response_id='response'").all()).toEqual([{ response_id: "response", thought_id: "root", position: 0 }]);
+    expect(() => db.run(sql)).toThrow(/immutable|sealed/i);
+    expect(store.getResponse("response")).toEqual(response);
+    expect(store.getResponse("other")).toEqual(other);
   });
 
   test.each([
@@ -176,7 +196,7 @@ describe("SQLite foundation", () => {
     const { db, store } = open();
     store.saveThought(root);
     store.saveThought(child);
-    const addendum = { id: "addendum", thoughtId: "child", text: "Full retained response", role: "addendum" } as const;
+    const addendum = { id: "addendum", thoughtIds: ["child"], state: "complete", text: "Full retained response", role: "addendum" } as const;
     store.saveResponse(addendum);
     expect(store.getResponse("addendum")).toEqual(addendum);
     expect(() => db.run(sql)).toThrow(/immutable/i);

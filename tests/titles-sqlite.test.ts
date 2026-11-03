@@ -57,7 +57,7 @@ describe("title migration and SQLite boundary", () => {
       expect(joined(store.getThought("child"))).toEqual({ id: "child", text: "AI words", title: "AI legacy", titleAuthor: "ai", author: "ai", kind: "developing-idea", createdAt: "2026-01-02", origin: "agent", parentId: "root", sourceIds: ["root"] });
       expect(joined(store.getThought("empty"))).toEqual({ id: "empty", text: "empty title words", title: null, titleAuthor: null, author: "user", kind: "user-contribution", createdAt: "2026-01-03", origin: "capture", parentId: "child", sourceIds: ["root", "child"] });
       expect(store.getConnection("link")).toEqual({ id: "link", fromId: "root", toId: "child", category: "supports", proposedBy: "ai", explanation: "private rationale", sourceIds: ["root"] });
-      expect(store.getResponse("response")).toEqual({ id: "response", thoughtId: "child", role: "addendum", text: "private addendum" });
+      expect(store.getResponse("response")).toEqual({ id: "response", thoughtIds: ["child"], state: "complete", role: "addendum", text: "private addendum" });
       expect(rejection.getResponse({ actor: "ai", mode: "normal" }, "response")?.text).toBe("private addendum");
       expect(rejection.listConnections({ actor: "user", mode: "normal" })).toEqual([]);
       expect(rejection.listConnections({ actor: "user", mode: "history" }).map(item => item.id)).toEqual(["link"]);
@@ -75,7 +75,7 @@ describe("title migration and SQLite boundary", () => {
       expect(() => db?.run("UPDATE thoughts SET text='changed' WHERE id='child'")).toThrow();
       expect(() => db?.run("UPDATE thoughts SET parent_id=NULL WHERE id='child'")).toThrow();
       expect(() => db?.run("INSERT OR REPLACE INTO thought_sources VALUES ('child',0,'empty')")).toThrow();
-      expect(() => db?.run("INSERT OR REPLACE INTO responses VALUES ('response','child','replace','addendum')")).toThrow();
+      expect(() => db?.run("INSERT OR REPLACE INTO responses (id,text,role,state) VALUES ('response','replace','addendum','complete')")).toThrow(/immutable/i);
       db.close();
       db = new Database(path);
       migrate(db);

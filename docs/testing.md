@@ -27,8 +27,8 @@ Tests supply their own configuration and data rather than relying on your runnin
 
 | Boundary | What the tests establish | Files |
 | --- | --- | --- |
-| Domain | Validation, immutable content, single-parent traversal, semantic creation, title authority, rejection and scoped reads using controlled inputs and repository doubles. | `domain`, `creation`, `rejection-domain`, `titles-domain` |
-| SQLite | Foreign keys, immutable-record triggers, source seals, atomic writes, rejection persistence, title migration and reopen behavior. | `sqlite`, `rejection-sqlite`, `titles-sqlite` |
+| Domain | Validation, immutable content, single-parent traversal, semantic creation, title authority, shared-response visibility, run identities and recovery using controlled inputs and repository/dispatcher doubles. | `domain`, `creation`, `rejection-domain`, `titles-domain`, `shared-responses-domain`, `runs-domain` |
+| SQLite | Foreign keys, immutable-record triggers, source/response seals, atomic admission and receipts, rejection persistence, migrations and reopen behavior. | `sqlite`, `rejection-sqlite`, `titles-sqlite`, `shared-responses-sqlite`, `runs-sqlite` |
 | Hono request API | Authentication, role restrictions, strict request bodies, response/status contracts, scoped data and sanitized logging without a network listener. | `api` |
 | Native daemon | Real HTTP plus SQLite, startup validation, persistence across restart, concurrent captures, port conflicts, bounded failure cases and process signals. | `daemon` |
 | Scripts | Request validation and diagnostics with injected fetch, plus a real isolated walkthrough and cleanup on success/failure. | `scripts` |
@@ -45,7 +45,7 @@ bun test tests/titles-domain.test.ts tests/titles-sqlite.test.ts
 
 - Unit tests own their records, IDs, clocks, configuration, and mocked dependencies. Valid changes to application data or configuration should not break those tests.
 - SQLite integration tests use in-memory databases or unique temporary directories. They verify actual persistence and constraints, not a mock database's approximation.
-- Migration tests build a frozen, populated legacy schema. They check preservation of thoughts, provenance, rejection state, responses and titles, then migration idempotence and reopening. They do not inspect or reset a user's database.
+- Migration tests build frozen, populated legacy schemas, including inline-title and separate-title databases with single-owner responses. They check preservation of thoughts, provenance, rejection state, titles and response associations, then migration idempotence and reopening. They do not inspect or reset a user's database.
 - HTTP and process tests own their listeners, credentials and subprocesses. They use ephemeral ports where appropriate, bound waits, and clean resources in `finally` paths.
 - Failure tests assert the intended diagnostic or state, not merely that some exception happened. An import error or missing table must not count as proof that an authorization or immutability check works.
 
@@ -60,8 +60,15 @@ The suite covers these distinctions:
 - Branch rejection requires the exact current preview; stale confirmations must not partially change state.
 - A separately rejected connection stays rejected when its endpoint ideas are restored.
 - User history/show-rejected access does not give AI callers access to rejected notes, sources, connections or response content.
+- A reply is stored once with ordered, sealed associations. Normal user reads filter rejected associations; AI cannot read a shared reply if any associated thought is rejected. Explicit user inspection retains all associations.
+- An interrupted addendum can still navigate to its latest eligible saved development without changing the reply's interrupted state or inventing a completed fallback.
+- Run admission retains the exact Evolve contribution, and an Evolve operation cannot choose another visible parent. Knowledge, operation receipts and issued-order membership commit or roll back together.
+- Lost acknowledgements recover the existing external identity. Native completion is durable evidence for finalization, not proof that the local output has already committed. Replayed operations do not create another development.
+- Stop, stale ownership and rejected context fence later work. Submission authorization is checked as well as later writes, and a late successful acknowledgement cannot revive a stopped run. Drafts do not override the durable order of saved developments.
 
 Actual weaver title generation is not covered because the weaver is not implemented. AI-authored developments and title fills in these tests are simulated calls to the existing command/API boundaries.
+
+Run tests use a controlled `NativeDispatcher`, not the real OpenCode client. They establish domain/storage recovery and fencing, not worker scheduling or native service compatibility. Claim generation is not an expiry-based lease or a model effort quota.
 
 ## Isolated walkthrough
 

@@ -1,6 +1,7 @@
 import type { Thought } from "./thought";
 import type { Connection } from "./connection";
 import type { ResponseRecord } from "./response";
+import { scopeSharedResponse } from "./shared-response";
 import { nonEmpty, ValidationError } from "./validation";
 
 export type Actor = "user" | "ai";
@@ -161,11 +162,10 @@ export class RejectionService {
   }
 
   getResponse(scope: ReadScope, id: string): ResponseRecord | null {
-    const showRejected = inspection(scope);
+    inspection(scope);
     nonEmpty(id, "id");
     const snapshot = this.repository.snapshot();
     const response = snapshot.responses.find(item => item.id === id);
-    if (!response || (!showRejected && snapshot.rejectedThoughtIds.includes(response.thoughtId))) return null;
-    return response;
+    return response ? scopeSharedResponse(scope, response, snapshot.rejectedThoughtIds) : null;
   }
 }

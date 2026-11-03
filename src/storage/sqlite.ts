@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { createThought, type Thought } from "../domain/thought";
 import { createConnection, type Connection } from "../domain/connection";
-import { createResponse, type ResponseRecord } from "../domain/response";
+import type { ResponseRecord } from "../domain/response";
+import { SqliteSharedResponses } from "./shared-response";
+import { migrateRunSchema } from "./run-schema";
 import { nonEmpty } from "../domain/validation";
 
 function boundary<T>(operation: string, action: () => T): T {
@@ -82,9 +84,9 @@ export function migrate(db: Database): void {
       );
       CREATE TABLE IF NOT EXISTS responses (
         id TEXT PRIMARY KEY NOT NULL,
-        thought_id TEXT NOT NULL REFERENCES thoughts(id),
         text TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('addendum', 'fallback'))
+        role TEXT NOT NULL CHECK (role IN ('addendum', 'fallback')),
+        state TEXT NOT NULL CHECK (state IN ('complete', 'interrupted'))
       );
       CREATE TRIGGER IF NOT EXISTS responses_immutable_update BEFORE UPDATE ON responses
       BEGIN SELECT RAISE(ABORT, 'responses are immutable'); END;
@@ -103,6 +105,36 @@ export function migrate(db: Database): void {
           SELECT id, title, CASE WHEN title IS NULL THEN NULL ELSE author END FROM thoughts;
           ALTER TABLE thoughts DROP COLUMN title;`);
       }
+      db.exec(`CREATE TABLE IF NOT EXISTS response_thoughts (
+        response_id TEXT NOT NULL REFERENCES responses(id),
+        thought_id TEXT NOT NULL REFERENCES thoughts(id),
+        position INTEGER NOT NULL CHECK (position >= 0),
+        PRIMARY KEY (response_id, position), UNIQUE (response_id, thought_id)
+      );
+      CREATE TABLE IF NOT EXISTS response_seals (
+        response_id TEXT PRIMARY KEY NOT NULL REFERENCES responses(id)
+      );`);
+      const responseColumns = db.query("PRAGMA table_info(responses)").all() as { name: string }[];
+      if (responseColumns.some(column => column.name === "thought_id")) {
+        db.exec(`ALTER TABLE responses ADD COLUMN state TEXT NOT NULL DEFAULT 'complete' CHECK (state IN ('complete', 'interrupted'));
+          INSERT INTO response_thoughts (response_id, thought_id, position) SELECT id, thought_id, 0 FROM responses;
+          INSERT INTO response_seals (response_id) SELECT id FROM responses;
+          ALTER TABLE responses DROP COLUMN thought_id;`);
+      }
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS response_thoughts_sealed_insert BEFORE INSERT ON response_thoughts
+        WHEN EXISTS (SELECT 1 FROM response_seals WHERE response_id = NEW.response_id)
+        BEGIN SELECT RAISE(ABORT, 'response associations are sealed'); END;
+        CREATE TRIGGER IF NOT EXISTS response_thoughts_immutable_update BEFORE UPDATE ON response_thoughts
+        BEGIN SELECT RAISE(ABORT, 'response associations are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS response_thoughts_immutable_delete BEFORE DELETE ON response_thoughts
+        BEGIN SELECT RAISE(ABORT, 'response associations are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS response_seals_immutable_update BEFORE UPDATE ON response_seals
+        BEGIN SELECT RAISE(ABORT, 'response seals are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS response_seals_immutable_delete BEFORE DELETE ON response_seals
+        BEGIN SELECT RAISE(ABORT, 'response seals are immutable'); END;
+      `);
+      migrateRunSchema(db);
     }).immediate();
   });
 }
@@ -162,17 +194,13 @@ export class SqliteStore {
 
   saveResponse(input: ResponseRecord): void {
     boundary("save response", () => {
-      const response = createResponse(input);
-      this.db.run("INSERT INTO responses (id, thought_id, text, role) VALUES (?, ?, ?, ?)",
-        [response.id, response.thoughtId, response.text, response.role]);
+      new SqliteSharedResponses(this.db).save(input);
     });
   }
 
   getResponse(id: string): ResponseRecord | null {
     return boundary("get response", () => {
-      nonEmpty(id, "id");
-      const row = this.db.query("SELECT id, thought_id AS thoughtId, text, role FROM responses WHERE id = ?").get(id);
-      return row ? createResponse(row) : null;
+      return new SqliteSharedResponses(this.db).get(id);
     });
   }
 }

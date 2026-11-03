@@ -15,8 +15,8 @@ export const links: Connection[] = [
   { id: "within", fromId: "child", toId: "grandchild", category: "related", proposedBy: "user", explanation: "internal rationale", sourceIds: [] },
 ];
 export const responses: ResponseRecord[] = [
-  { id: "root-response", thoughtId: "root", role: "fallback", text: "private root response" },
-  { id: "child-response", thoughtId: "child", role: "addendum", text: "child response" },
+  { id: "root-response", thoughtIds: ["root"], state: "complete", role: "fallback", text: "private root response" },
+  { id: "child-response", thoughtIds: ["child"], state: "complete", role: "addendum", text: "child response" },
 ];
 
 /** In-memory transaction double; copies mutable rejection state for rollback. */

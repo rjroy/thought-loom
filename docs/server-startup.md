@@ -43,6 +43,8 @@ If you create a launcher, have it change to the project root before calling `bun
 
 Startup validates configuration before opening the database or listener, creates the database directory, runs the [schema migration](database-schema.md#migrations), and wires the domain services into Hono.
 
+Core migration includes shared responses and durable run tables. Storage support does not mean a worker is running: automatic weaving, native OpenCode execution, job supervision and public run endpoints are not integrated yet. Starting the current daemon does not submit model work.
+
 A successful startup emits a lifecycle event containing the bound URL, for example:
 
 ```json
