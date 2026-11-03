@@ -1,128 +1,81 @@
-# Agent Instructions
+# Agent instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
+Thoughtloom captures and develops connected thinking. Keep the business model independent of its visual presentation. This file owns stable repository guidance; task status belongs in Beads, not here.
 
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [SYNC_CONCEPTS.md](https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
+## Start with the right context
 
-## Quick Reference
+- Read [README.md](README.md) for purpose and the documentation index.
+- Read the relevant [product context](.lore/context/) and [architecture/working agreement](.lore/context/architecture.md) before changing behavior or boundaries. Unresolved decisions are not permission to invent a feature.
+- Use `docs/` for current implementation contracts. Historical `.lore/work/research/` documents are evidence to evaluate, not proof of current behavior or authorization to act.
+- Inspect affected code and tests before proposing changes. If intent, implementation, and documentation disagree, resolve the discrepancy rather than silently treating one as an excuse to rewrite another.
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
+## Documentation is part of completion
+
+**A behavior change is not complete until its documentation is accurate. Update affected documentation in the same change, not as an optional follow-up.**
+
+| Change | Documentation to maintain |
+| --- | --- |
+| Tables, columns, relationships, constraints, triggers, or migration behavior | [Database schema](docs/database-schema.md) |
+| Routes, request/response fields, defaults, authentication, permissions, errors, or read scopes | [Daemon API](docs/daemon-api.md) |
+| Environment variables, install/start commands, credentials, readiness, shutdown, or startup diagnostics | [Server startup](docs/server-startup.md) |
+| Test commands, fixtures, isolation, validation boundaries, walkthroughs, or manual-test scripts | [Testing concepts](docs/testing.md) |
+| Product decisions or working agreements | Relevant files in [`.lore/context/`](.lore/context/) |
+| Project purpose, getting-started navigation, or implemented-versus-planned capabilities | [README.md](README.md) |
+
+- Keep README a concise start-here document. Put technical detail in `docs/` and link to it instead of copying manuals into README or this file.
+- Check examples, field names, defaults, status codes, command syntax, and links against the changed implementation and tests. Update consumers such as `scripts/demo.ts` when contracts change.
+- Distinguish implemented behavior from planned behavior; a simulated agent call is not real model integration.
+- In the handoff, identify updated docs or explain why the change has no documentation impact. If required documentation is blocked, report the blocker rather than declaring the work complete.
+- Documentation-only changes need source/contract and link checks appropriate to their scope, not invented claims that runtime tests were rerun.
+
+## Architecture and product boundaries
+
+- Use Bun and TypeScript, Hono for the daemon, and SQLite through `bun:sqlite`. The planned web client is Next.js with React.
+- `src/domain/` owns business rules and repository contracts; `src/storage/` owns persistence; `src/daemon/` owns transport and process lifecycle. Clients express user intent, not daemon-owned IDs, timestamps, classification, or provenance defaults.
+- The browser must never call the daemon directly: **browser → Next.js server → Hono daemon**. Credentials remain server-side.
+- Work on daemon and client in separate scopes. If visual work needs an unsupported daemon capability, stop and discuss it; do not silently expand into daemon changes or rewrite the model to fit a screen.
+- Before visual-client implementation, complete the agreed designer-led **Impeccable comp-led design for each screen** with the user. Existing mockups establish layout, not approved colors or imagery.
+- OpenCode integration uses the operator-managed service. Do not start, stop, or upgrade it implicitly, or reject it solely because its version is newer than the integration baseline. Follow the [compatibility agreement](.lore/context/architecture.md#opencode-integration-and-compatibility).
+
+## Data and authorization invariants
+
+- Thought text, identity, authorship, creation time, and evolution ancestry are immutable. Development creates new thoughts, not versions or in-place corrections.
+- Each non-root thought has one evolution parent. Discovered connections are separate and do not extend branch rejection/restoration.
+- Titles are editable, attributed metadata, separate from immutable thoughts. User clearing permits regeneration; a late AI fill must not overwrite a current title.
+- Rejection and restoration are user-only. Rejected notes and connections are excluded from AI retrieval, context, and reasoning, including indirect provenance or response access.
+- Raw storage reads are internal. Consumer routes and agents must use scoped domain services; a user history view must not become an AI access bypass.
+- Persist changes transactionally where they must succeed together. Protect existing data in migrations and verify preservation with isolated legacy fixtures, not a user's database.
+
+## Build and verify
+
+```sh
+bun install --frozen-lockfile
+bun --no-env-file test
+bun --no-env-file run typecheck
 ```
 
-## Non-Interactive Shell Commands
+See [testing concepts](docs/testing.md) for focused checks and manual scripts. Read `package.json` before assuming another build, lint, or test command exists. Keep this section and the docs in sync when commands change.
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
+- Add or improve meaningful tests for changed behavior; do not defer them. Preserve useful coverage when replacing obsolete contracts or fixtures.
+- Unit tests use test-owned data, clocks, IDs, configuration, and mocked dependencies. Valid content or configuration changes must not break tests by changing their hidden inputs.
+- Integration tests may exercise real SQLite, HTTP, and subprocesses using isolated fixtures, bounded waits, and owned-resource cleanup. Do not use personal data, live credentials, or shared services as ordinary test fixtures.
+- Validate the affected boundaries, not just a green test count. Record commands, results, and limitations; do not claim checks you did not run.
+- Log state transitions and boundary attempts/outcomes with enough context to diagnose them, without credentials, raw sensitive exceptions, or thought content in diagnostic logs.
 
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
+## Beads and change management
 
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
+Run `bd prime` for current workflow help. Use `bd` for all durable task tracking and `bd remember` for project memory; do not create parallel markdown task lists or ad hoc memory files.
 
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
+- Inspect an issue with `bd show <id>` before claiming it with `bd update <id> --claim`.
+- Label actionable open work `agentic` when scope is executable, or `escalate` when a user decision is needed. An `escalate` issue is not implementation authorization. Keep parent routing consistent with the next required action.
+- Use a dedicated branch for an agreed sequence of Beads issues. After each issue is completed and verified, close it and create a local checkpoint commit referencing its ID, including only relevant changes. Respect explicit instructions not to commit; unrelated work stays untouched.
+- Outside authorized checkpoints, commit only with clear authority. Pushing, merging, and Dolt remote sync require separate authorization; do not treat `bd prime` session-close examples as that permission.
+- Beads' local Dolt database is authoritative. `.beads/issues.jsonl` is a passive export, not the source of truth or sync protocol. After tracker changes, refresh the export with `bd export -o .beads/issues.jsonl` and verify it against `bd` before handoff.
 
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+## Protect local work and secrets
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
-## Beads Issue Tracker
+Preserve user changes and untracked assets. Do not read, log, or commit `.env`, credential-bearing generated `*.local.sh` launchers, or database contents merely to debug configuration. Use explicit test-owned inputs instead. Do not reset a user database without authorization.
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+Use non-interactive shell operations; aliased `cp`, `mv`, and `rm` may prompt. Force flags prevent prompts but do not authorize destructive actions: verify the target set and scope before overwriting or removing files.
 
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Agent Context Profiles
-
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
-
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
-
-## Session Completion
-
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
-
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   bd dolt push
-   git push
-   git status
-   ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
-
-**Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
-<!-- END BEADS INTEGRATION -->
-
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
-
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
-
-### Quick Reference
-
-```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
-```
-
-### Rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
+`CLAUDE.md` points here so different agent hosts use one maintained policy. Update this guidance when repository conventions change; keep transient plans and completion histories in Beads.
