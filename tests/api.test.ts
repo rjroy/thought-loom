@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createApp, type BoundaryEvent } from "../src/daemon/app";
-import { RejectionService } from "../src/domain/rejection";
+import { RejectionService, type RejectionSnapshot } from "../src/domain/rejection";
 import type { Thought } from "../src/domain/thought";
 import type { Connection } from "../src/domain/connection";
 import { MemoryRepository } from "./rejection-fixtures";
@@ -18,8 +18,14 @@ const credentials = { user: "user-secret-token", ai: "ai-secret-token" };
 const thoughtInput = { text: "sensitive new text" };
 const connectionInput = { fromId: "root", toId: "outside", category: "supports", explanation: "sensitive rationale", sourceIds: ["child"] } as const;
 
-function setup(failWrites = false) {
-  const repo = new MemoryRepository();
+function setup(failWrites = false, extra: Partial<Pick<RejectionSnapshot, "thoughts" | "connections" | "responses">> = {}) {
+  const repo = new class extends MemoryRepository {
+    override snapshot(): RejectionSnapshot {
+      const snapshot = super.snapshot();
+      return { ...snapshot, thoughts: [...snapshot.thoughts, ...(extra.thoughts ?? [])],
+        connections: [...snapshot.connections, ...(extra.connections ?? [])], responses: [...snapshot.responses, ...(extra.responses ?? [])] };
+    }
+  }();
   const rejection = new RejectionService(repo);
   const createdThoughts: Thought[] = [];
   const createdConnections: Connection[] = [];
@@ -117,10 +123,10 @@ describe("daemon API contract", () => {
     for (const mode of ["history", "show-rejected"] as const) {
       const thoughts = await t.request(`/thoughts?scope=${mode}`);
       expect(thoughts.status).toBe(200);
-      expect(await thoughts.json()).toEqual(t.rejection.listThoughts({ actor: "user", mode }));
+      expect(await thoughts.json()).toEqual(t.repo.snapshot().thoughts.map(item => ({ ...item, rejected: item.id === "root" })));
       const connections = await t.request(`/connections?scope=${mode}`);
       expect(connections.status).toBe(200);
-      expect(await connections.json()).toEqual(t.rejection.listConnections({ actor: "user", mode }));
+      expect(await connections.json()).toEqual(t.repo.snapshot().connections.map(item => ({ ...item, rejected: item.id === "within" })));
       const response = await t.request(`/responses/root-response?scope=${mode}`);
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(t.rejection.getResponse({ actor: "user", mode }, "root-response"));
@@ -142,6 +148,93 @@ describe("daemon API contract", () => {
       expect((await t.request(`${path}?scope=invalid`)).status).toBe(400);
       expect((await t.request(`${path}?scope=normal&scope=history`)).status).toBe(400);
     }
+  });
+
+  test("relationship reads gate the target, return direct children and incident directed connections", async () => {
+    const t = setup();
+    const snapshot = t.repo.snapshot();
+    const get = async (path: string) => {
+      const response = await t.request(path);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    expect(await get("/thoughts/root/children")).toEqual(snapshot.thoughts.filter(item => item.parentId === "root"));
+    expect(await get("/thoughts/child/children")).toEqual(snapshot.thoughts.filter(item => item.parentId === "child"));
+    expect(await get("/thoughts/outside/children")).toEqual([]);
+    expect(await get("/thoughts/child/connections")).toEqual(snapshot.connections);
+    expect(await get("/thoughts/outside/connections")).toEqual(snapshot.connections.filter(item => item.id === "cross"));
+    expect(await get("/thoughts/root/connections")).toEqual([]);
+    expect(await get("/thoughts/outside/responses")).toEqual([]);
+    t.rejection.rejectThought("user", "root");
+    const aiConnections = await t.request("/thoughts/outside/connections", { actor: "ai" });
+    expect(aiConnections.status).toBe(200);
+    expect(await aiConnections.json()).toEqual(snapshot.connections.filter(item => item.id === "cross").map(item => ({ ...item, sourceIds: ["outside"] })));
+    for (const relation of ["children", "connections", "responses"]) {
+      for (const id of ["missing", "root"]) {
+        expect((await t.request(`/thoughts/${id}/${relation}`)).status).toBe(404);
+        expect((await t.request(`/thoughts/${id}/${relation}`, { actor: "ai" })).status).toBe(404);
+      }
+      expect((await t.request(`/thoughts/root/${relation}?scope=history`)).status).toBe(200);
+      expect((await t.request(`/thoughts/child/${relation}?scope=history`, { actor: "ai" })).status).toBe(403);
+      expect((await t.request(`/thoughts/child/${relation}?scope=show-rejected`, { actor: "ai" })).status).toBe(403);
+      expect((await t.request(`/thoughts/child/${relation}?scope=invalid`)).status).toBe(400);
+      expect((await t.request(`/thoughts/child/${relation}?scope=normal&scope=history`)).status).toBe(400);
+      expect((await t.request(`/thoughts/child/${relation}?other=x`)).status).toBe(400);
+    }
+  });
+
+  test("response reverse discovery preserves shared order, fallback associations and scope privacy", async () => {
+    const base = new MemoryRepository().snapshot().thoughts[1];
+    if (!base) throw new Error("missing child fixture");
+    const contribution: Thought = { ...base, id: "contribution", parentId: "root", author: "user", kind: "user-contribution", origin: "contribution", sourceIds: [] };
+    const shared = { id: "shared", text: "shared addendum", role: "addendum", state: "complete", thoughtIds: ["sibling", "child", "grandchild"] } as const;
+    const fallback = { id: "fallback", text: "fallback on contribution", role: "fallback", state: "interrupted", thoughtIds: ["contribution"] } as const;
+    const t = setup(false, { thoughts: [contribution], responses: [shared, fallback] });
+    const read = async (id: string, suffix = "", actor: "user" | "ai" = "user") => {
+      const response = await t.request(`/thoughts/${id}/responses${suffix}`, { actor });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    expect(await read("sibling")).toEqual([shared]);
+    expect(await read("grandchild")).toEqual([shared]);
+    expect(await read("contribution")).toEqual([fallback]);
+    t.rejection.rejectThought("user", "child");
+    expect(await read("sibling")).toEqual([{ ...shared, thoughtIds: ["sibling", "grandchild"] }]);
+    expect(await read("sibling", "", "ai")).toEqual([]);
+    expect(await read("sibling", "?scope=history")).toEqual([shared]);
+    expect(await read("child", "?scope=show-rejected")).toEqual([t.repo.snapshot().responses.find(item => item.id === "child-response"), shared]);
+    expect(await read("contribution", "", "ai")).toEqual([fallback]);
+    expect(t.repo.snapshot().responses.find(item => item.id === "shared")).toEqual(shared);
+  });
+
+  test("inspection flags describe explicit rejection without mutating canonical records or leaking into normal reads", async () => {
+    const t = setup();
+    const canonical = t.repo.snapshot();
+    t.rejection.rejectThought("user", "root");
+    t.rejection.rejectThought("user", "grandchild");
+    t.rejection.rejectConnection("user", "cross");
+    for (const mode of ["history", "show-rejected"]) {
+      const suffix = `?scope=${mode}`;
+      const thought = canonical.thoughts.find(item => item.id === "root");
+      const grandchild = canonical.thoughts.find(item => item.id === "grandchild");
+      const child = canonical.thoughts.find(item => item.id === "child");
+      const cross = canonical.connections.find(item => item.id === "cross");
+      const within = canonical.connections.find(item => item.id === "within");
+      expect(await (await t.request(`/thoughts/root${suffix}`)).json()).toEqual({ ...thought, rejected: true });
+      expect(await (await t.request(`/thoughts/child${suffix}`)).json()).toEqual({ ...child, rejected: false });
+      expect(await (await t.request(`/thoughts/child/children${suffix}`)).json()).toEqual([{ ...grandchild, rejected: true }]);
+      expect(await (await t.request(`/connections/cross${suffix}`)).json()).toEqual({ ...cross, rejected: true });
+      expect(await (await t.request(`/connections/within${suffix}`)).json()).toEqual({ ...within, rejected: false });
+      expect(await (await t.request(`/thoughts/child/connections${suffix}`)).json()).toEqual([{ ...cross, rejected: true }, { ...within, rejected: false }]);
+    }
+    expect(await (await t.request("/thoughts/child/connections")).json()).toEqual([]);
+    const aiChild = await (await t.request("/thoughts/child", { actor: "ai" })).json();
+    expect(aiChild).toEqual({ ...canonical.thoughts.find(item => item.id === "child"), parentId: null, sourceIds: ["outside"] });
+    expect(await (await t.request("/thoughts/child/children", { actor: "ai" })).json()).toEqual([]);
+    expect(await (await t.request("/thoughts/child/connections", { actor: "ai" })).json()).toEqual([]);
+    expect(await (await t.request("/thoughts/child")).json()).toEqual(canonical.thoughts.find(item => item.id === "child"));
+    expect(t.repo.snapshot().thoughts).toEqual(canonical.thoughts);
+    expect(t.repo.snapshot().connections).toEqual(canonical.connections);
   });
 
   test("authentication and privilege checks precede all writes", async () => {

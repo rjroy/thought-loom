@@ -2,8 +2,9 @@ import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ReadScope } from "../domain/rejection";
-import type { SearchHit, SearchOptions, SearchPage, SearchRepository, SearchResult } from "../domain/search";
-import { displayTitle, type Author, type MaterialKind } from "../domain/thought";
+import { searchContexts, type SearchContext, type SearchHit, type SearchOptions, type SearchPage, type SearchRepository, type SearchResult } from "../domain/search";
+import { createThought, displayTitle, type Author, type MaterialKind } from "../domain/thought";
+import { createConnection } from "../domain/connection";
 
 let nextRepository = 0;
 type Vocabulary = { readonly documents: string; readonly terms: string; readonly spelling: string; readonly version: string };
@@ -92,14 +93,56 @@ export class SqliteSearchRepository implements SearchRepository {
         const kinds: Record<MaterialKind, number> = { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": 0 };
         for (const row of authorRows) authors[row.value] = row.n;
         for (const row of kindRows) kinds[row.value] = row.n;
+        const contexts = this.contexts(scope, match, rows.map(row => row.thoughtId));
         const results: SearchResult[] = rows.map(row => ({ kind: row.kind, id: row.id, thoughtId: row.thoughtId,
           text: row.text, title: displayTitle({ text: row.thoughtText, title: row.title }), author: row.author,
-          materialKind: row.materialKind, createdAt: row.createdAt, snippet: row.text.slice(0, 160) }));
+          materialKind: row.materialKind, createdAt: row.createdAt, snippet: row.text.slice(0, 160), context: contexts.get(row.thoughtId) ?? null }));
         return { results, counts: { authors, kinds } };
       })();
       this.logger.verbose("[search storage] query succeeded");
       return page;
     } catch (error) { this.logger.verbose("[search storage] query failed"); throw error; }
+  }
+
+  private contexts(scope: ReadScope, match: string, ids: readonly string[]): ReadonlyMap<string, SearchContext> {
+    if (!ids.length) return new Map();
+    const targetIds = JSON.stringify([...new Set(ids)]);
+    const targets = this.db.query(`SELECT id,parent_id AS parentId FROM thoughts WHERE id IN (SELECT value FROM json_each(?))`)
+      .all(targetIds) as { id: string; parentId: string | null }[];
+    // One FTS pass for the entire page, restricted to the thought's own text column.
+    const candidates = this.db.query(`WITH matching AS MATERIALIZED (
+        SELECT thought_id AS id,bm25(thought_search_fts,0,1,0) AS score
+        FROM thought_search_fts WHERE thought_search_fts MATCH ?
+      ), targets AS MATERIALIZED (SELECT value AS id FROM json_each(?))
+      SELECT targets.id AS targetId, matching.id AS thoughtId, c.id AS connectionId
+      FROM targets JOIN connections c ON c.from_id=targets.id OR c.to_id=targets.id
+      JOIN matching ON matching.id=CASE WHEN c.from_id=targets.id THEN c.to_id ELSE c.from_id END
+      WHERE matching.id != targets.id
+      ORDER BY targets.id, matching.score, matching.id, c.id`).all(`text : (${match})`, targetIds) as { targetId: string; thoughtId: string; connectionId: string }[];
+    const thoughtIds = JSON.stringify([...new Set([...targets.flatMap(target => target.parentId === null ? [] : [target.parentId]), ...candidates.map(item => item.thoughtId)])]);
+    const connectionIds = JSON.stringify([...new Set(candidates.map(item => item.connectionId))]);
+    const sourceMap = (rows: { ownerId: string; sourceId: string }[]) => {
+      const result = new Map<string, string[]>();
+      for (const row of rows) {
+        const sources = result.get(row.ownerId) ?? [];
+        sources.push(row.sourceId);
+        result.set(row.ownerId, sources);
+      }
+      return result;
+    };
+    const thoughtSources = sourceMap(this.db.query(`SELECT thought_id AS ownerId,source_id AS sourceId FROM thought_sources
+      WHERE thought_id IN (SELECT value FROM json_each(?)) ORDER BY thought_id,position`).all(thoughtIds) as { ownerId: string; sourceId: string }[]);
+    const connectionSources = sourceMap(this.db.query(`SELECT connection_id AS ownerId,source_id AS sourceId FROM connection_sources
+      WHERE connection_id IN (SELECT value FROM json_each(?)) ORDER BY connection_id,position`).all(connectionIds) as { ownerId: string; sourceId: string }[]);
+    const thoughtRows = this.db.query(`SELECT t.id,t.text,m.title,m.title_author AS titleAuthor,t.author,t.kind,t.created_at AS createdAt,t.origin,t.parent_id AS parentId
+      FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id WHERE t.id IN (SELECT value FROM json_each(?))`).all(thoughtIds) as { id: string }[];
+    const connectionRows = this.db.query(`SELECT id,from_id AS fromId,to_id AS toId,category,proposed_by AS proposedBy,explanation FROM connections
+      WHERE id IN (SELECT value FROM json_each(?))`).all(connectionIds) as { id: string }[];
+    const thoughts = new Map(thoughtRows.map(row => [row.id, createThought({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] })]));
+    const connections = new Map(connectionRows.map(row => [row.id, createConnection({ ...row, sourceIds: connectionSources.get(row.id) ?? [] })]));
+    const rejected = new Set((this.db.query("SELECT thought_id AS id FROM rejected_thoughts").all() as { id: string }[]).map(row => row.id));
+    const rejectedConnections = new Set((this.db.query("SELECT connection_id AS id FROM rejected_connections").all() as { id: string }[]).map(row => row.id));
+    return searchContexts(scope, targets, candidates, thoughts, connections, rejected, rejectedConnections);
   }
 
   private vocabulary(scope: ReadScope): Vocabulary {

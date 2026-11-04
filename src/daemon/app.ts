@@ -85,7 +85,7 @@ function safePath(path: string): string {
   if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
-    (["reject", "restore", "preview", "evolve", "stop"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
+    (["reject", "restore", "preview", "evolve", "stop", "children", "connections", "responses"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
 }
 
 /** Construct a server-side transport around scoped reads and validated commands. */
@@ -168,6 +168,16 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     if (!item) throw new ApiError(404);
     return c.json(item);
   });
+  for (const relation of ["children", "connections", "responses"] as const) {
+    app.get(`/thoughts/:id/${relation}`, c => {
+      const readScope = scope(c);
+      const id = c.req.param("id");
+      const items = relation === "children" ? rejection.listChildren(readScope, id) :
+        relation === "connections" ? rejection.listThoughtConnections(readScope, id) : rejection.listThoughtResponses(readScope, id);
+      if (!items) throw new ApiError(404);
+      return c.json(items);
+    });
+  }
   app.get("/connections", c => c.json(rejection.listConnections(scope(c))));
   app.get("/connections/:id", c => {
     const item = rejection.listConnections(scope(c)).find(t => t.id === c.req.param("id"));
@@ -240,7 +250,8 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     diagnostics.info("[thought] title changed", { thoughtId: c.req.param("id"), cleared: state.title === null });
     const thought = rejection.listThoughts({ actor: "user", mode: "history" }).find(item => item.id === c.req.param("id"));
     if (!thought) throw new ApiError(404);
-    return c.json({ ...thought, ...state });
+    const { rejected: _rejected, ...canonical } = thought;
+    return c.json({ ...canonical, ...state });
   });
   app.post("/thoughts/:id/title/fill", async c => {
     ai(c); noQuery(c);

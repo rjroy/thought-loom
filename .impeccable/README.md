@@ -23,7 +23,7 @@ The overall design gate remains open. These selections do not approve mobile/res
 - **Explore still needs:** initial/empty/loading/error views; expanded and long text; selected filters/counts, custom dates, open sorting, Show rejected; focus/mobile; and state-preserving return.
 - **Capture still needs:** phone, empty/long drafts, saving/saved/error/uncertain outcomes, optional-title behavior, focus, and draft-preserving recovery. A saved thought and background weaving are separate facts; no weaving status/retry control is specified.
 - **Illustrative content:** the selected Explore image's predecessor title also matches its query, so the pictured count is not a validated closed search fixture. Do not reuse the demo as executable data. No approved image is repainted to conceal this.
-- **Open contract note:** agent replies are readable by a known response ID, but a generic thought read does not discover associated response IDs. No approach to that gap is selected.
+- **Response discovery:** the daemon now exposes scoped `GET /thoughts/:id/responses` for associated retained replies, alongside direct-child and incident-connection reads. See the daemon API contract before designing the on-demand states. No new screen state is approved by this API addition.
 
 ## Provenance and reproduction
 

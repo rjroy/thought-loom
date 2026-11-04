@@ -34,6 +34,8 @@ These are server-side service credentials, not user accounts. The future browser
 
 Normal connection reads also exclude connections whose endpoints are rejected and connections explicitly rejected on their own. Responses have ordered thought associations: normal user reads remove rejected IDs and hide a reply if no eligible association remains; AI reads hide the entire reply if any associated thought is rejected. User history/show-rejected reads retain all associations. Inspection changes visibility, not the response record shape.
 
+User `history` and `show-rejected` thought and connection reads add `rejected: boolean`. This reports explicit rejection of that record, not rejection of a connection's endpoints. An active connection to a rejected thought can therefore have `rejected: false` in inspection reads. Normal thought/connection reads retain their existing record shapes, without this field. Inspection metadata does not change immutable thought content.
+
 AI can still read an active descendant of a rejected thought, but its returned `parentId` becomes null and rejected source IDs are removed. Persisted ancestry is not changed by this projection.
 
 ## Response records
@@ -56,9 +58,14 @@ All accept the read scopes above and return `200` JSON:
 | --- | --- | --- |
 | GET | `/thoughts` | Thought array, including parent links for tree inspection. |
 | GET | `/thoughts/:id` | One visible thought; otherwise `404`. |
+| GET | `/thoughts/:id/responses` | Visible retained responses associated with this thought. |
+| GET | `/thoughts/:id/connections` | Visible incoming and outgoing connections, retaining their recorded direction. |
+| GET | `/thoughts/:id/children` | Visible direct evolution children, not all descendants. |
 | GET | `/connections` | Connection array. |
 | GET | `/connections/:id` | One visible connection; otherwise `404`. |
 | GET | `/responses/:id` | One visible retained response; otherwise `404`. |
+
+Each per-thought relationship route requires the requested thought to be visible under the same read scope; a missing or hidden thought returns `404`. A visible thought with no visible related records returns an empty array. These reads use existing response, connection, and evolution relationships; they do not traverse discovered connections as evolution ancestry. Child and connection inspection records include the `rejected` field described above. Shared response associations follow the same visibility policy as `/responses/:id`, including the stricter AI rule.
 
 ## Search: `GET /search`
 
@@ -83,8 +90,13 @@ The response is `{results, counts: {authors, kinds}}`. Each result has:
 - `title`: destination thought's current title or first-five-word fallback.
 - `author`: matching record's author. Response hits are AI-authored even when their destination is a user contribution.
 - `materialKind`, `createdAt`: destination thought's classification and creation time.
+- `context`: `null`, `{kind: "connection", thought, connection}`, or `{kind: "predecessor", thought}`. Nested records use the normal scoped Thought and Connection projections above.
 
 Thought and response matches are distinct results. A shared response opens its latest eligible association; an interrupted fallback opens its associated input without becoming a completed development. Response visibility follows the read-scope rules above.
+
+Context belongs to the result's destination thought, including for response hits. Prefer a normally visible directly connected thought whose own text matches the effective search query. Choose the best text relevance regardless of the selected result sort; break ties by thought ID, then connection ID. Context candidates need not satisfy the result's author, kind, or date filters. Connection direction and recorded explanation are preserved. If there is no qualifying connection, use the immediate normally visible evolution parent; do not skip a hidden parent to find a more distant ancestor. Otherwise return `context: null`.
+
+Context always excludes rejected thoughts and explicitly rejected connections, even when the result scope includes rejected records for user inspection. AI context applies the existing parent/source redaction rules. Spelling-corrected searches use the effective corrected query for context selection too. Context adds no generated explanation and does not alter result identity, ordering, or filter counts.
 
 Author counts apply the query, dates and kind filter, but omit the selected author filter. Kind counts similarly omit the selected kind filter. Both maps include zero-valued options. Counts count matching records, not unique destination thoughts. There is no count for Show rejected: user `scope=show-rejected` adds rejected material alongside active results, while normal search excludes it server-side.
 

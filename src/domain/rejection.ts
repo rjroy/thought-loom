@@ -15,6 +15,8 @@ export interface RejectionSnapshot {
   readonly rejectedThoughtIds: readonly string[];
   readonly rejectedConnectionIds: readonly string[];
 }
+export type ThoughtRead = Thought & { readonly rejected?: boolean };
+export type ConnectionRead = Connection & { readonly rejected?: boolean };
 export interface RejectionTransaction {
   snapshot(): RejectionSnapshot;
   setThoughtRejected(id: string, rejected: boolean): void;
@@ -55,6 +57,21 @@ function inspection(scope: ReadScope): boolean {
     throw new ForbiddenActorError("Invalid read scope");
   }
   return scope.actor === "user" && scope.mode !== "normal";
+}
+
+/** Apply normal-scope provenance redaction to an active thought. */
+export function scopeActiveThought(actor: Actor, thought: Thought, rejected: ReadonlySet<string>): Thought | null {
+  if (rejected.has(thought.id)) return null;
+  return actor === "ai" ? { ...thought,
+    parentId: thought.parentId !== null && rejected.has(thought.parentId) ? null : thought.parentId,
+    sourceIds: thought.sourceIds.filter(id => !rejected.has(id)),
+  } : thought;
+}
+
+/** Apply normal-scope visibility and provenance redaction to a connection. */
+export function scopeActiveConnection(actor: Actor, connection: Connection, rejected: ReadonlySet<string>, rejectedConnections: ReadonlySet<string>): Connection | null {
+  if (rejectedConnections.has(connection.id) || rejected.has(connection.fromId) || rejected.has(connection.toId)) return null;
+  return actor === "ai" ? { ...connection, sourceIds: connection.sourceIds.filter(id => !rejected.has(id)) } : connection;
 }
 
 function branch(snapshot: RejectionSnapshot, rootId: string): string[] {
@@ -185,26 +202,52 @@ export class RejectionService {
   rejectConnection(actor: Actor, id: string): void { this.setConnection(actor, id, true); }
   restoreConnection(actor: Actor, id: string): void { this.setConnection(actor, id, false); }
 
-  listThoughts(scope: ReadScope): readonly Thought[] {
+  private thoughtsInSnapshot(scope: ReadScope, snapshot: RejectionSnapshot): readonly ThoughtRead[] {
     const showRejected = inspection(scope);
-    const snapshot = this.repository.snapshot();
-    if (showRejected) return snapshot.thoughts;
     const rejected = new Set(snapshot.rejectedThoughtIds);
-    return snapshot.thoughts.filter(thought => !rejected.has(thought.id)).map(thought => scope.actor === "ai" ? {
-      ...thought,
-      parentId: thought.parentId !== null && rejected.has(thought.parentId) ? null : thought.parentId,
-      sourceIds: thought.sourceIds.filter(id => !rejected.has(id)),
-    } : thought);
+    if (showRejected) return snapshot.thoughts.map(thought => ({ ...thought, rejected: rejected.has(thought.id) }));
+    return snapshot.thoughts.map(thought => scopeActiveThought(scope.actor, thought, rejected)).filter((thought): thought is Thought => thought !== null);
   }
 
-  listConnections(scope: ReadScope): readonly Connection[] {
+  listThoughts(scope: ReadScope): readonly ThoughtRead[] {
+    return this.thoughtsInSnapshot(scope, this.repository.snapshot());
+  }
+
+  private connectionsInSnapshot(scope: ReadScope, snapshot: RejectionSnapshot): readonly ConnectionRead[] {
     const showRejected = inspection(scope);
-    const snapshot = this.repository.snapshot();
-    if (showRejected) return snapshot.connections;
     const rejected = new Set(snapshot.rejectedThoughtIds);
     const rejectedConnections = new Set(snapshot.rejectedConnectionIds);
-    return snapshot.connections.filter(connection => !rejectedConnections.has(connection.id) && !rejected.has(connection.fromId) && !rejected.has(connection.toId))
-      .map(connection => scope.actor === "ai" ? { ...connection, sourceIds: connection.sourceIds.filter(id => !rejected.has(id)) } : connection);
+    if (showRejected) return snapshot.connections.map(connection => ({ ...connection, rejected: rejectedConnections.has(connection.id) }));
+    return snapshot.connections.map(connection => scopeActiveConnection(scope.actor, connection, rejected, rejectedConnections))
+      .filter((connection): connection is Connection => connection !== null);
+  }
+
+  listConnections(scope: ReadScope): readonly ConnectionRead[] {
+    return this.connectionsInSnapshot(scope, this.repository.snapshot());
+  }
+
+  private relationshipSnapshot(scope: ReadScope, id: string): RejectionSnapshot | null {
+    nonEmpty(id, "id");
+    const snapshot = this.repository.snapshot();
+    return this.thoughtsInSnapshot(scope, snapshot).some(thought => thought.id === id) ? snapshot : null;
+  }
+
+  listChildren(scope: ReadScope, id: string): readonly ThoughtRead[] | null {
+    const snapshot = this.relationshipSnapshot(scope, id);
+    return snapshot ? this.thoughtsInSnapshot(scope, snapshot).filter(thought => thought.parentId === id) : null;
+  }
+
+  listThoughtConnections(scope: ReadScope, id: string): readonly ConnectionRead[] | null {
+    const snapshot = this.relationshipSnapshot(scope, id);
+    return snapshot ? this.connectionsInSnapshot(scope, snapshot).filter(connection => connection.fromId === id || connection.toId === id) : null;
+  }
+
+  listThoughtResponses(scope: ReadScope, id: string): readonly ResponseRecord[] | null {
+    const snapshot = this.relationshipSnapshot(scope, id);
+    if (!snapshot) return null;
+    return snapshot.responses.filter(response => response.thoughtIds.includes(id))
+      .map(response => scopeSharedResponse(scope, response, snapshot.rejectedThoughtIds))
+      .filter((response): response is ResponseRecord => response !== null);
   }
 
   getResponse(scope: ReadScope, id: string): ResponseRecord | null {

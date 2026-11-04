@@ -271,7 +271,7 @@ describe("real HTTP and SQLite daemon", () => {
         expect(await visibleChild.json()).toEqual({ ...child, parentId: null, sourceIds: [] });
         const history = await request("/thoughts?scope=history");
         expect(history.status).toBe(200);
-        expect(await history.json()).toEqual(expect.arrayContaining([root, child]));
+        expect(await history.json()).toEqual(expect.arrayContaining([{ ...root, rejected: true }, { ...child, rejected: false }]));
         const previewResponse = await request(`/thoughts/${root.id}/branch/preview`);
         expect(previewResponse.status).toBe(200);
         const preview = await previewResponse.json();
@@ -287,7 +287,7 @@ describe("real HTTP and SQLite daemon", () => {
         expect((await request(`/thoughts/${root.id}/branch/restore`, "user", "POST")).status).toBe(204);
         expect(await (await request(`/thoughts/${child.id}`, "ai")).json()).toEqual(child);
         expect((await request(`/connections/${savedLink.id}`, "ai")).status).toBe(404);
-        expect(await (await request(`/connections/${savedLink.id}?scope=history`)).json()).toEqual(savedLink);
+        expect(await (await request(`/connections/${savedLink.id}?scope=history`)).json()).toEqual({ ...savedLink, rejected: true });
         await stop(daemon);
         daemon = await startDaemon(config(dbPath), event => events.push(event));
         request = client(daemon);

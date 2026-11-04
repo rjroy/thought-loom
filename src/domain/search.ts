@@ -1,6 +1,7 @@
-import { ForbiddenActorError, type ReadScope } from "./rejection";
+import { ForbiddenActorError, scopeActiveConnection, scopeActiveThought, type ReadScope } from "./rejection";
 import { nonEmpty, ValidationError } from "./validation";
-import type { Author, MaterialKind } from "./thought";
+import type { Author, MaterialKind, Thought } from "./thought";
+import type { Connection } from "./connection";
 
 /** A response hit points to its latest eligible associated thought. */
 export interface SearchHit {
@@ -27,6 +28,33 @@ export interface SearchResult extends SearchHit {
   readonly materialKind: MaterialKind;
   readonly createdAt: string;
   readonly snippet: string;
+  readonly context: SearchContext | null;
+}
+export type SearchContext = { readonly kind: "connection"; readonly thought: Thought; readonly connection: Connection }
+  | { readonly kind: "predecessor"; readonly thought: Thought };
+
+/** Candidates arrive ordered by own-text relevance, thought ID, then connection ID. */
+export function searchContexts(scope: ReadScope, targets: readonly { id: string; parentId: string | null }[],
+  candidates: readonly { targetId: string; thoughtId: string; connectionId: string }[],
+  thoughts: ReadonlyMap<string, Thought>, connections: ReadonlyMap<string, Connection>,
+  rejected: ReadonlySet<string>, rejectedConnections: ReadonlySet<string>): ReadonlyMap<string, SearchContext> {
+  const result = new Map<string, SearchContext>();
+  for (const candidate of candidates) {
+    if (result.has(candidate.targetId)) continue;
+    const thought = thoughts.get(candidate.thoughtId);
+    const connection = connections.get(candidate.connectionId);
+    if (!thought || !connection) continue;
+    const visibleThought = scopeActiveThought(scope.actor, thought, rejected);
+    const visibleConnection = scopeActiveConnection(scope.actor, connection, rejected, rejectedConnections);
+    if (visibleThought && visibleConnection) result.set(candidate.targetId, { kind: "connection", thought: visibleThought, connection: visibleConnection });
+  }
+  for (const target of targets) {
+    if (result.has(target.id) || target.parentId === null) continue;
+    const parent = thoughts.get(target.parentId);
+    const visible = parent && scopeActiveThought(scope.actor, parent, rejected);
+    if (visible) result.set(target.id, { kind: "predecessor", thought: visible });
+  }
+  return result;
 }
 export interface SearchPage {
   readonly results: readonly SearchResult[];

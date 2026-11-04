@@ -52,6 +52,8 @@ Where text is truncated, a clickable `…` expands the complete text in place. O
 
 For contextual material, prefer an eligible directly connected thought that also matches the query. Otherwise, the immediate recorded predecessor can explain where the thought developed from. If neither is suitable, omit context. Do not replace the result with its neighbor, display the whole ancestry, or manufacture an explanation.
 
+When several directly connected thoughts qualify, choose the best search-relevance match, independently of the selected result sort. Use a stable tie-breaker for equally relevant candidates. This selection belongs to the daemon, not the client.
+
 Rejected notes and connections are not ordinary surrounding context. They remain available for deliberate user inspection through Show rejected and idea history.
 
 Use recorded relationship rationale or provenance wording to explain that context. Ordinary search must not generate new AI interpretations on each query. Search ranking, connection confidence, and provenance are different things.

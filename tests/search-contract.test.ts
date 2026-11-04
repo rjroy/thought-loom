@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createApp } from "../src/daemon/app";
 import { CreationService } from "../src/domain/creation";
 import { RejectionService } from "../src/domain/rejection";
-import { SearchService } from "../src/domain/search";
+import { SearchService, type SearchPage } from "../src/domain/search";
 import { TitleService } from "../src/domain/title";
 import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { SqliteSearchRepository } from "../src/storage/search";
@@ -106,6 +106,100 @@ describe("headless search contract", () => {
   }));
 });
 
+// Access the additive contract without requiring production SearchResult scaffolding.
+function contextFor(page: SearchPage, id: string): unknown {
+  const result = page.results.find(item => item.id === id);
+  if (!result) throw new Error(`Missing search result ${id}`);
+  return "context" in result ? result.context : undefined;
+}
+
+function contextFixture(db: Database) {
+  const store = new SqliteStore(db);
+  const save = (id: string, text: string, parentId: string | null, createdAt: string, sourceIds: string[] = [], title: string | null = null, author: "user" | "ai" = "ai") => {
+    store.saveThought({ id, text, title, author, kind: author === "user" ? "user-contribution" : "developing-idea", createdAt, origin: "test", parentId, sourceIds });
+  };
+  save("ctx-ancestor", "old ancestry", null, "2017-01-01");
+  save("ctx-parent", "recorded predecessor", "ctx-ancestor", "2018-01-01");
+  save("ctx-target", "nebula target", "ctx-parent", "2023-06-01", [], null, "user");
+  save("ctx-hidden", "private reference", null, "2016-01-01");
+  save("ctx-best", "nebula nebula nebula", "ctx-hidden", "2020-01-01", ["ctx-hidden"]);
+  save("ctx-new", "nebula with many ordinary unrelated words to dilute the matching term significantly", null, "2025-01-01");
+  save("ctx-title", "unrelated words", null, "2026-01-01", [], "nebula");
+  const link = (id: string, toId: string, sourceIds: string[] = []) => store.saveConnection({ id, fromId: "ctx-target", toId, category: "supports", proposedBy: "ai", explanation: `recorded rationale ${id}`, sourceIds });
+  link("ctx-link-best", "ctx-best", ["ctx-hidden"]);
+  link("ctx-link-new", "ctx-new");
+  link("ctx-link-title", "ctx-title");
+  return { store, save, link };
+}
+
+describe("search result recorded context", () => {
+  test("connected own-text relevance beats recency and facets without changing result ranking or counts", () => fixture(({ db, service }) => {
+    const { store } = contextFixture(db);
+    const expected = { kind: "connection", thought: store.getThought("ctx-best"), connection: store.getConnection("ctx-link-best") };
+    const options = { authors: ["user"], kinds: ["user-contribution"], from: "2023-01-01", to: "2023-12-31" } as const;
+    for (const sort of ["newest", "oldest", "relevance"] as const) {
+      const page = service.query(user, "nebula", { ...options, sort });
+      expect(page.results.map(item => item.id)).toEqual(["ctx-target"]);
+      expect(page.counts).toEqual({ authors: { user: 1, ai: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0 } });
+      expect(contextFor(page, "ctx-target")).toEqual(expected);
+    }
+    // A title hit alone is not an eligible matching neighbor.
+    const titleOnly = service.query(user, "nebula", { authors: ["ai"] });
+    expect(titleOnly.results.map(item => item.id)).toContain("ctx-title");
+  }));
+
+  test("rejected links and neighbors never become surrounding context, including inspection; AI provenance is scoped", () => fixture(({ db, service, rejection }) => {
+    const { store } = contextFixture(db);
+    rejection.rejectThought("user", "ctx-hidden");
+    const aiPage = service.query(ai, "nebula");
+    expect(contextFor(aiPage, "ctx-target")).toEqual({ kind: "connection",
+      thought: { ...store.getThought("ctx-best"), parentId: null, sourceIds: [] },
+      connection: { ...store.getConnection("ctx-link-best"), sourceIds: [] } });
+    expect(JSON.stringify(contextFor(aiPage, "ctx-target"))).not.toContain("ctx-hidden");
+    rejection.rejectConnection("user", "ctx-link-best");
+    expect(contextFor(service.query(show, "nebula"), "ctx-target")).toEqual({ kind: "connection", thought: store.getThought("ctx-new"), connection: store.getConnection("ctx-link-new") });
+    rejection.rejectThought("user", "ctx-new");
+    const inspected = service.query(show, "nebula");
+    expect(inspected.results.map(item => item.id)).toContain("ctx-new");
+    expect(contextFor(inspected, "ctx-target")).toEqual({ kind: "predecessor", thought: store.getThought("ctx-parent") });
+    rejection.rejectThought("user", "ctx-parent");
+    expect(contextFor(service.query(show, "nebula"), "ctx-target")).toBeNull();
+    expect(contextFor(service.query(ai, "nebula"), "ctx-target")).toBeNull();
+  }));
+
+  test("equal relevance chooses the stable thought id and then connection id", () => fixture(({ db, service }) => {
+    const { store, save } = contextFixture(db);
+    save("tie-target", "tiequartz target", null, "2023-01-01");
+    save("tie-a", "tiequartz candidate", null, "2023-01-01");
+    save("tie-z", "tiequartz candidate", null, "2023-01-01");
+    for (const [id, toId] of [["link-z", "tie-a"], ["link-b", "tie-z"], ["link-a", "tie-a"]]) {
+      store.saveConnection({ id, fromId: "tie-target", toId, category: "related", proposedBy: "user", explanation: id, sourceIds: [] });
+    }
+    for (const sort of ["newest", "oldest"] as const) {
+      expect(contextFor(service.query(user, "tiequartz", { sort }), "tie-target")).toEqual({ kind: "connection", thought: store.getThought("tie-a"), connection: store.getConnection("link-a") });
+    }
+  }));
+
+  test("response hits use their destination's context, not another response or title hit; corrections use the effective query", () => fixture(({ db, service }) => {
+    const { store, save, link } = contextFixture(db);
+    save("ctx-response-neighbor", "not a matching note", null, "2024-01-01");
+    link("ctx-link-response", "ctx-response-neighbor");
+    store.saveResponse({ id: "ctx-response", text: "quasarneedle response", role: "addendum", state: "complete", thoughtIds: ["ctx-target"] });
+    store.saveResponse({ id: "ctx-other-response", text: "quasarneedle other response", role: "fallback", state: "complete", thoughtIds: ["ctx-response-neighbor"] });
+    const page = service.query(user, "quasarneedle");
+    expect(page.results.find(item => item.id === "ctx-response")?.thoughtId).toBe("ctx-target");
+    expect(contextFor(page, "ctx-response")).toEqual({ kind: "predecessor", thought: store.getThought("ctx-parent") });
+    expect(contextFor(page, "ctx-other-response")).toBeNull();
+
+    save("ctx-spell-target", "astronomical target", "ctx-parent", "2023-01-01", [], null, "user");
+    save("ctx-spell-neighbor", "astronomical neighbor", null, "2022-01-01");
+    store.saveConnection({ id: "ctx-spell-link", fromId: "ctx-spell-target", toId: "ctx-spell-neighbor", category: "related", proposedBy: "user", explanation: "recorded astronomy connection", sourceIds: [] });
+    const corrected = service.query(user, "astronimical");
+    expect(corrected.results.map(item => item.id)).toContain("ctx-spell-target");
+    expect(contextFor(corrected, "ctx-spell-target")).toEqual({ kind: "connection", thought: store.getThought("ctx-spell-neighbor"), connection: store.getConnection("ctx-spell-link") });
+  }));
+});
+
 describe("GET /search transport", () => {
   test("parses strict filter params and serves authenticated scoped results", async () => {
     const dir = mkdtempSync(join("/tmp/opencode", "search-http-"));
@@ -126,6 +220,7 @@ describe("GET /search transport", () => {
         expect(response.status).toBe(200);
         const page = await response.json();
         expect(page.results.map((item: { id: string }) => item.id)).toEqual(["one"]);
+        expect(page.results[0].context).toBeNull();
         expect(page.counts.authors.user).toBe(1);
         const combined = await request("/search?q=cobalt&author=user&author=ai&kind=captured-original&kind=developing-idea");
         expect(combined.status).toBe(200);
