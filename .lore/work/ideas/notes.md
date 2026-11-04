@@ -1,0 +1,6 @@
+- agentic search
+- user created connections
+- import markdown (splits it into multiple chained thoughts)
+- import URL (AI interpretation reads the referenced source and generates a summary NOTE this might even require an MCP that is configured in opencode)
+- import media (AI interpretation processes the media if possible and provides a summary)
+- import vault (extension of "import markdown" but understands that there can be linked files via obsidian style links and that could add additional connections and require a specific import order, and that the directory is also part of the media (title?))
