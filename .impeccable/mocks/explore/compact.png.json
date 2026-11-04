@@ -1,0 +1,59 @@
+{
+  "kind": "exploratory generated UI comp",
+  "option": "Compact excerpts",
+  "approved": true,
+  "directionApproved": true,
+  "userDirectionWords": "A - quiet night. works.",
+  "prompt": "Generate one actual exploratory UI comp of a desktop Thoughtloom web app, edge to edge, landscape target 1440 \u00d7 900, with crisp readable text and no browser window, device, or desk. Use the normal image-generation output mechanism and report its absolute native image path. Do not write application code, alter files, run Beads, or commit.\n\nThe attached A \u2014 Quiet Night image is the user's approved visual direction, not a request for a new style. Keep its exact all-dark palette, Source Sans 3 character, component family, gold Search action, and attached context-caption signature. Intended background is opaque; file-size budget unknown. This is a screen candidate, not a shipping raster or implementation.\n\nMake this option compact excerpts: reduce incidental spacing, keep result titles prominent, and use one or two readable lines of actual matching text before the attached context caption. Keep dates and authorship in a quiet, consistently aligned row. Where wording is abbreviated, a visible clickable ellipsis indicates in-place text expansion; do not add an AI summary or a new action. Leave honest unused space rather than invent more records.\n\nPreserve the reference's top shell, query above left filters and vertical results, count and sort. Navigation: thoughtloom, Explore selected, Capture, reserved Settings. Query \u201cconnections\u201d; Search; 3 results. Sort offers Relevance, Newest first, Oldest first. Authorship You 2 / AI 1. Kind counts: Original captures 2, Contributions 0, AI interpretations 1, Developing ideas 0. Created has Any time, Last 7 days, Last 30 days, This year, Custom range. Show rejected has no count; Clear filters remains.\n\nUse the same three titles, attributed excerpts, dates, and recorded Related / Developed from context as the reference. Include \u201cIllustrative notes and counts\u201d. No new navigation, attachments, profile, notifications, dashboard, invented status, or decorative imagery.\n",
+  "promptFile": ".impeccable/design-review/explore-prompts/compact.txt",
+  "promptKind": "exact Codex CLI stdin request; internal image-tool prompt not exposed by runner",
+  "reference": ".impeccable/design-review/evidence/dark/dark-quiet.png",
+  "referenceSha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+  "generatorRoute": "codex exec --skip-git-repo-check --image <selected reference> - < approved prompt",
+  "runnerVersion": "codex-cli 0.166.0",
+  "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no model override requested)",
+  "imageModel": null,
+  "imageModelNote": "not exposed by native route",
+  "dateUTC": "2026-11-04",
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1a497-ce2f-7720-afcc-6a682d0f0fee/exec-74735dde-4d39-4162-9b3a-9566b4c26a07.png",
+  "nativeSha256": "330b2fa5e2dd9c47d0d990d461b8d5a92d6f4acf2f089423a54296a02e60a0fe",
+  "copiedOriginalSha256": "330b2fa5e2dd9c47d0d990d461b8d5a92d6f4acf2f089423a54296a02e60a0fe",
+  "candidatePath": ".impeccable/mocks/explore/compact.png",
+  "candidateSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+  "decodedPixelSignature": "b9ef9c5c471a1ab811e878a2316e4692b5a43be740a352f3eb36a660c4d57f0d",
+  "actualDimensions": {
+    "width": 1586,
+    "height": 992
+  },
+  "intendedViewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "format": "PNG",
+  "colorSpace": "sRGB",
+  "opaque": true,
+  "alphaRequired": false,
+  "fileSizeBudget": null,
+  "bytes": 1444064,
+  "shippingRaster": false,
+  "integrationAuthorized": false,
+  "screen": "Explore",
+  "approval": {
+    "userWords": "compact",
+    "recordedAtUTC": "2026-11-04T03:40:18.641984+00:00",
+    "selectedCandidate": ".impeccable/mocks/explore/compact.png",
+    "selectedCandidateSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+    "scope": "the exact shown resting desktop Explore composition only",
+    "unseenStatesApproved": false,
+    "shippingRasterApproved": false,
+    "implementationAuthorized": false
+  },
+  "notesFile": ".impeccable/surfaces/impeccable-mocks-explore-compact-png.md",
+  "verification": {
+    "nativeOpened": true,
+    "candidateOpened": true,
+    "copyHashMatchedBeforePromptEmbedding": true,
+    "decodedPixelsMatchAfterPromptEmbedding": true,
+    "generatedRasterAccessibilityAuditPerformed": false
+  }
+}

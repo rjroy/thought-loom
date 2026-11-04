@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "status": "selected-only design packet; overall design gate open; no implementation or shipping-raster approval",
+  "direction": {
+    "id": "quiet-night",
+    "name": "Quiet Night / Collection labels",
+    "kind": "browser-rendered direction study",
+    "image": ".impeccable/design-review/evidence/dark/dark-quiet.png",
+    "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+    "source": ".impeccable/mocks/decision/dark-quiet.html",
+    "sourceSha256": "9966a0810f9bb66bfc5adbdc762592ab0219941da770d660f27d60dfb19f09e2",
+    "actualDimensions": {
+      "width": 1440,
+      "height": 900
+    },
+    "approval": {
+      "userWords": "A - quiet night. works.",
+      "scope": "shared visual direction only",
+      "unseenStatesApproved": false,
+      "implementationAuthorized": false
+    },
+    "browserVersion": "Chromium 155.0.8059.84",
+    "renderCommandTemplate": "chromium --headless --disable-gpu --screenshot=<new-output-path> --window-size=1440,900 --hide-scrollbars --virtual-time-budget=2000 file://<absolute-selected-HTML-path>"
+  },
+  "screens": [
+    {
+      "id": "explore-compact",
+      "name": "Compact excerpts",
+      "kind": "generated exploratory UI comp",
+      "image": ".impeccable/mocks/explore/compact.png",
+      "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+      "sidecar": ".impeccable/mocks/explore/compact.png.json",
+      "notes": ".impeccable/surfaces/impeccable-mocks-explore-compact-png.md",
+      "referenceId": "quiet-night",
+      "referenceSha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+      "approval": {
+        "userWords": "compact",
+        "recordedAtUTC": "2026-11-04T03:40:18.641984+00:00",
+        "selectedCandidate": ".impeccable/mocks/explore/compact.png",
+        "selectedCandidateSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+        "scope": "the exact shown resting desktop Explore composition only",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      }
+    },
+    {
+      "id": "capture-wide",
+      "name": "Wide working pad",
+      "kind": "generated exploratory UI comp",
+      "image": ".impeccable/mocks/capture/wide.png",
+      "sha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2",
+      "sidecar": ".impeccable/mocks/capture/wide.png.json",
+      "notes": ".impeccable/surfaces/impeccable-mocks-capture-wide-png.md",
+      "referenceId": "explore-compact",
+      "referenceSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+      "approval": {
+        "userWords": "wide",
+        "recordedAtUTC": "2026-11-04T04:10:19.437296+00:00",
+        "selectedCandidate": ".impeccable/mocks/capture/wide.png",
+        "selectedCandidateSha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2",
+        "scope": "the exact shown resting desktop Capture draft composition only",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      }
+    }
+  ],
+  "brandNotes": ".impeccable/brand/BRAND.md",
+  "brandSourceNotes": ".impeccable/brand/SOURCE.md",
+  "uiPalette": ".impeccable/brand/ui-palette.json",
+  "sourceContracts": [
+    "docs/daemon-api.md",
+    ".lore/context/architecture.md"
+  ],
+  "overallDesignGateClosed": false,
+  "implementationAuthorized": false,
+  "files": [
+    {
+      "path": ".impeccable/README.md",
+      "bytes": 4328,
+      "sha256": "041282cd387162fedd046b028ac8aac342759e134e0b03ee926644ede14ff311"
+    },
+    {
+      "path": ".impeccable/brand/BRAND.md",
+      "bytes": 1939,
+      "sha256": "3733f082be3cc7b20bf6d51d5fbb6844b25c5f54e89f6a717ed7a7017a2c489d"
+    },
+    {
+      "path": ".impeccable/brand/SOURCE.md",
+      "bytes": 1800,
+      "sha256": "3f7f6408df89513cdb958bb7bdc98ab5cf604ba1856f3d87046580b828bce891"
+    },
+    {
+      "path": ".impeccable/brand/colors.toml",
+      "bytes": 461,
+      "sha256": "f33975a3b23b8ca80397dd53b74a1a95c685693f3b8b0f30a6e7a4479870d6c4"
+    },
+    {
+      "path": ".impeccable/brand/fonts/OFL.txt",
+      "bytes": 4579,
+      "sha256": "f5cdf59463564e8428c1159d7e7b76eb408c9b5fd4af049c193533c681880169"
+    },
+    {
+      "path": ".impeccable/brand/fonts/SourceSans3-VariableFont_wght.ttf",
+      "bytes": 642476,
+      "sha256": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c"
+    },
+    {
+      "path": ".impeccable/brand/ui-palette.json",
+      "bytes": 2132,
+      "sha256": "760abd03ee30f6512d0685090f34f7813155046a517e3ad31e4df6413b1b3f57"
+    },
+    {
+      "path": ".impeccable/design-review/capture-prompts/wide.txt",
+      "bytes": 1795,
+      "sha256": "d36905dc0dc79395b21984a5f7719265fefdeb57c60a137bcbdd37a301961e19"
+    },
+    {
+      "path": ".impeccable/design-review/evidence/dark/dark-quiet.png",
+      "bytes": 140984,
+      "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622"
+    },
+    {
+      "path": ".impeccable/design-review/explore-prompts/compact.txt",
+      "bytes": 1941,
+      "sha256": "e642f4de986528504e19412f4cb39eb8cd96e2a4db9fc2411c46eaa6bea16d5e"
+    },
+    {
+      "path": ".impeccable/mocks/capture/wide.png",
+      "bytes": 1212616,
+      "sha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2"
+    },
+    {
+      "path": ".impeccable/mocks/capture/wide.png.json",
+      "bytes": 4698,
+      "sha256": "ff4bbec23d10d18e4e87ef718706e9d6c843aacdf709923666fb0122f4cea2fe"
+    },
+    {
+      "path": ".impeccable/mocks/decision/dark-quiet.html",
+      "bytes": 866233,
+      "sha256": "9966a0810f9bb66bfc5adbdc762592ab0219941da770d660f27d60dfb19f09e2"
+    },
+    {
+      "path": ".impeccable/mocks/explore/compact.png",
+      "bytes": 1444064,
+      "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f"
+    },
+    {
+      "path": ".impeccable/mocks/explore/compact.png.json",
+      "bytes": 4519,
+      "sha256": "727b52fdd070678dfb687453041746ae1fd4c53ed51ff67d6d9f1d13f7c9821d"
+    },
+    {
+      "path": ".impeccable/surfaces/impeccable-mocks-capture-wide-png.md",
+      "bytes": 2411,
+      "sha256": "d1f80cf414ccd3299ae8d6dd948e923f204ab3d13f45669231fae60694fc2240"
+    },
+    {
+      "path": ".impeccable/surfaces/impeccable-mocks-explore-compact-png.md",
+      "bytes": 2413,
+      "sha256": "a3b7483ed806f3ebc0cbc3774028f5ddefdafbe64dc37f3bc4ee2bb01988bac8"
+    }
+  ]
+}
