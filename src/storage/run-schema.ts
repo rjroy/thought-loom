@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { migrateRunReceipts } from "./run-receipt-schema";
+import { migrateAgenticExports } from "./agentic-export-schema";
 
 /** Schema-only helper. The authoritative core migration owns its transaction and connection setup. */
 export function migrateRunSchema(db: Database): void {
@@ -88,6 +89,7 @@ export function migrateRunSchema(db: Database): void {
     CREATE TRIGGER IF NOT EXISTS agent_bindings_immutable_delete BEFORE DELETE ON agent_bindings
     BEGIN SELECT RAISE(ABORT,'agent binding immutable'); END;
   `);
+  migrateAgenticExports(db);
 }
 
 function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
@@ -95,8 +97,9 @@ function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
   const stagedResults = schema !== null && /CHECK\s*\(\s*result_json\s+IS\s+NULL\s+OR\s+state\s*=\s*'processed'\s*\)/i.test(schema.sql);
   if (stagedResults) {
     // Only the old CHECK changes: a completed request may now retain its dispatched result before successor preparation.
-    // No table has an FK to run_steps; the two cross-table triggers are recreated below and by migrateRunReceipts.
+    // No table has an FK to run_steps; cross-table identity triggers are recreated by their schema helpers.
     db.exec(`DROP TRIGGER IF EXISTS runs_prepare_initial_step; DROP TRIGGER IF EXISTS run_receipts_step_identity;
+      DROP TRIGGER IF EXISTS export_reports_step_identity;
       ALTER TABLE run_steps RENAME TO run_steps_legacy;`);
   }
   db.exec(`

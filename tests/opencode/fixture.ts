@@ -3,7 +3,7 @@ import { prepareIsolatedLaunch } from './isolation';
 import { preflightExecutable, requireOptIn } from './native-binary';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile, lstat, readFile, rm, realpath } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, writeFile, lstat, readFile, rm, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { strict as assert } from 'node:assert';
 import { createServer, type Server } from 'node:http';
@@ -77,6 +77,8 @@ register('receipts', async () => {
   console.log(JSON.stringify(result,null,2));
 });
 try {
+  try { await access(new URL('../../build/sqlite/spellfix.so',import.meta.url)); }
+  catch { throw new Error('Missing build/sqlite/spellfix.so; run bun run build:spellfix before native acceptance'); }
   const hash = await preflightExecutable(bin); lifecycle.throwIfStopping(); result.sha256=hash;
   assert.equal(await realpath('/tmp/opencode'),'/tmp/opencode');
   assert.equal(await inspect('/etc/opencode'),'missing');
@@ -103,6 +105,19 @@ try {
       holdSeen=true; await new Promise<void>(resolve=>{ releaseHeld=resolve; });
     }
     if (title) output='Fixture native title';
+    else if (job.context.job.kind==='export') {
+      if (job.context.job.request === 'fixture-malicious-export') output=request('interpretation',{text:'fixture forbidden interpretation',sourceIds:[]});
+      else if (job.context.job.request !== 'fixture-cobalt-report') throw new Error('Unexpected export job');
+      else if (last.kind==='job') output=request('search',{query:'cobalt'});
+      else if (last.request.capability==='search') {
+        const source=last.result.candidates.find((candidate: {kind:string,snippet:string})=>candidate.kind==='thought' && candidate.snippet.includes('cobalt thought source'));
+        if (!source) throw new Error('Expected active fixture search candidate');
+        output=request('readThought',{id:source.id});
+      } else if (last.request.capability==='readThought') {
+        if (!last.result.thought || !last.result.thought.text.includes('cobalt thought source')) throw new Error('Expected full fixture source');
+        output={version:1,kind:'report',markdown:'# Fixture report\n\nFixture explanation, not verified fact.',sourceThoughtIds:[last.result.thought.id]};
+      } else throw new Error('Unexpected export capability');
+    }
     else if (job.context.job.kind==='weave') output=last.kind==='job' ? request('title-fill',{title:'Fixture generated title'}) : complete('No findings.');
     else if (last.kind==='job') output=request('readThought',{id:job.context.job.contributionId});
     else if (last.request.capability==='readThought') output=request('development',{parentId:job.context.job.contributionId,text:'fixture development',sourceIds:[]});
@@ -146,7 +161,7 @@ try {
   daemon = await start();
   const call=async(path:string,method='GET',data?:unknown)=>{ lifecycle.throwIfStopping(); const response=await fetch(new URL(path,daemon!.url),{method,headers:{authorization:`Bearer ${token}`,...(data===undefined?{}:{'content-type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(5000)}); return {status:response.status,data:await response.json()}; };
   const until=async(label:string,fn:()=>Promise<unknown>)=>{ const end=Date.now()+45000; while(Date.now()<end){lifecycle.throwIfStopping(); const value=await fn(); if(value)return value; await delay(100);} throw new Error(`timeout ${label}`); };
-  const captured=await call('/thoughts','POST',{text:'fixture original'}); assert.equal(captured.status,201); const rootId=captured.data.id;
+  const captured=await call('/thoughts','POST',{text:'fixture original cobalt thought source'}); assert.equal(captured.status,201); const rootId=captured.data.id;
   const titled=await until('weave title',async()=>{const r=await call(`/thoughts/${rootId}`); return r.data.title==='Fixture generated title' ? r.data : null;}); steps.push({op:'weave title fill',thought:titled});
   const admission=await call(`/thoughts/${rootId}/evolve`,'POST',{text:'fixture question'}); assert.equal(admission.status,201); const runId=admission.data.run.id; const contributionId=admission.data.contribution.id; steps.push({op:'evolve admission',admission:admission.data});
   const view=await until('evolve completion',async()=>{const r=await call(`/runs/${runId}`); if(r.data.status==='failed'||r.data.status==='interrupted') throw new Error(`evolve ${r.data.status}`); return r.data.status==='completed'?r.data:null;}) as RunView;
@@ -180,6 +195,49 @@ try {
   const restartDb=new Database(appConfig.dbPath,{readonly:true}); let issued:unknown[]; try { issued=restartDb.query('SELECT thought_id FROM run_issued_thoughts WHERE run_id=?').all(uncertainId); } finally {restartDb.close();} assert.equal(issued.length,1);
   assert(nativeCalls.some((c:any)=>c.method==='GET' && c.path.includes('/message?') && c.path.includes('cursor=')));
   steps.push({op:'lost acknowledgement daemon restart',dropped,preRestart,resumed,issued,identicalPromptPostCount:samePromptCalls.length,actualCursorContinuationObserved:true});
+
+  // Make rejected search material through public HTTP, and let every previously admitted weave finish before taking a knowledge snapshot.
+  const hidden=await call('/thoughts','POST',{text:'cobalt thought rejected fixture secret'}); assert.equal(hidden.status,201); const hiddenId=hidden.data.id;
+  const weaveSummary=await until('all weaves settled',async()=>{const db=new Database(appConfig.dbPath,{readonly:true}); try {
+    const rows=db.query("SELECT id,status FROM runs WHERE kind='weave'").all() as {id:string,status:string}[];
+    if(rows.some(row=>row.status==='failed'||row.status==='interrupted')) throw new Error('A fixture weave failed before snapshot');
+    return rows.length && rows.every(row=>row.status==='completed') ? rows : null;
+  } finally {db.close();}});
+  const reject=await fetch(new URL(`/thoughts/${hiddenId}/reject`,daemon.url),{method:'POST',headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(5000)}); assert.equal(reject.status,204); await reject.text();
+  const snapshot=()=>{const db=new Database(appConfig.dbPath,{readonly:true}); try {
+    return ['thoughts','thought_titles','thought_sources','thought_source_seals','connections','connection_sources','responses','response_thoughts','response_seals','rejected_thoughts','rejected_connections','thought_search_fts','response_search_fts'].map(table=>[table,db.query(`SELECT * FROM ${table} ORDER BY rowid`).all()]);
+  } finally {db.close();}};
+  const before=snapshot();
+  const prefix=await call('/search?q=coba'); assert.equal(prefix.status,200); assert(prefix.data.results.some((row: {id:string})=>row.id===rootId)); assert(!prefix.data.results.some((row: {id:string})=>row.id===hiddenId));
+  const typo=await call('/search?q=thoght'); assert.equal(typo.status,200); assert(typo.data.results.some((row: {id:string})=>row.id===rootId));
+  const markdown=async(path:string,method='GET',data?:unknown,credential=token)=>{lifecycle.throwIfStopping(); const response=await fetch(new URL(path,daemon!.url),{method,headers:{authorization:`Bearer ${credential}`,...(data===undefined?{}:{'content-type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(5000)}); return {status:response.status,contentType:response.headers.get('content-type'),text:await response.text()};};
+  const simpleOne=await markdown('/exports/simple','POST',{rootId,count:1,traversal:'breadth'});
+  assert.equal(simpleOne.status,200); assert.match(simpleOne.contentType??'',/^text\/markdown/); assert(simpleOne.text.includes('fixture original cobalt thought source')); assert(!simpleOne.text.includes('fixture question')); assert(!simpleOne.text.includes('fixture development'));
+  const simpleTree=await markdown('/exports/simple','POST',{rootId,count:2,traversal:'breadth'});
+  assert.equal(simpleTree.status,200); assert(simpleTree.text.includes('fixture original cobalt thought source')); assert(simpleTree.text.includes('fixture question')); assert(!simpleTree.text.includes('fixture development')); assert.deepEqual(snapshot(),before);
+  steps.push({op:'public search and simple export',prefix:prefix.data,typo:typo.data,simpleOne,simpleTree,weaveSummary,knowledgeUnchanged:true});
+
+  const admissionExport=await call('/exports/agentic','POST',{request:'fixture-cobalt-report'}); assert.equal(admissionExport.status,201); const exportId=admissionExport.data.run.id;
+  const exportView=await until('agentic export completed',async()=>{const r=await call(`/runs/${exportId}`); if(r.data.status==='failed'||r.data.status==='interrupted')throw new Error(`agentic export ${r.data.status}`); return r.data.status==='completed'?r.data:null;}) as RunView;
+  assert.deepEqual(exportView.confirmedThoughtIds,[]); assert.equal(exportView.responseId,null);
+  const report=await markdown(`/exports/agentic/${exportId}`); assert.equal(report.status,200); assert.match(report.contentType??'',/^text\/markdown/); assert(report.text.startsWith('# Fixture report\n\nFixture explanation, not verified fact.')); assert(report.text.includes('## Sources')); assert(report.text.includes(rootId)); assert(report.text.includes('Fixture generated title')); assert(report.text.includes('thought author: user')); assert(report.text.includes('kind: captured-original')); assert(!report.text.includes(hiddenId)); assert(!report.text.includes('cobalt thought rejected fixture secret'));
+  const exportDb=new Database(appConfig.dbPath,{readonly:true}); let exportSteps:{envelope_json:string,result_json:string|null}[]; let artifact:{sources_json:string}|null;
+  try {exportSteps=exportDb.query('SELECT envelope_json,result_json FROM run_steps WHERE run_id=? ORDER BY position').all(exportId) as typeof exportSteps; artifact=exportDb.query('SELECT sources_json FROM export_reports WHERE run_id=?').get(exportId) as typeof artifact;} finally {exportDb.close();}
+  assert.equal(exportSteps.length,3); const envelopes=exportSteps.map(row=>JSON.parse(row.envelope_json)); const searchResult=JSON.parse(exportSteps[0].result_json ?? 'null'); const readResult=JSON.parse(exportSteps[1].result_json ?? 'null');
+  assert.equal(envelopes[0].request.capability,'search'); assert.equal(envelopes[1].request.capability,'readThought'); assert.equal(envelopes[1].request.arguments.id,rootId); assert.equal(envelopes[2].kind,'report'); assert.deepEqual(envelopes[2].sourceThoughtIds,[rootId]); assert(searchResult.candidates.some((candidate:{id:string})=>candidate.id===rootId)); assert(!searchResult.candidates.some((candidate:{id:string})=>candidate.id===hiddenId)); assert.equal(readResult.thought.id,rootId); assert.equal(readResult.thought.text,'fixture original cobalt thought source');
+  assert(artifact); assert.deepEqual(JSON.parse(artifact.sources_json),[{id:rootId,title:'Fixture generated title',author:'user',kind:'captured-original'}]);
+  assert.equal((await markdown(`/exports/agentic/${exportId}`,'GET',undefined,agentToken)).status,403);
+  assert.equal((await markdown('/exports/agentic','POST',{request:'fixture unauthorized'},agentToken)).status,403);
+  assert.deepEqual(snapshot(),before);
+  steps.push({op:'agentic report search read and download',run:exportView,report,exportSteps,hiddenExcluded:true,knowledgeUnchanged:true});
+
+  const malicious=await call('/exports/agentic','POST',{request:'fixture-malicious-export'}); assert.equal(malicious.status,201); const maliciousId=malicious.data.run.id;
+  const failed=await until('malicious export rejected',async()=>{const r=await call(`/runs/${maliciousId}`); if(r.data.status==='completed')throw new Error('Malicious export completed'); return r.data.status==='failed'?r.data:null;}) as RunView;
+  assert.deepEqual(failed.confirmedThoughtIds,[]); assert.equal(failed.responseId,null); assert.equal((await markdown(`/exports/agentic/${maliciousId}`)).status,409);
+  const maliciousDb=new Database(appConfig.dbPath,{readonly:true}); let maliciousSteps:{envelope_json:string|null}[];
+  try { maliciousSteps=maliciousDb.query('SELECT envelope_json FROM run_steps WHERE run_id=? ORDER BY position').all(maliciousId) as typeof maliciousSteps; assert.equal(maliciousDb.query('SELECT run_id FROM export_reports WHERE run_id=?').get(maliciousId),null); } finally {maliciousDb.close();}
+  assert(maliciousSteps.some(row=>row.envelope_json && JSON.parse(row.envelope_json).request?.capability==='interpretation')); assert.deepEqual(snapshot(),before);
+  steps.push({op:'agentic malicious knowledge write rejected',run:failed,maliciousSteps,downloadStatus:409,knowledgeUnchanged:true});
   result.result='PASS';
 } catch(e) { result.error = e instanceof Error ? `${e.name}: ${e.message}` : String(e); }
 finally {

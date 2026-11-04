@@ -24,7 +24,7 @@ export interface AppOptions {
   readonly titles: TitleService;
   readonly search?: SearchService;
   readonly simpleExport?: SimpleExportService;
-  readonly agents?: Pick<AgentService,"evolve" | "status" | "stop">;
+  readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
 }
 
 type AppEnv = { Variables: { actor: Actor } };
@@ -78,6 +78,8 @@ function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
   if (path === "/exports/simple") return "/exports/simple";
+  if (path === "/exports/agentic") return "/exports/agentic";
+  if (parts.length === 4 && parts[1] === "exports" && parts[2] === "agentic") return "/exports/agentic/:id";
   if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
@@ -141,6 +143,18 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
       return c.body(simpleExport.render("user", { rootId, count: data.count, traversal }), 200, { "content-type": "text/markdown; charset=utf-8" });
     });
   }
+
+  app.post("/exports/agentic", async c => {
+    user(c); noQuery(c);
+    const data = await body(c,["request","effort"]);
+    if (!options.agents) throw new ApiError(503);
+    return c.json(options.agents.export(c.get("actor"),data),201);
+  });
+  app.get("/exports/agentic/:id", c => {
+    user(c); noQuery(c);
+    if (!options.agents) throw new ApiError(503);
+    return c.body(options.agents.report(c.get("actor"),c.req.param("id")),200,{"content-type":"text/markdown; charset=utf-8"});
+  });
 
   app.get("/thoughts", c => c.json(rejection.listThoughts(scope(c))));
   app.get("/thoughts/:id", c => {

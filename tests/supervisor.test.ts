@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RunSupervisor, type SupervisedWorker } from "../src/agent/supervisor";
 import { RunService, type NativeDispatcher } from "../src/domain/run";
 import { SqliteRunOperations } from "../src/storage/run-operations";
+import { SqliteAgenticExports } from "../src/storage/agentic-export";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
@@ -36,6 +37,8 @@ async function flush() { for (let i = 0; i < 5; i++) await Promise.resolve(); }
 
 test("scans queued, active, uncertain and terminal pending cancellation, not settled or completed", async () => fixture(async f => {
   const queued = f.admit("queued");
+  let exportSequence = 0;
+  const exportRun = new SqliteAgenticExports(f.db, { id: () => `export-${++exportSequence}`, now }).admit("user", { request: "Find related thinking" });
   const active = f.admit("active");
   const activeClaim = f.service.claim(active.id);
   f.steps.prepare(activeClaim, { promptId: active.promptId, input: "active input" });
@@ -61,7 +64,7 @@ test("scans queued, active, uncertain and terminal pending cancellation, not set
   const supervisor = new RunSupervisor({ db: f.db, worker, startTimer: () => () => {} });
   try {
     await supervisor.poll();
-    expect(seen.sort()).toEqual([queued.id, active.id, uncertain.id, pending.id].sort());
+    expect(seen.sort()).toEqual([queued.id, active.id, uncertain.id, pending.id, exportRun.id].sort());
     expect(f.runs.get(active.id)?.generation).toBe(activeClaim.generation);
     expect(f.runs.get(uncertain.id)?.generation).toBe(uncertainClaim.generation);
   } finally { await supervisor.stop(); }

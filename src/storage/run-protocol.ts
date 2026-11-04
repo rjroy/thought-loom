@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { RunConflictError, RunFenceError, type Claim, type RunRecord } from "../domain/run";
+import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
 import { parseEnvelope, protocolJson, type CancellationState, type NextStep, type ProtocolEnvelope, type RunProtocolRepository, type RunStep } from "../domain/run-protocol";
 import { nonEmpty } from "../domain/validation";
 import { isStepOperationCapability } from "../domain/run-operations";
@@ -47,6 +47,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     const kind = this.guarded("complete prompt",claim,run => {
       const step = this.current(run,promptId);
       const value = parseEnvelope(protocolJson(envelope));
+      if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) throw new RunForbiddenError("Final envelope does not match the run kind");
       const encoded = protocolJson(value);
       if (step.envelope !== null) {
         if (protocolJson(step.envelope) !== encoded) throw new RunConflictError("Completed prompt envelope differs");

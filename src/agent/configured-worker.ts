@@ -8,6 +8,7 @@ import type { SupervisedWorker } from "./supervisor";
 import { RunWorker, type WorkerNative } from "./worker";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteRunRepository } from "../storage/run";
+import { SqliteAgenticExports } from "../storage/agentic-export";
 
 export interface ConfiguredWorkerDependencies extends RunSources {
   readonly db: Database;
@@ -21,17 +22,21 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   private readonly worker: RunWorker;
   private readonly bindings: SqliteAgentBindings;
   private readonly runs: SqliteRunRepository;
+  private readonly exports: SqliteAgenticExports;
   private service: ResolvedAgentService | undefined;
   private resolving: Promise<void> | undefined;
   private paused = false;
   constructor(private readonly dependencies: ConfiguredWorkerDependencies) {
     this.bindings = new SqliteAgentBindings(dependencies.db);
     this.runs = new SqliteRunRepository(dependencies.db,dependencies);
+    this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
     this.worker = new RunWorker({...dependencies,bindingFor:run => {
+      const effort = run.kind === "export" ? this.exports.intent(run.id)?.effort : "standard";
+      if (effort === undefined) return null; // Unknown legacy intent is blocked, never assigned an invented effort/question.
       const service = this.service;
       if (!service) return null;
       const config = dependencies.config;
-      const variant = config.effort.standard;
+      const variant = config.effort[effort];
       return normalizeBinding({sessionId:run.sessionId,serviceUrl:service.url,location:{directory:config.directory},
         model:{...config.model,...(variant === null ? {} : {variant})},permissions:[{action:"*",resource:"*",effect:"deny"}],protocolVersion:1});
     },native:bindings => {
@@ -74,7 +79,8 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     if (this.paused) return;
     const run = this.runs.get(runId);
     // Canonical local output and terminal cleanup without a binding do not require discovery or a network connection.
-    if (run && ["queued","submitting","running","uncertain"].includes(run.status) && !this.bindings.get(runId)) {
+    const selectable = run && (run.kind !== "export" || this.exports.intent(runId) !== null);
+    if (selectable && ["queued","submitting","running","uncertain"].includes(run.status) && !this.bindings.get(runId)) {
       try { await this.resolve(); } catch { return; } // A later technical poll retries unavailable discovery.
     }
     if (!this.paused) await this.worker.tick(runId);

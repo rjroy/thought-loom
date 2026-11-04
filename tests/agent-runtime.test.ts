@@ -38,6 +38,9 @@ class Client implements PublicClient {
   cancellations = 0;
   unavailable = false;
   completeFirst = false;
+  exportSourceId = "";
+  exportWrite: { capability: string; arguments: Record<string, unknown> } | null = null;
+  readonly exportProposals: string[] = [];
   async serverInfo() { if (this.unavailable) throw new Error(`offline ${secret}`); return { version: "99.0.0-fixture" }; }
   async sessionCreate(input: Parameters<PublicClient["sessionCreate"]>[0]): Promise<NativeSession> {
     const session: NativeSession = { id: input.id, location: input.location, model: input.model, permissions: input.permissions, metadata: input.metadata };
@@ -58,9 +61,13 @@ class Client implements PublicClient {
     const context = object(initial.context);
     const job = object(context.job);
     const turn = this.prompts.filter(p => p.sessionID === input.sessionID).length;
-    const output = turn > 1 || this.completeFirst ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
+    const output = job.kind === "export" ? (turn === 1 ? { version: 1, kind: "request", request: this.exportWrite ?? { capability: "search", arguments: { query: "cobalt" } } } :
+      turn === 2 ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.exportSourceId } } } :
+        { version: 1, kind: "report", markdown: "# Fixture report\n\nExisting thinking, not new knowledge.", sourceThoughtIds: [this.exportSourceId] }) :
+      turn > 1 || this.completeFirst ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
       job.kind === "evolve" ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "fixture development", sourceIds: [] } } } :
         { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Fixture generated title" } } };
+    if (job.kind === "export" && turn === 1 && this.exportWrite) this.exportProposals.push(this.exportWrite.capability);
     const n = messages.length * 10 + 10;
     messages.push({ id: input.id, type: "user", time: { created: n }, text: input.text },
       { id: `assistant-${input.id}`, type: "assistant", time: { created: n + 1, completed: n + 2 }, content: [{ type: "text", text: JSON.stringify(output) }], finish: "stop" },
@@ -92,6 +99,229 @@ async function progress(daemon: RunningDaemon, timer: ReturnType<typeof controll
   for (let i = 0; i < 40; i++) { timer.pulse(); if (await predicate()) return; }
   throw new Error("Owned fixture did not reach expected durable state");
 }
+
+function seedExport(path: string) {
+  const db = new Database(path);
+  try {
+    migrate(db);
+    const store = new SqliteStore(db);
+    store.saveThought({ id: "export-source", text: "cobalt existing human thinking", title: "Owned source", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030", origin: "fixture", parentId: null, sourceIds: [] });
+    store.saveThought({ id: "export-ai", text: "an AI hypothesis", title: null, titleAuthor: null, author: "ai", kind: "ai-interpretation", createdAt: "2031", origin: "fixture", parentId: "export-source", sourceIds: ["export-source"] });
+  } finally { db.close(); }
+}
+function snapshot(path: string) {
+  const db = new Database(path, { readonly: true });
+  try {
+    return ["thoughts", "thought_titles", "thought_sources", "thought_source_seals", "connections", "connection_sources", "responses", "response_thoughts", "response_seals", "rejected_thoughts", "rejected_connections", "thought_search_fts", "response_search_fts"].map(table => [table, db.query(`SELECT * FROM ${table} ORDER BY rowid`).all()]);
+  } finally { db.close(); }
+}
+async function markdown(daemon: RunningDaemon, path: string, token = user) {
+  const response = await fetch(new URL(path, daemon.url), { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(1500) });
+  return { status: response.status, contentType: response.headers.get("content-type"), text: await bounded(response.text(), "Markdown body") };
+}
+
+test("agentic export searches, fully reads and downloads cited Markdown without changing knowledge", async () => fixture(async dir => {
+  const path = join(dir, "export.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source";
+  const timer = controlled(client); const events: DaemonEvent[] = [];
+  const configured: AgentConfig = { ...agent, effort: { quick: "brief", standard: null, thorough: "deep" } };
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent: configured }, event => events.push(event), timer.deps), "start");
+  try {
+    const before = snapshot(path);
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: "Connect existing cobalt thinking" });
+    expect(admitted.status).toBe(201);
+    const run = object(object(admitted.data).run); const runId = string(run.id);
+    expect(run).toMatchObject({ kind: "export", status: "queued", confirmedThoughtIds: [], responseId: null });
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    await progress(daemon, timer, async () => object((await call(daemon, `/runs/${runId}`)).data).status === "completed");
+    const final = object((await call(daemon, `/runs/${runId}`)).data);
+    expect(final).toMatchObject({ id: runId, kind: "export", status: "completed", confirmedThoughtIds: [], responseId: null });
+    const report = await markdown(daemon, `/exports/agentic/${runId}`);
+    expect(report.status).toBe(200);
+    expect(report.contentType).toMatch(/^text\/markdown\b/i);
+    expect(report.text).toContain("# Fixture report");
+    expect(report.text).toContain("Existing thinking, not new knowledge.");
+    expect(report.text).toContain("export-source");
+    expect(report.text).toContain("Owned source");
+    expect(report.text).toContain("user");
+    expect(snapshot(path)).toEqual(before);
+    const first = client.prompts[0];
+    if (!first) throw new Error("Expected export prompt");
+    const initial = object(JSON.parse(first.text));
+    expect(JSON.stringify(initial)).toContain("Connect existing cobalt thinking");
+    if (!Array.isArray(initial.capabilities)) throw new Error("Expected explicit capability list");
+    expect(initial.capabilities.map(item => string(object(item).capability)).sort()).toEqual(["readConnection", "readResponse", "readThought", "search"].sort());
+    expect(client.models[0]).toEqual({ providerID: "fixture", id: "model" });
+    expect((await markdown(daemon, `/exports/agentic/${runId}`, ai)).status).toBe(403);
+    const evolve = await call(daemon, "/thoughts/export-source/evolve", "POST", { text: "a normal conversation" });
+    expect(evolve.status).toBe(201);
+    expect((await markdown(daemon, `/exports/agentic/${string(object(object(evolve.data).run).id)}`)).status).toBe(404);
+    const rejected = await fetch(new URL("/thoughts/export-source/reject", daemon.url), { method: "POST", headers: { authorization: `Bearer ${user}` }, signal: AbortSignal.timeout(1500) });
+    expect(rejected.status).toBe(204);
+    await bounded(rejected.text(), "rejection body");
+    const historical = await markdown(daemon, `/exports/agentic/${runId}`);
+    expect(historical.status).toBe(200);
+    expect(historical.text).toBe(report.text);
+    expect((await markdown(daemon, `/exports/agentic/${runId}`, ai)).status).toBe(403);
+    expect(JSON.stringify(events)).not.toContain(secret);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test("malicious export model write requests cannot mutate knowledge or publish reports", async () => fixture(async dir => {
+  const path = join(dir, "forged-export.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source"; const timer = controlled(client);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
+  try {
+    const before = snapshot(path);
+    for (const request of [
+      { capability: "development", arguments: { parentId: "export-source", text: "forged development", sourceIds: [] } },
+      { capability: "interpretation", arguments: { text: "forged interpretation", sourceIds: [] } },
+      { capability: "title-fill", arguments: { title: "forged title" } },
+      { capability: "connection", arguments: { fromId: "export-source", toId: "export-ai", category: "related", explanation: "forged link", sourceIds: [] } },
+    ]) {
+      client.exportWrite = request;
+      const admitted = await call(daemon, "/exports/agentic", "POST", { request: `Attempt ${request.capability}` });
+      expect(admitted.status).toBe(201);
+      const runId = string(object(object(admitted.data).run).id);
+      await progress(daemon, timer, async () => ["failed", "interrupted"].includes(string(object((await call(daemon, `/runs/${runId}`)).data).status)));
+      expect(client.exportProposals.at(-1)).toBe(request.capability);
+      expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    }
+    expect(snapshot(path)).toEqual(before);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test("agentic export validates user-only admission and unavailable/not-ready download without partial writes", async () => fixture(async dir => {
+  const path = join(dir, "unconfigured-export.sqlite"); seedExport(path);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai } }, () => {}), "start");
+  try {
+    const before = snapshot(path);
+    const unavailable = await call(daemon, "/exports/agentic", "POST", { request: "my question" });
+    expect(unavailable.status).toBe(503);
+    expect(JSON.stringify(unavailable.data)).toMatch(/unavailable|not configured/i);
+    expect((await call(daemon, "/exports/agentic", "POST", { request: "forged" }, ai)).status).toBe(403);
+    expect((await markdown(daemon, "/exports/agentic/missing")).status).toBe(404);
+    expect((await markdown(daemon, "/exports/agentic/missing", ai)).status).toBe(403);
+    const db = new Database(path, { readonly: true });
+    try { expect(db.query("SELECT COUNT(*) AS n FROM runs WHERE kind='export'").get()).toEqual({ n: 0 }); } finally { db.close(); }
+    expect(snapshot(path)).toEqual(before);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test.each([
+  { effort: "quick", variant: "brief" }, { effort: "standard", variant: null }, { effort: "thorough", variant: "deep" },
+] as const)("export $effort binds only its configured native variant", async ({ effort, variant }) => fixture(async dir => {
+  const path = join(dir, "effort.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source"; const timer = controlled(client);
+  const configured: AgentConfig = { ...agent, effort: { quick: "brief", standard: null, thorough: "deep" } };
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent: configured }, () => {}, timer.deps), "start");
+  try {
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: `Question ${effort}`, effort });
+    expect(admitted.status).toBe(201);
+    const runId = string(object(object(admitted.data).run).id);
+    await progress(daemon, timer, async () => { await call(daemon, `/runs/${runId}`); return client.models.length > 0; });
+    expect(client.models[0]).toEqual({ providerID: "fixture", id: "model", ...(variant === null ? {} : { variant }) });
+    expect((await call(daemon, "/exports/agentic", "POST", { request: "bad effort", effort: "maximum" })).status).toBe(400);
+    expect((await call(daemon, "/exports/agentic", "POST", { request: "bad authority", model: "forged" })).status).toBe(400);
+    expect((await call(daemon, "/exports/agentic?scope=history", "POST", { request: "bad query" })).status).toBe(400);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test("Stop after native report completion but before publication forbids partial download", async () => fixture(async dir => {
+  const path = join(dir, "stopped-export.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source"; const timer = controlled(client);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
+  try {
+    const before = snapshot(path);
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: "Stop before publishing" });
+    expect(admitted.status).toBe(201);
+    const runId = string(object(object(admitted.data).run).id);
+    await progress(daemon, timer, async () => {
+      await call(daemon, `/runs/${runId}`);
+      const db = new Database(path, { readonly: true });
+      try { return db.query("SELECT 1 FROM run_steps WHERE run_id=? AND state='completed' AND json_extract(envelope_json,'$.kind')='report'").get(runId) !== null; }
+      finally { db.close(); }
+    });
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    const stopped = await call(daemon, `/runs/${runId}/stop`, "POST", {});
+    expect(stopped.status).toBe(200);
+    expect(object(stopped.data).status).toBe("interrupted");
+    for (let i = 0; i < 5; i++) { timer.pulse(); await call(daemon, `/runs/${runId}`); }
+    expect(object((await call(daemon, `/runs/${runId}`)).data).status).toBe("interrupted");
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    const db = new Database(path, { readonly: true });
+    try { expect(db.query("SELECT COUNT(*) AS n FROM export_reports WHERE run_id=?").get(runId)).toEqual({ n: 0 }); } finally { db.close(); }
+    expect(snapshot(path)).toEqual(before);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test("rejection after a source was read fences an uncommitted export report", async () => fixture(async dir => {
+  const path = join(dir, "rejected-export.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source"; const timer = controlled(client);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
+  try {
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: "Investigate cobalt" });
+    expect(admitted.status).toBe(201);
+    const runId = string(object(object(admitted.data).run).id);
+    await progress(daemon, timer, async () => {
+      await call(daemon, `/runs/${runId}`);
+      const db = new Database(path, { readonly: true });
+      try { return db.query("SELECT 1 FROM run_context WHERE run_id=? AND kind='thought' AND ref_id='export-source' AND full_read=1").get(runId) !== null; }
+      finally { db.close(); }
+    });
+    const rejected = await fetch(new URL("/thoughts/export-source/reject", daemon.url), { method: "POST", headers: { authorization: `Bearer ${user}` }, signal: AbortSignal.timeout(1500) });
+    expect(rejected.status).toBe(204); await bounded(rejected.text(), "rejection body");
+    await progress(daemon, timer, async () => object((await call(daemon, `/runs/${runId}`)).data).status === "interrupted");
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    const db = new Database(path, { readonly: true });
+    try { expect(db.query("SELECT COUNT(*) AS n FROM export_reports WHERE run_id=?").get(runId)).toEqual({ n: 0 }); } finally { db.close(); }
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
+
+test("bound export effort and model survive daemon restart with changed configuration", async () => fixture(async dir => {
+  const path = join(dir, "bound-export.sqlite"); seedExport(path);
+  const client = new Client(); client.exportSourceId = "export-source";
+  let timer = controlled(client);
+  const first: AgentConfig = { ...agent, effort: { quick: "brief", standard: null, thorough: "deep" } };
+  const second: AgentConfig = { ...agent, model: { providerID: "other", id: "changed" }, effort: { quick: "changed-quick", standard: "changed-standard", thorough: "changed-thorough" } };
+  let daemon: RunningDaemon | undefined;
+  try {
+    daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent: first }, () => {}, timer.deps), "start");
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: "Restart this export", effort: "thorough" });
+    expect(admitted.status).toBe(201);
+    const runId = string(object(object(admitted.data).run).id);
+    await progress(daemon, timer, async () => { if (!daemon) throw new Error("Missing daemon"); await call(daemon, `/runs/${runId}`); return client.models.length > 0; });
+    expect(client.models).toEqual([{ providerID: "fixture", id: "model", variant: "deep" }]);
+    const before = new Database(path, { readonly: true }); let binding: unknown;
+    try { binding = before.query("SELECT * FROM agent_bindings WHERE run_id=?").get(runId); expect(binding).not.toBeNull(); } finally { before.close(); }
+    await bounded(daemon.stop(), "first stop"); daemon = undefined;
+    timer = controlled(client);
+    daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent: second }, () => {}, timer.deps), "restart");
+    await progress(daemon, timer, async () => { if (!daemon) throw new Error("Missing daemon"); return object((await call(daemon, `/runs/${runId}`)).data).status === "completed"; });
+    const after = new Database(path, { readonly: true });
+    try { expect(after.query("SELECT * FROM agent_bindings WHERE run_id=?").get(runId)).toEqual(binding); } finally { after.close(); }
+    expect(client.models).toEqual([{ providerID: "fixture", id: "model", variant: "deep" }]);
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(200);
+  } finally { if (daemon) await bounded(daemon.stop(), "stop"); }
+}));
+
+test("configured but unreachable export remains durable without a fabricated report", async () => fixture(async dir => {
+  const path = join(dir, "unreachable-export.sqlite"); seedExport(path);
+  const client = new Client(); client.unavailable = true; const timer = controlled(client);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
+  try {
+    const before = snapshot(path);
+    const admitted = await call(daemon, "/exports/agentic", "POST", { request: "Retain while unavailable" });
+    expect(admitted.status).toBe(201);
+    const runId = string(object(object(admitted.data).run).id);
+    for (let i = 0; i < 8; i++) { timer.pulse(); await call(daemon, `/runs/${runId}`); }
+    const status = object((await call(daemon, `/runs/${runId}`)).data);
+    expect(["queued", "submitting", "running", "uncertain"]).toContain(string(status.status));
+    expect((await markdown(daemon, `/exports/agentic/${runId}`)).status).toBe(409);
+    expect(client.prompts).toEqual([]);
+    expect(snapshot(path)).toEqual(before);
+  } finally { await bounded(daemon.stop(), "stop"); }
+}));
 
 test("a failed pre-dispatch history read retries the same persisted prompt without becoming uncertain", async () => fixture(async dir => {
   class PreflightClient extends Client {

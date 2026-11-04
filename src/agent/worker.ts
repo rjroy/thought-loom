@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { RunConflictError, RunFenceError, type Claim, type RunRecord, type RunSources } from "../domain/run";
+import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, type RunStep } from "../domain/run-protocol";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../storage/capability";
@@ -7,6 +7,7 @@ import { SqliteRunOperations } from "../storage/run-operations";
 import { SqliteRunProtocolRepository } from "../storage/run-protocol";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteRunWorkerState } from "../storage/run-worker";
+import { SqliteAgenticExports } from "../storage/agentic-export";
 import { AgentBindingError, normalizeBinding } from "./binding";
 import type { AgentBinding, NativePhase, Observation, PersistedPrompt } from "./opencode-adapter";
 import { capabilityResultPrompt, initialWorkerPrompt } from "./worker-prompts";
@@ -50,6 +51,7 @@ export class RunWorker {
   private readonly operations: SqliteRunOperations;
   private readonly capabilities: SqliteCapabilityDispatcher;
   private readonly state: SqliteRunWorkerState;
+  private readonly exports: SqliteAgenticExports;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,Promise<void>>();
   private readonly ensured = new Set<string>();
@@ -63,6 +65,7 @@ export class RunWorker {
     this.operations = new SqliteRunOperations(db,dependencies);
     this.capabilities = new SqliteCapabilityDispatcher(db,dependencies);
     this.state = new SqliteRunWorkerState(db,dependencies);
+    this.exports = new SqliteAgenticExports(db,dependencies);
   }
   tick(runId: string): Promise<void> {
     if (this.paused) return Promise.resolve();
@@ -92,7 +95,6 @@ export class RunWorker {
       const run = this.runs.get(runId);
       if (!run) throw new RunConflictError("Worker run does not exist");
       if (terminal(run)) { this.forget(runId); await this.cancel(run); return; }
-      if (run.kind === "export") return; // Agentic export belongs to the subsequent execution slice.
       let binding = this.bindings.get(runId);
       if (!binding) {
         const selected = this.dependencies.bindingFor(Object.freeze({...run}));
@@ -102,6 +104,7 @@ export class RunWorker {
       if (!claim) { claim = this.runs.claim(runId); this.owners.set(runId,claim); }
       const owner = claim;
       this.active(owner);
+      if (run.kind === "export" && this.exports.intent(run.id) === null) throw new RunConflictError("Legacy export request is unavailable; cannot resume safely");
       const step = this.steps.steps(runId).at(-1);
       if (!step) throw new RunConflictError("Run has no current step");
       if (step.input === null) {
@@ -112,7 +115,7 @@ export class RunWorker {
       if (!this.bindings.get(runId)) { this.bindings.bind(runId,binding,owner); return; }
       const prompt = {promptId:step.promptId,input:step.input};
       this.active(owner,prompt);
-      if (step.envelope !== null) { this.process(owner,step); return; }
+      if (step.envelope !== null) { this.process(owner,step,run.kind); return; }
       if (!this.ensured.has(runId)) {
         if ((await this.call(owner,prompt,"ensure session",() => this.transport().ensureSession(owner,binding))).ok) this.ensured.add(runId);
         return;
@@ -148,13 +151,13 @@ export class RunWorker {
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
   }
-  private process(claim: Claim, step: RunStep): void {
+  private process(claim: Claim, step: RunStep, kind: RunKind): void {
     this.active(claim);
-    if (step.envelope?.kind === "complete") { this.state.finish(claim,step.promptId); this.forget(claim.runId); return; }
+    if (step.envelope?.kind === "complete" || step.envelope?.kind === "report") { this.state.finish(claim,step.promptId); this.forget(claim.runId); return; }
     if (step.envelope?.kind !== "request") throw new RunConflictError("Completed step has no canonical envelope");
     const result = this.capabilities.dispatch(claim,step.promptId,step.envelope.request);
     if (step.result === null) return;
-    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result)});
+    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind)});
   }
   private async call<T>(claim: Claim, prompt: PersistedPrompt, operation: "ensure session" | "submit" | "observe", action: () => Promise<T>): Promise<{readonly ok:true;readonly value:T} | {readonly ok:false}> {
     this.active(claim,prompt);

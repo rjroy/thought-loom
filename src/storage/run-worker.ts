@@ -8,6 +8,7 @@ import { nonEmpty } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteRunOperations } from "./run-operations";
 import { SqliteRunRepository } from "./run";
+import { SqliteAgenticExports } from "./agentic-export";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
@@ -30,6 +31,12 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     });
   }
   private initialContext(run: RunRecord): InitialRunContext {
+    if (run.kind === "export") {
+      const intent = new SqliteAgenticExports(this.db,this.sources).intent(run.id);
+      if (!intent) throw new RunConflictError("Legacy export request is unavailable; cannot infer intent");
+      // An export starts with its retained question, not a corpus dump or an invented subject. Reads add scoped witnesses.
+      return {job:{kind:"export",...intent},thoughts:[],connections:[],responses:[]};
+    }
     const scope = {actor:"ai",mode:"normal"} as const;
     const rejection = this.rejection();
     const visible = new Map(rejection.listThoughts(scope).map(thought => [thought.id,thought]));
@@ -54,7 +61,6 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         if (response) responses.set(response.id,response);
       }
     }
-    if (run.kind === "export") throw new RunForbiddenError("Export execution is not implemented by this worker");
     return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id} :
       {kind:"evolve",contributionId:subject.id,continuationId:subject.parentId},thoughts,connections,responses:[...responses.values()]};
   }
@@ -76,6 +82,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
   finish(claim: Claim, promptId: string): void {
     this.guarded("finish worker reply",claim,run => {
       if (run.promptId !== promptId) throw new RunFenceError();
+      if (run.kind === "export") { new SqliteAgenticExports(this.db,this.sources).finalize(claim,promptId); return; }
       const step = this.currentStep(run.id);
       if (step.input === null || step.state !== "completed" || step.envelope?.kind !== "complete") throw new RunConflictError("No canonical final reply is available");
       if (run.kind === "weave") { new SqliteRunOperations(this.db,this.sources).completeWeave(claim,promptId); return; }

@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Server startup](server-startup.md) · [Database schema](database-schema.md) · [Testing](testing.md)
 
-This is the loopback Hono API. Route definitions are in [`src/daemon/app.ts`](../src/daemon/app.ts); business creation and title rules live in [`creation.ts`](../src/domain/creation.ts) and [`title.ts`](../src/domain/title.ts). There is no version prefix. Configured agents run asynchronously; HTTP admission is not model completion. Agentic report export is not implemented yet.
+This is the loopback Hono API. Route definitions are in [`src/daemon/app.ts`](../src/daemon/app.ts); business creation and title rules live in [`creation.ts`](../src/domain/creation.ts) and [`title.ts`](../src/domain/title.ts). There is no version prefix. Configured agents run asynchronously; HTTP admission is not model completion.
 
 ## Authentication
 
@@ -107,10 +107,38 @@ bun run api --role user GET '/search?q=thinking&scope=show-rejected'
 
 Success returns `200` with `Content-Type: text/markdown`. The root counts toward the limit. Only evolution descendants are visited, never discovered connections. Rejected descendants are omitted without consuming the count, but traversal continues through them to active descendants. Full response addenda are excluded; a retained fallback recorded as thought text is included like any other thought.
 
-Each Markdown section includes the current title or first-five-word fallback, thought ID, immutable author, material kind, creation time, origin, eligible source IDs, and original text. Rejected source IDs are omitted. Export reads knowledge without creating or changing thoughts, titles, connections or rejection state. Agentic report export is not implemented yet.
+Each Markdown section includes the current title or first-five-word fallback, thought ID, immutable author, material kind, creation time, origin, eligible source IDs, and original text. Rejected source IDs are omitted. Export reads knowledge without creating or changing thoughts, titles, connections or rejection state.
 
 ```sh
 bun run api --role user POST /exports/simple '{"rootId":"<thought-id>","count":20,"traversal":"depth"}'
+```
+
+## Agentic export
+
+### Admission: `POST /exports/agentic`
+
+**Role:** user. **Body:** required nonempty `request`, optional `effort` (`quick`, `standard`, or `thorough`; default `standard`). Unknown fields and query parameters return `400`.
+
+```json
+{"request":"Gather the recorded arguments about this approach","effort":"thorough"}
+```
+
+Returns `201 {run}` using the run-status shape below. Missing agent configuration returns `503` before admitting a run or intent. A configured but unavailable service leaves work queued for execution, not falsely completed. Poll `GET /runs/:id`; use the existing Stop command to interrupt it.
+
+Effort selects the corresponding server-configured native model variant. It does not impose application turn, token, cost, search-count or note-count quotas. The selected model/variant is bound to the run; restart does not replace it with changed configuration.
+
+The agent investigates existing, AI-eligible thinking through read/search capabilities only. It cannot create thoughts, change titles or connections, reject/restore material, or schedule new development. Structured source IDs must identify fully read, currently eligible thoughts before publication. The report appends validated IDs, titles and thought attribution; arbitrary prose and body links remain model text, not independently fact-checked evidence.
+
+### Download: `GET /exports/agentic/:runId`
+
+**Role:** user. No query parameters. A completed artifact returns `200 text/markdown`. Missing or non-export runs return `404`; queued, running, uncertain, interrupted or failed runs return `409` rather than partial machine output. AI callers receive `403` for admission and download.
+
+Historical artifacts are retained for deliberate user download, including after later source rejection. They are not indexed as thoughts or made available through AI capabilities. Rejection or Stop during investigation fences further work and publication; already-sent native context cannot be withdrawn retroactively.
+
+```sh
+bun run api --role user POST /exports/agentic '{"request":"Summarize the existing thinking about search","effort":"quick"}'
+bun run api --role user GET '/runs/<run-id>'
+bun run api --role user GET '/exports/agentic/<run-id>'
 ```
 
 ## Agent runs

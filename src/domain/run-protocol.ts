@@ -1,9 +1,10 @@
 import type { Claim } from "./run";
-import { nonEmpty, record } from "./validation";
+import { nonEmpty, record, references } from "./validation";
 
 export type CapabilityEnvelope = { readonly version: 1; readonly kind: "request"; readonly request: { readonly capability: string; readonly arguments: Readonly<Record<string, unknown>> } };
 export type ReplyEnvelope = { readonly version: 1; readonly kind: "complete"; readonly reply: string };
-export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope;
+export type ReportEnvelope = { readonly version: 1; readonly kind: "report"; readonly markdown: string; readonly sourceThoughtIds: readonly string[] };
+export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope | ReportEnvelope;
 export type StepState = "prepared" | "submitting" | "uncertain" | "completed" | "processed";
 export interface RunStep {
   readonly runId: string;
@@ -76,6 +77,12 @@ export function parseEnvelope(input: string): ProtocolEnvelope {
     const data = record(JSON.parse(input));
     uniqueKeys(input);
     if (data.version !== 1) throw new ProtocolValidationError("Unsupported envelope version");
+    if (data.kind === "report") {
+      exactKeys(data,["version","kind","markdown","sourceThoughtIds"]);
+      const sourceThoughtIds = references(data.sourceThoughtIds,"sourceThoughtIds");
+      if (new Set(sourceThoughtIds).size !== sourceThoughtIds.length) throw new ProtocolValidationError("Duplicate report source");
+      return Object.freeze({version:1,kind:"report",markdown:nonEmpty(data.markdown,"markdown"),sourceThoughtIds});
+    }
     if (data.kind === "complete") {
       exactKeys(data,["version","kind","reply"]);
       return Object.freeze({ version: 1, kind: "complete", reply: nonEmpty(data.reply,"reply") });

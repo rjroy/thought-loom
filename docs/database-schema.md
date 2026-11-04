@@ -248,6 +248,19 @@ When the scheduling port is enabled, capture, an explicit user title-clear on an
 
 Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, weaver interpretations, connection writes and interrupted replies do not recursively schedule more weaving.
 
+### Agentic export artifacts
+
+These subordinate tables reuse run identities and claims; they are not another execution journal:
+
+| Table | Columns and constraints |
+| --- | --- |
+| `export_intents` | `run_id` primary key/FK to `runs`; nonempty `request`; `effort` is `quick`, `standard` (default), or `thorough`. Insert requires an export run. |
+| `export_reports` | `run_id` primary key/FK to `export_intents`; `prompt_id` identifies its completed report step; nonempty `markdown`; `sources_json` holds validated attribution. |
+
+Insert/update/delete guards prevent replacement or mutation of stored intents and reports. Legacy export runs remain without an intent rather than receiving an invented request. Finalization validates the persisted version-1 report envelope, full-read source witnesses, current source eligibility and all exposed run context. Report insertion and local completion commit together; Stop, rejection or stale ownership fences publication.
+
+The report preserves model Markdown and appends validated source thought IDs, title/fallback, immutable thought author and material kind. This validates citation structure and eligibility, not the truth of the model's connective conclusions. Historical artifacts are deliberately user-only: they are not thoughts, conversation responses, search-index entries or AI-readable context. Artifact and run-state writes do not grant knowledge-write authority. The existing worker/supervisor executes export runs; immutable intent selects the configured effort variant before binding, and user routes admit and download reports through scoped application services.
+
 ## Search indexes and vocabulary cache
 
 Core migration creates these derived FTS5 virtual tables:
