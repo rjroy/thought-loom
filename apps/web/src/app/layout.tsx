@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { PrimaryNavigation } from "../components/primary-navigation";
 import { ExploreProvider } from "../components/explore-provider";
+import { IdeaNavigationProvider } from "../components/idea-navigation-provider";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className={sourceSans.variable}>
       <body>
         <ExploreProvider>
+          <IdeaNavigationProvider>
           <a className="skip-link" href="#main-content">
             Skip to content
           </a>
@@ -47,6 +49,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main-content" className="workspace" tabIndex={-1}>
             {children}
           </main>
+          </IdeaNavigationProvider>
         </ExploreProvider>
       </body>
     </html>

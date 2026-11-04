@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture and Explore as described below; other screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture, Explore and Idea as described below; Evolve/export screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -45,7 +45,7 @@ Next.js development incoming-request logging is disabled in `apps/web/next.confi
 
 ### Capture workflow
 
-Enter thought text and an optional title, then Save. The browser calls the fixed Next.js `POST /api/capture` route; that server forwards only capture fields to daemon `POST /thoughts`. Identity and other defaults remain daemon-owned. A confirmed canonical `201` receipt enables Saved and Capture another; it does not wait for background weaving. The Open idea link uses the returned ID, but the destination screen belongs to the later Idea task and is not implemented yet.
+Enter thought text and an optional title, then Save. The browser calls the fixed Next.js `POST /api/capture` route; that server forwards only capture fields to daemon `POST /thoughts`. Identity and other defaults remain daemon-owned. A confirmed canonical `201` receipt enables Saved and Capture another; it does not wait for background weaving. Open idea uses the returned ID to open `/ideas/<id>`.
 
 Pending submission prevents repeated saves and retains the submitted text/title. Known pre-creation rejection allows deliberate Retry save. A timeout, dropped response, unexpected server failure, or invalid receipt instead shows **Not sure it saved**: the thought may already exist. No write is automatically replayed. The retained snapshot stays copyable; **Save another copy** is an explicit new capture with a duplicate warning. Opening Explore in a new tab is navigation, not confirmation of the original save.
 
@@ -65,7 +65,17 @@ Opening a valid search URL in a fresh page or reloading initializes its query, f
 
 Show rejected includes active and rejected results. Thought badges use existing user inspection reads; failed inspection is **Status unknown**, not proof that a result is active or rejected. Replies are not independently rejectable thoughts. Surrounding context remains the daemon's active-only projection. Loading, empty and failed searches are distinct; failures retain the query/selections and offer deliberate retry. Newer searches cannot be replaced by stale responses.
 
-Thought and response links target `/ideas/<id>`, preserving a known response ID and validated local Explore return state where applicable. The Idea destination belongs to its later implementation task and is not available yet. Rejected inspection intent is carried by that validated return state; it must not become an AI access bypass.
+Thought and response links target `/ideas/<id>`, preserving a known response ID and validated local Explore return state where applicable. Rejected inspection intent is carried by that validated return state; it must not become an AI access bypass.
+
+### Idea reading and changes
+
+Direct `/ideas/<id>` bookmarks load the normally visible thought without requiring previous browser state. Optional `responseId` selects only a reply associated with that focused thought. A validated local Explore `returnTo` preserves search state and deliberate Show rejected intent; explicit user inspection scopes are also supported. Invalid or external return targets do not broaden access or redirect outside the app. Previous-thought navigation reflects actual traversal, not an assumed evolution parent.
+
+Thought text, authorship and ancestry are not editable. Edit title and Clear title change separate metadata; clearing permits later generation without promising when it will happen. Full reply, Sources, History and connection rationale stay on demand. History shows distinct thoughts and uses deliberate user inspection for rejected records; ordinary unavailable sources/parents never silently fall back to broader access. Response links cannot fetch an unrelated reply by bypassing the focused thought's associations.
+
+More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas; its screen and the export screen are still later tasks. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
+
+Branch rejection uses the daemon's exact preview and affected count. If confirmation returns `409`, the dialog invalidates the old confirmation, loads a fresh preview, and requires another explicit confirmation. It never automatically repeats the destructive request. Branch restoration uses the existing bodyless operation, without an invented count/preview. Only confirmed command responses show success. Pending changes prevent duplicate submissions and keep their original target; unknown write outcomes stay unconfirmed without automatic replay or false success.
 
 ### Native spelling extension
 

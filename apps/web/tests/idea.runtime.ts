@@ -1,0 +1,256 @@
+import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { expect, type Page } from "@playwright/test";
+
+type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
+const original = "Owned original idea wording, unchanged by title edits.";
+const thought = { id: "idea-root", text: original, title: "Owned original title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "idea-parent", sourceIds: ["idea-source", "idea-hidden"] };
+const source = { ...thought, id: "idea-source", text: "Owned supporting source", title: "Owned source", parentId: null, sourceIds: [] };
+const parent = { ...thought, id: "idea-parent", text: "Owned rejected ancestor", title: "Owned parent", parentId: null, sourceIds: [] };
+const plain = { ...thought, id: "idea-plain", text: "Owned plain idea with no reply", title: "Plain idea", parentId: null, sourceIds: [] };
+const edge = { id: "idea-edge", fromId: "idea-root", toId: "idea-source", category: "supports", proposedBy: "ai", explanation: "Owned directed connection rationale", sourceIds: [] };
+const hiddenEdge = { ...edge, id: "idea-hidden-edge", toId: "idea-hidden", explanation: "Endpoint hidden only" };
+const reply = { id: "idea-reply", text: "Owned associated full reply", role: "addendum", state: "complete", thoughtIds: ["idea-root"] };
+const preview3 = { rootId: "idea-root", branchIds: ["idea-root", "idea-child-1", "idea-child-2"], affectedIds: ["idea-root", "idea-child-1", "idea-child-2"], count: 3 };
+const preview4 = { rootId: "idea-root", branchIds: [...preview3.branchIds, "idea-child-3"], affectedIds: [...preview3.affectedIds, "idea-child-3"], count: 4 };
+
+export function ideaDaemon(token: string) {
+  const attempts: Attempt[] = [];
+  let title: string | null = thought.title, rootRejected = false, branchAttempt = 0;
+  let holdPreview = false, holdTitle = false, failure = false;
+  let releasePreview: (() => void) | undefined, releaseTitle: (() => void) | undefined;
+  return {
+    attempts, expectedAuthorization: `Bearer ${token}`,
+    currentTitle() { return title; },
+    freshPreviewWaiting() { return releasePreview !== undefined; },
+    reset() { title = thought.title; rootRejected = false; branchAttempt = 0; holdPreview = false; holdTitle = false; failure = false; },
+    holdFreshPreview() { holdPreview = true; },
+    releasePreview() { releasePreview?.(); releasePreview = undefined; holdPreview = false; },
+    holdTitle() { holdTitle = true; },
+    releaseTitle() { releaseTitle?.(); releaseTitle = undefined; holdTitle = false; },
+    failWrites(value: boolean) { failure = value; },
+    async handler(req: IncomingMessage, res: ServerResponse) {
+      let body = ""; for await (const chunk of req) body += String(chunk);
+      const path = req.url ?? "", method = req.method ?? "";
+      attempts.push({ path, method, authorization: req.headers.authorization, body });
+      if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401).end(); return; }
+      const url = new URL(path, "http://fixture.invalid");
+      const inspection = url.searchParams.get("scope") === "history" || url.searchParams.get("scope") === "show-rejected";
+      const send = (value: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+      if (method === "GET") {
+        if (url.pathname === "/thoughts/idea-root/branch/preview") {
+          if (branchAttempt > 0 && holdPreview) await new Promise<void>(resolve => { releasePreview = resolve; });
+          send(branchAttempt ? preview4 : preview3); return;
+        }
+        if (url.pathname === "/thoughts/idea-root") { if (rootRejected && !inspection) { res.writeHead(404).end(); return; } send({ ...thought, title, titleAuthor: title === null ? null : "user", ...(inspection ? { rejected: rootRejected } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-plain") { send({ ...plain, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-source") { send({ ...source, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-parent") { if (!inspection) { res.writeHead(404).end(); return; } send({ ...parent, rejected: true }); return; }
+        if (url.pathname === "/thoughts/idea-hidden") { res.writeHead(404).end(); return; }
+        if (url.pathname.endsWith("/connections")) { send(url.pathname.includes("idea-root") ? (inspection ? [{ ...edge, rejected: true }, { ...hiddenEdge, rejected: false }] : [edge]) : []); return; }
+        if (url.pathname.endsWith("/responses")) { send(url.pathname.includes("idea-root") ? [reply] : []); return; }
+        if (url.pathname.endsWith("/children")) { send([]); return; }
+        res.writeHead(404).end(); return;
+      }
+      if (failure) { res.writeHead(500).end("owned private write failure"); return; }
+      if (url.pathname === "/thoughts/idea-root/title" && method === "PUT") {
+        if (holdTitle) await new Promise<void>(resolve => { releaseTitle = resolve; });
+        const value: unknown = JSON.parse(body);
+        if (!value || typeof value !== "object" || !("title" in value) || !(typeof value.title === "string" || value.title === null)) { res.writeHead(400).end(); return; }
+        title = value.title;
+        send({ ...thought, title, titleAuthor: title === null ? null : "user" }); return;
+      }
+      if (url.pathname === "/thoughts/idea-root/branch/reject") { branchAttempt++; if (branchAttempt === 1) { res.writeHead(409).end(); return; } rootRejected = true; res.writeHead(204).end(); return; }
+      if (url.pathname === "/thoughts/idea-root/reject") rootRejected = true;
+      if (url.pathname === "/thoughts/idea-root/restore" || url.pathname === "/thoughts/idea-root/branch/restore") rootRejected = false;
+      res.writeHead(204).end();
+    },
+  };
+}
+
+type Fixture = ReturnType<typeof ideaDaemon>;
+type Probe = (method: string, path: string, headers: string, body?: string) => Promise<{ status: number; headers: string; body: string }>;
+export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: string; host: string; probe: Probe; daemon: Fixture }): Promise<void> {
+  daemon.reset();
+  const start = daemon.attempts.length;
+  assert.equal((await probe("GET", "/api/ideas/idea-root", `Host: foreign.invalid\r\nX-Forwarded-Host: ${host}\r\n`)).status, 403);
+  const body = JSON.stringify({ action: "reject-thought", thoughtId: "idea-root" });
+  const headers = `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n`;
+  assert.equal((await probe("POST", "/api/ideas/idea-root", `Host: ${host}\r\nOrigin: http://foreign.invalid\r\n${headers}`, body)).status, 403);
+  assert.equal((await probe("POST", "/api/ideas/idea-root", `Host: ${host}\r\n${headers}`, body)).status, 403);
+  assert.equal(daemon.attempts.length, start);
+  const root = await fetch(`${origin}/api/ideas/idea-root?scope=normal&part=view`);
+  assert.equal(root.status, 200); assert.match(root.headers.get("cache-control") ?? "", /no-store/i);
+  const view = await root.json(); assert.equal(view.thought.text, original); assert.deepEqual(view.responses, [reply]);
+  const plainRead = await fetch(`${origin}/api/ideas/idea-plain?scope=normal&part=view`);
+  assert.equal(plainRead.status, 200); assert.deepEqual((await plainRead.json()).responses, []);
+  assert.equal((await fetch(`${origin}/api/ideas/idea-missing?scope=normal&part=view`)).status, 404);
+  const titleResponse = await fetch(`${origin}/api/ideas/idea-root`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ action: "title", thoughtId: "idea-root", title: null }) });
+  assert.equal(titleResponse.status, 200); assert.equal((await titleResponse.json()).text, original);
+  const commandResponse = await fetch(`${origin}/api/ideas/idea-root`, { method: "POST", headers: { origin, "content-type": "application/json" }, body });
+  assert.equal(commandResponse.status, 204);
+  const calls = daemon.attempts.slice(start);
+  assert.ok(calls.every(call => call.authorization === daemon.expectedAuthorization));
+  assert.ok(calls.some(call => call.method === "PUT" && call.path === "/thoughts/idea-root/title" && call.body === '{"title":null}'));
+  assert.ok(calls.some(call => call.method === "POST" && call.path === "/thoughts/idea-root/reject" && call.body === ""));
+  daemon.reset();
+}
+
+export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { origin: string; narrow: boolean }): Promise<void> {
+  daemon.reset();
+  const menu = page.getByRole("button", { name: "More actions" });
+  const openMenu = async () => { if (await menu.getAttribute("aria-expanded") !== "true") await menu.click(); };
+  const navigation = await page.goto(`${options.origin}/ideas/idea-plain`, { waitUntil: "networkidle" });
+  assert.equal(navigation?.status(), 200, "direct Idea bookmark must resolve to the actual page");
+  await expect(page.getByText(plain.text, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /full reply/i })).toHaveCount(0);
+  const returnTo = "/explore?q=owned&sort=newest&scope=normal";
+  await page.goto(`${options.origin}/ideas/idea-root?${new URLSearchParams({ responseId: "idea-reply", returnTo })}`, { waitUntil: "networkidle" });
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /back to results/i })).toHaveAttribute("href", returnTo);
+  await openMenu();
+  for (const action of ["evolve", "export"] as const) {
+    const href = await page.getByRole("link", { name: new RegExp(action, "i") }).getAttribute("href");
+    const url = new URL(href ?? "", options.origin);
+    assert.equal(url.pathname, `/${action}`); assert.equal(url.searchParams.get("thoughtId"), "idea-root");
+  }
+  await page.getByRole("link", { name: /back to results/i }).click();
+  await expect(page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toHaveValue("owned");
+  await expect(page.getByRole("combobox", { name: /sort/i })).toHaveValue("newest");
+  const beforeUnrelated = daemon.attempts.length;
+  await page.goto(`${options.origin}/ideas/idea-root?responseId=unrelated-secret`, { waitUntil: "networkidle" });
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  assert.ok(!daemon.attempts.slice(beforeUnrelated).some(attempt => attempt.path.startsWith("/responses/")));
+  await expect(page.getByText(reply.text, { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /edit title/i }).click();
+  const titleField = page.getByRole("textbox", { name: /title/i });
+  await titleField.fill("Edited owned title");
+  await page.getByRole("button", { name: /^save/i }).click();
+  await expect(page.getByText("Edited owned title", { exact: true })).toBeVisible();
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  assert.ok(daemon.attempts.some(call => call.method === "PUT" && call.path === "/thoughts/idea-root/title" && call.body === '{"title":"Edited owned title"}'));
+  await page.getByRole("button", { name: /edit title/i }).click();
+  await page.getByRole("button", { name: /clear title/i }).click();
+  await expect(page.getByRole("status").filter({ hasText: /title cleared/i })).toBeVisible();
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  assert.ok(daemon.attempts.some(call => call.method === "PUT" && call.body === '{"title":null}'));
+
+  const beforeDetails = daemon.attempts.length;
+  await page.getByRole("button", { name: /^sources/i }).click();
+  await expect(page.locator("#idea-sources").getByText(source.text, { exact: true })).toBeVisible();
+  assert.ok(!daemon.attempts.slice(beforeDetails).some(call => call.path.includes("scope=history")));
+  await page.locator("article").filter({ has: page.getByRole("heading", { name: "Owned source" }) }).getByRole("button", { name: "Why connected" }).click();
+  await expect(page.getByText(edge.explanation, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^history/i }).click();
+  await expect(page.getByText(parent.text, { exact: true })).toBeVisible();
+  assert.ok(daemon.attempts.some(call => call.path.includes("scope=history")));
+
+  const writes = () => daemon.attempts.filter(call => call.method !== "GET");
+  const beforeCancel = writes().length;
+  await openMenu();
+  await page.getByRole("button", { name: /reject idea/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  assert.equal(writes().length, beforeCancel);
+  await openMenu();
+  await page.getByRole("button", { name: /reject idea/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reject this idea" }).click();
+  await expect(page.getByText(/rejected/i).first()).toBeVisible();
+  const normal = await page.request.get(`${options.origin}/api/ideas/idea-root?scope=normal&part=view`);
+  assert.equal(normal.status(), 404);
+  await page.goto(`${options.origin}/ideas/idea-root?scope=show-rejected`, { waitUntil: "networkidle" });
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  const evolve = page.getByRole("link", { name: /evolve/i }).or(page.getByRole("button", { name: /evolve/i }));
+  await expect(evolve).toHaveAttribute("aria-disabled", "true");
+  await openMenu();
+  await expect(page.getByRole("button", { name: /restore this idea/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /restore idea branch/i })).toBeVisible();
+  const explicitEdge = page.locator("article").filter({ hasText: edge.explanation });
+  const endpointOnly = page.locator("article").filter({ hasText: hiddenEdge.explanation });
+  await expect(explicitEdge.getByRole("button", { name: /restore connection/i })).toBeVisible();
+  await expect(endpointOnly.getByRole("button", { name: /restore connection/i })).toHaveCount(0);
+  const beforeRestore = writes().length;
+  await page.getByRole("button", { name: /restore idea branch/i }).click();
+  await expect.poll(() => writes().length).toBe(beforeRestore + 1);
+  assert.equal(writes().at(-1)?.path, "/thoughts/idea-root/branch/restore");
+  assert.equal(writes().at(-1)?.body, "");
+  assert.ok(!writes().slice(beforeRestore).some(call => call.path.startsWith("/connections/")));
+
+  daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  daemon.holdFreshPreview();
+  try {
+    await openMenu();
+    await page.getByRole("button", { name: /reject branch/i }).click();
+    const dialog = page.getByRole("dialog");
+    const confirm = dialog.getByRole("button", { name: "Confirm reject branch" });
+    await expect(dialog.getByText(/\b3 ideas will be rejected/i)).toBeVisible();
+    const before = writes().length;
+    await confirm.click();
+    await expect.poll(() => writes().length).toBe(before + 1);
+    assert.deepEqual(JSON.parse(writes().at(-1)?.body ?? "null"), preview3);
+    await expect.poll(() => daemon.freshPreviewWaiting()).toBe(true);
+    await expect(confirm).toBeDisabled();
+    daemon.releasePreview();
+    await expect(dialog.getByText(/\b4 ideas will be rejected/i)).toBeVisible();
+    assert.equal(writes().length, before + 1, "fresh preview must not replay the destructive POST");
+    await confirm.click();
+    await expect.poll(() => writes().length).toBe(before + 2);
+    assert.deepEqual(JSON.parse(writes().at(-1)?.body ?? "null"), preview4);
+    await expect(page.getByRole("heading", { name: "Idea rejected" })).toBeVisible();
+  } finally { daemon.releasePreview(); }
+
+  daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  daemon.holdTitle();
+  try {
+    const before = writes().length;
+    await page.getByRole("button", { name: /edit title/i }).click();
+    await page.getByRole("textbox", { name: /title/i }).fill("Late owned title");
+    await page.getByRole("button", { name: /^save/i }).dblclick({ delay: 40 });
+    await expect.poll(() => writes().length).toBe(before + 1);
+    assert.equal(writes().at(-1)?.body, '{"title":"Late owned title"}');
+    await page.getByRole("link", { name: /owned source/i }).first().click();
+    await expect(page.getByText(source.text, { exact: true })).toBeVisible();
+    daemon.releaseTitle();
+    await expect.poll(() => daemon.currentTitle()).toBe("Late owned title");
+    await page.waitForTimeout(300);
+    await expect(page.getByText(source.text, { exact: true })).toBeVisible();
+    await expect(page.getByText("Late owned title", { exact: true })).toHaveCount(0);
+    assert.equal(writes().length, before + 1, "pending double click must not issue a second title write");
+  } finally { daemon.releaseTitle(); }
+
+  daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  daemon.failWrites(true);
+  const beforeFailure = writes().length;
+  await openMenu();
+  await page.getByRole("button", { name: /reject idea/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reject this idea" }).click();
+  await expect(page.getByText(/unconfirmed|could not confirm|unable to confirm/i).first()).toBeVisible();
+  await expect(menu).toBeEnabled();
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeFocused();
+  await page.waitForTimeout(300);
+  assert.equal(writes().length, beforeFailure + 1);
+  daemon.failWrites(false);
+  await openMenu();
+  await menu.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: /export/i })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeFocused();
+  daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  await openMenu();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Edit title" }).click();
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  const editTitle = page.getByRole("textbox", { name: "Title" });
+  await expect(editTitle).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(editTitle).toBeFocused();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Idea horizontal overflow");
+}
