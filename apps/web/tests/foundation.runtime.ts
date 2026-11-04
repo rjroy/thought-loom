@@ -12,6 +12,7 @@ import { chromium } from "@playwright/test";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
+import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser } from "./evolve.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -30,6 +31,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
+    "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
@@ -37,6 +39,9 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
     "apps/web/src/app/api/ideas/[id]/route.ts", "apps/web/src/server/idea.ts",
     "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts",
+    "apps/web/src/app/api/evolve/thoughts/[id]/route.ts", "apps/web/src/app/api/evolve/thoughts/[id]/responses/[responseId]/route.ts",
+    "apps/web/src/app/api/evolve/runs/[id]/route.ts", "apps/web/src/server/evolve.ts",
+    "apps/web/src/features/evolve/location.ts", "apps/web/src/features/evolve/types.ts", "apps/web/src/features/evolve/validation.ts", "apps/web/src/features/evolve/request.ts",
     "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
@@ -195,8 +200,10 @@ async function main(): Promise<void> {
   const fixtureDaemon = captureDaemon(token);
   const fixtureSearch = searchDaemon(token);
   const fixtureIdea = ideaDaemon(token);
+  const fixtureEvolve = evolveDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-")) void fixtureIdea.handler(request, response);
+    if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
+    else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
   });
@@ -238,6 +245,7 @@ async function main(): Promise<void> {
     await checkCaptureRoute({ origin, host, probe, daemon: fixtureDaemon });
     await checkSearchRoute({ origin, host, probe, daemon: fixtureSearch });
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
+    await checkEvolveRoute({ origin, host, probe, daemon: fixtureEvolve });
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
@@ -267,6 +275,7 @@ async function main(): Promise<void> {
           await page.waitForURL("**/explore");
           await checkExploreBrowser(page, fixtureSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await checkIdeaBrowser(page, fixtureIdea, { origin, narrow: viewport.width < 500 });
+          await checkEvolveBrowser(page, fixtureEvolve, { origin, narrow: viewport.width < 500 });
           await page.evaluate(() => document.fonts.ready);
           assert.ok(await page.evaluate(() => Array.from(document.fonts).some(font => font.status === "loaded" && font.family.toLowerCase().includes("source"))), "local Source Sans font should load");
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "horizontal overflow");

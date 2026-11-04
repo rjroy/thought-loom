@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture, Explore and Idea as described below; Evolve/export screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture, Explore, Idea and Evolve as described below; the export screen is still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -15,6 +15,8 @@ bun install --frozen-lockfile
 Use the committed lockfile. SQLite support comes from Bun's built-in `bun:sqlite`; a separate database server is not required.
 
 ### Web client foundation
+
+For a quick local trial, `bash scripts/setup-test.sh` generates matching private launchers. Start `scripts/daemon.local.sh` in one terminal and `scripts/web.local.sh` in another, then open `http://127.0.0.1:3000/capture`. Setup does not start services or reset the database. Its daemon uses real agent configuration, so queued work and site actions can incur model charges. See [rough local setup](testing.md#rough-local-agent-setup) for configuration and the optional smoke test. The manual commands below remain available.
 
 The root install includes the `apps/web` Bun workspace and uses the same committed lockfile. Start the web development server from the project root:
 
@@ -73,9 +75,17 @@ Direct `/ideas/<id>` bookmarks load the normally visible thought without requiri
 
 Thought text, authorship and ancestry are not editable. Edit title and Clear title change separate metadata; clearing permits later generation without promising when it will happen. Full reply, Sources, History and connection rationale stay on demand. History shows distinct thoughts and uses deliberate user inspection for rejected records; ordinary unavailable sources/parents never silently fall back to broader access. Response links cannot fetch an unrelated reply by bypassing the focused thought's associations.
 
-More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas; its screen and the export screen are still later tasks. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
+More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas; the export screen remains a later task. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
 
 Branch rejection uses the daemon's exact preview and affected count. If confirmation returns `409`, the dialog invalidates the old confirmation, loads a fresh preview, and requires another explicit confirmation. It never automatically repeats the destructive request. Branch restoration uses the existing bodyless operation, without an invented count/preview. Only confirmed command responses show success. Pending changes prevent duplicate submissions and keep their original target; unknown write outcomes stay unconfirmed without automatic replay or false success.
+
+### Evolve workspace
+
+`/evolve?thoughtId=<id>` opens a fresh workspace for a normally visible thought. Loading or reloading the page does not send a contribution, resume an earlier run, or stop daemon work. In-app browsing and return retain the mounted workspace's draft, known run references and continuation choice. Explicitly choosing Evolve from an earlier Idea starts from that selected thought instead. This is browser memory, not persistent conversation storage: reload loses that workspace without canceling durable daemon work.
+
+Send submits only the contribution text against the selected continuation. A canonical admission records the user contribution and establishes the known run ID; it is not a completed development. The workspace observes that run and separates recorded developments from its retained reply. Change selects an actual saved continuation; Open idea only browses. Complete fallback replies can use their associated contribution as the development, while interrupted fallback replies do not become continuation points.
+
+Unconfirmed admission retains its submitted snapshot without automatic resend or guessed run lookup. A failed status read does not mark the run failed. Temporary output/reply read errors retain previously confirmed display text with a warning, but unconfirmed points cannot be used for Send until checked successfully. Confirmed normal-scope unavailability removes those records; Change still permits deliberate selection of a remaining eligible thought. Check this run observes a known ID; Stop uses the daemon's existing stop operation and retains saved output and the next draft. An unconfirmed Stop is not proof of cancellation, and leaving the page is not Stop. All input/output reads remain normal-scoped; unavailable records do not silently fall back to rejected-history inspection. Model configuration remains daemon-side, with no client effort or model selector for Evolve.
 
 ### Native spelling extension
 
@@ -224,6 +234,6 @@ Lifecycle and request boundaries emit attempt/outcome events. Do not add full co
 
 ## Browser boundary
 
-The future browser client will communicate through the Next.js server, never directly with the daemon. Both bearer credentials remain server-side. They represent service roles, not a multiuser account system. The API does not enable permissive browser CORS access.
+The browser client communicates through the Next.js server, never directly with the daemon. Both bearer credentials remain server-side. They represent service roles, not a multiuser account system. The API does not enable permissive browser CORS access.
 
 Implementation: [`config.ts`](../src/daemon/config.ts), [`runtime.ts`](../src/daemon/runtime.ts), and [`main.ts`](../src/daemon/main.ts).

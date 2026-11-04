@@ -9,7 +9,7 @@ const fakeBun = [
   "#!/bin/bash",
   "set -eu",
   "printf '%s\\n' \"$*\" >> \"$FAKE_LOG\"",
-  "printf '%s\\0' \"$PWD\" \"${THOUGHTLOOM_USER_TOKEN-}\" \"${THOUGHTLOOM_AI_TOKEN-}\" \"${THOUGHTLOOM_DB_PATH-}\" \"${THOUGHTLOOM_PORT-}\" \"${THOUGHTLOOM_DAEMON_URL-}\" \"${THOUGHTLOOM_AGENT_CONFIG-}\" > \"$FAKE_ENV\"",
+  "printf '%s\\0' \"$PWD\" \"${THOUGHTLOOM_USER_TOKEN-}\" \"${THOUGHTLOOM_AI_TOKEN-}\" \"${THOUGHTLOOM_DB_PATH-}\" \"${THOUGHTLOOM_PORT-}\" \"${THOUGHTLOOM_DAEMON_URL-}\" \"${THOUGHTLOOM_AGENT_CONFIG-}\" \"${THOUGHTLOOM_WEB_ORIGIN-}\" > \"$FAKE_ENV\"",
   "case \"$*\" in *crypto.randomUUID*)",
   `  if [ ! -e "$FAKE_UUID_MARK" ]; then printf '%s\\n' '${firstToken}'; : > "$FAKE_UUID_MARK"; else printf '%s\\n' '${secondToken}'; fi; exit 0;;`,
   "esac",
@@ -20,6 +20,7 @@ const fakeBun = [
   "  test:*) if [ \"${THOUGHTLOOM_AGENT_CONFIG+x}\" = x ]; then printf '%s\\n' present >> \"$FAKE_CHECK_ENV\"; else printf '%s\\n' absent >> \"$FAKE_CHECK_ENV\"; fi; [ \"${FAKE_FAIL-}\" != test ] || exit 43; exit 0;;",
   "  run:typecheck) [ \"${FAKE_FAIL-}\" != typecheck ] || exit 44; exit 0;;",
   "  run:daemon) exit 0;;",
+  "  run:web:dev) exit 0;;",
   "esac",
   // Simulate the old SDK discovery path with an alternate test-owned selection.
   "if [ \"${1-}\" = -e ] && [[ \"${2-}\" = *Service.discover* ]]; then printf '%s\\n' \"$FAKE_DISCOVERY_CONFIG\"; exit 0; fi",
@@ -52,6 +53,10 @@ async function fixture(action: (f: { root: string; script: string; log: string; 
     for (const name of await readdir(projectScripts)) if (/^[a-zA-Z0-9_-]+\.ts$/.test(name)) await copyFile(join(projectScripts, name), join(scripts, name));
     await writeFile(join(root, ".data", "thoughtloom.sqlite"), "test-owned existing database sentinel");
     await writeFile(join(bin, "bun"), fakeBun); await chmod(join(bin, "bun"), 0o700);
+    for (const name of ["xdg-open", "open", "chromium", "google-chrome"]) {
+      await writeFile(join(bin, name), `#!/bin/bash\nprintf '%s\\n' 'unexpected-browser-${name}' >> "$FAKE_LOG"\nexit 98\n`);
+      await chmod(join(bin, name), 0o700);
+    }
     const log = join(root, "fake-calls.log"); const envFile = join(root, "fake-env.bin");
     const discovered = { service: { discover: true }, directory: root, model: { providerID: "fixture-provider", id: "fixture-model" }, effort: { quick: "fixture-variant", standard: "fixture-variant", thorough: "fixture-variant" } };
     const env = { HOME: root, TMPDIR: root, PATH: `${bin}:/usr/bin:/bin`, REAL_BUN: process.execPath, FAKE_LOG: log, FAKE_ENV: envFile, FAKE_CHECK_ENV: join(root, "test-agent-config-state"), FAKE_UUID_MARK: join(root, "uuid-used"), FAKE_DISCOVERY_CONFIG: JSON.stringify(discovered) };
@@ -65,7 +70,7 @@ async function launchEnv(f: { root: string; envFile: string; env: Record<string,
   return { cwd: fields[0], user: fields[1], ai: fields[2], db: fields[3], port: fields[4], url: fields[5], agent: fields[6] };
 }
 async function launchers(root: string) {
-  for (const name of ["daemon.local.sh", "demo.local.sh"]) {
+  for (const name of ["daemon.local.sh", "demo.local.sh", "web.local.sh"]) {
     const path = join(root, "scripts", name);
     expect((await stat(path)).mode & 0o777).toBe(0o700);
     const syntax = await command(["/bin/bash", "-n", path], root, { PATH: "/usr/bin:/bin", HOME: root });
@@ -73,6 +78,41 @@ async function launchers(root: string) {
     expect(await readFile(path, "utf8")).toMatch(/set\s+-[^\n]*e[^\n]*u|set\s+-euo\s+pipefail/);
   }
 }
+
+test("setup creates a private web launcher for the same daemon without starting services", async () => fixture(async f => {
+  const setup = await command(["/bin/bash", f.script], "/tmp/opencode", f.env);
+  expect(setup.code).toBe(0);
+  const output = setup.stdout + setup.stderr;
+  expect(output).toContain("scripts/daemon.local.sh");
+  expect(output).toContain("scripts/web.local.sh");
+  expect(output).toContain("http://127.0.0.1:3000");
+  expect(output).toMatch(/terminal/i);
+  expect(output).toMatch(/demo[^\n]*(?:optional|if (?:you|desired)|separately)|(?:optional|if (?:you|desired))[^\n]*demo/i);
+  expect(output).not.toContain(firstToken);
+  expect(output).not.toContain(secondToken);
+  const setupCalls = (await readFile(f.log, "utf8")).split("\n");
+  expect(setupCalls.some(call => /\brun\s+(?:daemon|web:dev|demo)\b/.test(call))).toBe(false);
+  expect(setupCalls.some(call => call.startsWith("unexpected-browser-"))).toBe(false);
+
+  await launchers(f.root);
+  const webPath = join(f.root, "scripts", "web.local.sh");
+  const web = await readFile(webPath, "utf8");
+  expect(web).toMatch(/\bexec\s+bun\s+--no-env-file\s+run\s+web:dev(?:\s|$)/);
+  expect(web).not.toContain(secondToken);
+  expect(web).not.toContain("THOUGHTLOOM_AI_TOKEN");
+  expect(web).not.toContain("THOUGHTLOOM_DB_PATH");
+  expect(web).not.toContain("THOUGHTLOOM_AGENT_CONFIG");
+  expect(web).not.toContain(join(f.root, ".data", "thoughtloom.sqlite"));
+  const started = await command(["/bin/bash", webPath], "/tmp/opencode", f.env);
+  expect(started.code).toBe(0);
+  const fields = (await readFile(f.envFile)).toString().split("\0");
+  expect({ cwd: fields[0], user: fields[1], ai: fields[2], db: fields[3], url: fields[5], agent: fields[6], webOrigin: fields[7] }).toEqual({
+    cwd: f.root, user: firstToken, ai: "", db: "", url: "http://127.0.0.1:3001", agent: "", webOrigin: "http://127.0.0.1:3000",
+  });
+  expect((await readFile(f.log, "utf8")).split("\n").filter(call => /\brun\s+web:dev\b/.test(call))).toEqual(["--no-env-file run web:dev"]);
+  expect(started.stdout + started.stderr).not.toContain(firstToken);
+  expect(started.stdout + started.stderr).not.toContain(secondToken);
+}));
 
 test("explicit agent config survives setup and private launcher quoting in a path with spaces", async () => fixture(async f => {
   const agent = JSON.stringify({ service: { url: "http://127.0.0.1:12345", token: "fixture 'quote' $HOME ; \"sensitive\"" }, directory: `${f.root}/workspace 'odd'`, model: { providerID: "fixture", id: "chosen" }, effort: { quick: null, standard: "variant with spaces", thorough: null } });
@@ -135,5 +175,7 @@ test("a failed required check stops setup before launchers are produced", async 
   expect(calls.some(value => /\brun\s+typecheck\b/.test(value))).toBe(false);
   await expect(stat(join(f.root, "scripts", "daemon.local.sh"))).rejects.toThrow();
   await expect(stat(join(f.root, "scripts", "demo.local.sh"))).rejects.toThrow();
+  await expect(stat(join(f.root, "scripts", "web.local.sh"))).rejects.toThrow();
+  expect((await readdir(join(f.root, "scripts"))).filter(name => /^\.(?:daemon|demo|web)\./.test(name))).toEqual([]);
   expect(await readFile(join(f.root, ".data", "thoughtloom.sqlite"), "utf8")).toBe("test-owned existing database sentinel");
 }));

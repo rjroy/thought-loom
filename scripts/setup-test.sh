@@ -29,8 +29,10 @@ export THOUGHTLOOM_AGENT_CONFIG
 # Write private launchers without exposing values in setup output or shell syntax.
 daemon_tmp="$(mktemp "$SCRIPT_DIR/.daemon.XXXXXXXX")"
 demo_tmp=""
-trap 'rm -f -- "$daemon_tmp" "$demo_tmp"' EXIT
+web_tmp=""
+trap 'rm -f -- "$daemon_tmp" "$demo_tmp" "$web_tmp"' EXIT
 demo_tmp="$(mktemp "$SCRIPT_DIR/.demo.XXXXXXXX")"
+web_tmp="$(mktemp "$SCRIPT_DIR/.web.XXXXXXXX")"
 launcher_header() {
   printf '#!/usr/bin/env bash\nset -euo pipefail\n'
   printf 'cd -- %q\n' "$ROOT"
@@ -90,7 +92,20 @@ try {
 }
 SMOKE
 LAUNCHER
-chmod 700 "$daemon_tmp" "$demo_tmp"
+{
+  printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+  printf 'cd -- %q\n' "$ROOT"
+  printf 'export THOUGHTLOOM_USER_TOKEN=%q\n' "$THOUGHTLOOM_USER_TOKEN"
+  printf 'export THOUGHTLOOM_DAEMON_URL=%q\n' "$THOUGHTLOOM_DAEMON_URL"
+  printf 'export THOUGHTLOOM_WEB_ORIGIN=%q\n' 'http://127.0.0.1:3000'
+  printf 'exec bun --no-env-file run web:dev\n'
+} > "$web_tmp"
+chmod 700 "$daemon_tmp" "$demo_tmp" "$web_tmp"
 mv -f -- "$daemon_tmp" "$SCRIPT_DIR/daemon.local.sh"
 mv -f -- "$demo_tmp" "$SCRIPT_DIR/demo.local.sh"
-printf '%s\n' 'Setup complete. Start scripts/daemon.local.sh, then run scripts/demo.local.sh in another terminal.'
+mv -f -- "$web_tmp" "$SCRIPT_DIR/web.local.sh"
+printf '%s\n' 'Setup complete.' \
+  'In one terminal, start: scripts/daemon.local.sh' \
+  'In a separate terminal, start: scripts/web.local.sh' \
+  'Open http://127.0.0.1:3000 in your browser.' \
+  'Optional: run scripts/demo.local.sh separately; it calls a real agent/model and may incur charges.'

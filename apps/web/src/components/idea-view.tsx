@@ -11,6 +11,7 @@ import type {
 import styles from "./idea.module.css";
 import { useIdeaNavigation, type PreviousIdea } from "./idea-navigation-provider";
 import { useExploreMemory } from "./explore-provider";
+import { useEvolveStore } from "./evolve-provider";
 
 type Detail<T> = { phase: "loading" } | { phase: "ready"; value: T } | { phase: "error" };
 type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
@@ -48,6 +49,7 @@ function relationship(connection: IdeaConnection, focus: string) {
 export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const navigation = useIdeaNavigation();
   const exploreMemory = useExploreMemory();
+  const evolve = useEvolveStore();
   const [previous, setPrevious] = useState<PreviousIdea | null>(null);
   const [view, setView] = useState<IdeaRecord | null>(null);
   const [readState, setReadState] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
@@ -329,7 +331,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
             </div>
             {thought.rejected === true || (inspection && thought.rejected !== false)
               ? <button className={`${styles.button} ${styles.primary}`} disabled aria-disabled="true">Evolve this idea</button>
-              : <Link className={`${styles.button} ${styles.primary}`} href={ideaActionHref(thought.id, "evolve")} prefetch={false}>Evolve this idea</Link>}
+              : <Link className={`${styles.button} ${styles.primary}`} href={ideaActionHref(thought.id, "evolve")} prefetch={false}
+                onNavigate={() => evolve.startFromIdea(thought.id)}>Evolve this idea</Link>}
           </div>
 
           <div className={styles.tools}>
