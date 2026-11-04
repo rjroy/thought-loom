@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The server is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. There is no visual client yet. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client foundation is described below; complete screen workflows are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -13,6 +13,33 @@ bun install --frozen-lockfile
 ```
 
 Use the committed lockfile. SQLite support comes from Bun's built-in `bun:sqlite`; a separate database server is not required.
+
+### Web client foundation
+
+The root install includes the `apps/web` Bun workspace and uses the same committed lockfile. Start the web development server from the project root:
+
+```sh
+bun --no-env-file run web:dev
+```
+
+For the production client:
+
+```sh
+bun --no-env-file run web:build
+bun --no-env-file run web:start
+```
+
+Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. The foundation contains shared navigation, not the completed Capture and Explore workflows. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
+
+| Web server variable | Default / purpose |
+| --- | --- |
+| `THOUGHTLOOM_WEB_ORIGIN` | `http://127.0.0.1:3000`; trusted browser origin and Host. Match this to the actual web listener if changing its port or loopback hostname. |
+| `THOUGHTLOOM_DAEMON_URL` | `http://127.0.0.1:3001`; server-only daemon origin. Only loopback HTTP(S) origins are accepted, without embedded credentials, paths, queries, or fragments. |
+| `THOUGHTLOOM_USER_TOKEN` | The daemon's user-role bearer credential, validated when the server transport is used. Never expose it through a `NEXT_PUBLIC_*` variable. |
+
+Export these variables in the launching shell. Next.js has its own application environment-file handling; Bun's `--no-env-file` flag is not a guarantee that Next.js will ignore such files. Keep all daemon credentials server-only. The web client does not need the daemon's AI token, database path, or agent configuration. It does not make direct browser-to-daemon requests. Server requests reject redirects, use bounded timeouts and `no-store`, and sanitize failures. The web request boundary rejects untrusted Host values and missing or foreign Origin values on mutations; forwarded headers do not establish trust.
+
+This is a local operator client, not a remote or multi-user deployment. Loopback binding and origin checks are not an account/login system. Do not expose it through a public listener or reverse proxy without a separate security design. Use Ctrl-C to stop either web process without stopping the independently running daemon.
 
 ### Native spelling extension
 

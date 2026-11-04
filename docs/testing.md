@@ -24,6 +24,19 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Web foundation checks
+
+```sh
+bun --no-env-file run web:test
+bun --no-env-file run web:typecheck
+bun --no-env-file run web:build
+bun --no-env-file run web:test:runtime
+```
+
+`web:test` runs the controlled server-boundary tests, also included in the ordinary Bun suite. The production runtime harness is a separate opt-in: it builds and starts an owned loopback Next.js server, then uses the installed Playwright package and `/usr/bin/chromium`. It checks trusted Host/mutation Origin handling, generated browser assets and output for test-owned credential sentinels, and the shared shell's navigation, focus, local font, and overflow at desktop/narrow widths. It does not contact the operator daemon or a model provider, and does not install a browser automatically.
+
+The runtime harness copies an explicit allowlist of current working-tree application/configuration files into an owned temporary workspace, installs the frozen root lock there with lifecycle scripts disabled, and builds and starts there with test-owned configuration. Dependencies resolve inside that workspace, not through links to the working tree. Generated `next-env.d.ts` and `.next` files are created by the fixture build, not copied or required from an earlier working-tree build. It excludes personal `.env` files and databases; do not remove personal configuration to run the checks. Update the source allowlist when adding runtime inputs so the fixture continues to represent the application. Bun's environment-file flag does not disable Next.js's independent application environment loading. Browser evidence currently covers the foundation, not authenticated Capture/Evolve/export workflows that have not been implemented. Owned HTTP transport tests separately exercise daemon authorization, timeout, redirect denial and redaction. Screenshots alone establish neither API behavior nor complete accessibility compliance.
+
 Search integration tests also need the [native extension build prerequisites](server-startup.md#native-spelling-extension). Run `bun run build:spellfix` before tests that use the default project artifact, including `search-contract` and `search-scopes`; that ignored artifact is absent on a fresh checkout and is not built automatically by the test command. Separate native pipeline tests compile the pinned vendored source into owned temporary outputs, verify its hash, load it through Bun SQLite, and check tamper and missing-artifact failures. Those temporary builds do not populate the default artifact. No system extension is assumed.
 
 ## Test boundaries
@@ -46,6 +59,7 @@ Search integration tests also need the [native extension build prerequisites](se
 | Configured daemon | Owned HTTP Weave/Evolve/status/Stop flow, unavailable service and role/credential boundaries; file-backed restart, cached-result recovery, held SDK shutdown and endpoint credential isolation. | `agent-runtime`, `runtime-recovery` |
 | Agentic export | Strict report envelopes, immutable request/effort, full-read citations and attribution, rejection/Stop fences, atomic artifact finalization and independent knowledge-write denial; runtime admission/download, read-only index snapshots, configured variants and bound restart. | `agentic-export`, `agent-runtime` |
 | Hono request API | Authentication, role restrictions, strict request bodies, response/status contracts, scoped relationship discovery, explicit rejection metadata for user inspection, and sanitized logging without a network listener. | `api` |
+| Web server boundary | Test-owned origin configuration, trusted Host and mutation Origin, server-side bearer transport, path restrictions, no-store requests, redirect denial, timeouts, and sanitized errors/logging. Owned redirect fixtures never contact the operator daemon. | `web-boundary` |
 | Native daemon | Real HTTP plus SQLite, startup validation, persistence across restart, concurrent captures, port conflicts, bounded failure cases and process signals. | `daemon` |
 | Scripts | Request validation and diagnostics with injected fetch, plus a real isolated walkthrough and cleanup on success/failure. | `scripts` |
 

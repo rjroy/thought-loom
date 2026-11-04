@@ -1,0 +1,161 @@
+import { describe, expect, test } from "bun:test";
+import { readWebConfig } from "../apps/web/src/server/config";
+import { requestDaemon } from "../apps/web/src/server/daemon";
+import { isTrustedRequest } from "../apps/web/src/server/request-guard";
+import { createLogger, type LogRecord } from "../src/logging";
+
+const token = "owned-token-sentinel";
+const thought = "owned-private-thought-sentinel";
+const config = () => readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://127.0.0.1:3001", THOUGHTLOOM_WEB_ORIGIN: "http://127.0.0.1:3000", THOUGHTLOOM_USER_TOKEN: token });
+const logger = (records: LogRecord[]) => createLogger("verbose", record => records.push(record));
+const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
+
+describe("web server configuration", () => {
+  test("has safe loopback defaults and does not require credentials during configuration", () => {
+    const result = readWebConfig({});
+    expect(result.daemonOrigin).toBe("http://127.0.0.1:3001");
+    expect(result.webOrigin).toBe("http://127.0.0.1:3000");
+    expect(result.userToken).toBeUndefined();
+  });
+
+  for (const value of ["https://example.com", "http://localhost.evil.test", "http://user:pass@127.0.0.1:3001", "http://127.0.0.1:3001/path", "http://127.0.0.1:3001/?q=x", "http://127.0.0.1:3001/#x", "file:///tmp/a", "not a url"]) {
+    test(`rejects invalid daemon origin ${value}`, () => {
+      expect(() => readWebConfig({ THOUGHTLOOM_DAEMON_URL: value })).toThrow();
+    });
+  }
+
+  for (const value of ["http://evil.test:3000", "http://user@localhost:3000", "http://localhost:3000/path", "http://localhost:3000/?q=1", "http://localhost:3000/#x"]) {
+    test(`rejects invalid web origin ${value}`, () => {
+      expect(() => readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: value })).toThrow();
+    });
+  }
+
+  test("accepts explicit loopback origins including IPv6 and independent configurations", () => {
+    const first = readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://localhost:4567", THOUGHTLOOM_WEB_ORIGIN: "http://[::1]:4568", THOUGHTLOOM_USER_TOKEN: "first" });
+    const second = readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://[::1]:4569", THOUGHTLOOM_USER_TOKEN: "second" });
+    expect(first.daemonOrigin).toBe("http://localhost:4567");
+    expect(first.webOrigin).toBe("http://[::1]:4568");
+    expect(second.daemonOrigin).toBe("http://[::1]:4569");
+    expect([first.userToken, second.userToken]).toEqual(["first", "second"]);
+  });
+});
+
+describe("browser request guard", () => {
+  const request = (method: string, headers: Record<string, string>) => new Request("http://127.0.0.1:3000/private", { method, headers });
+  test("gates private reads on the actual host, not forwarded host", () => {
+    expect(isTrustedRequest(config(), request("GET", { host: "127.0.0.1:3000" }))).toBe(true);
+    expect(isTrustedRequest(config(), request("GET", { host: "evil.test", "x-forwarded-host": "127.0.0.1:3000" }))).toBe(false);
+    expect(isTrustedRequest(config(), request("GET", {}))).toBe(false);
+    expect(isTrustedRequest(config(), request("GET", { host: "127.0.0.1:3001" }))).toBe(false);
+  });
+  test("mutations require the configured host and exact Origin", () => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(isTrustedRequest(config(), request(method, { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000" }))).toBe(true);
+      expect(isTrustedRequest(config(), request(method, { host: "127.0.0.1:3000" }))).toBe(false);
+      expect(isTrustedRequest(config(), request(method, { host: "127.0.0.1:3000", origin: "http://localhost:3000" }))).toBe(false);
+      expect(isTrustedRequest(config(), request(method, { host: "evil.test", origin: "http://127.0.0.1:3000" }))).toBe(false);
+    }
+  });
+  test("compares IPv6 host and port without guessing", () => {
+    const ipv6 = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: "http://[::1]:4312" });
+    expect(isTrustedRequest(ipv6, request("GET", { host: "[::1]:4312" }))).toBe(true);
+    expect(isTrustedRequest(ipv6, request("GET", { host: "[::1]:4313" }))).toBe(false);
+  });
+});
+
+describe("server daemon transport", () => {
+  for (const path of ["https://evil.test/steal", "//evil.test/steal", "/../steal", "/a/../steal", "/%2e%2e/steal", "/a/%2e%2e/steal", "/\\evil.test/x", "relative"]) {
+    test(`rejects caller-controlled unsafe path ${path} before fetch`, async () => {
+      let called = false;
+      const fetch = fakeFetch(async () => { called = true; return new Response(); });
+      await expect(requestDaemon(config(), { method: "GET", path }, { fetch, logger: logger([]), timeoutMs: 100 })).rejects.toThrow();
+      expect(called).toBe(false);
+    });
+  }
+
+  test("requires token only on use, before making any request", async () => {
+    let called = false;
+    const fetch = fakeFetch(async () => { called = true; return new Response(); });
+    await expect(requestDaemon(readWebConfig({}), { method: "GET", path: "/thoughts" }, { fetch, logger: logger([]), timeoutMs: 100 })).rejects.toThrow();
+    expect(called).toBe(false);
+  });
+
+  test("sends only server credentials and bounded transport options, with redacted read/write logs", async () => {
+    const records: LogRecord[] = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetch = fakeFetch(async (input, init) => { calls.push({ url: String(input), init }); return new Response("ok"); });
+    const deps = { fetch, logger: logger(records), timeoutMs: 1000 };
+    await requestDaemon(config(), { method: "GET", path: "/thoughts" }, deps);
+    await requestDaemon(config(), { method: "POST", path: "/thoughts", body: thought }, deps);
+    expect(calls.map(call => call.url)).toEqual(["http://127.0.0.1:3001/thoughts", "http://127.0.0.1:3001/thoughts"]);
+    for (const call of calls) {
+      expect(new Headers(call.init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      expect(call.init?.cache).toBe("no-store");
+      expect(call.init?.redirect).toBe("error");
+      expect(call.init?.signal).toBeInstanceOf(AbortSignal);
+    }
+    expect(records.length).toBeGreaterThanOrEqual(4);
+    expect(JSON.stringify(records)).not.toContain(token);
+    expect(JSON.stringify(records)).not.toContain(thought);
+  });
+
+  test("separate instances use only their own configuration and logger", async () => {
+    const first: LogRecord[] = [], second: LogRecord[] = [];
+    const seen: string[] = [];
+    const fetch = fakeFetch(async (input, init) => { seen.push(`${input} ${new Headers(init?.headers).get("authorization")}`); return new Response(); });
+    const a = readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://localhost:4001", THOUGHTLOOM_USER_TOKEN: "alpha" });
+    const b = readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://localhost:4002", THOUGHTLOOM_USER_TOKEN: "beta" });
+    await Promise.all([requestDaemon(a, { method: "GET", path: "/a" }, { fetch, logger: logger(first), timeoutMs: 1000 }), requestDaemon(b, { method: "GET", path: "/b" }, { fetch, logger: logger(second), timeoutMs: 1000 })]);
+    expect(seen.sort()).toEqual(["http://localhost:4001/a Bearer alpha", "http://localhost:4002/b Bearer beta"]);
+    expect(first.length).toBeGreaterThanOrEqual(2);
+    expect(second.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify([first, second])).not.toContain("alpha");
+    expect(JSON.stringify([first, second])).not.toContain("beta");
+  });
+
+  test("aborts timed-out requests and sanitizes upstream exceptions", async () => {
+    let aborted = false;
+    const fetch = fakeFetch(async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error(`${token} ${thought}`)); }, { once: true });
+    }));
+    const records: LogRecord[] = [];
+    let error: unknown;
+    try { await requestDaemon(config(), { method: "POST", path: "/thoughts", body: thought }, { fetch, logger: logger(records), timeoutMs: 20 }); } catch (caught) { error = caught; }
+    expect(aborted).toBe(true);
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).not.toContain(token);
+    expect(String(error)).not.toContain(thought);
+    expect(JSON.stringify(records)).not.toContain(token);
+    expect(JSON.stringify(records)).not.toContain(thought);
+  });
+
+  test("does not expose upstream failure bodies while preserving status", async () => {
+    const fetch = fakeFetch(async () => new Response(`${token} ${thought}`, { status: 403 }));
+    const records: LogRecord[] = [];
+    let result: Response | undefined, error: unknown;
+    try { result = await requestDaemon(config(), { method: "GET", path: "/thoughts" }, { fetch, logger: logger(records), timeoutMs: 100 }); } catch (caught) { error = caught; }
+    const status = result?.status ?? (error as { status?: number } | undefined)?.status;
+    expect(status).toBe(403);
+    const exposed = result ? await result.text() : String(error);
+    expect(exposed).not.toContain(token);
+    expect(exposed).not.toContain(thought);
+    expect(JSON.stringify(records)).not.toContain(token);
+    expect(JSON.stringify(records)).not.toContain(thought);
+  });
+
+  for (const status of [307, 308] as const) {
+    test(`does not follow ${status} redirects to a second owned server`, async () => {
+      let destinationRequests = 0;
+      const destination = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { destinationRequests++; return new Response("unexpected"); } });
+      const upstream = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { return new Response(null, { status, headers: { location: `http://127.0.0.1:${destination.port}/leak` } }); } });
+      try {
+        const local = readWebConfig({ THOUGHTLOOM_DAEMON_URL: `http://127.0.0.1:${upstream.port}`, THOUGHTLOOM_USER_TOKEN: token });
+        await expect(requestDaemon(local, { method: "POST", path: "/thoughts", body: thought }, { fetch, logger: logger([]), timeoutMs: 1000 })).rejects.toThrow();
+        expect(destinationRequests).toBe(0);
+      } finally {
+        upstream.stop(true);
+        destination.stop(true);
+      }
+    });
+  }
+});

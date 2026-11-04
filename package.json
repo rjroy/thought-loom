@@ -2,6 +2,7 @@
   "name": "thought-loom",
   "private": true,
   "type": "module",
+  "workspaces": ["apps/web"],
   "scripts": {
     "test": "bun test",
     "test:opencode": "bun --no-env-file run tests/opencode/fixture.ts",
@@ -9,7 +10,13 @@
     "daemon": "bun run src/daemon/main.ts",
     "api": "bun run scripts/api.ts",
     "demo": "bun run scripts/demo.ts",
-    "build:spellfix": "bash scripts/build-spellfix.sh"
+    "build:spellfix": "bash scripts/build-spellfix.sh",
+    "web:dev": "bun --no-env-file run --filter @thoughtloom/web dev",
+    "web:build": "bun --no-env-file run --filter @thoughtloom/web build",
+    "web:start": "bun --no-env-file run --filter @thoughtloom/web start",
+    "web:typecheck": "bun --no-env-file run --filter @thoughtloom/web typecheck",
+    "web:test": "bun --no-env-file test tests/web-boundary.test.ts",
+    "web:test:runtime": "bun --no-env-file apps/web/tests/foundation.runtime.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",

@@ -1,0 +1,25 @@
+{
+  "name": "@thoughtloom/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --no-env-file run --bun next dev --hostname 127.0.0.1",
+    "build": "bun --no-env-file run --bun next build",
+    "start": "bun --no-env-file run --bun next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --no-env-file test ../../tests/web-boundary.test.ts"
+  },
+  "dependencies": {
+    "next": "16.4.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
+  }
+}

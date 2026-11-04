@@ -1,0 +1,51 @@
+import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { PrimaryNavigation } from "../components/primary-navigation";
+import "./globals.css";
+
+const sourceSans = localFont({
+  src: "../../public/fonts/SourceSans3-VariableFont_wght.ttf",
+  variable: "--font-source-sans",
+  weight: "200 900",
+  display: "swap",
+  adjustFontFallback: false,
+  fallback: ["system-ui", "sans-serif"],
+});
+
+export const metadata: Metadata = {
+  title: { default: "Thoughtloom", template: "%s · Thoughtloom" },
+  description: "Capture and develop connected thinking.",
+};
+
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#031315",
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en" className={sourceSans.variable}>
+      <body>
+        <a className="skip-link" href="#main-content">
+          Skip to content
+        </a>
+        <header className="site-header">
+          <div className="site-header-inner">
+            <div className="brand">
+              <Link className="brand-name" href="/explore" aria-label="Thoughtloom home">
+                thoughtloom
+              </Link>
+              <p className="brand-tagline">Where ideas take shape.</p>
+            </div>
+            <PrimaryNavigation />
+          </div>
+        </header>
+        <main id="main-content" className="workspace" tabIndex={-1}>
+          {children}
+        </main>
+      </body>
+    </html>
+  );
+}

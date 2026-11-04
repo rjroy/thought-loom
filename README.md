@@ -18,7 +18,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 | Document | What it covers |
 | --- | --- |
-| [Server startup](docs/server-startup.md) | Install, configure, start, and stop the daemon; diagnose startup failures. |
+| [Server startup](docs/server-startup.md) | Install and run the daemon and web client; configure their server-side boundary. |
 | [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
 | [Daemon API](docs/daemon-api.md) | Authentication, request and response shapes, routes, and examples. |
 | [Database schema](docs/database-schema.md) | SQLite tables, relationships, constraints, and migrations. |
@@ -27,6 +27,6 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, both Markdown export modes, and manual test scripts. Configured OpenCode integration supports background weaving, conversational development, and read-only report investigation through scoped application capabilities.
 
-The Next.js/React client is not implemented yet. Without agent configuration, capture, search and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration.
+The separate Next.js/React client currently provides shared navigation and a server-only daemon boundary. Capture and Explore screen workflows are not implemented yet. Without agent configuration, daemon capture, search and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration.
 
 Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above describe the implementation that exists today.
