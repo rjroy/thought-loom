@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -24,9 +25,11 @@ async function createFixture(temp: string): Promise<string> {
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
     "apps/web/package.json", "apps/web/tsconfig.json",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
-    "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx",
+    "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
+    "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
+    "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
   ];
@@ -126,8 +129,8 @@ async function main(): Promise<void> {
   let server: ChildProcess | undefined;
   try {
   const fixtureWeb = await createFixture(temp);
-  let destinationRequests = 0;
-  daemon = createServer((_request, response) => { destinationRequests++; response.writeHead(500).end("unexpected"); });
+  const fixtureDaemon = captureDaemon(token);
+  daemon = createServer(fixtureDaemon.handler);
   const ownedDaemon = daemon;
   await new Promise<void>(resolveListen => ownedDaemon.listen(0, "127.0.0.1", resolveListen));
   // Release an owned ephemeral port for Next. A competing bind fails the test, never selects a shared service.
@@ -151,7 +154,7 @@ async function main(): Promise<void> {
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
     const host = `127.0.0.1:${port}`;
-    const probe = (method: string, path: string, headers: string) => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n`);
+    const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
     const trusted = await probe("GET", "/explore", `Host: ${host}\r\n`);
     assert.equal(trusted.status, 200);
     assert.match(trusted.headers, /cache-control:.*(?:private|no-store)/i);
@@ -163,6 +166,7 @@ async function main(): Promise<void> {
     assert.equal((await probe("POST", "/explore", `Host: ${host}\r\nOrigin: http://foreign.invalid\r\nContent-Length: 0\r\n`)).status, 403);
     const allowed = await probe("POST", "/explore", `Host: ${host}\r\nOrigin: ${origin}\r\nContent-Length: 0\r\n`);
     assert.notEqual(allowed.status, 403, "same-origin mutation should reach Next's router");
+    await checkCaptureRoute({ origin, host, probe, daemon: fixtureDaemon });
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
@@ -171,7 +175,7 @@ async function main(): Promise<void> {
         const leaks: string[] = [];
         page.on("request", request => {
           const url = request.url();
-          if (url.startsWith(daemonOrigin) || secrets.some(secret => url.includes(secret))) leaks.push("browser request exposed daemon configuration");
+          if (url.startsWith(daemonOrigin) || secrets.some(secret => url.includes(secret)) || request.headers().authorization?.includes(token)) leaks.push("browser request exposed daemon configuration");
         });
         page.on("console", message => { if (secrets.some(secret => message.text().includes(secret))) leaks.push("console exposed daemon configuration"); });
         page.on("pageerror", error => { if (secrets.some(secret => error.message.includes(secret))) leaks.push("page error exposed daemon configuration"); });
@@ -187,6 +191,7 @@ async function main(): Promise<void> {
           await page.getByRole("link", { name: "Capture", exact: true }).click();
           await page.waitForURL("**/capture");
           assert.equal(await page.getByRole("heading", { name: "Capture" }).count(), 1);
+          await checkCaptureBrowser(page, fixtureDaemon);
           await page.getByRole("link", { name: "Explore", exact: true }).click();
           await page.waitForURL("**/explore");
           await page.evaluate(() => document.fonts.ready);
@@ -198,8 +203,7 @@ async function main(): Promise<void> {
         } finally { await page.close(); }
       }
     } finally { await browser.close(); }
-    assert.equal(destinationRequests, 0, "browser or shell contacted daemon");
-    console.log("Foundation runtime checks passed");
+    console.log("Foundation and capture runtime checks passed");
   } finally {
     if (server) await stop(server);
     if (daemon?.listening) {

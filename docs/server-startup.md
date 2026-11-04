@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client foundation is described below; complete screen workflows are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client and Capture workflow are described below; other screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -29,7 +29,7 @@ bun --no-env-file run web:build
 bun --no-env-file run web:start
 ```
 
-Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. The foundation contains shared navigation, not the completed Capture and Explore workflows. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
+Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. Capture is available at `/capture`; Explore remains a placeholder until its implementation task. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
 
 | Web server variable | Default / purpose |
 | --- | --- |
@@ -40,6 +40,14 @@ Dev and production listeners bind to `127.0.0.1`; the default web origin is `htt
 Export these variables in the launching shell. Next.js has its own application environment-file handling; Bun's `--no-env-file` flag is not a guarantee that Next.js will ignore such files. Keep all daemon credentials server-only. The web client does not need the daemon's AI token, database path, or agent configuration. It does not make direct browser-to-daemon requests. Server requests reject redirects, use bounded timeouts and `no-store`, and sanitize failures. The web request boundary rejects untrusted Host values and missing or foreign Origin values on mutations; forwarded headers do not establish trust.
 
 This is a local operator client, not a remote or multi-user deployment. Loopback binding and origin checks are not an account/login system. Do not expose it through a public listener or reverse proxy without a separate security design. Use Ctrl-C to stop either web process without stopping the independently running daemon.
+
+### Capture workflow
+
+Enter thought text and an optional title, then Save. The browser calls the fixed Next.js `POST /api/capture` route; that server forwards only capture fields to daemon `POST /thoughts`. Identity and other defaults remain daemon-owned. A confirmed canonical `201` receipt enables Saved and Capture another; it does not wait for background weaving. The Open idea link uses the returned ID, but the destination screen belongs to the later Idea task and is not implemented yet.
+
+Pending submission prevents repeated saves and retains the submitted text/title. Known pre-creation rejection allows deliberate Retry save. A timeout, dropped response, unexpected server failure, or invalid receipt instead shows **Not sure it saved**: the thought may already exist. No write is automatically replayed. The retained snapshot stays copyable; **Save another copy** is an explicit new capture with a duplicate warning. Opening Explore in a new tab is navigation, not confirmation of the original save.
+
+Drafts and recovery snapshots are held in page memory. There is no application-managed reload/session persistence, offline queue, or autosave guarantee; keep an uncertain draft open. Capture another clears the form after a successful save. Neither UI diagnostics nor server logs include thought content or credentials.
 
 ### Native spelling extension
 

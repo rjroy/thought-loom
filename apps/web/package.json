@@ -7,7 +7,7 @@
     "build": "bun --no-env-file run --bun next build",
     "start": "bun --no-env-file run --bun next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "bun --no-env-file test ../../tests/web-boundary.test.ts"
+    "test": "bun --no-env-file test ../../tests/web-*.test.ts"
   },
   "dependencies": {
     "next": "16.4.5",

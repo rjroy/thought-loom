@@ -207,6 +207,194 @@ a {
   color: var(--color-muted);
 }
 
+.capture-workspace {
+  inline-size: 87%;
+}
+
+.capture-heading {
+  margin-block-end: 2rem;
+}
+
+.capture-heading p {
+  color: var(--color-body);
+  font-size: 1.25rem;
+}
+
+.capture-status:not(:empty) {
+  margin-block-end: 1.5rem;
+}
+
+.capture-status h2 {
+  margin: 0 0 0.375rem;
+  color: var(--color-text);
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.capture-status p {
+  max-inline-size: 65ch;
+  margin: 0;
+}
+
+.capture-status--saving h2 {
+  color: var(--color-focus);
+}
+
+.capture-status--saved {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--brand-color-2);
+  border-radius: 0.75rem;
+  background: var(--color-card);
+}
+
+.capture-status--saved h2 {
+  color: var(--brand-color-10);
+}
+
+.capture-status--not-saved h2,
+.capture-field-error {
+  color: var(--brand-color-9);
+}
+
+.capture-status--uncertain h2 {
+  color: var(--brand-color-3);
+}
+
+.capture-field + .capture-field {
+  margin-block-start: 1.5rem;
+}
+
+.capture-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.capture-field label,
+.capture-receipt dt {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.capture-optional {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
+.capture-control {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 3rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: var(--color-input);
+  color: var(--color-text);
+  caret-color: var(--brand-color-3);
+  font: inherit;
+}
+
+.capture-control[aria-invalid="true"] {
+  border-color: var(--brand-color-9);
+}
+
+.capture-thought {
+  min-block-size: clamp(15rem, 34vh, 20rem);
+  padding-block: 0.75rem;
+  resize: vertical;
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.capture-form[data-recovery="true"] .capture-thought {
+  min-block-size: 8rem;
+}
+
+.capture-field-error,
+.capture-hint {
+  margin: 0;
+}
+
+.capture-hint {
+  max-inline-size: 65ch;
+  margin-block-start: 0.375rem;
+  color: var(--color-muted);
+  font-size: 1rem;
+}
+
+.capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-block-start: 1.5rem;
+}
+
+.capture-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 7.25rem;
+  min-block-size: 3rem;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.capture-button:hover:not(:disabled) {
+  border-color: var(--color-text);
+}
+
+.capture-button--primary {
+  border-color: var(--brand-color-3);
+  background: var(--brand-color-3);
+  color: var(--color-ground);
+  font-weight: 700;
+}
+
+.capture-button--primary:hover:not(:disabled) {
+  border-color: var(--brand-color-11);
+  background: var(--brand-color-11);
+}
+
+.capture-button:disabled {
+  border-color: var(--color-line);
+  background: var(--color-line);
+  color: var(--color-body);
+  cursor: default;
+}
+
+.capture-receipt {
+  margin: 0;
+}
+
+.capture-receipt dd {
+  max-inline-size: 65ch;
+  margin: 0.5rem 0 1.5rem;
+  color: var(--color-text);
+  font-size: 1.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.capture-actions--saved {
+  justify-content: flex-start;
+}
+
+.capture-recovery-actions {
+  display: grid;
+  gap: 1.5rem;
+  max-inline-size: 36rem;
+  margin-block-start: 1.5rem;
+}
+
 @media (max-width: 48rem) {
   .site-header-inner {
     flex-direction: column;
@@ -238,5 +426,21 @@ a {
 
   .workspace {
     padding-block-start: 1.75rem;
+  }
+
+  .capture-workspace {
+    inline-size: 100%;
+  }
+
+  .capture-thought {
+    min-block-size: 15rem;
+  }
+
+  .capture-actions {
+    flex-direction: column;
+  }
+
+  .capture-button {
+    inline-size: 100%;
   }
 }
