@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { PrimaryNavigation } from "../components/primary-navigation";
+import { ExploreProvider } from "../components/explore-provider";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -28,23 +29,25 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={sourceSans.variable}>
       <body>
-        <a className="skip-link" href="#main-content">
-          Skip to content
-        </a>
-        <header className="site-header">
-          <div className="site-header-inner">
-            <div className="brand">
-              <Link className="brand-name" href="/explore" aria-label="Thoughtloom home">
-                thoughtloom
-              </Link>
-              <p className="brand-tagline">Where ideas take shape.</p>
+        <ExploreProvider>
+          <a className="skip-link" href="#main-content">
+            Skip to content
+          </a>
+          <header className="site-header">
+            <div className="site-header-inner">
+              <div className="brand">
+                <Link className="brand-name" href="/explore" aria-label="Thoughtloom home">
+                  thoughtloom
+                </Link>
+                <p className="brand-tagline">Where ideas take shape.</p>
+              </div>
+              <PrimaryNavigation />
             </div>
-            <PrimaryNavigation />
-          </div>
-        </header>
-        <main id="main-content" className="workspace" tabIndex={-1}>
-          {children}
-        </main>
+          </header>
+          <main id="main-content" className="workspace" tabIndex={-1}>
+            {children}
+          </main>
+        </ExploreProvider>
       </body>
     </html>
   );

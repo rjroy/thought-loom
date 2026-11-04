@@ -80,6 +80,30 @@ describe("server daemon transport", () => {
     expect(called).toBe(false);
   });
 
+  test("forwards an encoded search query and repeated facets to the configured daemon", async () => {
+    const params = new URLSearchParams();
+    params.set("q", "café & 雪 and spaces");
+    params.append("author", "user");
+    params.append("author", "ai");
+    params.append("kind", "captured-original");
+    params.append("kind", "developing-idea");
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetch = fakeFetch(async (input, init) => { calls.push({ url: String(input), init }); return new Response("ok"); });
+    const response = await requestDaemon(config(), { method: "GET", path: `/search?${params}` }, { fetch, logger: logger([]), timeoutMs: 1000 });
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.origin).toBe("http://127.0.0.1:3001");
+    expect(url.pathname).toBe("/search");
+    expect(url.searchParams.get("q")).toBe("café & 雪 and spaces");
+    expect(url.searchParams.getAll("author")).toEqual(["user", "ai"]);
+    expect(url.searchParams.getAll("kind")).toEqual(["captured-original", "developing-idea"]);
+    expect(calls[0]?.init?.method).toBe("GET");
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+    expect(calls[0]?.init?.cache).toBe("no-store");
+    expect(calls[0]?.init?.redirect).toBe("error");
+  });
+
   test("sends only server credentials and bounded transport options, with redacted read/write logs", async () => {
     const records: LogRecord[] = [];
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];

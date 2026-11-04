@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client and Capture workflow are described below; other screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture and Explore as described below; other screens are still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -29,7 +29,7 @@ bun --no-env-file run web:build
 bun --no-env-file run web:start
 ```
 
-Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. Capture is available at `/capture`; Explore remains a placeholder until its implementation task. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
+Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. Capture is available at `/capture` and search at `/explore`. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
 
 | Web server variable | Default / purpose |
 | --- | --- |
@@ -41,6 +41,8 @@ Export these variables in the launching shell. Next.js has its own application e
 
 This is a local operator client, not a remote or multi-user deployment. Loopback binding and origin checks are not an account/login system. Do not expose it through a public listener or reverse proxy without a separate security design. Use Ctrl-C to stop either web process without stopping the independently running daemon.
 
+Next.js development incoming-request logging is disabled in `apps/web/next.config.ts`: search and bookmarked page URLs contain private query text. This does not disable application diagnostics or critical-error logging. Do not re-enable request-URL logging to debug searches; server transport diagnostics intentionally omit query strings and content.
+
 ### Capture workflow
 
 Enter thought text and an optional title, then Save. The browser calls the fixed Next.js `POST /api/capture` route; that server forwards only capture fields to daemon `POST /thoughts`. Identity and other defaults remain daemon-owned. A confirmed canonical `201` receipt enables Saved and Capture another; it does not wait for background weaving. The Open idea link uses the returned ID, but the destination screen belongs to the later Idea task and is not implemented yet.
@@ -48,6 +50,22 @@ Enter thought text and an optional title, then Save. The browser calls the fixed
 Pending submission prevents repeated saves and retains the submitted text/title. Known pre-creation rejection allows deliberate Retry save. A timeout, dropped response, unexpected server failure, or invalid receipt instead shows **Not sure it saved**: the thought may already exist. No write is automatically replayed. The retained snapshot stays copyable; **Save another copy** is an explicit new capture with a duplicate warning. Opening Explore in a new tab is navigation, not confirmation of the original save.
 
 Drafts and recovery snapshots are held in page memory. There is no application-managed reload/session persistence, offline queue, or autosave guarantee; keep an uncertain draft open. Capture another clears the form after a successful save. Neither UI diagnostics nor server logs include thought content or credentials.
+
+### Explore workflow and bookmarks
+
+Explore starts with a query, not a recent-thought feed. The browser uses fixed Next.js `GET /api/search`; the daemon owns retrieval, result ordering, counts and context. Author/kind filters, UTC dates, relevance/newest/oldest sorting and inclusive Show rejected are supported. Expand a snippet to read the actual matching text. Retained replies remain distinct results even when they open the same thought as another match.
+
+Search URLs are bookmarkable, for example:
+
+```text
+/explore?q=connections&author=ai&kind=developing-idea&sort=newest
+```
+
+Opening a valid search URL in a fresh page or reloading initializes its query, filters, date bounds, sort and scope. Search terms are consequently visible in browser history and bookmarks; credentials and result bodies are not embedded in these links. In-app return also preserves result expansion and scroll using per-browser memory, not a shared server cache or persistent result store. Clear filters keeps the query and sort. Narrow screens expose the same refinements through Filters, with Close/Escape and focus return.
+
+Show rejected includes active and rejected results. Thought badges use existing user inspection reads; failed inspection is **Status unknown**, not proof that a result is active or rejected. Replies are not independently rejectable thoughts. Surrounding context remains the daemon's active-only projection. Loading, empty and failed searches are distinct; failures retain the query/selections and offer deliberate retry. Newer searches cannot be replaced by stale responses.
+
+Thought and response links target `/ideas/<id>`, preserving a known response ID and validated local Explore return state where applicable. The Idea destination belongs to its later implementation task and is not available yet. Rejected inspection intent is carried by that validated return state; it must not become an AI access bypass.
 
 ### Native spelling extension
 

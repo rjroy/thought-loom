@@ -1,0 +1,85 @@
+.view { min-inline-size: 0; }
+/* Keep workspace navigation available without losing the reading position. */
+:global(body):has(.view) :global(.site-header) {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  background: var(--color-ground);
+}
+:global(body):has(.view) :global(.skip-link) { z-index: 2; }
+.view :is(input, select, button, a, h2) { scroll-margin-block-start: 6rem; }
+.srOnly { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.searchForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; margin-block-end: 1.5rem; }
+.queryLabel { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+.queryBox { position: relative; min-inline-size: 0; }
+.searchIcon { position: absolute; inset-inline-start: 1rem; inset-block-start: 1rem; inline-size: 1.5rem; block-size: 1.5rem; pointer-events: none; color: var(--color-body); }
+.queryInput { inline-size: 100%; min-inline-size: 0; min-block-size: 3.5rem; padding: 0.625rem 1rem 0.625rem 3rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-input); color: var(--color-text); caret-color: var(--brand-color-3); font: inherit; font-size: 1.25rem; }
+.queryInput::placeholder { color: var(--color-muted); opacity: 1; }
+.button { display: inline-flex; align-items: center; justify-content: center; min-block-size: 3rem; padding: 0.5rem 1.25rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-ground); color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
+.button:hover { border-color: var(--color-text); }
+.primary { border-color: var(--brand-color-3); background: var(--brand-color-3); color: var(--color-ground); font-weight: 700; min-inline-size: 7.5rem; }
+.primary:hover { border-color: var(--brand-color-11); background: var(--brand-color-11); }
+.columns { display: grid; grid-template-columns: 15.875rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+.filterHeading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-block-end: 1rem; }
+.filterHeading h2, .resultsHeading h2 { margin: 0; color: var(--color-text); font-size: 1.375rem; line-height: 1.3; font-weight: 650; overflow-wrap: anywhere; }
+.filterGroup { min-inline-size: 0; margin: 0 0 1.25rem; padding: 0; border: 0; }
+.filterGroup legend, .fieldLabel { display: block; margin-block-end: 0.5rem; padding: 0; color: var(--color-muted); font-size: 1rem; font-weight: 600; }
+.facet { display: flex; align-items: center; gap: 0.625rem; min-block-size: 2.25rem; cursor: pointer; }
+.facet input { flex: none; inline-size: 1.125rem; block-size: 1.125rem; margin: 0; accent-color: var(--brand-color-3); }
+.count { margin-inline-start: auto; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.control { min-inline-size: 0; min-block-size: 2.75rem; padding: 0.375rem 0.625rem; border: 1px solid var(--color-control-line); border-radius: 0.375rem; background: var(--color-input); color: var(--color-text); font: inherit; }
+.filterGroup > .control { inline-size: 100%; }
+.filterGroup:disabled, .control:disabled, .facet:has(input:disabled), .textButton:disabled { color: var(--color-muted); cursor: default; }
+.dateFields { display: grid; gap: 0.75rem; margin-block-start: 0.75rem; }
+.dateFields label { display: grid; gap: 0.375rem; }
+.dateFields input { inline-size: 100%; }
+.fieldError { grid-column: 1 / -1; margin: 0; color: var(--brand-color-9); }
+.control[aria-invalid="true"], .queryInput[aria-invalid="true"] { border-color: var(--brand-color-9); }
+.filterFooter { display: grid; gap: 0.625rem; padding-block-start: 0.875rem; border-block-start: 1px solid var(--color-line); }
+.textButton { justify-self: start; min-block-size: 2.75rem; padding: 0; border: 0; background: transparent; color: var(--color-link); font: inherit; text-align: start; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.results { min-inline-size: 0; }
+.resultsHeading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-block-end: 1rem; }
+.resultsHeading p, .empty p { margin: 0.375rem 0 0; }
+.sort { display: flex; align-items: center; gap: 0.75rem; flex: none; color: var(--color-muted); }
+.sort select { max-inline-size: 11rem; }
+.resultList { display: grid; gap: 0.75rem; }
+.card { min-inline-size: 0; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-card); overflow: hidden; }
+.cardBody { padding: 1rem 1.25rem 0.75rem; }
+.byline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.375rem 0.625rem; margin-block-end: 0.25rem; color: var(--color-muted); font-size: 1rem; }
+.byline time { margin-inline-start: auto; }
+.user { color: var(--brand-color-2); font-weight: 600; }
+.ai { color: var(--brand-color-13); font-weight: 600; }
+.rejected, .unknown { padding: 0.0625rem 0.375rem; border: 1px solid var(--color-control-line); border-radius: 0.25rem; color: var(--color-body); }
+.rejected { color: var(--brand-color-9); }
+.card h3 { margin: 0; color: var(--color-text); font-size: 1.5rem; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+.card h3 a { color: inherit; text-decoration: none; }
+.card h3 a:hover { text-decoration: underline; }
+.excerpt { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.expandButton { display: inline; min-inline-size: 2.75rem; min-block-size: 2.75rem; padding: 0 0.25rem; border: 0; background: transparent; color: var(--color-link); font: inherit; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; vertical-align: baseline; }
+.context { padding: 0.625rem 1.25rem; background: var(--color-caption); color: var(--color-body); font-size: 1rem; overflow-wrap: anywhere; }
+.context strong { color: var(--color-text); }
+.empty { margin-block-start: 2rem; }
+.empty h3 { margin: 0; color: var(--color-text); font-size: 1.5rem; }
+.narrowTools, .closeFilters { display: none; }
+
+@media (max-width: 48rem) {
+  .view :is(input, select, button, a, h2) { scroll-margin-block-start: 10rem; }
+  .queryLabel { position: static; grid-column: 1 / -1; inline-size: auto; block-size: auto; clip-path: none; margin-block-end: 0.125rem; color: var(--color-text); font-size: 1.375rem; font-weight: 650; }
+  .searchForm { gap: 0.75rem; margin-block-end: 1rem; }
+  .queryInput { padding-inline-start: 0.875rem; }
+  .searchIcon { display: none; }
+  .primary { min-inline-size: 6rem; }
+  .narrowTools { display: flex; align-items: center; gap: 0.875rem; margin-block-end: 1.5rem; }
+  .narrowTools .button { flex: none; padding-inline: 0.875rem; }
+  .selectionSummary { min-inline-size: 0; margin: 0; color: var(--color-muted); font-size: 1rem; overflow-wrap: anywhere; }
+  .columns { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .filters { display: none; padding: 1rem; border: 1px solid var(--color-line); border-radius: 0.75rem; }
+  .filters[data-open="true"] { display: block; }
+  .closeFilters { display: inline-block; }
+  .facet { min-block-size: 2.75rem; }
+  .resultsHeading { flex-wrap: wrap; gap: 0.75rem; }
+  .sort { margin-inline-start: auto; }
+  .byline time { margin-inline-start: 0; }
+  .cardBody { padding-inline: 1rem; }
+  .context { padding-inline: 1rem; }
+}

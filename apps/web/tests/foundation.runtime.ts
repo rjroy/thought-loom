@@ -10,6 +10,7 @@ import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
+import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -23,12 +24,15 @@ async function createFixture(temp: string): Promise<string> {
   // Next build generates next-env.d.ts and .next inside the owned fixture.
   const inputs = [
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
-    "apps/web/package.json", "apps/web/tsconfig.json",
+    "apps/web/package.json", "apps/web/tsconfig.json", "apps/web/next.config.ts",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/capture-form.tsx",
+    "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
+    "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
+    "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
     "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
@@ -123,6 +127,61 @@ async function raw(port: number, request: string): Promise<{ status: number; hea
   });
 }
 
+async function checkDevQueryPrivacy(fixtureWeb: string, env: NodeJS.ProcessEnv, attempts: { path: string }[]): Promise<void> {
+  const reservation = createServer();
+  await new Promise<void>(resolveListen => reservation.listen(0, "127.0.0.1", resolveListen));
+  const port = (reservation.address() as AddressInfo).port;
+  await new Promise<void>((resolveClose, reject) => reservation.close(error => error ? reject(error) : resolveClose()));
+  const origin = `http://127.0.0.1:${port}`;
+  const child = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], {
+    ...env, NODE_ENV: "development", THOUGHTLOOM_WEB_ORIGIN: origin,
+  });
+  let stdout = "", stderr = "", overflow = false;
+  const append = (which: "stdout" | "stderr", chunk: Buffer) => {
+    const text = chunk.toString();
+    if (stdout.length + stderr.length + text.length > 2_000_000) { overflow = true; return; }
+    if (which === "stdout") stdout += text; else stderr += text;
+  };
+  child.stdout?.on("data", chunk => append("stdout", chunk));
+  child.stderr?.on("data", chunk => append("stderr", chunk));
+  const closed = new Promise<void>((resolveClose, reject) => {
+    child.once("error", reject);
+    child.once("close", () => resolveClose());
+  });
+  const apiSentinel = "owned-privacy-api-query-sentinel";
+  const pageSentinel = "owned-privacy-bookmark-query-sentinel";
+  try {
+    const deadline = Date.now() + 60_000;
+    let ready = false;
+    while (Date.now() < deadline && child.exitCode === null) {
+      try {
+        const response = await fetch(`${origin}/api/search?q=owned-dev-ready`, { signal: AbortSignal.timeout(10_000) });
+        if (response.status === 200) { await response.text(); ready = true; break; }
+      } catch { /* Next may still be compiling. */ }
+      await delay(100);
+    }
+    assert.ok(ready, "Owned Next development server did not become ready");
+    const before = attempts.length;
+    const api = await fetch(`${origin}/api/search?q=${apiSentinel}`, { signal: AbortSignal.timeout(30_000) });
+    assert.equal(api.status, 200);
+    const data = await api.json();
+    assert.ok(Array.isArray(data.results), "Search response must reach the actual handler");
+    assert.ok(attempts.slice(before).some(attempt => new URL(attempt.path, origin).searchParams.get("q") === apiSentinel), "Owned daemon must receive the search request");
+    const bookmark = await fetch(`${origin}/explore?q=${pageSentinel}`, { signal: AbortSignal.timeout(30_000) });
+    assert.equal(bookmark.status, 200);
+    assert.match(bookmark.headers.get("content-type") ?? "", /text\/html/i);
+    assert.ok((await bookmark.text()).includes("Thoughtloom"), "Bookmark must reach the rendered application");
+  } finally {
+    await stop(child);
+    await Promise.race([closed, delay(5000).then(() => { throw new Error("Development server output did not drain"); })]);
+  }
+  assert.equal(overflow, false, "Development output exceeded capture limit");
+  for (const [stream, output] of [["stdout", stdout], ["stderr", stderr]] as const) {
+    assert.ok(!output.includes(apiSentinel), `Development ${stream} leaked the search API query`);
+    assert.ok(!output.includes(pageSentinel), `Development ${stream} leaked the bookmark query`);
+  }
+}
+
 async function main(): Promise<void> {
   const temp = await mkdtemp("/tmp/opencode/thoughtloom-runtime-");
   let daemon: ReturnType<typeof createServer> | undefined;
@@ -130,7 +189,11 @@ async function main(): Promise<void> {
   try {
   const fixtureWeb = await createFixture(temp);
   const fixtureDaemon = captureDaemon(token);
-  daemon = createServer(fixtureDaemon.handler);
+  const fixtureSearch = searchDaemon(token);
+  daemon = createServer((request, response) => {
+    if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
+    else void fixtureDaemon.handler(request, response);
+  });
   const ownedDaemon = daemon;
   await new Promise<void>(resolveListen => ownedDaemon.listen(0, "127.0.0.1", resolveListen));
   // Release an owned ephemeral port for Next. A competing bind fails the test, never selects a shared service.
@@ -167,6 +230,7 @@ async function main(): Promise<void> {
     const allowed = await probe("POST", "/explore", `Host: ${host}\r\nOrigin: ${origin}\r\nContent-Length: 0\r\n`);
     assert.notEqual(allowed.status, 403, "same-origin mutation should reach Next's router");
     await checkCaptureRoute({ origin, host, probe, daemon: fixtureDaemon });
+    await checkSearchRoute({ origin, host, probe, daemon: fixtureSearch });
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
@@ -194,6 +258,7 @@ async function main(): Promise<void> {
           await checkCaptureBrowser(page, fixtureDaemon);
           await page.getByRole("link", { name: "Explore", exact: true }).click();
           await page.waitForURL("**/explore");
+          await checkExploreBrowser(page, fixtureSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await page.evaluate(() => document.fonts.ready);
           assert.ok(await page.evaluate(() => Array.from(document.fonts).some(font => font.status === "loaded" && font.family.toLowerCase().includes("source"))), "local Source Sans font should load");
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "horizontal overflow");
@@ -203,8 +268,14 @@ async function main(): Promise<void> {
         } finally { await page.close(); }
       }
     } finally { await browser.close(); }
-    console.log("Foundation and capture runtime checks passed");
+    console.log("Foundation, capture and Explore runtime checks passed");
+    // Never share Next build output between running production and development servers.
+    await stop(server);
+    server = undefined;
+    await checkDevQueryPrivacy(fixtureWeb, env, fixtureSearch.attempts);
+    console.log("Development request-log privacy checks passed");
   } finally {
+    // The fixture also releases any held response when its browser check exits.
     if (server) await stop(server);
     if (daemon?.listening) {
       daemon.closeAllConnections();
