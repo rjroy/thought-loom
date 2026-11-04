@@ -1,17 +1,18 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionTransaction } from "../domain/rejection";
 import { createThought } from "../domain/thought";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
 
-function boundary<T>(operation: string, action: () => T): T {
-  console.info(`[rejection storage] ${operation} attempt`);
+function boundary<T>(logger: Logger, operation: string, action: () => T): T {
+  logger.verbose(`[rejection storage] ${operation} attempt`);
   try {
     const result = action();
-    console.info(`[rejection storage] ${operation} succeeded`);
+    logger.verbose(`[rejection storage] ${operation} succeeded`);
     return result;
   } catch (error) {
-    console.error(`[rejection storage] ${operation} failed`);
+    logger.verbose(`[rejection storage] ${operation} failed`);
     throw error;
   }
 }
@@ -28,10 +29,10 @@ function sourcesByOwner(rows: { ownerId: string; sourceId: string }[]): Map<stri
 
 /** Internal adapter; expose scoped RejectionService reads to consumers instead. */
 export class SqliteRejectionRepository implements RejectionRepository {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly logger: Logger = createLogger()) {}
 
   exportTree(rootId: string): readonly ExportTreeNode[] {
-    return boundary("export tree", () => this.db.transaction(() => {
+    return boundary(this.logger, "export tree", () => this.db.transaction(() => {
       const tree = `WITH RECURSIVE tree(id) AS (SELECT id FROM thoughts WHERE id=? UNION SELECT t.id FROM thoughts t JOIN tree p ON t.parent_id=p.id)`;
       const sources = sourcesByOwner(this.db.query(`${tree}
         SELECT s.thought_id AS ownerId,s.source_id AS sourceId FROM thought_sources s JOIN tree ON tree.id=s.thought_id
@@ -73,23 +74,23 @@ export class SqliteRejectionRepository implements RejectionRepository {
   }
 
   snapshot(): RejectionSnapshot {
-    return boundary("snapshot", () => this.db.transaction(() => this.readSnapshot())());
+    return boundary(this.logger, "snapshot", () => this.db.transaction(() => this.readSnapshot())());
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {
-    return boundary("transaction", () => this.db.transaction(() => action({
+    return boundary(this.logger, "transaction", () => this.db.transaction(() => action({
       snapshot: () => this.readSnapshot(),
       setThoughtRejected: (id, rejected) => {
-        console.info(`[rejection storage] thought ${rejected ? "reject" : "restore"} attempt`);
+        this.logger.verbose(`[rejection storage] thought ${rejected ? "reject" : "restore"} attempt`);
         if (rejected) this.db.run("INSERT OR IGNORE INTO rejected_thoughts (thought_id) VALUES (?)", [id]);
         else this.db.run("DELETE FROM rejected_thoughts WHERE thought_id = ?", [id]);
-        console.info(`[rejection storage] thought ${rejected ? "reject" : "restore"} applied in transaction`);
+        this.logger.verbose(`[rejection storage] thought ${rejected ? "reject" : "restore"} applied in transaction`);
       },
       setConnectionRejected: (id, rejected) => {
-        console.info(`[rejection storage] connection ${rejected ? "reject" : "restore"} attempt`);
+        this.logger.verbose(`[rejection storage] connection ${rejected ? "reject" : "restore"} attempt`);
         if (rejected) this.db.run("INSERT OR IGNORE INTO rejected_connections (connection_id) VALUES (?)", [id]);
         else this.db.run("DELETE FROM rejected_connections WHERE connection_id = ?", [id]);
-        console.info(`[rejection storage] connection ${rejected ? "reject" : "restore"} applied in transaction`);
+        this.logger.verbose(`[rejection storage] connection ${rejected ? "reject" : "restore"} applied in transaction`);
       },
     })).immediate());
   }

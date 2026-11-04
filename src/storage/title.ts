@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { TitleConflictError, TitleNotFoundError, type TitleRecord, type TitleRepository, type TitleTransaction } from "../domain/title";
 import { titleClearWeaveIntent } from "../domain/weave-scheduling";
@@ -5,9 +6,9 @@ import { admitWeave, type WeaveSources } from "./weave-admission";
 
 /** Internal title persistence; consumers use TitleService. */
 export class SqliteTitleRepository implements TitleRepository {
-  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources) {}
+  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
   transaction<T>(action: (tx: TitleTransaction) => T): T {
-    console.info("[title storage] transaction attempt");
+    this.logger.verbose("[title storage] transaction attempt");
     try {
       const result = this.db.transaction(() => action({
         get: id => {
@@ -33,10 +34,10 @@ export class SqliteTitleRepository implements TitleRepository {
           if (this.scheduling) admitWeave(this.db,this.scheduling,titleClearWeaveIntent(id,this.scheduling.id()));
         },
       })).immediate();
-      console.info("[title storage] transaction succeeded");
+      this.logger.verbose("[title storage] transaction succeeded");
       return result;
     } catch (error) {
-      console.error("[title storage] transaction failed");
+      this.logger.verbose("[title storage] transaction failed");
       throw error;
     }
   }

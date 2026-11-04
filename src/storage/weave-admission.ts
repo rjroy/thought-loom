@@ -1,3 +1,4 @@
+import { createLogger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { RunConflictError, RunNotFoundError, type RunRecord, type RunSources } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
@@ -8,10 +9,11 @@ export type WeaveSources = RunSources;
 
 /** The same admission for manual and scheduled work; nested calls join the originating command's transaction. */
 export function admitWeave(db: Database, sources: WeaveSources, input: WeaveIntent): RunRecord {
+  const logger = sources.logger ?? createLogger();
   const data = record(input);
   if (Object.keys(data).length !== 2 || !Object.hasOwn(data,"subjectId") || !Object.hasOwn(data,"triggerId")) throw new RunConflictError("Invalid weave intent");
   const intent = {subjectId:nonEmpty(data.subjectId,"subjectId"),triggerId:nonEmpty(data.triggerId,"triggerId")};
-  console.info("[run storage] admit weave attempt",{subjectId:intent.subjectId});
+  logger.verbose("[run storage] admit weave attempt",{subjectId:intent.subjectId});
   try {
     const result = db.transaction(() => {
       // AI thought eligibility needs only existence/rejection, not thought text or a corpus snapshot.
@@ -29,10 +31,10 @@ export function admitWeave(db: Database, sources: WeaveSources, input: WeaveInte
       insertRun(db,run,intent);
       return {run,reused:false};
     }).immediate();
-    console.info("[run storage] weave admission applied in transaction",{runId:result.run.id,subjectId:intent.subjectId,reused:result.reused});
+    logger.verbose("[run storage] weave admission applied in transaction",{runId:result.run.id,subjectId:intent.subjectId,reused:result.reused});
     return Object.freeze(result.run);
   } catch (error) {
-    console.error("[run storage] weave admission failed",{subjectId:intent.subjectId});
+    logger.verbose("[run storage] weave admission failed",{subjectId:intent.subjectId});
     throw error;
   }
 }

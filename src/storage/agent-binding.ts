@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/opencode-adapter";
 import { AgentBindingError, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
@@ -8,7 +9,7 @@ import { SqliteRunAggregate } from "./run-aggregate";
 
 /** Binding belongs to the existing run aggregate and uses authoritative core migration. */
 export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBindings {
-  constructor(db: Database) { super(db); }
+  constructor(db: Database, logger: Logger = createLogger()) { super(db,logger); }
   bind(runId: string, input: AgentBinding, claim?: Claim): void {
     const binding = normalizeBinding(input);
     const valid = this.transaction("bind agent",runId,() => {

@@ -1,5 +1,6 @@
 import { parseAgentConfig, validateAgentConfig, type AgentConfig } from "./agent-config";
 import { ConfigError } from "./config-error";
+import type { LogLevel } from "../logging";
 export { ConfigError } from "./config-error";
 
 export interface DaemonConfig {
@@ -7,6 +8,7 @@ export interface DaemonConfig {
   readonly dbPath: string;
   readonly credentials: { readonly user: string; readonly ai: string };
   readonly agent?: AgentConfig | null;
+  readonly logLevel?: LogLevel;
 }
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
@@ -20,6 +22,7 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
     port: rawPort === undefined ? 3001 : Number(rawPort),
     dbPath: env.THOUGHTLOOM_DB_PATH,
     credentials: { user: env.THOUGHTLOOM_USER_TOKEN, ai: env.THOUGHTLOOM_AI_TOKEN },
+    logLevel: env.THOUGHTLOOM_LOG_LEVEL,
     ...(agent === null ? {} : {agent}),
   };
   return validateConfig(config);
@@ -47,5 +50,8 @@ export function validateConfig(input: unknown): DaemonConfig {
     throw new ConfigError(portDiagnostic);
   }
   const agent = "agent" in input && input.agent != null ? validateAgentConfig(input.agent) : null;
-  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, ...(agent === null ? {} : {agent}) };
+  const rawLevel = "logLevel" in input ? input.logLevel : undefined;
+  const level = rawLevel === undefined ? "info" : typeof rawLevel === "string" ? rawLevel.trim().toLowerCase() : "";
+  if (level !== "error" && level !== "warning" && level !== "info" && level !== "verbose") throw new ConfigError("THOUGHTLOOM_LOG_LEVEL must be error, warning, info or verbose");
+  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(agent === null ? {} : {agent}) };
 }

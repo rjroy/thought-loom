@@ -61,7 +61,7 @@ See [testing concepts](docs/testing.md) for focused checks and manual scripts. R
 - Unit tests use test-owned data, clocks, IDs, configuration, and mocked dependencies. Valid content or configuration changes must not break tests by changing their hidden inputs.
 - Integration tests may exercise real SQLite, HTTP, and subprocesses using isolated fixtures, bounded waits, and owned-resource cleanup. Do not use personal data, live credentials, or shared services as ordinary test fixtures.
 - Validate the affected boundaries, not just a green test count. Record commands, results, and limitations; do not claim checks you did not run.
-- Log state transitions and boundary attempts/outcomes with enough context to diagnose them, without credentials, raw sensitive exceptions, or thought content in diagnostic logs.
+- Use the shared [leveled logger](src/logging.ts) for daemon/backend diagnostics: routine polls/reads are Verbose, meaningful changes are Info, recoverable conditions are Warning, and terminal failures are Error. Pass the instance logger through dependencies instead of changing global console methods. See [logging configuration](docs/server-startup.md#logging). Log boundary attempts/outcomes without credentials, raw sensitive exceptions, or thought content.
 
 ## Beads and change management
 

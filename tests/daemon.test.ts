@@ -122,7 +122,7 @@ function stop(daemon: RunningDaemon) {
 
 describe("daemon configuration", () => {
   test("accepts configured credentials and database path with default and explicit ports", () => {
-    expect(parseConfig(env)).toEqual(config(env.THOUGHTLOOM_DB_PATH, 3001));
+    expect(parseConfig(env)).toEqual({ ...config(env.THOUGHTLOOM_DB_PATH, 3001), logLevel: "info" });
     expect(parseConfig({ ...env, THOUGHTLOOM_PORT: "0" }).port).toBe(0);
     expect(parseConfig({ ...env, THOUGHTLOOM_PORT: "65535" }).port).toBe(65535);
   });

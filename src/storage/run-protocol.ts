@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
 import { parseEnvelope, protocolJson, type CancellationState, type NextStep, type ProtocolEnvelope, type RunProtocolRepository, type RunStep } from "../domain/run-protocol";
@@ -8,7 +9,7 @@ import { SqliteRunAggregate } from "./run-aggregate";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
-  constructor(db: Database) { super(db); }
+  constructor(db: Database, logger: Logger = createLogger()) { super(db,logger); }
   steps(runId: string): readonly RunStep[] {
     return this.transaction("read steps",runId,() => { this.require(runId); return this.readSteps(runId); });
   }
@@ -29,7 +30,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       this.db.run("UPDATE run_steps SET input=? WHERE run_id=? AND prompt_id=?",[text,run.id,promptId]);
       return { ...step, input: text };
     });
-    console.info("[run storage] prompt input confirmed", { runId: claim.runId, promptId: prepared.promptId, position: prepared.position, state: prepared.state });
+    this.logger.verbose("[run storage] prompt input confirmed", { runId: claim.runId, promptId: prepared.promptId, position: prepared.position, state: prepared.state });
     return prepared;
   }
   setStepState(claim: Claim, promptId: string, state: "submitting" | "uncertain"): void {
@@ -41,7 +42,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       this.db.run("UPDATE run_steps SET state=? WHERE run_id=? AND prompt_id=?",[state,run.id,promptId]);
       this.db.run("UPDATE runs SET status=? WHERE id=?",[state,run.id]);
     });
-    console.info("[run storage] prompt state committed", { runId: claim.runId, promptId, state, generation: claim.generation });
+    this.logger.verbose("[run storage] prompt state committed", { runId: claim.runId, promptId, state, generation: claim.generation });
   }
   completeStep(claim: Claim, promptId: string, envelope: ProtocolEnvelope): void {
     const kind = this.guarded("complete prompt",claim,run => {
@@ -58,7 +59,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       this.db.run("UPDATE runs SET status='uncertain' WHERE id=?",[run.id]);
       return value.kind;
     });
-    console.info("[run storage] prompt completion confirmed", { runId: claim.runId, promptId, kind, generation: claim.generation });
+    this.logger.verbose("[run storage] prompt completion confirmed", { runId: claim.runId, promptId, kind, generation: claim.generation });
   }
   advance(claim: Claim, promptId: string, result: unknown, next: NextStep): RunStep {
     const successor = this.guarded<RunStep>("advance prompt",claim,run => {
@@ -91,7 +92,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       this.db.run("UPDATE runs SET status='queued' WHERE id=?",[run.id]);
       return { runId: run.id, position: step.position+1, promptId: nextPromptId, input: nextInput, state: "prepared", envelope: null, result: null };
     });
-    console.info("[run storage] prompt successor confirmed", { runId: claim.runId, from: promptId, to: successor.promptId, position: successor.position, generation: claim.generation });
+    this.logger.verbose("[run storage] prompt successor confirmed", { runId: claim.runId, from: promptId, to: successor.promptId, position: successor.position, generation: claim.generation });
     return successor;
   }
   cancellation(runId: string): CancellationState {

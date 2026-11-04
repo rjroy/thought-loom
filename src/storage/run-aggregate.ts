@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { Thought } from "../domain/thought";
 import type { Connection } from "../domain/connection";
@@ -38,11 +39,11 @@ function decodeStep(row: StepRow): RunStep {
 
 /** Internal shared run boundary. Knowledge and protocol methods use the same ownership, context, and Stop fences. */
 export class SqliteRunAggregate {
-  constructor(protected readonly db: Database) {}
+  constructor(protected readonly db: Database, protected readonly logger: Logger = createLogger()) {}
   protected transaction<T>(operation: string, runId: string, action: () => T): T {
-    console.info(`[run storage] ${operation} attempt`, { runId });
-    try { const result = this.db.transaction(action).immediate(); console.info(`[run storage] ${operation} succeeded`, { runId }); return result; }
-    catch (error) { console.error(`[run storage] ${operation} failed`, { runId }); throw error; }
+    this.logger.verbose(`[run storage] ${operation} attempt`, { runId });
+    try { const result = this.db.transaction(action).immediate(); this.logger.verbose(`[run storage] ${operation} succeeded`, { runId }); return result; }
+    catch (error) { this.logger.verbose(`[run storage] ${operation} failed`, { runId }); throw error; }
   }
   protected loadRun(id: string): RunRecord | null {
     return readRun(this.db,id);
@@ -66,14 +67,14 @@ export class SqliteRunAggregate {
       return { valid: true, value: action(run,visible) } as const;
     });
     if (!outcome.valid) {
-      console.info("[run storage] rejected context fenced", { runId: claim.runId, generation: claim.generation });
+      this.logger.verbose("[run storage] rejected context fenced", { runId: claim.runId, generation: claim.generation });
       throw new RunFenceError();
     }
     return outcome.value;
   }
-  protected rejection(): RejectionService { return new RejectionService(new SqliteRejectionRepository(this.db)); }
+  protected rejection(): RejectionService { return new RejectionService(new SqliteRejectionRepository(this.db,this.logger)); }
   protected creation(sources: { readonly id: () => string; readonly now: () => string }): CreationService {
-    const store = new SqliteStore(this.db);
+    const store = new SqliteStore(this.db,undefined,this.logger);
     return new CreationService({ rejection: this.rejection(), ...sources, writes: {
       createThought: thought => store.saveThought(thought), createConnection: connection => store.saveConnection(connection),
     } });
@@ -91,7 +92,7 @@ export class SqliteRunAggregate {
       this.db.run("UPDATE runs SET status=? WHERE id=?",[localStatus,run.id]);
       return {from:run.status,to:localStatus,promptId:step.promptId,nativeState:evidence};
     });
-    console.info("[run storage] status committed",{runId:claim.runId,generation:claim.generation,...transition});
+    this.logger.verbose("[run storage] status committed",{runId:claim.runId,generation:claim.generation,...transition});
   }
   protected insertRun(run: RunRecord, intent: WeaveIntent | null = null): void {
     insertRun(this.db,run,intent);
@@ -142,7 +143,7 @@ export class SqliteRunAggregate {
     const associations = this.associations(run);
     if (row?.draft && !row.responseId && associations) {
       const response = createSharedResponse({ ...record(JSON.parse(row.draft)), ...associations, state: "interrupted" });
-      new SqliteSharedResponses(this.db).save(response);
+      new SqliteSharedResponses(this.db,this.logger).save(response);
       this.db.run("UPDATE run_replies SET draft_json=NULL,response_id=? WHERE run_id=?", [response.id,run.id]);
     }
     // Unmapped legacy input is retained, never guessed. Native settlement must outlive this local authority fence.

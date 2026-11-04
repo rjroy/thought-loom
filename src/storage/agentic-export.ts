@@ -11,7 +11,7 @@ interface ReportRow { readonly promptId: string; readonly markdown: string; read
 
 /** Read-only knowledge execution on the existing run aggregate; report lifecycle writes never enter knowledge storage. */
 export class SqliteAgenticExports extends SqliteRunAggregate implements AgenticExports {
-  constructor(db: Database, private readonly sources: RunSources) { super(db); }
+  constructor(db: Database, private readonly sources: RunSources) { super(db,sources.logger); }
   admit(actor: Actor, input: { readonly request: string; readonly effort?: ExportEffort }): RunRecord {
     if (actor !== "user") throw new RunForbiddenError();
     const intent = exportIntent(input);

@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ReadScope } from "../domain/rejection";
@@ -12,14 +13,14 @@ export class SqliteSearchRepository implements SearchRepository {
   private readonly prefix = `search_cache_${++nextRepository}`;
   private readonly vocabularies = new Map<string, Vocabulary>();
   private extensionLoaded = false;
-  constructor(private readonly db: Database, private readonly spellfixPath = fileURLToPath(new URL("../../build/sqlite/spellfix.so", import.meta.url))) {}
+  constructor(private readonly db: Database, private readonly spellfixPath = fileURLToPath(new URL("../../build/sqlite/spellfix.so", import.meta.url)), private readonly logger: Logger = createLogger()) {}
 
   private flags(scope: ReadScope): { inspect: number; ai: number } {
     return { inspect: scope.actor === "user" && scope.mode !== "normal" ? 1 : 0, ai: scope.actor === "ai" ? 1 : 0 };
   }
 
   search(scope: ReadScope, query: string): readonly SearchHit[] {
-    console.info("[search storage] search attempt");
+    this.logger.verbose("[search storage] search attempt");
     try {
       const result = this.db.transaction(() => {
         const tokens = query.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -42,13 +43,13 @@ export class SqliteSearchRepository implements SearchRepository {
             AND (?=0 OR NOT EXISTS (SELECT 1 FROM response_thoughts rt JOIN rejected_thoughts rejected ON rejected.thought_id=rt.thought_id WHERE rt.response_id=r.id))`).all(inspect,match,inspect,ai) as SearchHit[];
         return [...thoughts, ...responses];
       })();
-      console.info("[search storage] search succeeded");
+      this.logger.verbose("[search storage] search succeeded");
       return result;
-    } catch (error) { console.error("[search storage] search failed"); throw error; }
+    } catch (error) { this.logger.verbose("[search storage] search failed"); throw error; }
   }
 
   query(scope: ReadScope, query: string, options: SearchOptions): SearchPage {
-    console.info("[search storage] query attempt");
+    this.logger.verbose("[search storage] query attempt");
     try {
       const page = this.db.transaction(() => {
         let tokens: string[] = query.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -96,9 +97,9 @@ export class SqliteSearchRepository implements SearchRepository {
           materialKind: row.materialKind, createdAt: row.createdAt, snippet: row.text.slice(0, 160) }));
         return { results, counts: { authors, kinds } };
       })();
-      console.info("[search storage] query succeeded");
+      this.logger.verbose("[search storage] query succeeded");
       return page;
-    } catch (error) { console.error("[search storage] query failed"); throw error; }
+    } catch (error) { this.logger.verbose("[search storage] query failed"); throw error; }
   }
 
   private vocabulary(scope: ReadScope): Vocabulary {
@@ -129,7 +130,7 @@ export class SqliteSearchRepository implements SearchRepository {
   }
 
   private suggestions(scope: ReadScope, term: string): readonly { word: string; distance: number }[] {
-    console.info("[search storage] suggest attempt");
+    this.logger.verbose("[search storage] suggest attempt");
     try {
       const vocabulary = this.vocabulary(scope);
       const { inspect, ai } = this.flags(scope);
@@ -154,8 +155,8 @@ export class SqliteSearchRepository implements SearchRepository {
         }
         return this.db.query(`SELECT word, distance FROM temp.${vocabulary.spelling} WHERE word MATCH ? ORDER BY distance, rank DESC, word`).all(term) as { word: string; distance: number }[];
       })();
-      console.info("[search storage] suggest succeeded");
+      this.logger.verbose("[search storage] suggest succeeded");
       return result;
-    } catch (error) { console.error("[search storage] suggest failed"); throw error; }
+    } catch (error) { this.logger.verbose("[search storage] suggest failed"); throw error; }
   }
 }

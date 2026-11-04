@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { createThought, type Thought } from "../domain/thought";
 import { createConnection, type Connection } from "../domain/connection";
@@ -8,21 +9,21 @@ import { nonEmpty } from "../domain/validation";
 import { captureWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave, type WeaveSources } from "./weave-admission";
 
-function boundary<T>(operation: string, action: () => T): T {
-  console.info(`[storage] ${operation} attempt`);
+function boundary<T>(logger: Logger, operation: string, action: () => T): T {
+  logger.verbose(`[storage] ${operation} attempt`);
   try {
     const result = action();
-    console.info(`[storage] ${operation} succeeded`);
+    logger.verbose(`[storage] ${operation} succeeded`);
     return result;
   } catch (error) {
-    console.error(`[storage] ${operation} failed`);
+    logger.verbose(`[storage] ${operation} failed`);
     throw error;
   }
 }
 
 /** Bootstrap an existing connection. Safe to call on each opening. */
-export function migrate(db: Database): void {
-  boundary("migrate", () => {
+export function migrate(db: Database, logger: Logger = createLogger()): void {
+  boundary(logger, "migrate", () => {
     db.exec("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON;");
     const foreignKeys = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number };
     if (foreignKeys.foreign_keys !== 1) throw new Error("SQLite foreign keys could not be enabled");
@@ -178,10 +179,10 @@ export function migrate(db: Database): void {
 
 /** Internal raw persistence; future routes and agents must use scoped RejectionService reads. */
 export class SqliteStore {
-  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources) {}
+  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
 
   saveThought(input: Thought): void {
-    boundary("save thought", () => {
+    boundary(this.logger, "save thought", () => {
       const thought = createThought(input);
       this.db.transaction(() => {
         this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -198,7 +199,7 @@ export class SqliteStore {
   }
 
   getThought(id: string): Thought | null {
-    return boundary("get thought", () => {
+    return boundary(this.logger, "get thought", () => {
       nonEmpty(id, "id");
       const row = this.db.query(`SELECT t.id, t.text, m.title, m.title_author AS titleAuthor, t.author, t.kind, t.created_at AS createdAt,
         t.origin, t.parent_id AS parentId FROM thoughts t JOIN thought_titles m ON m.thought_id = t.id WHERE t.id = ?`).get(id);
@@ -209,7 +210,7 @@ export class SqliteStore {
   }
 
   saveConnection(input: Connection): void {
-    boundary("save connection", () => {
+    boundary(this.logger, "save connection", () => {
       const connection = createConnection(input);
       this.db.transaction(() => {
         this.db.run("INSERT INTO connections (id, from_id, to_id, category, proposed_by, explanation) VALUES (?, ?, ?, ?, ?, ?)",
@@ -221,7 +222,7 @@ export class SqliteStore {
   }
 
   getConnection(id: string): Connection | null {
-    return boundary("get connection", () => {
+    return boundary(this.logger, "get connection", () => {
       nonEmpty(id, "id");
       const row = this.db.query(`SELECT id, from_id AS fromId, to_id AS toId, category,
         proposed_by AS proposedBy, explanation FROM connections WHERE id = ?`).get(id);
@@ -232,14 +233,14 @@ export class SqliteStore {
   }
 
   saveResponse(input: ResponseRecord): void {
-    boundary("save response", () => {
-      new SqliteSharedResponses(this.db).save(input);
+    boundary(this.logger, "save response", () => {
+      new SqliteSharedResponses(this.db,this.logger).save(input);
     });
   }
 
   getResponse(id: string): ResponseRecord | null {
-    return boundary("get response", () => {
-      return new SqliteSharedResponses(this.db).get(id);
+    return boundary(this.logger, "get response", () => {
+      return new SqliteSharedResponses(this.db,this.logger).get(id);
     });
   }
 }

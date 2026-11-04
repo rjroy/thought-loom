@@ -1,3 +1,4 @@
+import { createLogger } from "../logging";
 import { createThought } from "./thought";
 import { nonEmpty } from "./validation";
 import type { Thought } from "./thought";
@@ -64,6 +65,7 @@ export interface NativeDispatcher {
   observe(sessionId: string, promptId: string): Promise<NativeState>;
 }
 export interface RunSources {
+  readonly logger?: import("../logging").Logger;
   readonly id: () => string;
   readonly now: () => string;
   readonly sessionId?: () => string;
@@ -108,15 +110,15 @@ export class RunService {
     if (!run) throw new RunNotFoundError();
     // This synchronous transaction is the authorization point; the external call owns no SQL lock.
     repo.setStatus(claim, "submitting", undefined, run.promptId);
-    console.info("[run] native submit attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+    (this.deps.logger ?? createLogger()).verbose("[run] native submit attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
     try { await this.deps.dispatcher.submit(run.sessionId, run.promptId); }
     catch {
-      console.error("[run] native submit uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+      (this.deps.logger ?? createLogger()).warning("[run] native submit uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
       // A Stop, rejected context, or a newer owner wins over even a failed acknowledgement.
       repo.setStatus(claim, "uncertain", undefined, run.promptId);
       throw new RunAdmissionError("Native submission outcome uncertain");
     }
-    console.info("[run] native submit acknowledged", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+    (this.deps.logger ?? createLogger()).verbose("[run] native submit acknowledged", { runId: run.id, promptId: run.promptId, generation: claim.generation });
     repo.setStatus(claim, "running", undefined, run.promptId);
   }
   async recover(id: string): Promise<Recovery> {
@@ -127,14 +129,14 @@ export class RunService {
     const claim = repo.claim(id);
     let observed = run.nativeState;
     if (observed !== "completed") {
-      console.info("[run] native observe attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+      (this.deps.logger ?? createLogger()).verbose("[run] native observe attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
       try { observed = await this.deps.dispatcher.observe(run.sessionId, run.promptId); }
       catch {
-        console.error("[run] native observe uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+        (this.deps.logger ?? createLogger()).warning("[run] native observe uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
         repo.setStatus(claim, "uncertain", "unknown", run.promptId);
         throw new RunAdmissionError("Native observation outcome uncertain");
       }
-      console.info("[run] native observe succeeded", { runId: run.id, promptId: run.promptId, generation: claim.generation, nativeState: observed });
+      (this.deps.logger ?? createLogger()).verbose("[run] native observe succeeded", { runId: run.id, promptId: run.promptId, generation: claim.generation, nativeState: observed });
     }
     repo.setStatus(claim, observed === "running" ? "running" : "uncertain", observed, run.promptId);
     const reconciled = repo.get(id);

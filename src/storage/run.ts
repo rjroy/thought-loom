@@ -12,7 +12,7 @@ import { admitWeave } from "./weave-admission";
 
 /** Durable transaction boundary; never invokes a model or network while holding a SQLite lock. */
 export class SqliteRunRepository extends SqliteRunAggregate implements RunRepository {
-  constructor(db: Database, private readonly sources: RunSources & { readonly scheduleWeave?: boolean }) { super(db); }
+  constructor(db: Database, private readonly sources: RunSources & { readonly scheduleWeave?: boolean }) { super(db,sources.logger); }
   get(id: string): RunRecord | null { return this.loadRun(id); }
   migrate(): void { migrate(this.db); }
   admit(admission: Admission): void {
@@ -41,10 +41,10 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
       return { runId: id, generation };
     });
     if (!outcome) {
-      console.info("[run storage] rejected context fenced", { runId: id });
+      this.logger.verbose("[run storage] rejected context fenced", { runId: id });
       throw new RunFenceError();
     }
-    console.info("[run storage] ownership claimed", { runId: id, generation: outcome.generation });
+    this.logger.verbose("[run storage] ownership claimed", { runId: id, generation: outcome.generation });
     return outcome;
   }
   setStatus(claim: Claim, status: RunStatus, nativeState?: NativeState, promptId?: string): void {
@@ -110,14 +110,14 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   }
   reply(runId: string): SharedResponse | null {
     const row = this.db.query("SELECT response_id AS id FROM run_replies WHERE run_id=?").get(runId) as {id: string | null} | null;
-    return row?.id ? new SqliteSharedResponses(this.db).get(row.id) : null;
+    return row?.id ? new SqliteSharedResponses(this.db,this.logger).get(row.id) : null;
   }
   finish(claim: Claim, response: SharedResponse): void {
     this.guarded("finish", claim, (run,visible) => {
       if (run.kind === "export") throw new RunForbiddenError();
       const value = createSharedResponse(response);
       this.checkAssociations(run,value,visible);
-      new SqliteSharedResponses(this.db).save(value);
+      new SqliteSharedResponses(this.db,this.logger).save(value);
       this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id", [claim.runId,value.id]);
       const intent = evolveWeaveIntent(run,value,this.issued(run.id));
       if (this.sources.scheduleWeave && intent) admitWeave(this.db,this.sources,intent);

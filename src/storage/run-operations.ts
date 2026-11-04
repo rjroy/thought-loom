@@ -13,7 +13,7 @@ import { admitWeave } from "./weave-admission";
 
 /** Typed writes share the original run aggregate, transaction, receipt table, and issued ordering. */
 export class SqliteRunOperations extends SqliteRunAggregate implements RunOperations {
-  constructor(db: Database, private readonly sources: RunSources) { super(db); }
+  constructor(db: Database, private readonly sources: RunSources) { super(db,sources.logger); }
   admitWeave(actor: "user", input: WeaveIntent): RunRecord {
     if (actor !== "user") throw new RunForbiddenError();
     return admitWeave(this.db,this.sources,input);
@@ -64,7 +64,7 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       if (effect.type === "connection") this.track(run.id,{kind:"connection",id:effect.connection.id});
       return effect;
     });
-    console.info("[run storage] step operation confirmed", { runId: claim.runId, promptId, type: result.type, generation: claim.generation });
+    this.logger.verbose("[run storage] step operation confirmed", { runId: claim.runId, promptId, type: result.type, generation: claim.generation });
     return result;
   }
   private apply(operation: StepOperation, subjectId: string | null): StepOperationResult {
@@ -74,7 +74,7 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       if (subjectId === null) throw new RunConflictError("Weave subject is unknown");
       if (operation.type === "interpretation") return { type: "interpretation", thought: this.creation(this.sources).interpret("ai",subjectId,operation) };
       try {
-        new TitleService(new SqliteTitleRepository(this.db)).fillAi("ai",subjectId,operation.title);
+        new TitleService(new SqliteTitleRepository(this.db,undefined,this.logger)).fillAi("ai",subjectId,operation.title);
         return { type: "title-fill", status: "filled" };
       } catch (error) {
         if (error instanceof TitleConflictError) return { type: "title-fill", status: "unchanged" };

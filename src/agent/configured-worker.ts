@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { AgentConfig } from "../daemon/agent-config";
 import type { RunSources } from "../domain/run";
@@ -19,6 +20,8 @@ export interface ConfiguredWorkerDependencies extends RunSources {
 
 /** One worker and one lazy attachment snapshot; no SDK/service work at construction or daemon readiness. */
 export class ConfiguredRunWorker implements SupervisedWorker {
+  private readonly logger: Logger;
+  private unavailable = false;
   private readonly worker: RunWorker;
   private readonly bindings: SqliteAgentBindings;
   private readonly runs: SqliteRunRepository;
@@ -27,7 +30,8 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   private resolving: Promise<void> | undefined;
   private paused = false;
   constructor(private readonly dependencies: ConfiguredWorkerDependencies) {
-    this.bindings = new SqliteAgentBindings(dependencies.db);
+    this.logger = dependencies.logger ?? createLogger();
+    this.bindings = new SqliteAgentBindings(dependencies.db,this.logger);
     this.runs = new SqliteRunRepository(dependencies.db,dependencies);
     this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
     this.worker = new RunWorker({...dependencies,bindingFor:run => {
@@ -46,7 +50,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
         const service = this.service;
         // Never retarget a persisted session or send a newly selected endpoint's credentials to an old endpoint.
         if (this.paused || !service || service.url !== binding.serviceUrl) throw new AgentUnavailableError("Run-owned service is unavailable");
-        return adapter ??= new OpenCodeAdapter(dependencies.client(service),bindings,bindings.assertActive.bind(bindings));
+        return adapter ??= new OpenCodeAdapter(dependencies.client(service),bindings,bindings.assertActive.bind(bindings),this.logger);
       };
       const native: WorkerNative = {
         ensureSession:async (claim,binding) => (await owned(binding)).ensureSession(claim,binding),
@@ -60,16 +64,18 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   private resolve(): Promise<void> {
     if (this.service) return Promise.resolve();
     if (!this.resolving) this.resolving = (async () => {
-      console.info("[agent runtime] resolve service attempt");
+      this.logger.verbose("[agent runtime] resolve service attempt");
       try {
         const selected = await this.dependencies.resolve(this.dependencies.config);
         if (this.paused) return;
         const url = validateServiceUrl(selected.url);
         const headers = selected.headers === undefined ? undefined : Object.freeze(Object.fromEntries(new Headers(selected.headers)));
         this.service = Object.freeze({url,...(headers === undefined ? {} : {headers}),...(selected.token === undefined ? {} : {token:selected.token})});
-        console.info("[agent runtime] resolve service succeeded");
+        this.logger.verbose("[agent runtime] resolve service succeeded");
+        if (this.unavailable) { this.unavailable = false; this.logger.info("[agent runtime] service available"); }
       } catch {
-        console.error("[agent runtime] resolve service unavailable");
+        if (!this.unavailable) { this.unavailable = true; this.logger.warning("[agent runtime] service unavailable"); }
+        else this.logger.verbose("[agent runtime] service remains unavailable");
         throw new AgentUnavailableError("Configured agent service is unavailable");
       }
     })().finally(() => { this.resolving = undefined; });

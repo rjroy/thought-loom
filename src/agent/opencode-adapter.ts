@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import { RunFenceError, type Claim } from "../domain/run";
 import { protocolJson } from "../domain/run-protocol";
 import { AgentBindingError, normalizeBinding, sameBinding, sameModel, type AgentBinding, type ModelRef } from "./binding";
@@ -52,9 +53,11 @@ export type NativePhase = "history" | "submit" | "acknowledged" | "pending" | "r
 
 /** No service startup; all calls are fenced to an existing application claim. */
 export class OpenCodeAdapter {
+  private readonly observationOutages = new Set<string>();
   /** Production callers supply SqliteAgentBindings.assertActive bound to its receiver; tests may inject controlled fences. */
   constructor(private readonly client: PublicClient, private readonly bindings: AgentBindings,
-    private readonly assertActive: (claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase) => readonly PersistedPrompt[] | void) {}
+    private readonly assertActive: (claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase) => readonly PersistedPrompt[] | void,
+    private readonly logger: Logger = createLogger()) {}
   private bound(runId: string, requested: AgentBinding): AgentBinding {
     const binding = normalizeBinding(requested);
     const saved = this.bindings.get(runId);
@@ -70,19 +73,20 @@ export class OpenCodeAdapter {
     if (session.unsafe || session.location.directory !== binding.location.directory || !sameModel(binding.model,session.model) ||
         protocolJson(session.permissions) !== protocolJson(binding.permissions) || protocolJson(session.metadata) !== protocolJson(metadata)) throw new AgentBindingError("Native session does not match its owned binding");
   }
-  private async call<T>(claim: Claim, operation: string, action: () => Promise<T>, prompt?: PersistedPrompt): Promise<T> {
+  private async call<T>(claim: Claim, operation: string, action: () => Promise<T>, prompt?: PersistedPrompt, onTransportFailure?: () => void): Promise<T> {
     this.assertActive(claim,prompt);
-    console.info("[agent] native call attempt",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
+    this.logger.verbose("[agent] native call attempt",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
     let value: T;
     try { value = await action(); }
     catch (error) {
       this.assertActive(claim,prompt);
-      console.error("[agent] native call failed",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
+      this.logger.verbose("[agent] native call failed",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
       if (error instanceof AgentBindingError || error instanceof AgentSessionMissingError || error instanceof RunFenceError) throw error;
+      onTransportFailure?.();
       throw new AgentUncertainError("Native operation outcome is uncertain");
     }
     this.assertActive(claim,prompt);
-    console.info("[agent] native call succeeded",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
+    this.logger.verbose("[agent] native call succeeded",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
     return value;
   }
   private prompt(value: PersistedPrompt): PersistedPrompt {
@@ -124,13 +128,13 @@ export class OpenCodeAdapter {
       throw error;
     }
   }
-  private async history(claim: Claim, binding: AgentBinding, prompt: PersistedPrompt): Promise<readonly NativeMessage[]> {
+  private async history(claim: Claim, binding: AgentBinding, prompt: PersistedPrompt, onTransportFailure?: () => void): Promise<readonly NativeMessage[]> {
     const messages: NativeMessage[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     do {
       const input: Parameters<PublicClient["history"]>[0] = cursor === undefined ? {sessionID:binding.sessionId,order:"asc"} : {sessionID:binding.sessionId,cursor};
-      const page = await this.call(claim,"message.list",() => this.client.history(input),prompt);
+      const page = await this.call(claim,"message.list",() => this.client.history(input),prompt,onTransportFailure);
       for (const message of page.data) messages.push(message);
       cursor = page.cursor.next;
       if (cursor !== undefined && (typeof cursor !== "string" || !cursor || cursors.has(cursor))) throw new AgentUncertainError("Native history cursor made no progress");
@@ -178,12 +182,16 @@ export class OpenCodeAdapter {
     this.assertActive(claim,current);
     const binding = this.bound(claim.runId,requested);
     if (!current) return {state:"uncertain"};
+    let transportFailed = false;
+    const failed = () => { transportFailed = true; };
     try {
-      this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),current));
-      const messages = await this.history(claim,binding,current);
-      const inbox = await this.call(claim,"inbox.list",() => this.client.inbox({sessionID:binding.sessionId}),current);
-      const active = await this.call(claim,"session.active",() => this.client.active(),current);
-      this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),current));
+      this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),current,failed));
+      const messages = await this.history(claim,binding,current,failed);
+      const inbox = await this.call(claim,"inbox.list",() => this.client.inbox({sessionID:binding.sessionId}),current,failed);
+      const active = await this.call(claim,"session.active",() => this.client.active(),current,failed);
+      this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),current,failed));
+      this.assertActive(claim,current);
+      if (this.observationOutages.delete(binding.sessionId)) this.logger.info("[agent] observation service recovered", { runId: claim.runId });
       const observed = correlateHistory(binding.sessionId,prompts,messages,inbox,active);
       this.assertActive(claim,current,observed.state);
       return observed;
@@ -191,13 +199,17 @@ export class OpenCodeAdapter {
       if (error instanceof RunFenceError) throw error;
       if (error instanceof AgentBindingError) { this.assertActive(claim,current,"quarantined"); return {state:"quarantined"}; }
       this.assertActive(claim,current,"uncertain");
+      if (transportFailed && !this.observationOutages.has(binding.sessionId)) {
+        this.observationOutages.add(binding.sessionId);
+        this.logger.warning("[agent] observation service unavailable", { runId: claim.runId });
+      }
       return {state:"uncertain"};
     }
   }
   async cancel(runId: string, requested: AgentBinding, input: PersistedPrompt): Promise<"pending" | "settled"> {
     const binding = this.bound(runId,requested);
     const prompt = this.prompt(input);
-    console.info("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
+    this.logger.verbose("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
     try {
       // Cleanup can stop an owned but quarantined session whose model/location/rules have drifted. It cannot adopt it.
       this.verifyOwner(runId,binding,await this.client.sessionGet({sessionID:binding.sessionId}));
@@ -207,10 +219,10 @@ export class OpenCodeAdapter {
       const active = await this.client.active();
       this.verifyOwner(runId,binding,await this.client.sessionGet({sessionID:binding.sessionId}));
       const state = inbox.length === 0 && !Object.hasOwn(active,binding.sessionId) ? "settled" : "pending";
-      console.info("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state});
+      this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state});
       return state;
     } catch (error) {
-      console.error("[agent] native cancellation unresolved",{runId,promptId:prompt.promptId});
+      this.logger.verbose("[agent] native cancellation unresolved",{runId,promptId:prompt.promptId});
       if (error instanceof AgentBindingError) throw error;
       return "pending";
     }

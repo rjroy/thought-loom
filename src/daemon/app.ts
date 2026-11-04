@@ -6,6 +6,7 @@ import { CreationForbiddenError, CreationNotFoundError, type CreationService, ty
 import { TitleConflictError, TitleForbiddenError, TitleNotFoundError, type TitleService } from "../domain/title";
 import type { SearchService } from "../domain/search";
 import { SimpleExportNotFoundError, type SimpleExportService } from "../domain/simple-export";
+import { createLogger, type Logger } from "../logging";
 import { AgentNotConfiguredError, type AgentService } from "../domain/agent";
 import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError } from "../domain/run";
 
@@ -24,6 +25,7 @@ export interface AppOptions {
   readonly titles: TitleService;
   readonly search?: SearchService;
   readonly simpleExport?: SimpleExportService;
+  readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
 }
 
@@ -89,6 +91,7 @@ function safePath(path: string): string {
 /** Construct a server-side transport around scoped reads and validated commands. */
 export function createApp(options: AppOptions): Hono<AppEnv> {
   const { rejection, creation, titles, credentials, logger } = options;
+  const diagnostics = options.diagnostics ?? createLogger();
   if (!credentials.user.trim() || !credentials.ai.trim() || credentials.user === credentials.ai) {
     throw new Error("Invalid credentials configuration");
   }
@@ -100,6 +103,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
       error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError ? 403 :
       error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError ? 404 :
       error instanceof ValidationError ? 400 : 500;
+    if (status === 500) diagnostics.error("[daemon] request failed", { method: c.req.method, path: safePath(new URL(c.req.url).pathname) });
     return c.json({ error: status === 500 ? "Internal server error" :
       ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict", 503: "Agents are not configured; set THOUGHTLOOM_AGENT_CONFIG" } as const)[status] }, status);
   });
@@ -148,7 +152,9 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     user(c); noQuery(c);
     const data = await body(c,["request","effort"]);
     if (!options.agents) throw new ApiError(503);
-    return c.json(options.agents.export(c.get("actor"),data),201);
+    const admission = options.agents.export(c.get("actor"),data);
+    diagnostics.info("[agent] export admitted", { runId: admission.run.id });
+    return c.json(admission,201);
   });
   app.get("/exports/agentic/:id", c => {
     user(c); noQuery(c);
@@ -176,14 +182,18 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.post("/thoughts", async c => {
     user(c); noQuery(c);
-    return c.json(creation.capture("user", thoughtInput(await body(c, ["text", "title"]))), 201);
+    const thought = creation.capture("user", thoughtInput(await body(c, ["text", "title"])));
+    diagnostics.info("[thought] capture succeeded", { thoughtId: thought.id });
+    return c.json(thought, 201);
   });
   app.post("/thoughts/:id/evolve", async c => {
     user(c); noQuery(c);
     const data = await body(c,["text"]);
     const text = nonEmpty(data.text,"text");
     if (!options.agents) throw new ApiError(503);
-    return c.json(options.agents.evolve(c.get("actor"),c.req.param("id"),text),201);
+    const admission = options.agents.evolve(c.get("actor"),c.req.param("id"),text);
+    diagnostics.info("[agent] evolve admitted", { runId: admission.run.id });
+    return c.json(admission,201);
   });
   app.get("/runs/:id", c => {
     user(c); noQuery(c);
@@ -194,31 +204,40 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     user(c); noQuery(c);
     await body(c,[]);
     if (!options.agents) throw new ApiError(503);
-    return c.json(options.agents.stop(c.get("actor"),c.req.param("id")));
+    const run = options.agents.stop(c.get("actor"),c.req.param("id"));
+    diagnostics.info("[agent] stop requested", { runId: run.id });
+    return c.json(run);
   });
   app.post("/thoughts/:id/contributions", async c => {
     user(c); noQuery(c);
-    return c.json(creation.contribute("user", c.req.param("id"), thoughtInput(await body(c, ["text", "title"]))), 201);
+    const thought = creation.contribute("user", c.req.param("id"), thoughtInput(await body(c, ["text", "title"])));
+    diagnostics.info("[thought] contribution created", { thoughtId: thought.id });
+    return c.json(thought, 201);
   });
   app.post("/thoughts/:id/developments", async c => {
     ai(c); noQuery(c);
     const data = await body(c, ["text", "title", "sourceIds"]);
-    return c.json(creation.develop("ai", c.req.param("id"), { ...thoughtInput(data),
-      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) }), 201);
+    const thought = creation.develop("ai", c.req.param("id"), { ...thoughtInput(data),
+      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) });
+    diagnostics.info("[thought] development created", { thoughtId: thought.id });
+    return c.json(thought, 201);
   });
   app.post("/connections", async c => {
     noQuery(c);
     const data = await body(c, ["fromId", "toId", "category", "explanation", "sourceIds"]);
-    return c.json(creation.connect(c.get("actor"), { fromId: nonEmpty(data.fromId, "fromId"), toId: nonEmpty(data.toId, "toId"),
+    const connection = creation.connect(c.get("actor"), { fromId: nonEmpty(data.fromId, "fromId"), toId: nonEmpty(data.toId, "toId"),
       category: oneOf(data.category, "category", ["supports", "contradicts", "extends", "related"]),
       explanation: nonEmpty(data.explanation, "explanation"),
-      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) }), 201);
+      ...(data.sourceIds === undefined ? {} : { sourceIds: references(data.sourceIds, "sourceIds") }) });
+    diagnostics.info("[connection] created", { connectionId: connection.id });
+    return c.json(connection, 201);
   });
 
   app.put("/thoughts/:id/title", async c => {
     user(c); noQuery(c);
     const data = await body(c, ["title"]);
     const state = titles.setUser("user", c.req.param("id"), nullableString(data.title, "title"));
+    diagnostics.info("[thought] title changed", { thoughtId: c.req.param("id"), cleared: state.title === null });
     const thought = rejection.listThoughts({ actor: "user", mode: "history" }).find(item => item.id === c.req.param("id"));
     if (!thought) throw new ApiError(404);
     return c.json({ ...thought, ...state });
@@ -227,6 +246,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     ai(c); noQuery(c);
     const data = await body(c, ["title"]);
     const state = titles.fillAi("ai", c.req.param("id"), nonEmpty(data.title, "title"));
+    diagnostics.info("[thought] title filled", { thoughtId: c.req.param("id") });
     const thought = rejection.listThoughts({ actor: "ai", mode: "normal" }).find(item => item.id === c.req.param("id"));
     if (!thought) throw new ApiError(404);
     return c.json({ ...thought, ...state });
@@ -245,12 +265,14 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
         !Array.isArray(data.affectedIds) || !data.affectedIds.every((id: unknown) => typeof id === "string") || typeof data.count !== "number") throw new ApiError(409);
     const confirmation: BranchPreview = { rootId: data.rootId, branchIds: data.branchIds, affectedIds: data.affectedIds, count: data.count };
     rejection.rejectBranch("user", confirmation);
+    diagnostics.info("[thought] branch rejected", { thoughtId: c.req.param("id") });
     return c.body(null, 204);
   });
   app.post("/thoughts/:id/branch/restore", c => {
     user(c); noQuery(c);
     try { rejection.restoreBranch("user", c.req.param("id")); }
     catch (error) { if (error instanceof ValidationError) throw new ApiError(404); throw error; }
+    diagnostics.info("[thought] branch restored", { thoughtId: c.req.param("id") });
     return c.body(null, 204);
   });
   for (const kind of ["thoughts", "connections"] as const) {
@@ -265,6 +287,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
             if (action === "reject") rejection.rejectConnection("user", id); else rejection.restoreConnection("user", id);
           }
         } catch (error) { if (error instanceof ValidationError) throw new ApiError(404); throw error; }
+        diagnostics.info("[rejection] state changed", { kind, action, id });
         return c.body(null, 204);
       });
     }

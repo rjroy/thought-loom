@@ -37,6 +37,7 @@ Loading is lazy when spelling support is requested, not part of daemon readiness
 | `THOUGHTLOOM_DB_PATH` | Yes | SQLite database path. Parent directories are created after configuration validation. An absolute path avoids working-directory surprises. |
 | `THOUGHTLOOM_PORT` | No | Integer from `0` through `65535`; default `3001`. `0` selects an available ephemeral port. |
 | `THOUGHTLOOM_AGENT_CONFIG` | No | Server-only JSON agent configuration described below. Omit it to use ordinary daemon features without agent configuration. |
+| `THOUGHTLOOM_LOG_LEVEL` | No | `error`, `warning`, `info` (default), or `verbose`; case-insensitive. Controls daemon diagnostics. |
 
 The server's bind address is not configurable: it is `127.0.0.1`, not all interfaces. Loopback binding does not replace authentication.
 
@@ -80,6 +81,27 @@ bun run daemon
 These assignments generate distinct credentials for this shell session. Store them securely if you need to reuse them. Do not put them in browser code, commits, diagnostic output, or world-readable launch scripts.
 
 If you create a launcher, have it change to the project root before calling `bun run daemon`. Otherwise, Bun may not find this project's package script. Quote paths and variable expansions in shell scripts.
+
+## Logging
+
+`THOUGHTLOOM_LOG_LEVEL` sets the diagnostic threshold:
+
+| Level | Includes |
+| --- | --- |
+| `error` | Unexpected or terminal failures. |
+| `warning` | Errors and recoverable warnings, such as service unavailability. |
+| `info` | Warnings/errors plus captures and meaningful work/lifecycle changes. This is the default. |
+| `verbose` | All of the above plus routine polling, reads and boundary diagnostics. |
+
+Successful idle polling does not produce Info messages. Invalid configured levels fail startup with a sanitized configuration error. Thought contents, credentials and raw sensitive exceptions are not diagnostic payloads, even at Verbose.
+
+```sh
+THOUGHTLOOM_LOG_LEVEL=verbose bun run daemon
+# Or, with a generated test launcher:
+THOUGHTLOOM_LOG_LEVEL=warning scripts/daemon.local.sh
+```
+
+Restart the daemon to change its configured level. Each daemon instance owns its logger and threshold; the setting does not alter the operator's OpenCode service logging. The successful startup readiness JSON below remains unconditional because it is a protocol notification used to discover the listening URL, not a filtered diagnostic. API helper results and exported Markdown are also unaffected.
 
 ## Startup and readiness
 

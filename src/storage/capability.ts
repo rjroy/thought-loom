@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { capabilityOperation, parseCapabilityRequest, readCapabilityResult, type CapabilityDispatcher, type CapabilityResult, type ReadCapabilityRequest, type ReadCapabilityResult } from "../domain/capability";
-import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type ContextRef } from "../domain/run";
+import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type ContextRef, type RunSources } from "../domain/run";
 import { stepOperationScope } from "../domain/run-operations";
 import { protocolJson } from "../domain/run-protocol";
 import { SearchService } from "../domain/search";
@@ -14,10 +14,10 @@ const scope = { actor: "ai", mode: "normal" } as const;
 export class SqliteCapabilityDispatcher extends SqliteRunAggregate implements CapabilityDispatcher {
   private readonly operations: SqliteRunOperations;
   private readonly search: SearchService;
-  constructor(db: Database, sources: { readonly id: () => string; readonly now: () => string }) {
-    super(db);
+  constructor(db: Database, sources: RunSources) {
+    super(db,sources.logger);
     this.operations = new SqliteRunOperations(db,sources);
-    this.search = new SearchService(new SqliteSearchRepository(db));
+    this.search = new SearchService(new SqliteSearchRepository(db,undefined,sources.logger));
   }
   dispatch(claim: Claim, promptId: string, input: unknown): CapabilityResult {
     return this.guarded("dispatch capability",claim,run => {

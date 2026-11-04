@@ -3,7 +3,12 @@ import { startDaemon } from "./runtime";
 
 if (import.meta.main) {
   try {
-    const daemon = await startDaemon(parseConfig(process.env), event => console.log(JSON.stringify(event)));
+    const config = parseConfig(process.env);
+    const daemon = await startDaemon(config, event => {
+      if ("operation" in event && event.operation === "start" && event.phase === "outcome" && event.success === true) {
+        console.log(JSON.stringify(event));
+      } else if (config.logLevel === "verbose") console.log(JSON.stringify(event));
+    });
     let shuttingDown = false;
     const shutdown = () => {
       if (shuttingDown) return;

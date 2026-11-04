@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, type RunStep } from "../domain/run-protocol";
@@ -31,7 +32,7 @@ export interface WorkerDependencies extends RunSources {
 class WorkerPaused extends RunFenceError {}
 /** The real adapter binds this actual method, so pause also fences its intermediate asynchronous callbacks. */
 class WorkerBindings extends SqliteAgentBindings {
-  constructor(db: Database, private readonly localFence: () => void) { super(db); }
+  constructor(db: Database, private readonly localFence: () => void, logger: Logger) { super(db,logger); }
   override assertActive(claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase): readonly PersistedPrompt[] | void {
     this.localFence();
     return super.assertActive(claim,prompt,phase);
@@ -45,6 +46,7 @@ const terminal = (run: RunRecord): boolean => ["completed","interrupted","failed
 
 /** Manual polling seam; the daemon supervisor owns scheduling and can drive independent runs. */
 export class RunWorker {
+  private readonly logger: Logger;
   private readonly bindings: WorkerBindings;
   private readonly runs: SqliteRunRepository;
   private readonly steps: SqliteRunProtocolRepository;
@@ -54,14 +56,16 @@ export class RunWorker {
   private readonly exports: SqliteAgenticExports;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,Promise<void>>();
+  private readonly unavailable = new Set<string>();
   private readonly ensured = new Set<string>();
   private native: WorkerNative | undefined;
   private paused = false;
   constructor(private readonly dependencies: WorkerDependencies) {
     const {db} = dependencies;
-    this.bindings = new WorkerBindings(db,() => { if (this.paused) throw new WorkerPaused(); });
+    this.logger = dependencies.logger ?? createLogger();
+    this.bindings = new WorkerBindings(db,() => { if (this.paused) throw new WorkerPaused(); },this.logger);
     this.runs = new SqliteRunRepository(db,dependencies);
-    this.steps = new SqliteRunProtocolRepository(db);
+    this.steps = new SqliteRunProtocolRepository(db,this.logger);
     this.operations = new SqliteRunOperations(db,dependencies);
     this.capabilities = new SqliteCapabilityDispatcher(db,dependencies);
     this.state = new SqliteRunWorkerState(db,dependencies);
@@ -81,7 +85,10 @@ export class RunWorker {
     this.bindings.assertActive(claim,prompt);
   }
   private transport(): WorkerNative { return this.native ??= this.dependencies.native(this.bindings); }
-  private forget(runId: string): void { this.owners.delete(runId); this.ensured.delete(runId); }
+  private forget(runId: string): void {
+    this.owners.delete(runId); this.ensured.delete(runId);
+    for (const key of this.unavailable) if (key.startsWith(`${runId}:`)) this.unavailable.delete(key);
+  }
   private prompts(runId: string): readonly PersistedPrompt[] {
     return this.steps.steps(runId).map(step => {
       if (step.input === null) throw new RunConflictError("Exact historical prompt input is unavailable");
@@ -146,14 +153,18 @@ export class RunWorker {
         return; // A newer worker owns an active run. This worker never reclaims it on a later poll.
       }
       if (!claim) throw error;
-      console.error("[worker] local processing failed",{runId,generation:claim.generation});
+      this.logger.error("[worker] local processing failed",{runId,generation:claim.generation});
       try { this.active(claim); this.operations.fail(claim); this.forget(runId); }
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
   }
   private process(claim: Claim, step: RunStep, kind: RunKind): void {
     this.active(claim);
-    if (step.envelope?.kind === "complete" || step.envelope?.kind === "report") { this.state.finish(claim,step.promptId); this.forget(claim.runId); return; }
+    if (step.envelope?.kind === "complete" || step.envelope?.kind === "report") {
+      this.state.finish(claim,step.promptId);
+      this.logger.info("[worker] run completed", { runId: claim.runId, kind });
+      this.forget(claim.runId); return;
+    }
     if (step.envelope?.kind !== "request") throw new RunConflictError("Completed step has no canonical envelope");
     const result = this.capabilities.dispatch(claim,step.promptId,step.envelope.request);
     if (step.result === null) return;
@@ -161,16 +172,21 @@ export class RunWorker {
   }
   private async call<T>(claim: Claim, prompt: PersistedPrompt, operation: "ensure session" | "submit" | "observe", action: () => Promise<T>): Promise<{readonly ok:true;readonly value:T} | {readonly ok:false}> {
     this.active(claim,prompt);
-    console.info("[worker] native boundary attempt",{runId:claim.runId,promptId:prompt.promptId,generation:claim.generation,operation});
+    const key = `${claim.runId}:${operation}`;
+    this.logger.verbose("[worker] native boundary attempt",{runId:claim.runId,promptId:prompt.promptId,generation:claim.generation,operation});
     try {
       const value = await action();
       this.active(claim,prompt);
-      console.info("[worker] native boundary succeeded",{runId:claim.runId,promptId:prompt.promptId,generation:claim.generation,operation});
+      if (this.unavailable.delete(key)) this.logger.info("[worker] native service recovered", { runId: claim.runId, operation });
+      this.logger.verbose("[worker] native boundary succeeded",{runId:claim.runId,promptId:prompt.promptId,generation:claim.generation,operation});
       return {ok:true,value};
     } catch (error) {
       if (this.paused || error instanceof RunFenceError) throw error;
       if (error instanceof AgentBindingError) { this.bindings.assertActive(claim,prompt,"quarantined"); throw error; }
-      console.error("[worker] native boundary failed",{runId:claim.runId,promptId:prompt.promptId,generation:claim.generation,operation});
+      if (!this.unavailable.has(key)) {
+        this.unavailable.add(key);
+        this.logger.warning("[worker] native service unavailable", { runId: claim.runId, operation });
+      } else this.logger.verbose("[worker] native boundary remains unavailable",{runId:claim.runId,operation});
       if (operation === "submit") this.state.submissionFailed(claim,prompt.promptId);
       return {ok:false};
     }
@@ -182,18 +198,18 @@ export class RunWorker {
     if (!binding) return;
     const step = this.steps.steps(run.id).at(-1);
     if (!step || step.input === null) return; // Unknown legacy input/binding is never fabricated for cleanup.
-    console.info("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId});
+    this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId});
     try {
       const result = await this.transport().cancel(run.id,binding,{promptId:step.promptId,input:step.input});
       if (this.paused) return;
       if (result === "settled") this.steps.settleCancellation(run.id);
-      console.info("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
-    } catch { console.error("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
+      this.logger.verbose("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
+    } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
   }
   /** Local shutdown only: never a user Stop. */
   pause(): void {
     if (this.paused) return;
     this.paused = true;
-    console.info("[worker] paused",{ownedRuns:this.owners.size,activeTicks:this.flights.size});
+    this.logger.verbose("[worker] paused",{ownedRuns:this.owners.size,activeTicks:this.flights.size});
   }
 }

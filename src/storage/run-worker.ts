@@ -12,7 +12,7 @@ import { SqliteAgenticExports } from "./agentic-export";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
-  constructor(db: Database, private readonly sources: RunSources) { super(db); }
+  constructor(db: Database, private readonly sources: RunSources) { super(db,sources.logger); }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
     return this.guarded("prepare worker context",claim,run => {
       const step = this.currentStep(run.id);
@@ -71,7 +71,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       const step = this.currentStep(run.id);
       if (step.input === null) throw new RunConflictError("Exact prompt input was not retained");
       if (run.status === "queued" && step.state === "prepared") {
-        console.info("[run storage] failed pre-dispatch retained prepared prompt",{runId:run.id,promptId,generation:claim.generation});
+        this.logger.verbose("[run storage] failed pre-dispatch retained prepared prompt",{runId:run.id,promptId,generation:claim.generation});
         return;
       }
       if (run.nativeState === "completed") return;
@@ -112,7 +112,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         FROM run_steps s JOIN runs r ON r.id=s.run_id WHERE r.id=?`).get(runId) as {total:number;unsubmitted:number};
       if (history.total !== 1 || history.unsubmitted !== 1) return false;
       this.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=? AND cancellation_state='pending'",[runId]);
-      console.info("[run storage] unsubmitted cancellation settled locally",{runId});
+      this.logger.verbose("[run storage] unsubmitted cancellation settled locally",{runId});
       return true;
     });
   }
