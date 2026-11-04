@@ -1,11 +1,13 @@
+import { parseAgentConfig, validateAgentConfig, type AgentConfig } from "./agent-config";
+import { ConfigError } from "./config-error";
+export { ConfigError } from "./config-error";
+
 export interface DaemonConfig {
   readonly port: number;
   readonly dbPath: string;
   readonly credentials: { readonly user: string; readonly ai: string };
+  readonly agent?: AgentConfig | null;
 }
-
-/** Invalid server configuration, before any listener or database is opened. */
-export class ConfigError extends Error {}
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
 
@@ -13,10 +15,12 @@ const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
 export function parseConfig(env: Readonly<Record<string, string | undefined>>): DaemonConfig {
   const rawPort = env.THOUGHTLOOM_PORT;
   if (rawPort !== undefined && !/^\d+$/.test(rawPort)) throw new ConfigError(portDiagnostic);
+  const agent = parseAgentConfig(env);
   const config = {
     port: rawPort === undefined ? 3001 : Number(rawPort),
     dbPath: env.THOUGHTLOOM_DB_PATH,
     credentials: { user: env.THOUGHTLOOM_USER_TOKEN, ai: env.THOUGHTLOOM_AI_TOKEN },
+    ...(agent === null ? {} : {agent}),
   };
   return validateConfig(config);
 }
@@ -42,5 +46,6 @@ export function validateConfig(input: unknown): DaemonConfig {
   if (!("port" in input) || typeof input.port !== "number" || !Number.isInteger(input.port) || input.port < 0 || input.port > 65535) {
     throw new ConfigError(portDiagnostic);
   }
-  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai } };
+  const agent = "agent" in input && input.agent != null ? validateAgentConfig(input.agent) : null;
+  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, ...(agent === null ? {} : {agent}) };
 }

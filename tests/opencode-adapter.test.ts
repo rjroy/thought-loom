@@ -1,0 +1,382 @@
+import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, resolveAgentService, type AgentBinding, type AgentBindings, type InboxItem, type NativeMessage, type NativeSession, type PublicClient } from "../src/agent/opencode-adapter";
+import { RunFenceError, RunService, type Claim, type NativeDispatcher } from "../src/domain/run";
+import { SqliteAgentBindings } from "../src/storage/agent-binding";
+import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
+import { migrate } from "../src/storage/sqlite";
+
+const binding: AgentBinding = { sessionId: "ses_fixture_111111111111111111111111", serviceUrl: "http://127.0.0.1:44999", location: { directory: "/owned/workspace" }, model: { providerID: "fixture-provider", id: "fixture-model", variant: "fixture-variant" }, permissions: [{ action: "*", resource: "*", effect: "deny" }], protocolVersion: 1 };
+const claim: Claim = { runId: "run-fixture", generation: 1 };
+const prompt = { promptId: "msg_fixture_222222222222222222222222", input: "fixture proposal request" };
+const other = { promptId: "msg_fixture_333333333333333333333333", input: "fixture followup" };
+const completeText = '{"version":1,"kind":"complete","reply":"fixture reply"}';
+
+class MemoryBindings implements AgentBindings {
+  private value: AgentBinding | null = null;
+  bind(_runId: string, value: AgentBinding): void {
+    if (this.value && JSON.stringify(this.value) !== JSON.stringify(value)) throw new AgentBindingError();
+    this.value = value;
+  }
+  get(_runId: string): AgentBinding | null { return this.value; }
+}
+
+// Shapes mirror the SDK-decoded /session, /inbox and /message receipts, not fake wire envelopes.
+class FakeClient implements PublicClient {
+  session: NativeSession | null = null;
+  queued: InboxItem[] = [];
+  pages = new Map<string, { data: readonly NativeMessage[]; cursor: { next?: string } }>();
+  calls: { method: string; input: unknown }[] = [];
+  loseAck = false;
+  activeState: Readonly<Record<string, unknown>> = {};
+  async serverInfo() { this.calls.push({ method: "info", input: null }); return { version: "99.0.0-fixture" }; }
+  async sessionCreate(input: Parameters<PublicClient["sessionCreate"]>[0]): Promise<NativeSession> {
+    this.calls.push({ method: "create", input });
+    this.session = { id: input.id, location: input.location, model: input.model, permissions: input.permissions, metadata: input.metadata };
+    return this.session;
+  }
+  async sessionGet(input: { readonly sessionID: string }): Promise<NativeSession> {
+    this.calls.push({ method: "get", input });
+    if (!this.session) throw new Error("fixture session missing");
+    return this.session;
+  }
+  async prompt(input: Parameters<PublicClient["prompt"]>[0]): Promise<InboxItem> {
+    this.calls.push({ method: "prompt", input });
+    const item: InboxItem = { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: 2 } };
+    this.queued.push(item);
+    if (this.loseAck) throw new Error("fixture socket failure with private detail");
+    return item;
+  }
+  async inbox(input: { readonly sessionID: string }) { this.calls.push({ method: "inbox", input }); return this.queued; }
+  async history(input: Parameters<PublicClient["history"]>[0]) {
+    this.calls.push({ method: "history", input });
+    if (input.cursor !== undefined && Object.hasOwn(input, "order")) throw new Error("SDK rejects order with cursor");
+    return this.pages.get(input.cursor ?? "first") ?? { data: [], cursor: {} };
+  }
+  async active() { this.calls.push({ method: "active", input: null }); return this.activeState; }
+  async cancelInbox(input: { readonly sessionID: string; readonly inboxID: string }) { this.calls.push({ method: "cancel", input }); this.queued = this.queued.filter(item => item.id !== input.inboxID); }
+  async interrupt(input: { readonly sessionID: string }) { this.calls.push({ method: "interrupt", input }); return { interrupted: false }; }
+}
+const userMessage = (id: string, text: string, created: number): NativeMessage => ({ id, type: "user", time: { created }, text });
+const assistantMessage = (id: string, text: string, created: number): NativeMessage => ({ id, type: "assistant", time: { created, completed: created + 1 }, content: [{ type: "text", text }], finish: "stop" });
+const idle = (id: string, created: number): NativeMessage => ({ id, type: "idle", time: { created }, outcome: "succeeded" });
+
+async function withPersistedSecondStep(action: (value: { client: FakeClient; adapter: OpenCodeAdapter; claim: Claim; binding: AgentBinding; first: { promptId: string; input: string }; next: { promptId: string; input: string }; runs: SqliteRunRepository }) => Promise<void>) {
+  const dir = mkdtempSync(join("/tmp/opencode", "owned-adapter-history-"));
+  const db = new Database(join(dir, "fixture.sqlite"));
+  try {
+    migrate(db);
+    let sequence = 0;
+    const id = () => `owned-${++sequence}`;
+    const runs = new SqliteRunRepository(db, { id, now: () => "2030" });
+    const dispatcher: NativeDispatcher = { submit: async () => {}, observe: async () => "running" };
+    const service = new RunService({ repository: runs, dispatcher, id, now: () => "2030" });
+    const run = service.admit("user", "weave").run;
+    const actualClaim = service.claim(run.id);
+    const bindings = new SqliteAgentBindings(db);
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, bindings, bindings.assertActive.bind(bindings));
+    const actualBinding = { ...binding, sessionId: run.sessionId };
+    await adapter.ensureSession(actualClaim, actualBinding);
+    const steps = new SqliteRunProtocolRepository(db);
+    const first = { promptId: run.promptId, input: "owned first exact input" };
+    const next = { promptId: "owned-second-prompt", input: "sensitive next owned input" };
+    steps.prepare(actualClaim, first);
+    steps.completeStep(actualClaim, first.promptId, { version: 1, kind: "request", request: { capability: "inspectThought", arguments: { thoughtId: "fixture" } } });
+    steps.advance(actualClaim, first.promptId, { found: "fixture" }, next);
+    await action({ client, adapter, claim: actualClaim, binding: actualBinding, first, next, runs });
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+}
+
+describe("public OpenCode adapter over typed facade", () => {
+  test("creates and verifies explicit owned binding, accepts newer capable identity, schedules prompt normally", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    const adapter = new OpenCodeAdapter(client, bindings, () => {});
+    await adapter.ensureSession(claim, binding);
+    expect(bindings.get(claim.runId)).toEqual(binding);
+    expect(client.calls.find(call => call.method === "create")?.input).toEqual({ id: binding.sessionId, location: binding.location, model: binding.model, permissions: binding.permissions, metadata: { owner: "thoughtloom", runId: claim.runId, protocolVersion: "1" } });
+    await adapter.submit(claim, binding, prompt);
+    expect(client.calls.find(call => call.method === "prompt")?.input).toEqual({ sessionID: binding.sessionId, id: prompt.promptId, text: prompt.input });
+    expect(client.calls.some(call => call.method === "info")).toBe(true);
+  });
+
+  test("lost admission acknowledgement recovers the same queued prompt without duplicate submit", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    const adapter = new OpenCodeAdapter(client, bindings, () => {});
+    await adapter.ensureSession(claim, binding);
+    client.loseAck = true;
+    let failure: unknown;
+    try { await adapter.submit(claim, binding, prompt); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(AgentUncertainError);
+    expect(String(failure)).not.toContain("private detail");
+    expect(String(failure)).not.toContain(prompt.input);
+    const restarted = new OpenCodeAdapter(client, bindings, () => {});
+    expect(await restarted.observe(claim, binding, [prompt])).toEqual({ state: "pending" });
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(1);
+    expect(client.calls.some(call => call.method === "history")).toBe(true);
+  });
+
+  test("paginates canonical ordered history to correlate latest completed output without an assistant parent field", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    const adapter = new OpenCodeAdapter(client, bindings, () => {});
+    await adapter.ensureSession(claim, binding);
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistantMessage("assistant-first", "older output", 2), idle("idle-first", 4)], cursor: { next: "cursor-next" } });
+    client.pages.set("cursor-next", { data: [userMessage(other.promptId, other.input, 5), assistantMessage("assistant-second", completeText, 6), idle("idle-second", 8)], cursor: {} });
+    expect(await adapter.observe(claim, binding, [prompt, other])).toEqual({ state: "completed", output: completeText });
+    expect(client.calls.filter(call => call.method === "history").map(call => call.input)).toEqual([{ sessionID: binding.sessionId, order: "asc" }, { sessionID: binding.sessionId, cursor: "cursor-next" }]);
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("foreign user input and prompt identity collisions quarantine instead of selecting ambiguous output", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    const adapter = new OpenCodeAdapter(client, bindings, () => {});
+    await adapter.ensureSession(claim, binding);
+    for (const data of [
+      [userMessage(prompt.promptId, "different private input", 1), assistantMessage("assistant", completeText, 2), idle("idle", 4)],
+      [userMessage(prompt.promptId, prompt.input, 1), userMessage("foreign-prompt", "foreign injected message", 2), assistantMessage("assistant", completeText, 3), idle("idle", 5)],
+    ]) {
+      client.pages.set("first", { data, cursor: {} });
+      expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "quarantined" });
+    }
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("submit accepts prior owned prompt history only when every persisted identity and input agrees", async () => {
+    await withPersistedSecondStep(async ({ client, adapter, claim, binding, first, next, runs }) => {
+      client.pages.set("first", { data: [userMessage(first.promptId, first.input, 1), assistantMessage("assistant-first", "prior protocol", 2), idle("idle-first", 4)], cursor: {} });
+      await adapter.submit(claim, binding, next);
+      expect(client.calls.filter(call => call.method === "prompt").map(call => call.input)).toEqual([{ sessionID: binding.sessionId, id: next.promptId, text: next.input }]);
+      expect(runs.get(claim.runId)?.status).toBe("running");
+    });
+  });
+
+  test("submit quarantines a foreign user or altered prior input before disclosing the next prompt", async () => {
+    for (const kind of ["foreign", "collision"] as const) {
+      await withPersistedSecondStep(async ({ client, adapter, claim, binding, first, next, runs }) => {
+        const user = kind === "foreign" ? userMessage("foreign-input", "foreign injected content", 1) : userMessage(first.promptId, "altered owned input", 1);
+        client.pages.set("first", { data: [user, assistantMessage("assistant-first", "prior protocol", 2), idle("idle-first", 4)], cursor: {} });
+        await expect(adapter.submit(claim, binding, next)).rejects.toThrow(AgentBindingError);
+        expect(client.calls.filter(call => call.method === "prompt")).toEqual([]);
+        expect(JSON.stringify(client.calls.filter(call => call.method === "prompt"))).not.toContain(next.input);
+        expect(runs.get(claim.runId)?.status).toBe("interrupted");
+      });
+    }
+  });
+
+  test("empty history and timeout remain uncertain rather than triggering a replacement prompt", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    client.history = async () => { throw new Error("fixture timeout with private details"); };
+    expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("repeated history cursors remain uncertain and do not resubmit", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1)], cursor: { next: "repeat" } });
+    client.pages.set("repeat", { data: [], cursor: { next: "repeat" } });
+    expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    expect(client.calls.filter(call => call.method === "history")).toHaveLength(2);
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("binding mismatch refuses reuse before prompt", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    const adapter = new OpenCodeAdapter(client, bindings, () => {});
+    await adapter.ensureSession(claim, binding);
+    if (!client.session) throw new Error("Expected fixture session");
+    const original = client.session;
+    for (const mutated of [
+      { ...original, model: { ...original.model, id: "foreign-model" } },
+      { ...original, model: { ...original.model, variant: "foreign-variant" } },
+      { ...original, location: { directory: "/foreign/location" } },
+      { ...original, permissions: [] },
+      { ...original, metadata: { owner: "foreign" } },
+    ]) {
+      client.session = mutated;
+      await expect(adapter.submit(claim, binding, prompt)).rejects.toThrow(AgentBindingError);
+    }
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("cancels queued prompt and interrupts; late submission acknowledgement is fenced", async () => {
+    const client = new FakeClient();
+    const bindings = new MemoryBindings();
+    let active = true;
+    const adapter = new OpenCodeAdapter(client, bindings, () => { if (!active) throw new RunFenceError(); });
+    await adapter.ensureSession(claim, binding);
+    await adapter.submit(claim, binding, prompt);
+    active = false;
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("settled");
+    expect(client.calls.filter(call => call.method === "cancel").map(call => call.input)).toEqual([{ sessionID: binding.sessionId, inboxID: prompt.promptId }]);
+    expect(client.calls.some(call => call.method === "interrupt")).toBe(true);
+    await expect(adapter.submit(claim, binding, other)).rejects.toThrow(RunFenceError);
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(1);
+  });
+
+  test("an acknowledgement arriving after the claim is fenced cannot mark submission successful", async () => {
+    const client = new FakeClient();
+    let active = true;
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => { if (!active) throw new RunFenceError(); });
+    await adapter.ensureSession(claim, binding);
+    let release: (() => void) | undefined;
+    let notify: (() => void) | undefined;
+    const entered = new Promise<void>(resolve => { notify = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const original = client.prompt.bind(client);
+    client.prompt = async input => { const item = await original(input); notify?.(); await gate; return item; };
+    const pending = adapter.submit(claim, binding, prompt);
+    try {
+      await Promise.race([entered, pending.then(() => { throw new Error("Unexpected early acknowledgement"); }), Bun.sleep(2000).then(() => { throw new Error("Prompt was not submitted"); })]);
+      active = false;
+      release?.();
+      await expect(pending).rejects.toThrow(RunFenceError);
+      expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(1);
+    } finally { release?.(); }
+  });
+});
+
+test("binding persists with its run and refuses mutation across reopen", () => {
+  const dir = mkdtempSync(join("/tmp/opencode", "opencode-binding-"));
+  const path = join(dir, "owned.sqlite");
+  const db = new Database(path);
+  try {
+    migrate(db);
+    let counter = 0;
+    const id = () => `owned-${++counter}`;
+    const repository = new SqliteRunRepository(db, { id, now: () => "2030" });
+    const dispatcher: NativeDispatcher = { submit: async () => {}, observe: async () => "running" };
+    const run = new RunService({ repository, dispatcher, id, now: () => "2030" }).admit("user", "weave").run;
+    const bindings = new SqliteAgentBindings(db);
+    bindings.bind(run.id, binding);
+    expect(bindings.get(run.id)).toEqual(binding);
+    for (const changed of [
+      { ...binding, location: { directory: "/other/workspace" } },
+      { ...binding, serviceUrl: "http://127.0.0.1:45000" },
+      { ...binding, model: { ...binding.model, variant: "other" } },
+      { ...binding, permissions: [] },
+    ]) expect(() => bindings.bind(run.id, changed)).toThrow(AgentBindingError);
+    const reopened = new Database(path);
+    try { migrate(reopened); expect(new SqliteAgentBindings(reopened).get(run.id)).toEqual(binding); }
+    finally { reopened.close(); }
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("maintained public client decodes owned HTTP fixture and recovers post-admission 503", async () => {
+  const token = "fixture-only-service-token";
+  const calls: { method: string; path: string; body: unknown; authorized: boolean }[] = [];
+  const queued: InboxItem[] = [];
+  let session: NativeSession | null = null;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    const path = new URL(request.url).pathname;
+    const raw = await request.text();
+    const body: unknown = raw ? JSON.parse(raw) : null;
+    const authorized = request.headers.get("authorization") === `Bearer ${token}`;
+    calls.push({ method: request.method, path, body, authorized });
+    if (!authorized) return new Response("unauthorized", { status: 401 });
+    if (path === "/api/info") return Response.json({ version: "99.0.0-fixture", pid: 123, urls: [], paths: { tmp: "/owned" } });
+    if (path === "/api/session" && request.method === "POST") {
+      session = { id: binding.sessionId, location: binding.location, model: binding.model, permissions: binding.permissions, metadata: { owner: "thoughtloom", runId: claim.runId, protocolVersion: "1" } };
+      return Response.json({ data: { ...session, projectID: "fixture-project", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    }
+    if (path === `/api/session/${binding.sessionId}` && request.method === "GET") return Response.json({ data: { ...session, projectID: "fixture-project", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    if (path === `/api/session/${binding.sessionId}/prompt` && request.method === "POST") {
+      queued.push({ id: prompt.promptId, sessionID: binding.sessionId, time: { created: 2 }, type: "user", payload: { text: prompt.input }, delivery: "queue" });
+      return new Response("fixture admitted then lost acknowledgement", { status: 503 });
+    }
+    if (path === `/api/session/${binding.sessionId}/inbox`) return Response.json({ data: queued });
+    if (path === `/api/session/${binding.sessionId}/message`) return Response.json({ data: [], cursor: {} });
+    if (path === "/api/session/active") return Response.json({ data: {} });
+    return new Response("unexpected fixture route", { status: 404 });
+  } });
+  try {
+    const actualBinding = { ...binding, serviceUrl: server.url.origin };
+    const client = createPublicClient({ url: server.url.origin, token });
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, actualBinding);
+    await expect(adapter.submit(claim, actualBinding, prompt)).rejects.toThrow(AgentUncertainError);
+    expect(await adapter.observe(claim, actualBinding, [prompt])).toEqual({ state: "pending" });
+    const prompts = calls.filter(call => call.path.endsWith("/prompt"));
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.body).toEqual({ id: prompt.promptId, text: prompt.input });
+    expect(calls.every(call => call.authorized)).toBe(true);
+  } finally { await Promise.race([server.stop(true), Bun.sleep(3000).then(() => { throw new Error("Fixture server stop timed out"); })]); }
+}, 10000);
+
+test("real public client uses order only on first history page and correlates complete cursor history", async () => {
+  const requests: string[] = [];
+  let session: NativeSession | null = null;
+  const assistant = (id: string, text: string, created: number) => ({
+    id, type: "assistant", time: { created, streamed: created, completed: created + 1 }, agent: "build",
+    model: binding.model, content: [{ type: "text", text }], finish: "stop", rawFinish: "stop", cost: 0,
+    tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+  });
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (path === "/api/info") return Response.json({ version: "99.0.0-fixture", pid: 123, urls: [], paths: { tmp: "/owned" } });
+    if (path === "/api/session" && request.method === "POST") {
+      await request.text();
+      session = { id: binding.sessionId, location: binding.location, model: binding.model, permissions: binding.permissions, metadata: { owner: "thoughtloom", runId: claim.runId, protocolVersion: "1" } };
+      return Response.json({ data: { ...session, projectID: "fixture-project", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    }
+    if (path === `/api/session/${binding.sessionId}`) return Response.json({ data: { ...session, projectID: "fixture-project", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    if (path === `/api/session/${binding.sessionId}/inbox`) return Response.json({ data: [] });
+    if (path === "/api/session/active") return Response.json({ data: {} });
+    if (path === `/api/session/${binding.sessionId}/message`) {
+      requests.push(url.search);
+      const cursor = url.searchParams.get("cursor");
+      if (cursor && url.searchParams.has("order")) return Response.json({ error: "order forbidden with cursor" }, { status: 400 });
+      if (!cursor && url.searchParams.get("order") === "asc") return Response.json({ data: [userMessage(prompt.promptId, prompt.input, 1), assistant("assistant-first", "prior result", 2), idle("idle-first", 4)], cursor: { next: "owned-next" } });
+      if (cursor === "owned-next") return Response.json({ data: [userMessage(other.promptId, other.input, 5), assistant("assistant-second", completeText, 6), idle("idle-second", 8)], cursor: {} });
+      return Response.json({ error: "unexpected cursor" }, { status: 400 });
+    }
+    return new Response("unexpected fixture route", { status: 404 });
+  } });
+  try {
+    const actualBinding = { ...binding, serviceUrl: server.url.origin };
+    const adapter = new OpenCodeAdapter(createPublicClient({ url: server.url.origin }), new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, actualBinding);
+    expect(await adapter.observe(claim, actualBinding, [prompt, other])).toEqual({ state: "completed", output: completeText });
+    expect(requests).toHaveLength(2);
+    expect(new URLSearchParams(requests[0]).get("order")).toBe("asc");
+    expect(new URLSearchParams(requests[0]).has("cursor")).toBe(false);
+    expect(new URLSearchParams(requests[1]).get("cursor")).toBe("owned-next");
+    expect(new URLSearchParams(requests[1]).has("order")).toBe(false);
+  } finally { await Promise.race([server.stop(true), Bun.sleep(3000).then(() => { throw new Error("Fixture server stop timed out"); })]); }
+}, 10000);
+
+test("discovered Basic authorization reaches the owned HTTP service unchanged and is not persisted", async () => {
+  const authorization = `Basic ${btoa("fixture-user:fixture-password")}`;
+  const seen: (string | null)[] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    seen.push(request.headers.get("authorization"));
+    if (new URL(request.url).pathname !== "/api/info" || request.headers.get("authorization") !== authorization) return new Response("unauthorized", { status: 401 });
+    return Response.json({ version: "99.0.0-fixture", pid: 123, urls: [], paths: { tmp: "/owned" } });
+  } });
+  try {
+    const config = { service: { discover: true }, directory: "/owned/workspace", model: { providerID: "fixture-provider", id: "fixture-model" }, effort: { quick: null, standard: null, thorough: null } } as const;
+    const resolved = await resolveAgentService(config, { async discover() { return { url: server.url.origin, headers: { authorization } }; } });
+    expect(resolved).toEqual({ url: server.url.origin, headers: { authorization } });
+    const client = createPublicClient(resolved);
+    expect((await client.serverInfo()).version).toBe("99.0.0-fixture");
+    expect(seen).toEqual([authorization]);
+    const bindings = new MemoryBindings();
+    const owned = { ...binding, serviceUrl: server.url.origin };
+    await new OpenCodeAdapter(new FakeClient(), bindings, () => {}).ensureSession(claim, owned);
+    expect(JSON.stringify(bindings.get(claim.runId))).not.toContain(authorization);
+    expect(JSON.stringify(bindings.get(claim.runId))).not.toContain("fixture-password");
+  } finally { await Promise.race([server.stop(true), Bun.sleep(3000).then(() => { throw new Error("Fixture server stop timed out"); })]); }
+}, 10000);

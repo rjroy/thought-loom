@@ -13,13 +13,15 @@ export interface RunRecord {
   readonly id: string;
   readonly kind: RunKind;
   readonly status: RunStatus;
+  /** Effective native identity from the immutable binding, or the initially allocated identity before binding. */
   readonly sessionId: string;
+  /** Current prompt projection; each prompt's immutable identity and exact input live in the ordered steps. */
   readonly promptId: string;
   readonly createdAt: string;
   readonly generation: number;
   /** Exact admitted contribution; a legacy evolve run with no mapping cannot resume. */
   readonly inputThoughtId: string | null;
-  /** Native observation is distinct from locally committed finalization. */
+  /** Current step's native observation, distinct from locally committed run finalization. */
   readonly nativeState: NativeState;
 }
 export interface Claim { readonly runId: string; readonly generation: number }
@@ -37,7 +39,7 @@ export type ReplyDraft = Omit<SharedResponse, "state">;
 export interface Recovery {
   readonly run: RunRecord;
   readonly claim: Claim;
-  /** Reconcile existing native output, continue observation, or resume the existing run. Never resubmit. */
+  /** Finalize the current prompt's native output (request or reply), observe, or resume. Never resubmit. */
   readonly action: "finalize" | "observe" | "resume";
 }
 
@@ -46,8 +48,8 @@ export interface RunRepository {
   admit(admission: Admission): void;
   get(id: string): RunRecord | null;
   claim(id: string): Claim;
-  /** Revalidate ownership and all exposed context atomically with the transition, including submission authorization. */
-  setStatus(claim: Claim, status: RunStatus, nativeState?: NativeState): void;
+  /** Revalidate ownership/context atomically. Async callbacks also bind their original promptId so they cannot affect a later step. */
+  setStatus(claim: Claim, status: RunStatus, nativeState?: NativeState, promptId?: string): void;
   stop(id: string): void;
   expose(claim: Claim, ref: ContextRef): ContextValue | null;
   contextRefs(runId: string): readonly ContextRef[];
@@ -61,11 +63,15 @@ export interface NativeDispatcher {
   submit(sessionId: string, promptId: string): Promise<void>;
   observe(sessionId: string, promptId: string): Promise<NativeState>;
 }
-export interface RunDependencies {
-  readonly repository: RunRepository;
-  readonly dispatcher: NativeDispatcher;
+export interface RunSources {
   readonly id: () => string;
   readonly now: () => string;
+  readonly sessionId?: () => string;
+  readonly promptId?: () => string;
+}
+export interface RunDependencies extends RunSources {
+  readonly repository: RunRepository;
+  readonly dispatcher: NativeDispatcher;
 }
 export class RunNotFoundError extends Error {}
 export class RunForbiddenError extends Error {}
@@ -73,14 +79,14 @@ export class RunConflictError extends Error {}
 export class RunFenceError extends Error {}
 export class RunAdmissionError extends Error {}
 
-/** Admission of an evolve run and its contribution is a single repository transaction. */
-export class RunService {
-  constructor(private readonly deps: RunDependencies) {}
+/** Admission has no native transport dependency; the repository commits run and contribution together. */
+export class RunAdmissionService {
+  constructor(private readonly deps: RunSources & { readonly repository: RunRepository }) {}
   admit(actor: "user", kind: RunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
     if (actor !== "user") throw new RunForbiddenError();
     if (!["weave", "evolve", "export"].includes(kind) || (kind === "evolve") !== (contribution !== undefined)) throw new RunAdmissionError();
     const { id, now, repository } = this.deps;
-    const identity = { id: id(), sessionId: id(), promptId: id(), createdAt: now() };
+    const identity = { id: id(), sessionId: this.deps.sessionId?.() ?? id(), promptId: this.deps.promptId?.() ?? id(), createdAt: now() };
     const thought = contribution ? createThought({ id: id(), text: contribution.text, parentId: nonEmpty(contribution.parentId, "parentId"), title: null, titleAuthor: null,
       author: "user", kind: "user-contribution", origin: "contribution", createdAt: identity.createdAt, sourceIds: [] }) : null;
     const run: RunRecord = Object.freeze({ ...identity, kind, status: "queued", generation: 0, inputThoughtId: thought?.id ?? null, nativeState: "unknown" });
@@ -88,23 +94,30 @@ export class RunService {
     repository.admit(admission);
     return admission;
   }
+}
+
+export class RunService {
+  constructor(private readonly deps: RunDependencies) {}
+  admit(actor: "user", kind: RunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
+    return new RunAdmissionService(this.deps).admit(actor,kind,contribution);
+  }
   claim(id: string): Claim { return this.deps.repository.claim(id); }
   async submit(claim: Claim): Promise<void> {
     const repo = this.deps.repository;
     const run = repo.get(claim.runId);
     if (!run) throw new RunNotFoundError();
     // This synchronous transaction is the authorization point; the external call owns no SQL lock.
-    repo.setStatus(claim, "submitting");
-    console.info("[run] native submit attempt", { runId: run.id, generation: claim.generation });
+    repo.setStatus(claim, "submitting", undefined, run.promptId);
+    console.info("[run] native submit attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
     try { await this.deps.dispatcher.submit(run.sessionId, run.promptId); }
     catch {
-      console.error("[run] native submit uncertain", { runId: run.id, generation: claim.generation });
+      console.error("[run] native submit uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
       // A Stop, rejected context, or a newer owner wins over even a failed acknowledgement.
-      repo.setStatus(claim, "uncertain");
+      repo.setStatus(claim, "uncertain", undefined, run.promptId);
       throw new RunAdmissionError("Native submission outcome uncertain");
     }
-    console.info("[run] native submit acknowledged", { runId: run.id, generation: claim.generation });
-    repo.setStatus(claim, "running");
+    console.info("[run] native submit acknowledged", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+    repo.setStatus(claim, "running", undefined, run.promptId);
   }
   async recover(id: string): Promise<Recovery> {
     const repo = this.deps.repository;
@@ -114,16 +127,16 @@ export class RunService {
     const claim = repo.claim(id);
     let observed = run.nativeState;
     if (observed !== "completed") {
-      console.info("[run] native observe attempt", { runId: run.id, generation: claim.generation });
+      console.info("[run] native observe attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
       try { observed = await this.deps.dispatcher.observe(run.sessionId, run.promptId); }
       catch {
-        console.error("[run] native observe uncertain", { runId: run.id, generation: claim.generation });
-        repo.setStatus(claim, "uncertain", "unknown");
+        console.error("[run] native observe uncertain", { runId: run.id, promptId: run.promptId, generation: claim.generation });
+        repo.setStatus(claim, "uncertain", "unknown", run.promptId);
         throw new RunAdmissionError("Native observation outcome uncertain");
       }
-      console.info("[run] native observe succeeded", { runId: run.id, generation: claim.generation, nativeState: observed });
+      console.info("[run] native observe succeeded", { runId: run.id, promptId: run.promptId, generation: claim.generation, nativeState: observed });
     }
-    repo.setStatus(claim, observed === "running" ? "running" : "uncertain", observed);
+    repo.setStatus(claim, observed === "running" ? "running" : "uncertain", observed, run.promptId);
     const reconciled = repo.get(id);
     if (!reconciled) throw new RunNotFoundError();
     return { run: reconciled, claim, action: reconciled.nativeState === "completed" ? "finalize" : reconciled.nativeState === "running" ? "resume" : "observe" };

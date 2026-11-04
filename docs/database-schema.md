@@ -96,7 +96,7 @@ Composite primary key: `(connection_id, position)`. Thought-source sealing trigg
 
 An addendum can accompany several recorded developments without duplicating its text. A fallback retains the response when no separate development was recorded and has exactly one thought association. Update/delete triggers protect response text, identity, role and state.
 
-The HTTP API can read these records but does not currently provide a response-creation route. These states represent retained output; they do not themselves implement agent jobs or cancellation. Real agent integration is still pending.
+The HTTP API reads these records rather than accepting client-created responses. Configured Evolve execution creates them transactionally during local finalization. Response states describe retained output; run/step state and cancellation settlement are tracked separately.
 
 ### `response_thoughts`
 
@@ -129,7 +129,7 @@ A connection with a rejected endpoint is unavailable in normal reads even withou
 
 ## Durable execution tables
 
-These tables are initialized by core migration through [`run-schema.ts`](../src/storage/run-schema.ts). They support internal run services, not an active worker or public job API yet. No table causes a model call merely by containing a row.
+These tables are initialized by core migration through [`run-schema.ts`](../src/storage/run-schema.ts). Configured workers and public Evolve/status/Stop routes use the same run aggregate. Migration itself makes no model calls; with agent configuration present, the daemon supervisor can process queued rows, including jobs retained from an earlier run.
 
 ### `runs`
 
@@ -139,15 +139,51 @@ These tables are initialized by core migration through [`run-schema.ts`](../src/
 | `kind` | `TEXT` | Check: `weave`, `evolve`, or `export`. |
 | `status` | `TEXT` | Check: `queued`, `submitting`, `running`, `uncertain`, `completed`, `interrupted`, or `failed`. |
 | `session_id` | `TEXT` | Unique, stable external session identity. |
-| `prompt_id` | `TEXT` | Unique, stable external prompt identity. |
+| `prompt_id` | `TEXT` | Unique, immutable initial external prompt identity. Later prompt identities live in `run_steps`. |
 | `created_at` | `TEXT` | Creation timestamp. |
 | `generation` | `INTEGER` | Nonnegative claim generation used to fence stale owners. |
 | `input_thought_id` | `TEXT`, nullable | Foreign key to the admitted user contribution; required exactly for new `evolve` runs and null for other kinds. |
-| `native_state` | `TEXT` | `unknown` (default), `running`, or `completed`; external observation is distinct from local status. |
+| `weave_subject_id` | `TEXT`, nullable | Foreign key to the thought being woven; paired with the trigger identity and permitted only for weave runs. |
+| `weave_trigger_id` | `TEXT`, nullable | Immutable trigger identity; legacy weave intent remains unknown rather than inferred. |
+| `cancellation_state` | `TEXT` | `none` (default), `pending`, or `settled`; remote cancellation settlement is distinct from local interruption. |
 
-Identity, kind, session/prompt identities, creation time and input identity are trigger-protected; deleting runs is blocked. Once native completion is recorded, a trigger prevents downgrading that evidence. Status and generation remain mutable through guarded repository operations, not arbitrary model instructions.
+Identity, kind, initial session/prompt identities, creation time and input identity are trigger-protected; deleting runs is blocked. Status and generation remain mutable through guarded repository operations, not arbitrary model instructions. The internal `RunRecord.promptId` and `nativeState` project the current ordered step, rather than duplicating its native completion evidence in `runs`.
 
 Evolve contribution creation and run admission commit together. The persisted input link identifies the exact contribution after restart and constrains where the run may add developments. A claim contains the run ID and generation. Claims currently have no time-based expiry; this is ownership fencing, not a model-runtime or effort quota.
+
+### `run_steps`
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `run_id` | `TEXT` | Foreign key to `runs.id`. |
+| `position` | `INTEGER` | Nonnegative step order; composite primary key with `run_id`. |
+| `prompt_id` | `TEXT` | Globally unique, immutable daemon-owned prompt identity. |
+| `input` | `TEXT`, nullable | Exact immutable input; null only until prepared or when legacy input is unknown. |
+| `state` | `TEXT` | `prepared`, `submitting`, `uncertain`, `completed`, or `processed`. |
+| `native_state` | `TEXT` | `unknown`, `running`, or `completed`, local to this step. |
+| `envelope_json` | `TEXT`, nullable | Validated canonical request/completion envelope. |
+| `result_json` | `TEXT`, nullable | Confirmed capability result, retained before advancement and reused for eligible replay. |
+
+Triggers enforce append order, immutable identities/input, durable completion, and immutable recorded envelopes/results. A run insert creates step zero. Preparation records its exact input once; migration never invents missing legacy input. A completed capability step can retain its confirmed result before advancement. Advancing atomically verifies or records that result and creates the successor's exact input and identity. Matching replay reuses that successor; a mismatch conflicts. Every successor begins with its own unknown native state.
+
+Protocol input is one strict version-1 JSON request or completion envelope. Duplicate keys, extra fields, unsupported versions, model-supplied operation IDs and malformed/truncated output are rejected. Machine envelopes are not retained conversational replies. Async acknowledgements are bound to the original prompt and cannot change a successor step.
+
+Stop fences local execution before remote cancellation settles. Pending settlement remains durable even after local interruption; marking cancellation settled never restores execution authority. A binding alone is not evidence of submission: an untouched initial step proven never submitted can settle locally without native cleanup. Submitted steps and ambiguous legacy history still require reconciliation. Configured workers process these steps through the daemon-owned supervisor.
+
+### `agent_bindings`
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `run_id` | `TEXT` | Primary key and foreign key to `runs.id`. |
+| `session_id` | `TEXT` | Unique native session identity bound to the run. |
+| `service_url`, `directory` | `TEXT` | Selected service and native location. |
+| `model_json` | `TEXT` | Explicit provider/model/variant reference. |
+| `permissions_json` | `TEXT` | Bound deny rules. |
+| `protocol_version` | `INTEGER` | Check: `1`. |
+
+Update/delete triggers make bindings immutable. No service credentials or authentication headers are stored. Binding is permitted only before the initial native submission; recovery cannot infer a new binding for an already-submitted unbound run. Internal run reads project the bound native session while preserving the initial allocated identity in `runs`.
+
+Adapter authorization checks ownership, context visibility and exact persisted prompt bytes in short transactions before crossing the native boundary. Submission is recorded before dispatch, so an ambiguous acknowledgement cannot justify resending after restart merely because native inbox/history reads are empty. Foreign or conflicting native input quarantines the run. Binding verification and ordinary paginated history establish ownership and output correlation; live event delivery alone is not recovery evidence.
 
 ### `run_context`
 
@@ -156,29 +192,35 @@ Evolve contribution creation and run admission commit together. The persisted in
 | `run_id` | `TEXT` | Foreign key to `runs.id`. |
 | `kind` | `TEXT` | Check: `thought`, `connection`, or `response`. |
 | `ref_id` | `TEXT` | Referenced identity; polymorphic, so not a declared foreign key. |
+| `full_read` | `INTEGER` | Durable full-read distinction; defaults to false for legacy exposure rows and may only be upgraded. |
 
-Composite primary key: `(run_id, kind, ref_id)`. The repository checks AI visibility before recording exposed context and revalidates it when authorizing submissions and writes. A shared reply becomes ineligible if any associated thought is rejected. No update/delete triggers are defined on this table; authority and visibility checks live in the domain/repository boundary.
+Composite primary key: `(run_id, kind, ref_id)`. The repository checks AI visibility before recording exposed context and revalidates it when authorizing submissions, reads, writes and cached-result delivery. A shared reply becomes ineligible if any associated thought is rejected. Full-read evidence is monotonic; a candidate snippet or a referenced ID alone does not prove that the model read the thought's full text.
+
+The scoped capability dispatcher returns narrow search candidates and AI-scoped thought, connection or response reads. It records every exposed reference, but does not upgrade indirectly referenced IDs to full-read witnesses. Connections and supporting sources require the appropriate full reads before a write. Model requests cannot select user authority, run/operation identity, authorship or timestamps, and cannot reject/restore notes or access raw SQL/files. Capability effects, exposure evidence, typed receipts, issued membership and the confirmed step result share the aggregate transaction. A Stop or rejected exposed reference fences replay as well as new work.
 
 ### `run_operation_receipts`
 
 | Column | Type | Constraint / meaning |
 | --- | --- | --- |
 | `run_id` | `TEXT` | Foreign key to `runs.id`. |
-| `operation_id` | `TEXT` | Stable operation identity within the run. |
+| `operation_id` | `TEXT` | Stable operation identity within the run; step-format receipts use the persisted prompt ID. |
 | `operation_json` | `TEXT` | Recorded operation request. |
-| `thought_id` | `TEXT` | Foreign key to the resulting development. |
+| `thought_id` | `TEXT`, nullable | Foreign key to a resulting development/interpretation; absent for title fills and connections. |
 | `result_json` | `TEXT` | Recorded result returned for an eligible replay. |
+| `format` | `TEXT` | `legacy` (default) or `step`. Legacy receipts require a resulting thought. |
 
-Composite primary key: `(run_id, operation_id)`. Unique index `run_receipt_result` covers `(run_id, operation_id, thought_id)` for the issued-membership foreign key. Update/delete triggers protect receipts.
+Composite primary key: `(run_id, operation_id)`. A unique constraint covers `(run_id, operation_id, thought_id)` for the issued-membership foreign key. Update/delete triggers protect receipts. An insert trigger requires a step-format receipt to identify an existing prompt belonging to the run.
 
-The current internal operation contract creates a development. Its knowledge change, receipt and issued membership commit atomically. Reusing the operation identity with the same request reuses the result rather than writing another thought; a different request conflicts. A stopped, stale or rejected-context claim cannot use replay to bypass its fence. Export runs cannot dispatch knowledge writes.
+Typed step operations record developments, interpretations, categorized connections or conditional missing-title fills. Their effects and receipts commit atomically; only thought-producing operations also create issued membership. Evolve developments use the admitted contribution as parent; weave interpretations use the persisted weave subject. Authorship, IDs and timestamps are daemon-owned.
+
+Reusing the operation identity with the same request reuses the result; a different request conflicts. Title-fill outcomes include a durable no-op when a title already exists. Replaying that no-op after a later user clear does not apply the old proposal. A stopped, failed, stale or rejected-context claim cannot use replay to bypass its fence. Export runs cannot dispatch any knowledge write. Legacy development receipts remain readable without inventing membership for non-thought results.
 
 ### `run_issued_thoughts`
 
 | Column | Type | Constraint / meaning |
 | --- | --- | --- |
 | `run_id` | `TEXT` | Foreign key to `runs.id`. |
-| `operation_id` | `TEXT` | Operation that issued the development. |
+| `operation_id` | `TEXT` | Operation that issued the development or interpretation. |
 | `thought_id` | `TEXT` | Foreign key to the issued thought. |
 | `position` | `INTEGER` | Nonnegative issued-order position. |
 
@@ -197,6 +239,14 @@ This is the durable source of reply membership, not a potentially stale draft li
 There are no immutable-row triggers here because drafts and finalization bookkeeping change. Final canonical text and associations are protected by the response tables.
 
 Stop retains confirmed developments and can persist an existing draft as an interrupted response using durable associations. It does not invent an association if none can be derived safely. Final response persistence and local completion commit together. Observed native completion instead produces a reconciliation handoff with action `finalize`; it does not claim the local response is already committed. Recovery returns `{run, claim, action}` using `finalize`, `resume`, or `observe`, without replacing the stored external identities.
+
+A title-only or no-findings weave can complete without creating a conversational response. Failure retains confirmed knowledge changes and eligible interrupted drafts, fences later callbacks, and keeps pending remote cancellation settlement available.
+
+### Durable weave scheduling
+
+When the scheduling port is enabled, capture, an explicit user title-clear on an eligible active note, and successful Evolve finalization admit a follow-up weave inside the triggering transaction. Capture uses `capture:<thought-id>`; each eligible title-clear has a daemon-generated invitation ID; Evolve uses `evolve:<run-id>` and selects its last issued development or contribution fallback. Clearing an already absent title on an eligible note is still a new regeneration invitation; clearing a rejected note's title is not. Worker finalization uses the same scheduling path as direct run finalization.
+
+Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, weaver interpretations, connection writes and interrupted replies do not recursively schedule more weaving.
 
 ## Search indexes and vocabulary cache
 
@@ -217,7 +267,7 @@ Suggestion vocabularies use connection-local temporary FTS5 and spellfix1 tables
 
 ## Constraints and access boundaries
 
-Migration enables `PRAGMA foreign_keys = ON` and verifies it, and also enables `PRAGMA recursive_triggers = ON` for the connection. In addition to indexes created for primary-key and unique constraints, the run schema defines the unique `run_receipt_result` index.
+Migration enables `PRAGMA foreign_keys = ON` and verifies it, and also enables `PRAGMA recursive_triggers = ON` for the connection. Primary-key and unique constraints create their supporting indexes.
 
 SQL constraints and triggers protect persistence invariants; they do not replace service authorization or scoped reads. Raw storage access is internal. Future agents and routes must use the domain services to exclude rejected thought content, ancestry, sources, connections and responses appropriately.
 
@@ -238,6 +288,8 @@ For legacy responses with a single `responses.thought_id`, migration adds a `com
 
 Subsequent opens do not recopy cleared titles or response associations. Existing identity, text, authorship, dates, ancestry, sources, connections, rejection state and responses are preserved. [Migration tests](testing.md#controlled-inputs-not-production-assumptions) exercise populated legacy fixtures and reopen behavior.
 
-Core migration also initializes run storage; callers do not need a separate run-repository initialization step. For an older run schema, missing input/native-state fields are added without guessing an Evolve input. An unmapped legacy Evolve run cannot safely resume. When issued membership is first introduced, existing receipt rows are backfilled in their persisted insertion order, not sorted by identity or timestamp. Repository migration delegates to the same authoritative core path.
+Core migration also initializes run storage; callers do not need a separate run-repository initialization step. Older run schemas gain missing input/cancellation fields without guessing an Evolve input. An unmapped legacy Evolve run cannot safely resume. Existing initial prompt identities and native evidence move into step zero with unknown input; the old run-level `native_state` column is removed. Previously interrupted runs receive pending cancellation settlement when that field is introduced. When issued membership is first introduced, existing receipt rows are backfilled in their persisted insertion order, not sorted by identity or timestamp. Repository migration delegates to the same authoritative core path.
 
-Back up valuable data before upgrading and stop the daemon before replacing a disposable database. Automatic weaver execution is not part of this schema yet.
+Back up valuable data before upgrading and stop the daemon before replacing a disposable database. Automatic weaving is enabled only by explicit server-side agent configuration; schema migration itself does not call a model.
+
+Receipt migration rebuilds the receipt/issued-membership pair together to permit typed non-thought results, preserving legacy requests, results and issued positions. Foreign-key enforcement remains enabled throughout the core migration transaction. Legacy weave subject/trigger fields remain null; migration does not infer a subject from surrounding data.

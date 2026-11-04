@@ -9,6 +9,8 @@ export interface TitleRecord extends TitleState { readonly rejected: boolean }
 export interface TitleTransaction {
   get(id: string): TitleRecord | null;
   set(id: string, state: TitleState): void;
+  /** Optional scheduling port; implementation joins this same transaction and owns the invitation identity. */
+  inviteWeave?(id: string): void;
 }
 export interface TitleRepository {
   transaction<T>(action: (tx: TitleTransaction) => T): T;
@@ -36,9 +38,11 @@ export class TitleService {
     nonEmpty(id, "id");
     if (title !== null) nonEmpty(title, "title");
     return this.repository.transaction(tx => {
-      if (!tx.get(id)) throw new TitleNotFoundError();
+      const item = tx.get(id);
+      if (!item) throw new TitleNotFoundError();
       const state: TitleState = { title, titleAuthor: title === null ? null : "user" };
       tx.set(id, state);
+      if (title === null && !item.rejected) tx.inviteWeave?.(id);
       return state;
     });
   }

@@ -6,6 +6,8 @@ import { CreationForbiddenError, CreationNotFoundError, type CreationService, ty
 import { TitleConflictError, TitleForbiddenError, TitleNotFoundError, type TitleService } from "../domain/title";
 import type { SearchService } from "../domain/search";
 import { SimpleExportNotFoundError, type SimpleExportService } from "../domain/simple-export";
+import { AgentNotConfiguredError, type AgentService } from "../domain/agent";
+import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError } from "../domain/run";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -22,11 +24,12 @@ export interface AppOptions {
   readonly titles: TitleService;
   readonly search?: SearchService;
   readonly simpleExport?: SimpleExportService;
+  readonly agents?: Pick<AgentService,"evolve" | "status" | "stop">;
 }
 
 type AppEnv = { Variables: { actor: Actor } };
 type ApiContext = Context<AppEnv>;
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 500;
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 500 | 503;
 
 class ApiError extends Error {
   constructor(readonly status: ErrorStatus) { super(); }
@@ -75,10 +78,10 @@ function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
   if (path === "/exports/simple") return "/exports/simple";
-  if (!["thoughts", "connections", "responses"].includes(parts[1] ?? "")) return "/other";
+  if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
-    (["reject", "restore", "preview"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
+    (["reject", "restore", "preview", "evolve", "stop"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
 }
 
 /** Construct a server-side transport around scoped reads and validated commands. */
@@ -90,12 +93,13 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError ? error.status :
-      error instanceof BranchConfirmationError || error instanceof TitleConflictError ? 409 :
-      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError ? 403 :
-      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError ? 404 :
+      error instanceof AgentNotConfiguredError ? 503 :
+      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError ? 409 :
+      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError ? 403 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError ? 404 :
       error instanceof ValidationError ? 400 : 500;
     return c.json({ error: status === 500 ? "Internal server error" :
-      ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict" } as const)[status] }, status);
+      ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict", 503: "Agents are not configured; set THOUGHTLOOM_AGENT_CONFIG" } as const)[status] }, status);
   });
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
@@ -159,6 +163,24 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   app.post("/thoughts", async c => {
     user(c); noQuery(c);
     return c.json(creation.capture("user", thoughtInput(await body(c, ["text", "title"]))), 201);
+  });
+  app.post("/thoughts/:id/evolve", async c => {
+    user(c); noQuery(c);
+    const data = await body(c,["text"]);
+    const text = nonEmpty(data.text,"text");
+    if (!options.agents) throw new ApiError(503);
+    return c.json(options.agents.evolve(c.get("actor"),c.req.param("id"),text),201);
+  });
+  app.get("/runs/:id", c => {
+    user(c); noQuery(c);
+    if (!options.agents) throw new ApiError(503);
+    return c.json(options.agents.status(c.get("actor"),c.req.param("id")));
+  });
+  app.post("/runs/:id/stop", async c => {
+    user(c); noQuery(c);
+    await body(c,[]);
+    if (!options.agents) throw new ApiError(503);
+    return c.json(options.agents.stop(c.get("actor"),c.req.param("id")));
   });
   app.post("/thoughts/:id/contributions", async c => {
     user(c); noQuery(c);

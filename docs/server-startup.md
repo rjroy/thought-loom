@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The current server is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. There is no visual client or OpenCode connection to start alongside it yet.
+The server is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. There is no visual client yet. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -36,8 +36,34 @@ Loading is lazy when spelling support is requested, not part of daemon readiness
 | `THOUGHTLOOM_AI_TOKEN` | Yes | AI-role bearer credential; at least 32 characters after trimming surrounding whitespace and different from the user token. |
 | `THOUGHTLOOM_DB_PATH` | Yes | SQLite database path. Parent directories are created after configuration validation. An absolute path avoids working-directory surprises. |
 | `THOUGHTLOOM_PORT` | No | Integer from `0` through `65535`; default `3001`. `0` selects an available ephemeral port. |
+| `THOUGHTLOOM_AGENT_CONFIG` | No | Server-only JSON agent configuration described below. Omit it to use ordinary daemon features without agent configuration. |
 
 The server's bind address is not configurable: it is `127.0.0.1`, not all interfaces. Loopback binding does not replace authentication.
+
+### Agent configuration
+
+OpenCode integration uses this explicit configuration shape:
+
+```json
+{
+  "service": {"discover": true},
+  "directory": "/absolute/operator-approved/workspace",
+  "model": {"providerID": "<provider-id>", "id": "<model-id>"},
+  "effort": {"quick": null, "standard": null, "thorough": null}
+}
+```
+
+Set the serialized JSON in `THOUGHTLOOM_AGENT_CONFIG`; placeholders above are not runnable model choices. All fields and all three effort entries are required when configuring agents. Variant entries are model-specific strings or explicit `null` for that model's default variant. There are no universal `low`/`high` names or application turn, token, cost, search-count or note-count quotas. No model is selected from the catalog automatically.
+
+`service: {"discover": true}` attaches only to an already-running managed service and preserves its authentication headers, including Basic authentication. It never starts, stops or upgrades the service. Alternatively, use `service: {"url": "<service-url>", "token": "<optional-bearer-token>"}` for an explicit endpoint; omit `token` when not needed. Keep this setting server-side and out of commits or browser code. Credentials are not stored in run bindings or diagnostic errors.
+
+Unknown fields, invalid values or a non-absolute directory produce a sanitized configuration error. Absence of this setting preserves capture, reads, search and Simple export. Capture and user title-clear on eligible active notes still persist queued weave jobs; they do not create native bindings or invoke a model without agent configuration. Clearing a rejected note's title does not invite agent work. Explicit Evolve requests return `503` before saving a contribution when configuration is absent.
+
+With configuration present, the supervisor processes queued work and may invoke the selected model, including jobs retained from earlier runs. Weave and Evolve currently use the `standard` variant mapping. Attachment is lazy and does not delay daemon readiness. Unavailable discovery or transport does not roll back successful capture or invent a completed result. The application follows durable native session/prompt identities after uncertain acknowledgements rather than blindly resubmitting.
+
+Bindings retain the selected location/model/variant and endpoint, not credentials. Changing model configuration does not rebind existing runs. If the currently resolved endpoint differs from a persisted binding, that run remains unavailable rather than receiving the new endpoint's credentials. Resolve the service mismatch before expecting recovery.
+
+All model context comes from scoped Thoughtloom reads. Native deny permissions are defense in depth, not a universal sandbox for operator plugins or policies. Use a trusted service and approved workspace. Already-sent context cannot be withdrawn retroactively; rejection fences further application reads, submissions, writes and publication, with best-effort native interruption.
 
 For a disposable local run:
 
@@ -57,7 +83,7 @@ If you create a launcher, have it change to the project root before calling `bun
 
 Startup validates configuration before opening the database or listener, creates the database directory, runs the [schema migration](database-schema.md#migrations), and wires the domain services into Hono.
 
-Core migration includes shared responses and durable run tables. Storage support does not mean a worker is running: automatic weaving, native OpenCode execution, job supervision and public run endpoints are not integrated yet. Starting the current daemon does not submit model work.
+Core migration includes search indexes, shared responses, durable run steps, capability results and bindings. Without agent configuration, no worker submits model work. With it, one owned supervisor drives queued/active work and pending cancellation settlement through the existing service.
 
 A successful startup emits a lifecycle event containing the bound URL, for example:
 
@@ -85,7 +111,7 @@ See [manual requests](daemon-api.md#manual-requests) for capture and title examp
 
 ## Stop and restart
 
-Use Ctrl+C or send SIGTERM. The entrypoint handles SIGINT and SIGTERM, stops the listener, then closes SQLite. Repeated stop requests do not repeat cleanup. A shutdown failure produces a sanitized error and nonzero exit status.
+Use Ctrl+C or send SIGTERM. The entrypoint handles SIGINT and SIGTERM, pauses/drains agent work and stops the listener before closing SQLite. Local shutdown is not user Stop: it does not undo saved work or request native cancellation merely because the daemon is leaving. Restart reconciles existing identities. Repeated stop requests do not repeat cleanup; cleanup continues after individual errors. A shutdown failure produces a sanitized error and nonzero exit status.
 
 Restart after changing code, credentials, or startup configuration. There is no hot-reload process configured by `bun run daemon`.
 

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "test:opencode": "bun --no-env-file run tests/opencode/fixture.ts",
     "typecheck": "tsc --noEmit",
     "daemon": "bun run src/daemon/main.ts",
     "api": "bun run scripts/api.ts",
@@ -15,6 +16,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
+    "@opencode/client": "2.2.5",
     "hono": "4.13.16"
   }
 }

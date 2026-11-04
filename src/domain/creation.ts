@@ -59,6 +59,13 @@ export class CreationService {
     this.requireReferences(actor, [parentId, ...sources]);
     return this.thought(actor, input, parentId, sources, "developing-idea", "development");
   }
+  interpret(actor: Actor, subjectId: string, input: DevelopmentInput): Thought {
+    if (actor !== "ai") throw new CreationForbiddenError();
+    nonEmpty(subjectId,"subjectId");
+    const sources = references(input.sourceIds ?? [],"sourceIds");
+    this.requireReferences(actor,[subjectId,...sources]);
+    return this.thought(actor,input,subjectId,sources,"ai-interpretation","weave");
+  }
   connect(actor: Actor, input: ConnectionInput): Connection {
     if (actor !== "user" && actor !== "ai") throw new CreationForbiddenError();
     const connection = createConnection({ ...input, sourceIds: input.sourceIds ?? [], id: this.deps.id(), proposedBy: actor });

@@ -1,9 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { TitleConflictError, TitleNotFoundError, type TitleRecord, type TitleRepository, type TitleTransaction } from "../domain/title";
+import { titleClearWeaveIntent } from "../domain/weave-scheduling";
+import { admitWeave, type WeaveSources } from "./weave-admission";
 
 /** Internal title persistence; consumers use TitleService. */
 export class SqliteTitleRepository implements TitleRepository {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources) {}
   transaction<T>(action: (tx: TitleTransaction) => T): T {
     console.info("[title storage] transaction attempt");
     try {
@@ -26,6 +28,9 @@ export class SqliteTitleRepository implements TitleRepository {
             const result = this.db.query("SELECT changes() AS count").get() as { count: number };
             if (result.count !== 1) throw new TitleNotFoundError();
           }
+        },
+        inviteWeave: id => {
+          if (this.scheduling) admitWeave(this.db,this.scheduling,titleClearWeaveIntent(id,this.scheduling.id()));
         },
       })).immediate();
       console.info("[title storage] transaction succeeded");

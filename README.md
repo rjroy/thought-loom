@@ -25,8 +25,8 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 ## Current state
 
-The Bun/TypeScript foundation provides SQLite persistence, an authenticated Hono daemon, immutable evolution trees, editable title metadata, rejection/restoration, FTS5 search with spellfix1 typo handling, Simple Markdown export, and manual test scripts.
+The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, Simple Markdown export, and manual test scripts. Configured OpenCode integration supports background weaving and conversational development through scoped application capabilities.
 
-The Next.js/React client, OpenCode-backed agents, and Agentic report export are not implemented yet. In particular, titles are not automatically generated until the weaver is integrated.
+The Next.js/React client and Agentic report export are not implemented yet. Without agent configuration, capture and ordinary daemon features remain usable; weaving jobs stay queued and titles use the display fallback.
 
 Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above describe the implementation that exists today.

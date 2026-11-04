@@ -17,7 +17,7 @@ Its task is not to organize every note into a predetermined taxonomy. It should 
 
 The baseline loop is capture followed by asynchronous weaving, and targeted follow-up weaving after meaningful discussion changes. The application schedules and deduplicates work and tracks its state; the agent does the interpretive work.
 
-Exact scheduling, affected scope, retries, and cost bounds remain implementation decisions to design explicitly. A permanently running model, periodic full-corpus sweep, or scheduled aging process is not assumed.
+Exact scheduling, affected scope, and recovery from operational failures remain implementation decisions to design explicitly. Model effort or variants must not become application-imposed turn, token, cost, search-count or note-count quotas. A permanently running model, periodic full-corpus sweep, or scheduled aging process is not assumed.
 
 ## What a pass does
 

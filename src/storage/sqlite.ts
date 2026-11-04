@@ -5,6 +5,8 @@ import type { ResponseRecord } from "../domain/response";
 import { SqliteSharedResponses } from "./shared-response";
 import { migrateRunSchema } from "./run-schema";
 import { nonEmpty } from "../domain/validation";
+import { captureWeaveIntent } from "../domain/weave-scheduling";
+import { admitWeave, type WeaveSources } from "./weave-admission";
 
 function boundary<T>(operation: string, action: () => T): T {
   console.info(`[storage] ${operation} attempt`);
@@ -176,7 +178,7 @@ export function migrate(db: Database): void {
 
 /** Internal raw persistence; future routes and agents must use scoped RejectionService reads. */
 export class SqliteStore {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly scheduling?: WeaveSources) {}
 
   saveThought(input: Thought): void {
     boundary("save thought", () => {
@@ -189,7 +191,9 @@ export class SqliteStore {
         const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");
         thought.sourceIds.forEach((id, index) => insert.run(thought.id, index, id));
         this.db.run("INSERT INTO thought_source_seals (thought_id) VALUES (?)", [thought.id]);
-      })();
+        const intent = captureWeaveIntent(thought);
+        if (this.scheduling && intent) admitWeave(this.db,this.scheduling,intent);
+      }).immediate();
     });
   }
 
