@@ -1,100 +1,2229 @@
 {
-  "schemaVersion": 1,
-  "status": "selected-only design packet; overall design gate open; no implementation or shipping-raster approval",
-  "direction": {
-    "id": "quiet-night",
-    "name": "Quiet Night / Collection labels",
-    "kind": "browser-rendered direction study",
-    "image": ".impeccable/design-review/evidence/dark/dark-quiet.png",
-    "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
-    "source": ".impeccable/mocks/decision/dark-quiet.html",
-    "sourceSha256": "9966a0810f9bb66bfc5adbdc762592ab0219941da770d660f27d60dfb19f09e2",
-    "actualDimensions": {
-      "width": 1440,
-      "height": 900
-    },
-    "approval": {
-      "userWords": "A - quiet night. works.",
-      "scope": "shared visual direction only",
-      "unseenStatesApproved": false,
-      "implementationAuthorized": false
-    },
-    "browserVersion": "Chromium 155.0.8059.84",
-    "renderCommandTemplate": "chromium --headless --disable-gpu --screenshot=<new-output-path> --window-size=1440,900 --hide-scrollbars --virtual-time-budget=2000 file://<absolute-selected-HTML-path>"
+  "schemaVersion": 2,
+  "status": "minimum selected design handoff; agreed visual design gate complete; no implementation or runtime ship authority",
+  "designGateComplete": true,
+  "visualDecisionsApproved": true,
+  "implementationAuthorized": false,
+  "runtimeAcceptance": false,
+  "remainingVisualQuestions": [],
+  "trackerClosure": "parent-owned, outside this artifact packet",
+  "handoff": ".impeccable/README.md",
+  "seedReference": "seed:fdce08ba14ee611a",
+  "approvalLimits": {
+    "unseenStatesApproved": false,
+    "shippingRasterApproved": false,
+    "exactViewportVerified": false,
+    "runtimeVerified": false,
+    "accessibilityAuditPerformed": false
   },
-  "screens": [
+  "sharedRules": {
+    "id": "shared-focus-validation-readable-flow",
+    "approval": {
+      "userWords": "yes",
+      "recordedAtUTC": "2026-11-04T16:26:12.008467+00:00",
+      "approved": true,
+      "scope": "shared Focus / Filters / Validation / Readable flow / Recovery rules alongside the four exact approximate compositions; apply across agreed surfaces including unchanged Capture",
+      "runtimeVerified": false,
+      "exactViewportVerified": false,
+      "accessibilityVerified": false,
+      "implementationAuthorized": false,
+      "originalApprovedRulesSha256": "385c2ad64fd33f58ffe2cfa49a955548db1337bedeaa30eaf541f9c4d8689cb4"
+    },
+    "exceptions": [
+      "Readable CSS type and accessible targets take precedence over tiny scaled raster helpers; scrolling farther is expected.",
+      "At narrow CSS widths, place/wrap the Export count error below its field rather than shrink text or force the drawn side-by-side placement.",
+      "Use one coherent shared shell and approved font, not incidental generated header density/tagline differences.",
+      "Do not infer immutable text formatting from incidental generated italic emphasis.",
+      "Source/root/run/record boundaries and existing Export Request / Report ready copy overrides remain unchanged."
+    ],
+    "currentRulesLocation": ".impeccable/README.md#shared-world-brand-and-interaction-rules"
+  },
+  "brand": {
+    "sourceRepository": "/home/rjroy/Projects/personal-brand",
+    "sourceRevision": "55dbe8766668cd409b16bddb437a6bceb7fb56f3",
+    "inspectedUTC": "2026-11-04",
+    "sourceWorkingTreeAtInspection": "clean",
+    "uncommittedSourceChangesIncluded": false,
+    "authoritativeGuide": {
+      "historicalSourcePath": "brand/BRAND.md",
+      "sha256AtInspection": "ace197bb0e86cae3639ef6ea7366ee92df6b3d4c7d4d0e301fb5d55df2d9e6a4"
+    },
+    "themeSource": {
+      "historicalSourcePath": "brand/theme/colors.toml",
+      "sha256AtInspection": "f33975a3b23b8ca80397dd53b74a1a95c685693f3b8b0f30a6e7a4479870d6c4",
+      "retainedRepresentation": "palette.ansiPalette and palette.terminalDefaults; original TOML values verified equal before consolidation"
+    },
+    "palette": {
+      "name": "Quiet Night",
+      "scope": "selected shared visual direction; local UI roles, not additional brand-master colors",
+      "colorSpace": "sRGB",
+      "mixtureRule": "rounded sRGB channel interpolation; result is a local surface treatment, not a new brand master color",
+      "ansiPalette": {
+        "color0": "#031315",
+        "color1": "#D66B65",
+        "color2": "#83B88A",
+        "color3": "#EFB83F",
+        "color4": "#5E8BD6",
+        "color5": "#8871C5",
+        "color6": "#248F91",
+        "color7": "#D5D3C5",
+        "color8": "#344548",
+        "color9": "#F18A83",
+        "color10": "#A5D5A5",
+        "color11": "#FFD477",
+        "color12": "#8EAEF2",
+        "color13": "#B09AE5",
+        "color14": "#65C4C5",
+        "color15": "#FEF6E1"
+      },
+      "roles": {
+        "night": "#031315",
+        "text": "#FEF6E1",
+        "secondary": "#D5D3C5",
+        "muted": "#A5A8A0",
+        "lantern": "#EFB83F",
+        "lantern-bright": "#FFD477",
+        "horizon": "#5E8BD6",
+        "nav-active": "#8EAEF2",
+        "focus": "#8EAEF2",
+        "link": "#65C4C5",
+        "user": "#83B88A",
+        "ai": "#B09AE5",
+        "control-line": "#7B837F",
+        "caption-text": "#D5D3C5",
+        "selection": "#35557F",
+        "success": "#83B88A",
+        "success-bright": "#A5D5A5",
+        "error": "#D66B65",
+        "error-bright": "#F18A83",
+        "ground": "#031315",
+        "shell": "#031315",
+        "card": "#122224",
+        "caption": "#0A2C2E",
+        "input": "#0E1E20",
+        "line": "#344548",
+        "card-line": "#1F3033"
+      },
+      "mixtures": {
+        "card": {
+          "base": "color0",
+          "mix": "color8",
+          "mixPercent": 30
+        },
+        "caption": {
+          "base": "color0",
+          "mix": "color6",
+          "mixPercent": 20
+        },
+        "input": {
+          "base": "color0",
+          "mix": "color8",
+          "mixPercent": 22
+        },
+        "card-line": {
+          "base": "color0",
+          "mix": "color8",
+          "mixPercent": 58
+        },
+        "muted": {
+          "base": "color8",
+          "mix": "color7",
+          "mixPercent": 70
+        },
+        "control-line": {
+          "base": "color8",
+          "mix": "color7",
+          "mixPercent": 44
+        },
+        "selection": {
+          "base": "color0",
+          "mix": "color4",
+          "mixPercent": 55
+        }
+      },
+      "terminalDefaults": {
+        "accent": "#EFB83F",
+        "cursor": "#EFB83F",
+        "foreground": "#FEF6E1",
+        "background": "#031315",
+        "selection_foreground": "#344548",
+        "selection_background": "#D5D3C5"
+      }
+    },
+    "font": {
+      "family": "Source Sans 3",
+      "file": ".impeccable/brand/fonts/SourceSans3-VariableFont_wght.ttf",
+      "sha256": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c",
+      "historicalSourcePath": "brand/fonts/Source_Sans_3/SourceSans3-VariableFont_wght.ttf",
+      "license": ".impeccable/brand/fonts/OFL.txt",
+      "licenseSha256": "f5cdf59463564e8428c1159d7e7b76eb408c9b5fd4af049c193533c681880169",
+      "historicalLicenseSourcePath": "brand/fonts/Source_Sans_3/OFL.txt"
+    },
+    "sourcePathsAreHistoricalNotRuntimeDependencies": true
+  },
+  "generation": {
+    "route": "codex exec --skip-git-repo-check --image <reference1> [--image <reference2>] - < <extracted-request>",
+    "hostTimeoutMs": 600000,
+    "promptLocation": {
+      "container": "each generated PNG",
+      "chunkType": "tEXt",
+      "keyword": "impeccable:prompt",
+      "encoding": "UTF-8",
+      "meaning": "exact producing Codex CLI stdin; not the unexposed internal image-tool prompt"
+    },
+    "imageModel": null,
+    "imageModelNote": "not exposed by runner; not guessed",
+    "runtimeRasters": false,
+    "reproduction": "exact request and ordered selected references are local; regeneration not promised byte-identical; future generation requires separate authorization"
+  },
+  "assets": [
+    {
+      "id": "quiet-night",
+      "name": "Quiet Night / Collection labels",
+      "familyId": "direction",
+      "kind": "browser-rendered direction study",
+      "image": ".impeccable/design-review/evidence/dark/dark-quiet.png",
+      "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+      "actualDimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "A - quiet night. works.",
+        "scope": "shared visual direction only",
+        "unseenStatesApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "kind": "browser-rendered direction study",
+        "browserVersion": "Chromium 155.0.8059.84",
+        "historicalSource": {
+          "type": "self-contained HTML direction study",
+          "originalSha256": "9966a0810f9bb66bfc5adbdc762592ab0219941da770d660f27d60dfb19f09e2",
+          "retained": false,
+          "requiredForHandoff": false,
+          "note": "redundant direction source/embedded-font copy removed; selected PNG, palette and bundled font are authoritative visual inputs"
+        },
+        "historicalRenderCommandTemplate": "chromium --headless --disable-gpu --screenshot=<new-output-path> --window-size=1440,900 --hide-scrollbars --virtual-time-budget=2000 file://<absolute-selected-HTML-path>"
+      }
+    },
     {
       "id": "explore-compact",
       "name": "Compact excerpts",
+      "familyId": "resting-composition",
       "kind": "generated exploratory UI comp",
       "image": ".impeccable/mocks/explore/compact.png",
       "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
-      "sidecar": ".impeccable/mocks/explore/compact.png.json",
-      "notes": ".impeccable/surfaces/impeccable-mocks-explore-compact-png.md",
-      "referenceId": "quiet-night",
-      "referenceSha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
       "approval": {
         "userWords": "compact",
         "recordedAtUTC": "2026-11-04T03:40:18.641984+00:00",
-        "selectedCandidate": ".impeccable/mocks/explore/compact.png",
-        "selectedCandidateSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
         "scope": "the exact shown resting desktop Explore composition only",
         "unseenStatesApproved": false,
         "shippingRasterApproved": false,
         "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no model override requested)",
+        "promptSha256": "e642f4de986528504e19412f4cb39eb8cd96e2a4db9fc2411c46eaa6bea16d5e",
+        "references": [
+          {
+            "path": ".impeccable/design-review/evidence/dark/dark-quiet.png",
+            "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622",
+            "role": "approved visual reference"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a497-ce2f-7720-afcc-6a682d0f0fee/exec-74735dde-4d39-4162-9b3a-9566b4c26a07.png",
+          "sha256": "330b2fa5e2dd9c47d0d990d461b8d5a92d6f4acf2f089423a54296a02e60a0fe",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "ad3256331f5f71845375ed0375cb448adba1124dccf674dae849463426292724",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
       }
     },
     {
       "id": "capture-wide",
       "name": "Wide working pad",
+      "familyId": "resting-composition",
       "kind": "generated exploratory UI comp",
       "image": ".impeccable/mocks/capture/wide.png",
       "sha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2",
-      "sidecar": ".impeccable/mocks/capture/wide.png.json",
-      "notes": ".impeccable/surfaces/impeccable-mocks-capture-wide-png.md",
-      "referenceId": "explore-compact",
-      "referenceSha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
       "approval": {
         "userWords": "wide",
         "recordedAtUTC": "2026-11-04T04:10:19.437296+00:00",
-        "selectedCandidate": ".impeccable/mocks/capture/wide.png",
-        "selectedCandidateSha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2",
         "scope": "the exact shown resting desktop Capture draft composition only",
         "unseenStatesApproved": false,
         "shippingRasterApproved": false,
         "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "d36905dc0dc79395b21984a5f7719265fefdeb57c60a137bcbdd37a301961e19",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Quiet Night shell, palette, type character, and component family only; not Explore content or composition"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a4ae-50f4-7291-ac1e-b92523e584fc/exec-f25d88d0-39b9-4ad3-beba-c6ad1ae84e9c.png",
+          "sha256": "34dff7ad8556c77fb302782c06ff64eef6f9dba21d938b6a6aaf1f86538049a7",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "72bd38f11b230357e1bfdb19dc16d3e09ffc23dcea3991abfb6396962eb51aea",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "idea-rows",
+      "name": "Thought above rows",
+      "familyId": "resting-composition",
+      "kind": "generated exploratory UI comp",
+      "image": ".impeccable/mocks/idea/rows.png",
+      "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "3",
+        "recordedAtUTC": "2026-11-04T05:28:11.895545+00:00",
+        "scope": "the exact shown resting desktop Idea Thought above rows composition only",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T05:21:51.136345+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "44b21607f7f12a9e7cd0d02acc9053e25fef44714af4778ffe97bee3d60d49bd",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Quiet Night shell, palette, Source Sans 3 character and component family only; not Explore content or composition"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a4ff-eb1f-7020-a9cf-375dcd3e8a77/exec-cc1e644a-0d63-4664-a80e-81aa223b954d.png",
+          "sha256": "81a53c8b719f5b70c92d32653b42f5aacae4629f3b5b574eba4d304602d75fe7",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "1c385613880b1771c74e2f9b57418c96b52d9b06bf7e96dee2ef7e1a7fa1520c",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-rail",
+      "name": "Starting thought rail",
+      "familyId": "resting-composition",
+      "kind": "generated exploratory UI comp",
+      "image": ".impeccable/mocks/evolve/rail.png",
+      "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "3",
+        "recordedAtUTC": "2026-11-04T05:43:06.811475+00:00",
+        "scope": "the exact shown resting desktop Evolve Starting thought rail composition after one completed exchange only",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T05:32:23.922171+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "ac4a3f87a1ddc582bf7ee14e83ee74aad1c8452043f5070263dd574177168130",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected Quiet Night shell, palette, Source Sans 3 and component family; not Idea layout or Evolve button"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a509-8d4b-72a3-b283-8abce369a79a/exec-90fbcc9f-5bd2-45b9-990d-ee9e1fd487e1.png",
+          "sha256": "1c8b969a4d64c6c19ef8a39cd39c53923b2cb05268f0846a552e6509637264fe",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "e8bb4cb02dced530b10470852a4ca2a75fbb500d2f448643d333c1cb0ecebb21",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "export-columns",
+      "name": "Side-by-side methods",
+      "familyId": "resting-composition",
+      "kind": "generated exploratory UI comp",
+      "image": ".impeccable/mocks/export/columns.png",
+      "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "side-by-side methods",
+        "recordedAtUTC": "2026-11-04T05:54:03.884637+00:00",
+        "scope": "the exact shown desktop Export Side-by-side methods setup composition only",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T05:46:36.919335+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "c49b64fc135f9bdfeae4b781058219c83f85bf55aa67c38f66bf7c5c872bdcc1",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Quiet Night palette, Source Sans 3, shared shell and component family; not Explore search controls or layout"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a516-3106-7303-8f2f-bf70a498c539/exec-a8a45024-8c46-42a3-9dd7-921055d3adca.png",
+          "sha256": "df412eaf7f6494a7b478a66aa67c716d4bb39b728f479432091c937046e26259",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "29f0b2d3b36bba05b0ec4cc85af99b932186588e9196c6eba0edea02577a8e41",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "capture-phone-roomy",
+      "name": "Roomy flow (approximate phone)",
+      "familyId": "resting-composition",
+      "kind": "generated exploratory UI sketch; approximate phone composition",
+      "image": ".impeccable/mocks/capture-phone/roomy.png",
+      "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+      "actualDimensions": {
+        "width": 928,
+        "height": 1695
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "1",
+        "recordedAtUTC": "2026-11-04T06:11:27.003132+00:00",
+        "scope": "the exact shown Roomy generated sketch as an approximate phone composition only; native928x1695 projects to about390x712, not390x844",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:02:27.000997+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "f16ad8964d58d1f28e49685c97c8e36f11163991d5d70139b396a41435c87280",
+        "references": [
+          {
+            "path": ".impeccable/mocks/capture/wide.png",
+            "sha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2",
+            "role": "selected Capture Wide palette, Source Sans 3, component family and task order; reflow for phone, not desktop screenshot scaling"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a523-621b-7a41-9eb7-c65efc516bdb/exec-97cbc951-a1d9-44b0-a1d9-ebd0edbe63cb.png",
+          "sha256": "2894d26b5e20edcdf2e26eaa8b45def8acf90b227bf793489a14de4878b14856",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "1517c9f42f2760e7867e3e0d4037bf21f90446d3c78cea45687adcefab4ffab2",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 712.34
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing",
+        "originalRequestedViewport": {
+          "width": 390,
+          "height": 844
+        },
+        "originalTargetFrameVerified": false
+      }
+    },
+    {
+      "id": "capture-state-saving",
+      "name": "Saving",
+      "familyId": "capture-save-recovery",
+      "kind": "generated exploratory UI state sketch; approximate phone composition",
+      "image": ".impeccable/mocks/capture-states/saving.png",
+      "sha256": "2872545d0e6c73c674e1d5edf7338c2fa38afd2b3aa8c2df1d8c7b6bc31e2b0a",
+      "actualDimensions": {
+        "width": 928,
+        "height": 1695
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:29:56.859483+00:00",
+        "scope": "the exact shown Saving Capture sketch in the four-state family only; approximate phone composition, not runtime recovery or complete Capture acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:15:12.035646+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "49ea170b330fb0f436795b3db1028d2f41fdd010d87d63d9964a66d7a98d05ca",
+        "references": [
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "selected approximate Capture phone Roomy composition and inherited selected desktop Wide/Quiet Night family; no exactviewport validation"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a530-24f7-7341-a358-54c4f7e70e5b/exec-a0c54622-bf48-4984-aec5-b811f0459942.png",
+          "sha256": "52702399a8c1b6d4238ce2d645f2fdc0560b3e5cff5118d2c07b1174e143dec7",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "0be3f89cee437f8edf1a53e5f165e5c7b08b8c229a532742da3beaa6c6bd395e",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 712.34
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "capture-state-saved",
+      "name": "Saved",
+      "familyId": "capture-save-recovery",
+      "kind": "generated exploratory UI state sketch; approximate phone composition",
+      "image": ".impeccable/mocks/capture-states/saved.png",
+      "sha256": "a243820c6ea55f972fb38a1bf47e418b5029e7ef0616efe9f5d7a3c7d362b6e6",
+      "actualDimensions": {
+        "width": 928,
+        "height": 1695
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:29:56.859483+00:00",
+        "scope": "the exact shown Saved Capture sketch in the four-state family only; approximate phone composition, not runtime recovery or complete Capture acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:15:12.144452+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "b17555e9364fb04bf179821b7e4583041d62d8ae29953b8408588d2de97fb0cd",
+        "references": [
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "selected approximate Capture phone Roomy composition and inherited selected desktop Wide/Quiet Night family; no exactviewport validation"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a530-2500-7e51-8438-f606808efb08/exec-fb3d8715-5ee9-4df9-8c9d-c17baebaee8c.png",
+          "sha256": "9dd8a523549da5cf595b5152039710abee82fe13e3c59f5b093fb4218b220d96",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "0bbb664c20d95f963f7f264e0c8abbf54de8d1349c48bb1cb16ed2801d26103f",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 712.34
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "capture-state-rejected",
+      "name": "Not saved \u2014 request rejected",
+      "familyId": "capture-save-recovery",
+      "kind": "generated exploratory UI state sketch; approximate phone composition",
+      "image": ".impeccable/mocks/capture-states/rejected.png",
+      "sha256": "090763bf3c1c1693dd3d55f283986186382f03669f44ec97e5e2f8808311194e",
+      "actualDimensions": {
+        "width": 928,
+        "height": 1695
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:29:56.859483+00:00",
+        "scope": "the exact shown Not saved \u2014 request rejected Capture sketch in the four-state family only; approximate phone composition, not runtime recovery or complete Capture acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:15:12.252022+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "b82463a309ad907b12ac22eaa00ad58af5c9f196575314fa08c007379f77b2ee",
+        "references": [
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "selected approximate Capture phone Roomy composition and inherited selected desktop Wide/Quiet Night family; no exactviewport validation"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a530-253c-73a2-ad6c-babb8300b355/exec-3e9800c1-f7b2-4061-8f26-bfff8fc9cca1.png",
+          "sha256": "5552d7145fa6fafd8d6acac48d90f2d97d2e622442c149891c30c721a53ec429",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "9b63201ada3ed4a2eb2fad0844d91f39c80b74479985fc2aa9e6daca257b4f85",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 712.34
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "capture-state-uncertain",
+      "name": "Not sure it saved",
+      "familyId": "capture-save-recovery",
+      "kind": "generated exploratory UI state sketch; approximate phone composition",
+      "image": ".impeccable/mocks/capture-states/uncertain.png",
+      "sha256": "4cbcc9c07ef701d99c83c0b081ad0e55009ab4c376165466948eb911486cb076",
+      "actualDimensions": {
+        "width": 928,
+        "height": 1695
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:29:56.859483+00:00",
+        "scope": "the exact shown Not sure it saved Capture sketch in the four-state family only; approximate phone composition, not runtime recovery or complete Capture acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:15:12.369420+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic configuration; no requested override)",
+        "promptSha256": "f7603858d00b18d6d6224c6e8c8f1ccfeacad39496526e2db77417d5c25fb343",
+        "references": [
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "selected approximate Capture phone Roomy composition and inherited selected desktop Wide/Quiet Night family; no exactviewport validation"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a530-253e-7862-8a38-615144529a1a/exec-092152b2-4278-443e-a95f-9323be04e26f.png",
+          "sha256": "4002eb01e20eaa6ac6648bd8c2ab0386947805e5c268f37ed7fbc708ddae7144",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "a0b29f0b9e13fa64c4df53e91f0717e9421a805fe933f04830031e86403c01f9",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 712.34
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "explore-state-initial",
+      "name": "Initial query-first",
+      "familyId": "explore-essential-states",
+      "kind": "generated exploratory desktop UI state sketch",
+      "image": ".impeccable/mocks/explore-states/initial.png",
+      "sha256": "693391ef9c4eb6e75ae3ba75a9083f80f2bb7a5aff03bc4b36eb90293d9c6167",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:39:51.990136+00:00",
+        "scope": "the exact shown Initial query-first desktop sketch in the four-state Explore family only; no runtime or complete Explore acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:32:40.622728+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override requested)",
+        "promptSha256": "e2f0c3023db25d3eb2850fedc35f924838dedd0574ba306e290179f873ee9cc5",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact excerpts desktop composition and established Quiet Night identity, not result fixture content"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a540-e6ff-7d23-853d-7702439e8fba/exec-0bc5e402-e65d-49ed-b42e-9ff94c0fb322.png",
+          "sha256": "a1d8f5dfe2595da5c9566947b820b97943e1b0cc578b4e68fde52d9b37345228",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "939ba564baa78c1aef2e69d756fa7f61a6d732f36eefb31f845eba142f7fb97b",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-state-loading",
+      "name": "Loading",
+      "familyId": "explore-essential-states",
+      "kind": "generated exploratory desktop UI state sketch",
+      "image": ".impeccable/mocks/explore-states/loading.png",
+      "sha256": "9abbd813efa625f53435059e3f44d1b7358cc89c29ced7e0ff7e3dbbaba2660d",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:39:51.990136+00:00",
+        "scope": "the exact shown Loading desktop sketch in the four-state Explore family only; no runtime or complete Explore acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:32:40.775160+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override requested)",
+        "promptSha256": "4b21405dc792fa7156422b2d638ddc75116cd8e10d0f2afc47f73a22f2f9b094",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact excerpts desktop composition and established Quiet Night identity, not result fixture content"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a540-e700-7070-a325-a8cfcfd3fede/exec-a190ce91-0a70-42c4-b767-36b4f76fb791.png",
+          "sha256": "1f95544b8b0a5eb75d38b95a2f0c1e9bc627b11bd696fe437c9b3c53870c46fd",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "0665627d92a4fb5a2e8e28c99cc352ea5790088d2a46338883af1e72209bb0c0",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-state-empty",
+      "name": "No results",
+      "familyId": "explore-essential-states",
+      "kind": "generated exploratory desktop UI state sketch",
+      "image": ".impeccable/mocks/explore-states/empty.png",
+      "sha256": "8bc050388dcb4d9067a22e7dc0d1446a0722a1b111e560a2e595dc533cd2bd62",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:39:51.990136+00:00",
+        "scope": "the exact shown No results desktop sketch in the four-state Explore family only; no runtime or complete Explore acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:32:40.919824+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override requested)",
+        "promptSha256": "45a1b20848103848fa5d38b56f663b38fb8b10ed403096f5783adbab742b35af",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact excerpts desktop composition and established Quiet Night identity, not result fixture content"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a540-e706-77a1-a713-9448073eeb5b/exec-9a67abd3-4ef6-4b2e-a841-ec13361c75f1.png",
+          "sha256": "f2f2517af5ff0c5ecb46bb582032f072160f0d33dc5bd365761fc1729a9ba1c6",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "64bd1a10cb4e6959a8820c7734d7f5564260667653b16e9ec6389c0d995b7040",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-state-error",
+      "name": "Request failure",
+      "familyId": "explore-essential-states",
+      "kind": "generated exploratory desktop UI state sketch",
+      "image": ".impeccable/mocks/explore-states/error.png",
+      "sha256": "a8b83135d79ff9c5102d5c63454eb955b5058fe479b16fef6d9ea8a70b959eac",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T06:39:51.990136+00:00",
+        "scope": "the exact shown Request failure desktop sketch in the four-state Explore family only; no runtime or complete Explore acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:32:41.082473+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override requested)",
+        "promptSha256": "bec4a7906fc39e997bd6f326dbc49e481b432fdc0d2a489542d26bc687d90f62",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact excerpts desktop composition and established Quiet Night identity, not result fixture content"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a540-e705-7982-8013-4409e7fa74a7/exec-c0a28710-f18d-40fe-8704-5699ce6d86fb.png",
+          "sha256": "557640db8d6a78c661818b8226a30df25bf19a6fea8b27bd0d4bf1f26d512451",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "ec68a5e5de1387d74c3bf9ec2c9315bff2997a65f121aa26934e4e3e21f7510f",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-interaction-filtered",
+      "name": "Filtered positive results",
+      "familyId": "explore-critical-interactions",
+      "kind": "generated exploratory desktop interaction sketch",
+      "image": ".impeccable/mocks/explore-interactions/filtered.png",
+      "sha256": "94e711478b8a40fe29d1b223f4fa14ddd302ace08b378092f59f0242bf630260",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T09:55:51.162757+00:00",
+        "scope": "the exact shown Filtered positive results desktop sketch in the Explore interaction family only; no runtime/focus/responsive/return-state acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:44:48.671144+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "7fc09bdd4496b6bf1870eb43a2add79eba79e905d99c77833741f668af9f6926",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact desktop composition and Quiet Night identity, not original illustrative results or counts"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a54b-8fe8-7440-8004-6445fd666468/exec-7605cac1-03bf-4c83-b541-76534372f832.png",
+          "sha256": "19b0070800543d6a56e533bee255a59854df6851ffc55b56b9008594dfb17e1d",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "5d09c4c3bb963ba9225be1c76fd5557b7a27f74c764946d36a05006d59b7d39b",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-interaction-expanded",
+      "name": "Expanded actual text",
+      "familyId": "explore-critical-interactions",
+      "kind": "generated exploratory desktop interaction sketch",
+      "image": ".impeccable/mocks/explore-interactions/expanded.png",
+      "sha256": "c4c90ba061f36c8693773d4530aa2225eed96c142bee14828cca2676b030631a",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T09:55:51.162757+00:00",
+        "scope": "the exact shown Expanded actual text desktop sketch in the Explore interaction family only; no runtime/focus/responsive/return-state acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:44:48.833491+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "79df09b6f4f0323154dffc3a3be10c62d810b953b15c15ed184fef282b40ce11",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact desktop composition and Quiet Night identity, not original illustrative results or counts"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a54b-8fe9-7b41-89e3-e3fcf5cbf95c/exec-09b2734e-4abe-4779-a718-e891656d759d.png",
+          "sha256": "f89188534760c82df7f8269436b9725f5631a57cf5267a0a09335386b1e5a1ed",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "a4e593e62f1fc6728e7b520d7df19b53b1004c7888445d05e15977e49b6fb388",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-interaction-dates",
+      "name": "Custom dates and open sort",
+      "familyId": "explore-critical-interactions",
+      "kind": "generated exploratory desktop interaction sketch",
+      "image": ".impeccable/mocks/explore-interactions/dates.png",
+      "sha256": "ecdbaa83074befb3a4cba8a5e873296c7919601867a9bc65c1be2208cf937ed0",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T09:55:51.162757+00:00",
+        "scope": "the exact shown Custom dates and open sort desktop sketch in the Explore interaction family only; no runtime/focus/responsive/return-state acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:44:48.996748+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "b399deb4e892d3af3805a3f43e2c00271fb4fbb42c49b40e47dcd7cd077541ed",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact desktop composition and Quiet Night identity, not original illustrative results or counts"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a54b-8fe9-7181-af02-0e63c30d3c53/exec-e1e6c567-a049-4991-8456-397f32518a27.png",
+          "sha256": "08e452dd55df5109156f72e3b57bdb0cb44a250db983b854f4270b43c2cbd116",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "bc28b8a42fb2381df9df98540ac2d584b799665ff5f7974a75f8f1d1d107f5b0",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "explore-interaction-inclusive",
+      "name": "Active plus rejected inspection",
+      "familyId": "explore-critical-interactions",
+      "kind": "generated exploratory desktop interaction sketch",
+      "image": ".impeccable/mocks/explore-interactions/inclusive.png",
+      "sha256": "df0a922d22a263a9094e32c07aa63f14a66b89ccb9d6a601978f8a8c9d948f06",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T09:55:51.162757+00:00",
+        "scope": "the exact shown Active plus rejected inspection desktop sketch in the Explore interaction family only; no runtime/focus/responsive/return-state acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T06:44:49.157161+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "b25121d0d1c8fb7f09a5cd6e9cc2ab16663941554376ae0eedde80e7a9be974b",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected Compact desktop composition and Quiet Night identity, not original illustrative results or counts"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a54b-8fe9-74c1-b7c4-f37d481427d7/exec-85f03e26-24a4-4410-a0fa-15a3858e03cf.png",
+          "sha256": "fdb0422acd2befccbc636f76a2b4e367fc294273777986f51bc214c9370d0204",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "62866f83bde9a1462e49026adc9a6d7e3046a622652ce0117b0dcfcba7459f8f",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "idea-detail-title",
+      "name": "Title metadata editor",
+      "familyId": "idea-on-demand-details",
+      "kind": "generated exploratory desktop secondary-state sketch",
+      "image": ".impeccable/mocks/idea-details/title.png",
+      "sha256": "960f5c9eb34447ea7d10d67f186134bf38c6774213822ff448d7bcf8e6cc260a",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T10:23:11.175361+00:00",
+        "scope": "the exact shown Title metadata editor desktop sketch in the Idea detail family only; no runtime/focus/responsive/complete-Idea acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:01:49.987974+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "5184e63a9be7d0d5865dda570224601f31a78becf94b1b5a1ead26d60d04fcad",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected Thought above rows focal-thought/subordinate-context layout and Quiet Night shell; development/detail fixture is a different thought, not a new reply for the original"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a5ff-bfeb-7862-a02a-4ccacc9997aa/exec-3f065bf3-3ad9-491c-8ffc-d6c886029c6f.png",
+          "sha256": "0a02ea477c0b10f0b8f34b290d3f1174e29f44be15fe320faa5b8a76dd206139",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "074ea181d1b9d05921fc77a1b644ee032ca407589327f4fc22df358b6a03ce1d",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "idea-detail-details",
+      "name": "Recorded reply, history, sources and rationale",
+      "familyId": "idea-on-demand-details",
+      "kind": "generated exploratory desktop secondary-state sketch",
+      "image": ".impeccable/mocks/idea-details/details.png",
+      "sha256": "004d0e9cb428475576b74a1aa3a333a176ed9c44742a8199355ae3c14eadbc78",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T10:23:11.175361+00:00",
+        "scope": "the exact shown Recorded reply, history, sources and rationale desktop sketch in the Idea detail family only; no runtime/focus/responsive/complete-Idea acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:01:50.146608+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "830b1001330964c915fb648c502a3bfef494ec9ab39dd8338c8ce391c30b32df",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected Thought above rows focal-thought/subordinate-context layout and Quiet Night shell; development/detail fixture is a different thought, not a new reply for the original"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a5ff-bfed-75e0-a809-ef691a856032/exec-3655f08c-9809-4fae-a0e6-6a812ce58942.png",
+          "sha256": "d578cfdf9b44cf868f20535fc6fee34218ace4a7c23518f2d043455bbc9c3154",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "762dc97707533eef637e3428cc3d8f03006c35db5bc3223beadd35cfb88f22de",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "idea-detail-branch",
+      "name": "Fresh branch confirmation after conflict",
+      "familyId": "idea-on-demand-details",
+      "kind": "generated exploratory desktop secondary-state sketch",
+      "image": ".impeccable/mocks/idea-details/branch.png",
+      "sha256": "2cb7736606ca9679a2b7ecf6a1faeed37acbc0a7c86deb77ebe5404afef62271",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T10:23:11.175361+00:00",
+        "scope": "the exact shown Fresh branch confirmation after conflict desktop sketch in the Idea detail family only; no runtime/focus/responsive/complete-Idea acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:01:50.314730+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "ccd081c832f0401662184330f24beccbcf4d6dce8d70c9baab9033a963328ec0",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected Thought above rows focal-thought/subordinate-context layout and Quiet Night shell; development/detail fixture is a different thought, not a new reply for the original"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a5ff-bffa-7573-9ad9-697b175f5494/exec-00c042d8-3391-4b3e-a103-f478cc7a8ad4.png",
+          "sha256": "2049595a7aa89752fdcd9b702c5502be2d02697bc70fca121b7ee4f86f9bd692",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "802de6648a3c58a998d7eb6e6083a81467faff8334db5c328685ec0aed4f3182",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "idea-detail-restore",
+      "name": "Rejected user inspection and independent connection restoration",
+      "familyId": "idea-on-demand-details",
+      "kind": "generated exploratory desktop secondary-state sketch",
+      "image": ".impeccable/mocks/idea-details/restore.png",
+      "sha256": "76182f6145ef4360486da2d2ce5fddd90e1221467ae9bf8d55ce620e419993fa",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T10:23:11.175361+00:00",
+        "scope": "the exact shown Rejected user inspection and independent connection restoration desktop sketch in the Idea detail family only; no runtime/focus/responsive/complete-Idea acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:01:50.479932+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "2ceeac0d3f483681b8fe9d225e113894817dc24b3e9ebe272bdc69fa8635e4dc",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected Thought above rows focal-thought/subordinate-context layout and Quiet Night shell; development/detail fixture is a different thought, not a new reply for the original"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a5ff-bffa-7a53-a2bf-3beb9790026d/exec-edb5f3a0-89e8-4425-b77c-2271249bda3e.png",
+          "sha256": "d19e3733e005e343192ed50e4b3492d5350ffe697c895866bd7b30c31fdbd8d1",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "ee55c829d38bd4dc265d13cc54d47781b515794472687df15e47e648616bb89c",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-lifecycle-fresh",
+      "name": "Fresh workspace",
+      "familyId": "evolve-lifecycle",
+      "kind": "generated exploratory desktop lifecycle sketch",
+      "image": ".impeccable/mocks/evolve-lifecycle/fresh.png",
+      "sha256": "57d6f8f4e9f26dc137ac55de215d5757dd13692f118aae3dfdbd68b1671a0895",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T14:26:44.885228+00:00",
+        "scope": "the exact shown Fresh workspace desktop sketch in Evolve lifecycle family only; no runtime/focus/responsive/complete-Evolve acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:28:45.029985+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "610bf017a97a96b7e96eea91a953e051f35469e0709d0bd059b79b28e969d99e",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected rail/shell/chronological conversation/saved-output/composer topology and Quiet Night identity, not completed-reply content for other states"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a618-4305-78b2-988c-5f5281d11190/exec-afc51cb8-2d47-4889-ae80-3d19b6539ac6.png",
+          "sha256": "ea38801c333f2d475f593c93c008f5c8d6b225e43cbcf2243adcd15b4f1e386d",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "8bc765571439000f6c8fff07a0673fe1abbd51d6a5421e51a842b0604c7011f4",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-lifecycle-running",
+      "name": "Running after queued admission",
+      "familyId": "evolve-lifecycle",
+      "kind": "generated exploratory desktop lifecycle sketch",
+      "image": ".impeccable/mocks/evolve-lifecycle/running.png",
+      "sha256": "56badafe4666bab714a037b51c641ea2cca6e991fc2de4c48888512a908416cc",
+      "actualDimensions": {
+        "width": 1584,
+        "height": 993
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T14:26:44.885228+00:00",
+        "scope": "the exact shown Running after queued admission desktop sketch in Evolve lifecycle family only; no runtime/focus/responsive/complete-Evolve acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:28:45.203349+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "df323332e4199d74f86561c61de320fec231ea02c0c0836e089ca81eaa586f86",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected rail/shell/chronological conversation/saved-output/composer topology and Quiet Night identity, not completed-reply content for other states"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a618-4305-7540-ad0d-9129dcb80982/exec-bc4c1482-3a68-473e-a41b-68370075a593.png",
+          "sha256": "bd84fc66688fccb3b0fe3995d7fc332742d896da4d48e580c40e983553e96cc7",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "a671d0de829fe134a0bf6a9075bb7268c4716eec0f4bfae4a6ea6a3ed3c46c22",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-lifecycle-uncertain",
+      "name": "Uncertain known-run observation",
+      "familyId": "evolve-lifecycle",
+      "kind": "generated exploratory desktop lifecycle sketch",
+      "image": ".impeccable/mocks/evolve-lifecycle/uncertain.png",
+      "sha256": "a6489b6e81457262897aec1327baa5a8f32351f00319a7abaa1887a5fdab6df3",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T14:26:44.885228+00:00",
+        "scope": "the exact shown Uncertain known-run observation desktop sketch in Evolve lifecycle family only; no runtime/focus/responsive/complete-Evolve acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:28:45.372788+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "147ba255ee1d92e1db24806b0679846ad3abdf1ebd5f5f58ba63f5ef0a75ec73",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected rail/shell/chronological conversation/saved-output/composer topology and Quiet Night identity, not completed-reply content for other states"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a618-4309-7d00-81f9-36a65901cbc3/exec-f41cfe76-ba09-4f7d-9e60-d8b8171096d6.png",
+          "sha256": "a2e62ab9ecf182fe5cd22a897e4717f01ed2efb1716a7957e741e43b610428b2",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "673e8f6c33f9a9bb7bbe91b927300643643702466a3e7e03c74a40e299c97336",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-lifecycle-interrupted",
+      "name": "Interrupted retained reply and continuation choice",
+      "familyId": "evolve-lifecycle",
+      "kind": "generated exploratory desktop lifecycle sketch",
+      "image": ".impeccable/mocks/evolve-lifecycle/interrupted.png",
+      "sha256": "ac20c03b248ba152bf70c70feae5b9ae6590ca49885499b6445c55bc3600b0a9",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T14:26:44.885228+00:00",
+        "scope": "the exact shown Interrupted retained reply and continuation choice desktop sketch in Evolve lifecycle family only; no runtime/focus/responsive/complete-Evolve acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:28:45.547701+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "643562eb03d22910b1cd1b471657514c4149fc23d9a442c8f34d95711d95f013",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected rail/shell/chronological conversation/saved-output/composer topology and Quiet Night identity, not completed-reply content for other states"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a618-4308-7a60-a1db-8f661d9aab99/exec-050df102-8d97-46e0-941a-63a3a37de1c2.png",
+          "sha256": "5f6bc4943d26983435669eddc240d00ff0139f12c992a726fd56f87d1df1dbac",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "b852bebadbec99450ea890c6e2bafda5c0331cee9d3b95126952770d68a0a36d",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "evolve-lifecycle-failed",
+      "name": "Failed terminal run with confirmed saved work",
+      "familyId": "evolve-lifecycle",
+      "kind": "generated exploratory desktop lifecycle sketch",
+      "image": ".impeccable/mocks/evolve-lifecycle/failed.png",
+      "sha256": "d67cb7540e4a05a2b0f2de50ef60e8972d775fe68dfed2701da7c9f1d5c924ff",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T14:26:44.885228+00:00",
+        "scope": "the exact shown Failed terminal run with confirmed saved work desktop sketch in Evolve lifecycle family only; no runtime/focus/responsive/complete-Evolve acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T10:28:45.713261+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "0ea200824ef4da1536b3a7d6f7eae910526eeabaaa21ae4a9218254abb5f440a",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected rail/shell/chronological conversation/saved-output/composer topology and Quiet Night identity, not completed-reply content for other states"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a618-430a-7f61-98af-e61fc2799211/exec-fe10c224-515b-44f7-bfb1-32a9e45f3add.png",
+          "sha256": "830b8a7fc8411defa097febf0e906b1a8a4000341e0db4fe309b9ae9b857bc52",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "469bc4e3b57f84571dfd9502ac46e7b4d456c40440a3c999a55a5fcd6fe5d841",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "export-output-simple",
+      "name": "Simple Markdown preview",
+      "familyId": "export-output",
+      "kind": "generated exploratory desktop output sketch",
+      "image": ".impeccable/mocks/export-output/simple.png",
+      "sha256": "d4b77525a985ca4074e5fa96280805b1adaf1ee1c2d0db3c9c22ad92ccb7eafd",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:10:27.599291+00:00",
+        "scope": "exact shown Simple Markdown preview desktop composition only, with the explicit family wording overrides; no unseen/runtime/responsive acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T14:33:58.504293+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "1a86c3f734a8e3c897bdde67e3ea824fe5829cf091e9a0eb75cad131336d6f18",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected Side-by-side methods setup family and Quiet Night shell, not a replacement of approved setup composition; broader output reading regions authorized"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a6f7-fdfb-7d22-a117-28091ea48795/exec-804270ff-1e95-4ef0-bb28-acfe9b311828.png",
+          "sha256": "192fff90b3777450f712c6451983c31715eadd00ab4599c838828db58b8a2a32",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "7905709c0127c7041ce84ed91bdee2f3da52795188aa07a499725feb6d2a6dc0",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "export-output-running",
+      "name": "Agentic running",
+      "familyId": "export-output",
+      "kind": "generated exploratory desktop output sketch",
+      "image": ".impeccable/mocks/export-output/running.png",
+      "sha256": "af04ce36c96f23a91ca0d210017c5c6ba7dd03ade0c809c7784fd416450c0734",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:10:27.599291+00:00",
+        "scope": "exact shown Agentic running desktop composition only, with the explicit family wording overrides; no unseen/runtime/responsive acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T14:33:58.663171+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "6babd72551defa20130c23f1ea4261c48e16516f2aeb073f97e9874add4149ac",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected Side-by-side methods setup family and Quiet Night shell, not a replacement of approved setup composition; broader output reading regions authorized"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a6f7-fdfb-7a72-af2e-09da1d40160f/exec-2a0728bb-ab5a-450c-957f-8c4f9e31aa25.png",
+          "sha256": "b4d0f19e5f7063a329c3158a0132f35332281468ad7085e21f1a9c09acd8e8d4",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "3638dd0d23f5e735b03af28900ce978feba534c43f302110cf52ef0181b10eb0",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "copyOverrides": [
+        {
+          "from": "Admitted request",
+          "to": "Request"
+        }
+      ]
+    },
+    {
+      "id": "export-output-completed",
+      "name": "Agentic completed report",
+      "familyId": "export-output",
+      "kind": "generated exploratory desktop output sketch",
+      "image": ".impeccable/mocks/export-output/completed.png",
+      "sha256": "7552f2efa32a210928b5e52d7b51162ef1105c66fe4d364bd42eaf0641fda486",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:10:27.599291+00:00",
+        "scope": "exact shown Agentic completed report desktop composition only, with the explicit family wording overrides; no unseen/runtime/responsive acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T14:33:58.825467+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "f844aecdb366212087ddb3ff73348631f6a95de747af505da4996d09134297ba",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected Side-by-side methods setup family and Quiet Night shell, not a replacement of approved setup composition; broader output reading regions authorized"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a6f7-fdfa-73c2-b640-359934b8d076/exec-74da26b5-250d-4b87-a401-145b8d6f7b1b.png",
+          "sha256": "51d3f44cd2b58e6f4a190c6331600029d5139520256e2210c65b761f5bec670c",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "79ff8d3f6b585ed0fb6dd7b7f9d00bdeb47f47412f23ab82d0c14a69a6298c84",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "copyOverrides": [
+        {
+          "from": "Successful artifact read.",
+          "to": "Report ready"
+        }
+      ]
+    },
+    {
+      "id": "export-output-uncertain",
+      "name": "Agentic uncertain known run",
+      "familyId": "export-output",
+      "kind": "generated exploratory desktop output sketch",
+      "image": ".impeccable/mocks/export-output/uncertain.png",
+      "sha256": "b87d65c07b8850f8bfd8e4f345c194a500e4586532e41b19ad995d94a8653f3b",
+      "actualDimensions": {
+        "width": 1585,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:10:27.599291+00:00",
+        "scope": "exact shown Agentic uncertain known run desktop composition only, with the explicit family wording overrides; no unseen/runtime/responsive acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T14:33:58.982492+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "3e38321e19a4761f0ef94e33455e8a4deeab61433b5f26c4dcc02637705472d3",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected Side-by-side methods setup family and Quiet Night shell, not a replacement of approved setup composition; broader output reading regions authorized"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a6f7-fdfb-7071-bb3a-23e5db5a54d8/exec-6fd5f379-74cd-4cd2-aa93-6d9d5dba08ac.png",
+          "sha256": "77fba3471ebcb6f7edc0fe8c0f8a07924e1a834dfcb77e125c75327093c54752",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "b3649ed979dfc50a38c0a09ccf3f35d9a91bbe82f8c3799a7518681655f38150",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "export-output-interrupted",
+      "name": "Agentic interrupted",
+      "familyId": "export-output",
+      "kind": "generated exploratory desktop output sketch",
+      "image": ".impeccable/mocks/export-output/interrupted.png",
+      "sha256": "3e403f5abdce15dc07bf806539d3adfe8b70fdc7caf03f5f96d349254e34a5e4",
+      "actualDimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:10:27.599291+00:00",
+        "scope": "exact shown Agentic interrupted desktop composition only, with the explicit family wording overrides; no unseen/runtime/responsive acceptance",
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T14:33:59.134679+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no requested override)",
+        "promptSha256": "445fe6cf9af8e7aa886fc661ca59d236b9250283b959b1616ed47acbc6982860",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected Side-by-side methods setup family and Quiet Night shell, not a replacement of approved setup composition; broader output reading regions authorized"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a6f7-fdfb-7581-b595-7aa66153558a/exec-05c3f444-c686-4e0a-bd31-cf38994a23ab.png",
+          "sha256": "219595d9f6cfe06b9e844b9d73b7eda8e00ae82730f813976515c9941987d817",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "f6a31c4683ed4ce0b01cc2fb62ed0f5477b4139421d1ca1840be94a3b7f43f7d",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      }
+    },
+    {
+      "id": "narrow-explore",
+      "name": "Explore approximate narrow adaptation",
+      "familyId": "narrow-adaptations",
+      "kind": "generated exploratory UI sketch; approximate narrow-screen composition",
+      "image": ".impeccable/mocks/narrow/explore.png",
+      "sha256": "eb2b97a3a5786b6acbfc3b64d4d28fe8ea349489d5acbc7ebe0d8307ccfce8a9",
+      "actualDimensions": {
+        "width": 975,
+        "height": 1614
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:26:12.008467+00:00",
+        "scope": "the exact shown Explore approximate narrow-screen composition and associated shared rules/exceptions only; not literal raster text sizing/header variations, exact CSS viewport or runtime accessibility acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "accessibilityAuditApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "sharedRulesId": "shared-focus-validation-readable-flow"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T16:16:09.280373+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override)",
+        "promptSha256": "787979e418d023db09aa67a9ec0b2821cd112a2f98695953f66262ac62b7c308",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "selected desktop composition and own-world hierarchy; preserve approved source unchanged"
+          },
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "accepted approximate phone shell/readability character only, not an exact viewport or replacement Capture"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a755-9c3b-70f2-bcbf-4aa24d17a79b/exec-d80a6f7f-6707-45f7-b5cf-a467b40429bb.png",
+          "sha256": "73e3b64083d9c7a949dea6cd95ecb0a44c8cdbebb9b5a8dfc145ea3cd5c1ddbf",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "6ddc50aee430576a15d57846ca480f7a846b12797bad80c4fa1ca432d3f2a00f",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 645.6
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "narrow-idea",
+      "name": "Idea approximate narrow adaptation",
+      "familyId": "narrow-adaptations",
+      "kind": "generated exploratory UI sketch; approximate narrow-screen composition",
+      "image": ".impeccable/mocks/narrow/idea.png",
+      "sha256": "30796e898a7cd88582d9849ad57297b9d694a5652998fc2417cb19d7e407376f",
+      "actualDimensions": {
+        "width": 975,
+        "height": 1614
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:26:12.008467+00:00",
+        "scope": "the exact shown Idea approximate narrow-screen composition and associated shared rules/exceptions only; not literal raster text sizing/header variations, exact CSS viewport or runtime accessibility acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "accessibilityAuditApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "sharedRulesId": "shared-focus-validation-readable-flow"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T16:16:09.280373+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override)",
+        "promptSha256": "1e0f67ce0f7433f0d9c30bdd7ac8f4cac77202215b2510b3676248e24bc2b7d2",
+        "references": [
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "selected desktop composition and own-world hierarchy; preserve approved source unchanged"
+          },
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "accepted approximate phone shell/readability character only, not an exact viewport or replacement Capture"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a755-9c45-7f60-9c04-30c1157e3211/exec-f1827775-b29c-4245-8128-eb9d8ac59898.png",
+          "sha256": "4a00e472dce3e572782055683f35a8ca5d774cfd7deaf3dfe5f5723bba788f1a",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "e620403bc8339527e02337e242d5a0b4b352c44878abd0a53163c0e4e2519b0c",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 645.6
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "narrow-evolve",
+      "name": "Evolve approximate narrow adaptation",
+      "familyId": "narrow-adaptations",
+      "kind": "generated exploratory UI sketch; approximate narrow-screen composition",
+      "image": ".impeccable/mocks/narrow/evolve.png",
+      "sha256": "6e4d830ee7b76d71e34a33afcf84315221b6b075b305f9694dbe6ed51245fb45",
+      "actualDimensions": {
+        "width": 975,
+        "height": 1614
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:26:12.008467+00:00",
+        "scope": "the exact shown Evolve approximate narrow-screen composition and associated shared rules/exceptions only; not literal raster text sizing/header variations, exact CSS viewport or runtime accessibility acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "accessibilityAuditApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "sharedRulesId": "shared-focus-validation-readable-flow"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T16:16:09.280373+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override)",
+        "promptSha256": "0535b853f16d26faaf6c70187a348083492e6edcc3ab6964fbe74454b1b7c187",
+        "references": [
+          {
+            "path": ".impeccable/mocks/evolve/rail.png",
+            "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637",
+            "role": "selected desktop composition and own-world hierarchy; preserve approved source unchanged"
+          },
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "accepted approximate phone shell/readability character only, not an exact viewport or replacement Capture"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a755-9c45-74f3-8695-31d65a9a0944/exec-b9c45036-c250-4b5b-b98d-515f11404c57.png",
+          "sha256": "89b08a152c52d75ac3ed90a1d4c78aa646497b9730208039b3d8047b0beebc48",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "650eb45c10606ba9dc614dee4e044e59c2c459a65b1c83d095b4a8240d0a9349",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 645.6
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
+      }
+    },
+    {
+      "id": "narrow-export",
+      "name": "Export approximate narrow adaptation",
+      "familyId": "narrow-adaptations",
+      "kind": "generated exploratory UI sketch; approximate narrow-screen composition",
+      "image": ".impeccable/mocks/narrow/export.png",
+      "sha256": "07bc566abed666d67e56a9a4e23ce8920471fbfd7d2d78772b7b719c669c57bb",
+      "actualDimensions": {
+        "width": 975,
+        "height": 1614
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb  3.0",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "yes",
+        "recordedAtUTC": "2026-11-04T16:26:12.008467+00:00",
+        "scope": "the exact shown Export approximate narrow-screen composition and associated shared rules/exceptions only; not literal raster text sizing/header variations, exact CSS viewport or runtime accessibility acceptance",
+        "approximateCompositionOnly": true,
+        "exactViewportApproved": false,
+        "keyboardBehaviorApproved": false,
+        "touchAuditApproved": false,
+        "responsiveBehaviorApproved": false,
+        "accessibilityAuditApproved": false,
+        "unseenStatesApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "sharedRulesId": "shared-focus-validation-readable-flow"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-04T16:16:09.280373+00:00",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6.1-sol (automatic; no override)",
+        "promptSha256": "b87af7ecf317e0c13724a710e9a166fa22635f41c1bc2f0ec9a465ac2af367da",
+        "references": [
+          {
+            "path": ".impeccable/mocks/export/columns.png",
+            "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241",
+            "role": "selected desktop composition and own-world hierarchy; preserve approved source unchanged"
+          },
+          {
+            "path": ".impeccable/mocks/capture-phone/roomy.png",
+            "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a",
+            "role": "accepted approximate phone shell/readability character only, not an exact viewport or replacement Capture"
+          }
+        ],
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1a755-9c55-7090-b294-f0db4674cd01/exec-d80821e6-c8aa-4108-bd72-c4d9245aa5e0.png",
+          "sha256": "066145242ead39dc9f3727cc6f91b553c1b7dae286def4b43e7beae1bf6b205f",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "7f345c43eaf2e17c564999bf969be6f338fc0a8cb956527a5d13d0f535ebb22b",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "projectionAt390Wide": {
+          "width": 390,
+          "height": 645.6
+        },
+        "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
       }
     }
   ],
-  "brandNotes": ".impeccable/brand/BRAND.md",
-  "brandSourceNotes": ".impeccable/brand/SOURCE.md",
-  "uiPalette": ".impeccable/brand/ui-palette.json",
-  "sourceContracts": [
-    "docs/daemon-api.md",
-    ".lore/context/architecture.md"
-  ],
-  "overallDesignGateClosed": false,
-  "implementationAuthorized": false,
   "files": [
     {
       "path": ".impeccable/README.md",
-      "bytes": 4438,
-      "sha256": "18cd253cb9f10c41fc18a967cd3e81b7cd260cd17f51f628facd670dcabe12e0"
-    },
-    {
-      "path": ".impeccable/brand/BRAND.md",
-      "bytes": 1939,
-      "sha256": "3733f082be3cc7b20bf6d51d5fbb6844b25c5f54e89f6a717ed7a7017a2c489d"
-    },
-    {
-      "path": ".impeccable/brand/SOURCE.md",
-      "bytes": 1800,
-      "sha256": "3f7f6408df89513cdb958bb7bdc98ab5cf604ba1856f3d87046580b828bce891"
-    },
-    {
-      "path": ".impeccable/brand/colors.toml",
-      "bytes": 461,
-      "sha256": "f33975a3b23b8ca80397dd53b74a1a95c685693f3b8b0f30a6e7a4479870d6c4"
+      "bytes": 23962,
+      "sha256": "4fe5ef74b710767aea2efe6700943f44cffbc6d52761a6c3b356cf129ea2a8ca"
     },
     {
       "path": ".impeccable/brand/fonts/OFL.txt",
@@ -107,24 +2236,34 @@
       "sha256": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c"
     },
     {
-      "path": ".impeccable/brand/ui-palette.json",
-      "bytes": 2132,
-      "sha256": "760abd03ee30f6512d0685090f34f7813155046a517e3ad31e4df6413b1b3f57"
-    },
-    {
-      "path": ".impeccable/design-review/capture-prompts/wide.txt",
-      "bytes": 1795,
-      "sha256": "d36905dc0dc79395b21984a5f7719265fefdeb57c60a137bcbdd37a301961e19"
-    },
-    {
       "path": ".impeccable/design-review/evidence/dark/dark-quiet.png",
       "bytes": 140984,
       "sha256": "0f0f284d3e42ec751f4934f271fada8ebeab4d8358a887d0befa0ad868a82622"
     },
     {
-      "path": ".impeccable/design-review/explore-prompts/compact.txt",
-      "bytes": 1941,
-      "sha256": "e642f4de986528504e19412f4cb39eb8cd96e2a4db9fc2411c46eaa6bea16d5e"
+      "path": ".impeccable/mocks/capture-phone/roomy.png",
+      "bytes": 1436663,
+      "sha256": "d572d1997057887a764ddebab1e0a53c8e12376da9264acd84a35ed2c11fdb1a"
+    },
+    {
+      "path": ".impeccable/mocks/capture-states/rejected.png",
+      "bytes": 1595604,
+      "sha256": "090763bf3c1c1693dd3d55f283986186382f03669f44ec97e5e2f8808311194e"
+    },
+    {
+      "path": ".impeccable/mocks/capture-states/saved.png",
+      "bytes": 1389319,
+      "sha256": "a243820c6ea55f972fb38a1bf47e418b5029e7ef0616efe9f5d7a3c7d362b6e6"
+    },
+    {
+      "path": ".impeccable/mocks/capture-states/saving.png",
+      "bytes": 1506968,
+      "sha256": "2872545d0e6c73c674e1d5edf7338c2fa38afd2b3aa8c2df1d8c7b6bc31e2b0a"
+    },
+    {
+      "path": ".impeccable/mocks/capture-states/uncertain.png",
+      "bytes": 1507255,
+      "sha256": "4cbcc9c07ef701d99c83c0b081ad0e55009ab4c376165466948eb911486cb076"
     },
     {
       "path": ".impeccable/mocks/capture/wide.png",
@@ -132,14 +2271,74 @@
       "sha256": "5a7a1f114d539fd408ec5bf4c3bfd31097357103b518c0f473e444141cdf77a2"
     },
     {
-      "path": ".impeccable/mocks/capture/wide.png.json",
-      "bytes": 4698,
-      "sha256": "ff4bbec23d10d18e4e87ef718706e9d6c843aacdf709923666fb0122f4cea2fe"
+      "path": ".impeccable/mocks/evolve-lifecycle/failed.png",
+      "bytes": 1500280,
+      "sha256": "d67cb7540e4a05a2b0f2de50ef60e8972d775fe68dfed2701da7c9f1d5c924ff"
     },
     {
-      "path": ".impeccable/mocks/decision/dark-quiet.html",
-      "bytes": 866233,
-      "sha256": "9966a0810f9bb66bfc5adbdc762592ab0219941da770d660f27d60dfb19f09e2"
+      "path": ".impeccable/mocks/evolve-lifecycle/fresh.png",
+      "bytes": 1314339,
+      "sha256": "57d6f8f4e9f26dc137ac55de215d5757dd13692f118aae3dfdbd68b1671a0895"
+    },
+    {
+      "path": ".impeccable/mocks/evolve-lifecycle/interrupted.png",
+      "bytes": 1625796,
+      "sha256": "ac20c03b248ba152bf70c70feae5b9ae6590ca49885499b6445c55bc3600b0a9"
+    },
+    {
+      "path": ".impeccable/mocks/evolve-lifecycle/running.png",
+      "bytes": 1583384,
+      "sha256": "56badafe4666bab714a037b51c641ea2cca6e991fc2de4c48888512a908416cc"
+    },
+    {
+      "path": ".impeccable/mocks/evolve-lifecycle/uncertain.png",
+      "bytes": 1580637,
+      "sha256": "a6489b6e81457262897aec1327baa5a8f32351f00319a7abaa1887a5fdab6df3"
+    },
+    {
+      "path": ".impeccable/mocks/evolve/rail.png",
+      "bytes": 1573460,
+      "sha256": "2332e4acf816ff08d394248e229aa3b7530bfccc7a53d155e9e98ec99b2fd637"
+    },
+    {
+      "path": ".impeccable/mocks/explore-interactions/dates.png",
+      "bytes": 1504153,
+      "sha256": "ecdbaa83074befb3a4cba8a5e873296c7919601867a9bc65c1be2208cf937ed0"
+    },
+    {
+      "path": ".impeccable/mocks/explore-interactions/expanded.png",
+      "bytes": 1534958,
+      "sha256": "c4c90ba061f36c8693773d4530aa2225eed96c142bee14828cca2676b030631a"
+    },
+    {
+      "path": ".impeccable/mocks/explore-interactions/filtered.png",
+      "bytes": 1447920,
+      "sha256": "94e711478b8a40fe29d1b223f4fa14ddd302ace08b378092f59f0242bf630260"
+    },
+    {
+      "path": ".impeccable/mocks/explore-interactions/inclusive.png",
+      "bytes": 1494606,
+      "sha256": "df0a922d22a263a9094e32c07aa63f14a66b89ccb9d6a601978f8a8c9d948f06"
+    },
+    {
+      "path": ".impeccable/mocks/explore-states/empty.png",
+      "bytes": 1275770,
+      "sha256": "8bc050388dcb4d9067a22e7dc0d1446a0722a1b111e560a2e595dc533cd2bd62"
+    },
+    {
+      "path": ".impeccable/mocks/explore-states/error.png",
+      "bytes": 1346928,
+      "sha256": "a8b83135d79ff9c5102d5c63454eb955b5058fe479b16fef6d9ea8a70b959eac"
+    },
+    {
+      "path": ".impeccable/mocks/explore-states/initial.png",
+      "bytes": 1251159,
+      "sha256": "693391ef9c4eb6e75ae3ba75a9083f80f2bb7a5aff03bc4b36eb90293d9c6167"
+    },
+    {
+      "path": ".impeccable/mocks/explore-states/loading.png",
+      "bytes": 1250358,
+      "sha256": "9abbd813efa625f53435059e3f44d1b7358cc89c29ced7e0ff7e3dbbaba2660d"
     },
     {
       "path": ".impeccable/mocks/explore/compact.png",
@@ -147,19 +2346,79 @@
       "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f"
     },
     {
-      "path": ".impeccable/mocks/explore/compact.png.json",
-      "bytes": 4519,
-      "sha256": "727b52fdd070678dfb687453041746ae1fd4c53ed51ff67d6d9f1d13f7c9821d"
+      "path": ".impeccable/mocks/export-output/completed.png",
+      "bytes": 1682504,
+      "sha256": "7552f2efa32a210928b5e52d7b51162ef1105c66fe4d364bd42eaf0641fda486"
     },
     {
-      "path": ".impeccable/surfaces/impeccable-mocks-capture-wide-png.md",
-      "bytes": 2411,
-      "sha256": "d1f80cf414ccd3299ae8d6dd948e923f204ab3d13f45669231fae60694fc2240"
+      "path": ".impeccable/mocks/export-output/interrupted.png",
+      "bytes": 1475245,
+      "sha256": "3e403f5abdce15dc07bf806539d3adfe8b70fdc7caf03f5f96d349254e34a5e4"
     },
     {
-      "path": ".impeccable/surfaces/impeccable-mocks-explore-compact-png.md",
-      "bytes": 2413,
-      "sha256": "a3b7483ed806f3ebc0cbc3774028f5ddefdafbe64dc37f3bc4ee2bb01988bac8"
+      "path": ".impeccable/mocks/export-output/running.png",
+      "bytes": 1577762,
+      "sha256": "af04ce36c96f23a91ca0d210017c5c6ba7dd03ade0c809c7784fd416450c0734"
+    },
+    {
+      "path": ".impeccable/mocks/export-output/simple.png",
+      "bytes": 1602458,
+      "sha256": "d4b77525a985ca4074e5fa96280805b1adaf1ee1c2d0db3c9c22ad92ccb7eafd"
+    },
+    {
+      "path": ".impeccable/mocks/export-output/uncertain.png",
+      "bytes": 1533999,
+      "sha256": "b87d65c07b8850f8bfd8e4f345c194a500e4586532e41b19ad995d94a8653f3b"
+    },
+    {
+      "path": ".impeccable/mocks/export/columns.png",
+      "bytes": 1467756,
+      "sha256": "35cb9ede3fa76178702a11e0894bdb7b1ba9f421502e4f399b47c840ffc7f241"
+    },
+    {
+      "path": ".impeccable/mocks/idea-details/branch.png",
+      "bytes": 1600368,
+      "sha256": "2cb7736606ca9679a2b7ecf6a1faeed37acbc0a7c86deb77ebe5404afef62271"
+    },
+    {
+      "path": ".impeccable/mocks/idea-details/details.png",
+      "bytes": 1624964,
+      "sha256": "004d0e9cb428475576b74a1aa3a333a176ed9c44742a8199355ae3c14eadbc78"
+    },
+    {
+      "path": ".impeccable/mocks/idea-details/restore.png",
+      "bytes": 1567481,
+      "sha256": "76182f6145ef4360486da2d2ce5fddd90e1221467ae9bf8d55ce620e419993fa"
+    },
+    {
+      "path": ".impeccable/mocks/idea-details/title.png",
+      "bytes": 1549656,
+      "sha256": "960f5c9eb34447ea7d10d67f186134bf38c6774213822ff448d7bcf8e6cc260a"
+    },
+    {
+      "path": ".impeccable/mocks/idea/rows.png",
+      "bytes": 1456478,
+      "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110"
+    },
+    {
+      "path": ".impeccable/mocks/narrow/evolve.png",
+      "bytes": 1557110,
+      "sha256": "6e4d830ee7b76d71e34a33afcf84315221b6b075b305f9694dbe6ed51245fb45"
+    },
+    {
+      "path": ".impeccable/mocks/narrow/explore.png",
+      "bytes": 1673129,
+      "sha256": "eb2b97a3a5786b6acbfc3b64d4d28fe8ea349489d5acbc7ebe0d8307ccfce8a9"
+    },
+    {
+      "path": ".impeccable/mocks/narrow/export.png",
+      "bytes": 1483227,
+      "sha256": "07bc566abed666d67e56a9a4e23ce8920471fbfd7d2d78772b7b719c669c57bb"
+    },
+    {
+      "path": ".impeccable/mocks/narrow/idea.png",
+      "bytes": 1635904,
+      "sha256": "30796e898a7cd88582d9849ad57297b9d694a5652998fc2417cb19d7e407376f"
     }
   ]
 }

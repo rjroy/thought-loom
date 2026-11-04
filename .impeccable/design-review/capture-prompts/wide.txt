@@ -1,9 +1,0 @@
-Generate one actual exploratory UI comp of the desktop Thoughtloom Capture web screen, edge to edge, landscape target 1440 × 900. Crisp readable UI text, no browser/device/desk framing. Use the normal image-generation output mechanism and report the absolute native image path. Do not write code, alter project files, run Beads, or commit.
-
-Use the attached selected Explore Compact image only for the approved Quiet Night shell, all-dark mixed palette, Source Sans 3 character, and standard component family. Its search bar, filters, result cards, and context captions do not belong on Capture. Keep dark fields, restrained corners, blue active navigation, and the gold primary action; no new style or artwork.
-
-This option is Wide working pad: a wide left-aligned writing area sharing the shell's work-area edge, giving a broader plain-text field than a centered form. Below the thought field, keep the optional title secondary and align Save with the far edge of the writing area. Leave unused space honestly empty; do not invent a side panel or additional function.
-
-The whole screen reads thoughtloom and the existing tagline; Explore, Capture selected, reserved Settings. Show “Capture”, “Write or paste a thought.”, label “Thought”, the exact unsaved draft “An idea can be useful before I know how to name it.”, an empty “Title (optional)” field, and “Save”. Small review text says “Illustrative draft”. These are the same controls/content as the other options.
-
-No timestamps, IDs, autosave, saved badge, AI conversation or progress, rich-text toolbar, attachments, counters, tags, folders, suggested prompts, Cancel, or extra actions. Opaque intended background; file-size budget unknown. Generate a candidate comp, not application code or a runtime image.

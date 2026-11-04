@@ -1,9 +1,0 @@
-Generate one actual exploratory UI comp of a desktop Thoughtloom web app, edge to edge, landscape target 1440 × 900, with crisp readable text and no browser window, device, or desk. Use the normal image-generation output mechanism and report its absolute native image path. Do not write application code, alter files, run Beads, or commit.
-
-The attached A — Quiet Night image is the user's approved visual direction, not a request for a new style. Keep its exact all-dark palette, Source Sans 3 character, component family, gold Search action, and attached context-caption signature. Intended background is opaque; file-size budget unknown. This is a screen candidate, not a shipping raster or implementation.
-
-Make this option compact excerpts: reduce incidental spacing, keep result titles prominent, and use one or two readable lines of actual matching text before the attached context caption. Keep dates and authorship in a quiet, consistently aligned row. Where wording is abbreviated, a visible clickable ellipsis indicates in-place text expansion; do not add an AI summary or a new action. Leave honest unused space rather than invent more records.
-
-Preserve the reference's top shell, query above left filters and vertical results, count and sort. Navigation: thoughtloom, Explore selected, Capture, reserved Settings. Query “connections”; Search; 3 results. Sort offers Relevance, Newest first, Oldest first. Authorship You 2 / AI 1. Kind counts: Original captures 2, Contributions 0, AI interpretations 1, Developing ideas 0. Created has Any time, Last 7 days, Last 30 days, This year, Custom range. Show rejected has no count; Clear filters remains.
-
-Use the same three titles, attributed excerpts, dates, and recorded Related / Developed from context as the reference. Include “Illustrative notes and counts”. No new navigation, attachments, profile, notifications, dashboard, invented status, or decorative imagery.

@@ -1,36 +1,132 @@
-# Selected Thoughtloom designs
+# Approved Thoughtloom design handoff
 
-This packet contains the selected visual direction and two selected desktop comps, with their source, approval, and provenance notes. It is not a production client or a completed design system.
+**The agreed visual design gate is complete. No visual question remains.** This does not authorize client/daemon implementation or represent a shipping, accessibility or runtime verdict. Tracker closure and commits belong to the parent session.
 
-| Selection | Artifact | Approval |
+This minimum packet has **41 files**: 37 distinct selected PNGs, this current handoff, one [identity/approval/provenance/palette manifest](selected-assets.json), and the [Source Sans 3 font](brand/fonts/SourceSans3-VariableFont_wght.ttf) with its [OFL license](brand/fonts/OFL.txt). Comparison boards, duplicate sidecars/prompts, producing briefs, review history, design fixtures and workflow scaffolding are unnecessary once their current decisions and essential provenance are consolidated here. No approved main PNG has been repainted, resized or discarded.
+
+## Selected visual references
+
+The direction is a browser-rendered study; the other 36 PNGs are generated exploratory comps. Each exact image's hash, actual dimensions, reference chain and scoped approval are in the manifest. All example thoughts, counts, IDs, conversations and reports are **illustrative**, not personal/live data or executable test fixtures.
+
+| Family | Selected images | User approval |
 | --- | --- | --- |
-| **Quiet Night / Collection labels** | [Direction image](design-review/evidence/dark/dark-quiet.png) · [self-contained HTML source](mocks/decision/dark-quiet.html) | “A - quiet night. works.” — shared visual direction only |
-| **Explore — Compact excerpts** | [Selected comp](mocks/explore/compact.png) · [screen notes](surfaces/impeccable-mocks-explore-compact-png.md) | “compact” — shown resting desktop composition only |
-| **Capture — Wide working pad** | [Selected comp](mocks/capture/wide.png) · [screen notes](surfaces/impeccable-mocks-capture-wide-png.md) | “wide” — shown resting desktop draft composition only |
+| Quiet Night / Collection labels | [Direction](design-review/evidence/dark/dark-quiet.png) | “A - quiet night. works.” — shared visual direction |
+| Desktop compositions | [Explore Compact](mocks/explore/compact.png) · [Capture Wide](mocks/capture/wide.png) · [Idea Rows](mocks/idea/rows.png) · [Evolve Rail](mocks/evolve/rail.png) · [Export Columns](mocks/export/columns.png) | “compact”, “wide”, “3”, “3”, “side-by-side methods” — shown resting compositions; Evolve has one completed exchange, Export is setup |
+| Capture phone | [Roomy](mocks/capture-phone/roomy.png) | “1” — approximate composition only |
+| Capture recovery | [Saving](mocks/capture-states/saving.png) · [Saved](mocks/capture-states/saved.png) · [Access denied](mocks/capture-states/rejected.png) · [Uncertain](mocks/capture-states/uncertain.png) | “yes” — exact four approximate state sketches |
+| Explore essential states | [Initial](mocks/explore-states/initial.png) · [Loading](mocks/explore-states/loading.png) · [No results](mocks/explore-states/empty.png) · [Failure](mocks/explore-states/error.png) | “yes” — exact four desktop states |
+| Explore interactions | [Filtered](mocks/explore-interactions/filtered.png) · [Expanded](mocks/explore-interactions/expanded.png) · [Date/sort](mocks/explore-interactions/dates.png) · [Inclusive rejected](mocks/explore-interactions/inclusive.png) | “yes” — exact four desktop states |
+| Idea details | [Title](mocks/idea-details/title.png) · [Reply/history/provenance](mocks/idea-details/details.png) · [Fresh branch confirmation](mocks/idea-details/branch.png) · [Rejected inspection/restore](mocks/idea-details/restore.png) | “yes” — exact four desktop states |
+| Evolve lifecycle | [Fresh](mocks/evolve-lifecycle/fresh.png) · [Running](mocks/evolve-lifecycle/running.png) · [Uncertain](mocks/evolve-lifecycle/uncertain.png) · [Interrupted/continuation](mocks/evolve-lifecycle/interrupted.png) · [Failed](mocks/evolve-lifecycle/failed.png) | “yes” — exact five desktop states |
+| Export output | [Simple preview](mocks/export-output/simple.png) · [Running](mocks/export-output/running.png) · [Report ready](mocks/export-output/completed.png) · [Uncertain](mocks/export-output/uncertain.png) · [Interrupted](mocks/export-output/interrupted.png) | “yes” — exact five compositions **with the copy overrides below** |
+| Remaining narrow adaptations | [Explore](mocks/narrow/explore.png) · [Idea](mocks/narrow/idea.png) · [Evolve](mocks/narrow/evolve.png) · [Export](mocks/narrow/export.png) | “yes” — exact four **approximate** compositions **and shared rules/exceptions below** |
 
-[Selected assets and hashes](selected-assets.json) records the approval chain. The direction image is a **browser-rendered study**; Explore and Capture are **generated UI comps**. The approved PNGs are preserved unchanged.
+## Shared world, brand and interaction rules
 
-## Shared visual direction
+**Quiet Night:** all-dark working/reading surfaces, Source Sans 3, restrained borders and familiar controls. Focal text precedes subordinate context. The personal brand's **full sixteen-color functional palette plus documented rounded sRGB mixtures** supplies surfaces, neutrals, attribution and feedback; the four identity anchors are not a four-color ceiling. There is no requirement to show every palette color at once or color-code every material kind.
 
-Quiet Night uses all-dark working and reading surfaces, Source Sans 3, and the personal brand's **full 16-color functional palette plus documented mixtures**. Gold identifies the primary action, blue selection/focus, cyan contextual links, and worded green/purple bylines distinguish user/AI authorship—not agreement or acceptance.
+The manifest's `brand.palette` is the complete token handoff: exact ANSI values, original terminal defaults, selected UI roles and mixture percentages. Ground/shell `#031315`, card `#122224`, input `#0E1E20`, caption `#0A2C2E`, text `#FEF6E1`, body `#D5D3C5`, muted `#A5A8A0`, control line `#7B837F`; gold `#EFB83F` primary action, blue `#8EAEF2` selection/focus, cyan `#65C4C5` links, worded green/purple user/AI bylines. Attribution is not agreement, confidence or rejection state. Avoid adding pure white, a new visual world, terminal decoration or decorative art.
 
-See [selected brand guidance](brand/BRAND.md), [exact palette roles and mixtures](brand/ui-palette.json), and [source provenance](brand/SOURCE.md). The font and its license are bundled. No personal-brand artwork or external font service is required.
+**Brand provenance:** `/home/rjroy/Projects/personal-brand/brand/BRAND.md`, source revision `55dbe8766668cd409b16bddb437a6bceb7fb56f3`, inspected 2026-11-04 UTC with a clean source tree; no uncommitted inputs. Source guide/theme/font fingerprints and original source-relative paths are retained in the manifest. Palette values are consolidated losslessly, not silently refreshed from a mutable checkout. The font/license remain byte-identical. Machine-local source/native paths are historical identifiers, not required runtime dependencies. Confirm any future brand refresh separately.
 
-## Current scope
+**Navigation:** Explore / Capture / inactive Settings Reserved. Settings contents/behavior are undefined and excluded, not an additional design blocker. Idea, Evolve and Export are contextual; no extra shared destination, profile, bell, Ideas or Journal. Proposed Export entry is `Export…` in Idea's secondary actions, then Back to idea; the approved Idea image is unchanged. Opening another thought selects another Simple root—no root picker.
 
-The overall design gate remains open. These selections do not approve mobile/responsive layouts, unseen interaction/recovery states, other screens, shipping raster controls, or Next.js/daemon implementation. Settings remains reserved and undefined.
+**Approved shared rules and explicit raster exceptions:**
 
-- **Explore still needs:** initial/empty/loading/error views; expanded and long text; selected filters/counts, custom dates, open sorting, Show rejected; focus/mobile; and state-preserving return.
-- **Capture still needs:** phone, empty/long drafts, saving/saved/error/uncertain outcomes, optional-title behavior, focus, and draft-preserving recovery. A saved thought and background weaving are separate facts; no weaving status/retry control is specified.
-- **Illustrative content:** the selected Explore image's predecessor title also matches its query, so the pictured count is not a validated closed search fixture. Do not reuse the demo as executable data. No approved image is repainted to conceal this.
-- **Response discovery:** the daemon now exposes scoped `GET /thoughts/:id/responses` for associated retained replies, alongside direct-child and incident-connection reads. See the daemon API contract before designing the on-demand states. No new screen state is approved by this API addition.
+- Show obvious separated blue keyboard focus, persistent labels, underlined links and worded errors; never rely on color or hover alone. Reading order is focus order.
+- Narrow Explore uses an explicit **Filters** disclosure and count of selected filter values (AI + Developing ideas = two), not a new daemon facet/result count. Expose the existing author/kind/date/Show rejected/Clear filters controls with a visible heading/close, expanded state and predictable focus return; support Escape if implemented as a dialog. Preserve query/filter/sort/return position.
+- Put errors beside their fields and associate them in DOM. Retain all input/drafts and unrelated valid values. At genuinely narrow widths, wrap the Export count error **below** its field instead of shrinking text. Positive whole count only, no invented upper limit; nonempty Evolve contribution enables Send; pending admission disables duplicate sending without an exactly-once guarantee. Export methods validate independently.
+- Preserve readable CSS text and accessible targets even if the page scrolls farther than the full-page sketches. Stack rows/details and use full-width flowing Markdown with safe identifier wrapping and reachable Download. **Do not literally scale raster text/targets into the app.**
+- Use one coherent shell and the approved font, not incidental generated header/tagline density differences. Do not infer thought formatting from generated italic emphasis. Evolve's wordmark line saying “Evolve” is text, not a second action.
+- Apply retained-draft/known-run recovery consistently. A read/transport error is not proof of daemon failure. Never automatically replay writes, invent unknown-ID lookup, resume opaque sessions, promise autosave/offline queues/cross-reload persistence, or fabricate completed/partial downloadable output.
 
-## Provenance and reproduction
+**Approximate framing:** Capture Roomy and its four state sketches are 928 × 1695, about 390 × 712 when proportionally previewed—not 390 × 844. The other narrow sketches are 975 × 1614, about 390 × 646. These are hierarchy studies, not CSS viewport, physical-device, keyboard, touch, safe-area, contrast or accessibility audits. Their actual dimensions and original framing limitations remain explicit in the manifest.
 
-Each generated comp has an adjacent `.png.json` containing its exact approved-image hash, approval scope, native output identity, input reference, and exact CLI request. The selected requests are retained at [Explore prompt](design-review/explore-prompts/compact.txt) and [Capture prompt](design-review/capture-prompts/wide.txt).
+## Surface behavior and content boundaries
 
-The authorized generation route is `codex exec --skip-git-repo-check --image <recorded-reference> - < recorded-prompt`, using a 600000 ms host timeout and normal native staging. This records how the selected images were produced; it is not permission to generate replacements. New outputs must not overwrite these approved PNGs, and AI regeneration is not promised to be byte-identical. Internal image-model/tool-prompt details not exposed by the runner are left unknown.
+Current [architecture](../.lore/context/architecture.md), [daemon API](../docs/daemon-api.md) and screen context remain authoritative. Browser → Next.js server → Hono; credentials stay server-side. No attachments, rich-text editor, tags/folders, graph, editable thought text, versions, new agent mode, model/budget settings, extra endpoints or Settings features are authorized.
 
-The direction HTML is self-contained and retains the exact embedded Source Sans 3 font. Its rendering command and browser version are recorded in the manifest. Machine-local source/native paths in provenance are historical identifiers, not runtime dependencies. Durable selected files and all required palette/font resources are inside this packet.
+### Capture
 
-Current product and transport constraints remain in the [architecture agreement](../.lore/context/architecture.md) and [daemon API](../docs/daemon-api.md). The selected packet does not depend on `PRODUCT.md`.
+Thought text first, secondary optional title, Save. Titles are not mandatory. Saving retains visible/copyable draft values and disables repeat submission in the current page. Only a confirmed **201** and canonical returned thought enable Saved, Open idea and Capture another thought. Do not wait for weaving or add weaving progress/retry.
+
+The Not saved sketch is **401 access denial before creation**, not rejection of an existing thought and not a universal network/500 treatment. Keep text/title and allow deliberate retry after access is restored. An unknown outcome says it **may have saved**; retain the original submitted snapshot. Open Explore in new tab is navigation, not proof of this request. **Save another copy** explicitly warns it may create a duplicate and admits a new capture only on deliberate intent. Identical text is not an idempotency key; later edits must not silently replace the snapshot associated with uncertainty. No save-status lookup or background replay is promised.
+
+### Explore
+
+Query-first, not a feed. No queryless search; before input exists refinements/sort are inactive. Loading retains query/selections, disables Searching and uses dashes for unknown counts; only a successful empty response can show zeros. Empty allows adjustment/Clear filters; failed search retains values and offers deliberate Retry search. Only the latest matching request may populate results if inputs change while loading.
+
+Authorship/kind filters combine OR within groups, AND across groups; author facets omit only author selection, kind facets omit only kind selection. Counts count **thought and response records separately**, not unique destinations; no date/Show rejected count. Clear filters retains query/sort but resets author/kind/date/Show rejected. Custom dates are inclusive UTC; sort is Relevance / Newest first / Oldest first. Show rejected is inclusive active **plus** rejected, never rejected-only.
+
+Cards show actual matching wording, not generated summaries. Ellipsis expands the complete matching `text` in place; opening uses `thoughtId`. Response matches are AI-authored and open their eligible associated thought with retained reply available; they are neither new developments nor independently rejectable. Titles/classification/context remain distinct from matching record identity. Return preserves query, filters, sort and place.
+
+Context is daemon-owned: best qualifying directly connected matching thought, otherwise immediate visible predecessor, otherwise none. Context remains active-only even in rejected inspection; it need not satisfy result date/author/kind filters. Preserve recorded direction/rationale; do not generate a new explanation. SearchResult itself has **no rejected flag**: the pictured rejected **thought** badge uses normal server composition of existing user `GET /thoughts/:id?scope=show-rejected`. A failed inspection cannot establish active/rejected status or every association of a response.
+
+The consistent later example has query `connections`, AI + Developing ideas, two matches (one development and its full reply). Facets You/AI = 0/2; Original/Contribution/Interpretation/Developing = 0/0/1/2. Nov 1–3 inclusive removes the October interpretation facet (0/0/0/2), not the two results or their older context. Inclusive rejected adds one thought: three results, 0/3 and 0/0/1/3. The original Compact desktop's matching predecessor/title makes its three-result illustration unsuitable as executable data; do not change retrieval behavior or repaint it to rationalize that count.
+
+### Idea
+
+Keep immutable thought text focal, Evolve primary and title/details/availability actions secondary. The selected original has **no parent, source IDs or retained reply**; do not manufacture counts or Full reply for it. Edit/Clear changes title metadata only; clear sends `title:null`, permits conditional regeneration and leaves the first-five-word fallback (here **Connections should help me ask**). Active clearing can queue weaving; no timed fill promise, and late AI must not overwrite a current title. Rejected clearing does not imply agent work.
+
+Full reply, Sources, History and Why connected are on demand, not always open. The detail sketch uses a **different AI development**, with a genuine retained addendum, source original and three-thought parent path. History means distinct thoughts, not revisions. Use scoped canonical thought/associated-response/incident-directed-connection/direct-child/source/parent reads, not a new aggregate. Dates shown belong to thoughts, not invented response timestamps. Preserve recorded connection direction, proposer, explanation and sources; no new confidence/reasoning.
+
+Rejection/restoration is user-only. Individual thought rejection leaves descendants active; branch operations follow evolution ancestry, **not discovered connections or source references**. The selected refreshed confirmation is after a stale three-item preview returns409 and a fresh preview succeeds with **four** ideas. Submit that exact fresh `rootId,branchIds,affectedIds,count` object, require explicit new confirmation, and never automatically retry the destructive POST. While refresh is pending/failed, old confirmation stays unavailable.
+
+Rejected inspection is a separate single-item snapshot, not the result of rejecting that branch. Distinguish explicit connection rejection from ordinary invisibility caused by a rejected endpoint: **Restore connection only for `rejected:true`**. Restoring a thought does not restore an independently rejected connection; restoring a connection still requires active endpoints for ordinary visibility. The merely endpoint-hidden connection has no redundant Restore connection. Branch restoration is the existing bodyless operation, not an invented restoration preview. Rejected thoughts cannot Evolve; separate title editing remains possible. Deliberate user history must never feed rejected material to AI. No deletion/rejection-reason/timestamp/Restore all is implied.
+
+### Evolve
+
+Starting context rail on desktop, compact disclosure above chronological conversation on narrow screens. Opening starts a fresh workspace: no greeting, automatically resumed opaque session or fabricated output. Recorded developments remain subordinate to the user-facing reply; all are distinct immutable thoughts. Latest **issued confirmed** development is the continuation default. Change selects another issued development/branch point deliberately; Open idea only browses. Choosing Evolve from an earlier Idea starts a new workspace. No repeated Evolve action, attachments or forced complex selector on every turn.
+
+Admission atomically creates contribution + queued run and returns201. Status uses only `{id,kind,status,confirmedThoughtIds,responseId}`. Resolve saved IDs and canonical reply reads before presenting text as recorded. No stream, percentages, ETA, hidden reasoning, native bindings, invented error cause or cancellation-settlement field. Keep the next unsent draft; freeze admitted continuation and disable Send while active/uncertain.
+
+Queued/submitting/running/uncertain use the same honest local status pattern. Stop on nonterminal work sends `{}` and fences authority, not an instant native-kill guarantee. Confirmed outputs survive. Uncertain/check reads **the same known run ID**, not another admission or reconciliation endpoint. Interrupted can show a genuine canonical `state:interrupted` reply and saved thoughts, never provisional prose; the selected fixture has two outputs, latest selected, with other output/starting-branch choices. Failed is an alternative outcome with one saved output and null reply, not a transition from interruption. Other failures could retain a canonical interrupted reply if actually exposed. Terminal Send is an ordinary **new contribution**, not Retry/Resume of the previous one. No general retry or automatic replay.
+
+Leaving is not cancellation; keep actual known run IDs available. Unknown admission before receiving an ID remains honestly unknown, with no invented lookup or automatic duplicate POST. Workspace persistence/reload policy must be explicit during implementation, not inferred as a guarantee. Precise agent context selection remains daemon-owned; images do not authorize context expansion, session aggregation or rejected-history access.
+
+### Export
+
+Simple and Agentic are distinct methods, side by side on desktop and stacked on narrow screens. Root is read-only contextual selection. **Copy overrides:** running **Request** replaces “Admitted request”; completed **Report ready** replaces “Successful artifact read.” Exact PNGs stay unchanged.
+
+Simple sends only rootId, positive whole count and breadth/depth traversal. Includes root, traverses evolution only, skips rejected descendants without consuming count or cutting off active descendants, excludes separate full reply addenda (stored fallback thought text remains a thought). Preview renders actual200 Markdown with current title/fallback, ID, author/kind, creation time, origin, eligible source IDs and original words. Download saves **those same returned bytes**, not another export request. `thoughtloom-simple.md` is a consumer filename, not an API field. Zero count is invalid with **Enter a whole number of 1 or more.** No upper bound is invented. This must not disable independent valid Agentic input.
+
+Agentic sends nonempty request plus Quick/Standard/Thorough effort, not quotas/model settings or Simple branch restrictions. It investigates eligible existing thinking read-only. Preserve request/effort read-only after known admission; no editing silently starts another job or duplicate Create report. Stop/check follow the same known-run pattern as Evolve. Back to setup navigates and retains inputs/run reference; it does not restart work.
+
+Only completed status **and successful report GET** allow report preview/download. Noncompleted artifact reads409, not partial reports. Interrupted/failed retain input with no report or active Download/Stop/Retry/Resume; failed reuses the common terminal-error treatment **without Evolve development/reply cards**, with “No completed report is available.” Missing configuration503 before admission says no report started; configured service unavailability may leave durable queued work, not falsely failed work. Failed observation/artifact reads retain last real status/known ID, never generate substitute output. `exp-0142` is a synthetic example run ID, not a daemon field/default. `thoughtloom-report.md` is a local filename.
+
+The API returns **plain Markdown**, not `{sources:...}`. Only identities in the daemon-appended final **Sources** block are candidates for local Idea links, after normal same-scope thought reads establish eligibility. Follow the current producer's escaping/code-delimited JSON-ID format in `src/domain/agentic-export.ts:renderExportReport`; do not trust arbitrary body prose/links as validated sources or change downloaded bytes. Keep source attribution and the “not endorsement” distinction. Later source rejection does not rewrite the historical human-downloadable report: failed normal links become unavailable, without silently switching to history or exposing the artifact to AI. Agentic report completion need not create thoughts or an Evolve response; empty confirmed IDs/null responseId are valid. Safe rendering/source parsing/scoped resolution require isolated consumer tests.
+
+## Provenance and reuse
+
+The manifest consolidates essential image metadata and approvals, reference hashes/ordering, brand/font sources and current shared exceptions. It contains no required path to removed briefs, boards, fixtures or sidecars. Superseded prose/fixture files are not reproduction dependencies: exact producing content is recoverable from the **PNG's embedded CLI request**, while this handoff governs current approved rules and wording. Prompts may contain the original technical wording explicitly overridden above; extraction must not silently rewrite history.
+
+All 36 generated PNGs contain the exact producing UTF-8 request in the `impeccable:prompt` tEXt chunk. Extract one without an image library (from repository root):
+
+```sh
+python3 - .impeccable/mocks/explore/compact.png > /tmp/opencode/thoughtloom-comp-prompt.txt <<'PY'
+import pathlib, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+assert data[:8] == b'\x89PNG\r\n\x1a\n'
+offset = 8
+while offset < len(data):
+    size = int.from_bytes(data[offset:offset + 4], 'big')
+    kind = data[offset + 4:offset + 8]
+    value = data[offset + 8:offset + 8 + size]
+    offset += size + 12
+    if kind == b'tEXt' and value.startswith(b'impeccable:prompt\0'):
+        sys.stdout.buffer.write(value.split(b'\0', 1)[1])
+        break
+else:
+    raise SystemExit('Exact producing request missing')
+PY
+```
+
+For an **independently authorized future generation**, use the existing asset-art Codex route with that extracted request on stdin and the manifest's ordered reference images: `codex exec --skip-git-repo-check --image <reference> [--image <second-reference>] - < <request-file>`. Set the host shell timeout to **600000 ms**, allow normal native staging, inspect before copying, and never overwrite an approved PNG. No automatic retry/duplicate after timeout or alternate provider. Observed runner/model and unexposed internal-model details remain accurately recorded. Regeneration is not promised byte-identical and this recipe is not new generation or integration permission.
+
+The direction PNG has browser-study provenance rather than an image prompt. Its redundant HTML (including a second embedded font copy) is not required to recreate the selected UI world; the PNG, palette, font and current rules are the visual handoff. Its original source hash/browser identity remain historical in the manifest, not a live file dependency. Native staging paths are similarly historical; all actual reference images and font/license resources are local.
+
+## Verification and implementation boundary
+
+All 37 main PNG identities are preserved exactly. Prompt extraction, reference chains, dimensions and the minimum file inventory are checked; prior native/copy pixel checks and actual native/copy visual inspections are recorded as design evidence, not rerun runtime tests. Consolidation does not claim FTS/API/agent/database/browser testing. Design fixtures were illustrative checks, not production configuration or ready-made unit tests.
+
+Future separately authorized client work must verify real responsive type/targets/wrapping, keyboard/focus/disclosures, long/empty/error content, date/numeric/nonempty validation, command uncertainty/draft retention, query/scroll restoration, Stop/known-run recovery, rejected-scope protections, safe Markdown/source parsing and actual preview/download. These are implementation/consumer checks, **not remaining design blockers or requests for more mockups**. The current Impeccable workflow's measured build comparisons, finish review and final implementation-derived DESIGN.md/tokens have not run; do not label this comp approval an application “ship” verdict.
