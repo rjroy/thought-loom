@@ -56,7 +56,7 @@ OpenCode integration uses this explicit configuration shape:
 
 Set the serialized JSON in `THOUGHTLOOM_AGENT_CONFIG`; placeholders above are not runnable model choices. All fields and all three effort entries are required when configuring agents. Variant entries are model-specific strings or explicit `null` for that model's default variant. There are no universal `low`/`high` names or application turn, token, cost, search-count or note-count quotas. No model is selected from the catalog automatically.
 
-For a rough local test, [the setup helper](testing.md#rough-local-agent-setup) can generate matching private launchers from explicit configuration or the existing service's configured default model. This is a helper choice, not a daemon fallback to an arbitrary catalog model.
+For a rough local test, [the setup helper](testing.md#rough-local-agent-setup) generates matching private launchers from explicit configuration or defaults to `openai/gpt-6.1-sol`, with `low`, `medium`, and `high` variants for quick, standard, and thorough effort. These are helper defaults, not a daemon model fallback.
 
 `service: {"discover": true}` attaches only to an already-running managed service and preserves its authentication headers, including Basic authentication. It never starts, stops or upgrades the service. Alternatively, use `service: {"url": "<service-url>", "token": "<optional-bearer-token>"}` for an explicit endpoint; omit `token` when not needed. Keep this setting server-side and out of commits or browser code. Credentials are not stored in run bindings or diagnostic errors.
 

@@ -18,27 +18,11 @@ env -u THOUGHTLOOM_AGENT_CONFIG bun --no-env-file test
 env -u THOUGHTLOOM_AGENT_CONFIG bun --no-env-file run typecheck
 
 if [[ ! ${THOUGHTLOOM_AGENT_CONFIG+x} ]]; then
-  # Discover only the existing operator-managed service and its selected default.
-  if ! THOUGHTLOOM_AGENT_CONFIG="$(bun --no-env-file -e '
-    import { Service } from "@opencode/client/service";
-    import { OpenCode } from "@opencode/client";
-    try {
-      const endpoint = await Service.discover();
-      if (!endpoint) throw new Error();
-      const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) });
-      const selected = (await client.model.default({ location: { directory: process.cwd() } }, { signal: AbortSignal.timeout(10000) })).data;
-      if (!selected || !selected.providerID || !selected.id) throw new Error();
-      const variant = "variant" in selected && typeof selected.variant === "string" && selected.variant.trim() ? selected.variant : null;
-      console.log(JSON.stringify({ service: { discover: true }, directory: process.cwd(),
-        model: { providerID: selected.providerID, id: selected.id },
-        effort: { quick: variant, standard: variant, thorough: variant } }));
-    } catch {
-      console.error("Cannot select the running OpenCode service default model; start/configure the operator service or set THOUGHTLOOM_AGENT_CONFIG explicitly.");
-      process.exitCode = 1;
-    }
-  ')"; then
-    exit 1
-  fi
+  THOUGHTLOOM_AGENT_CONFIG="$(bun --no-env-file -e '
+    console.log(JSON.stringify({ service: { discover: true }, directory: process.cwd(),
+      model: { providerID: "openai", id: "gpt-6.1-sol" },
+      effort: { quick: "low", standard: "medium", thorough: "high" } }));
+  ')"
 fi
 export THOUGHTLOOM_AGENT_CONFIG
 

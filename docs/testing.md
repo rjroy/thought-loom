@@ -142,7 +142,7 @@ scripts/daemon.local.sh
 scripts/demo.local.sh
 ```
 
-Setup builds spellfix and runs checks, then writes private matching launchers without resetting `.data/thoughtloom.sqlite`. It preserves an explicit `THOUGHTLOOM_AGENT_CONFIG`; otherwise it uses the already-running OpenCode service's configured default model, with the model's default variant for all effort labels. Supply explicit configuration to choose different variants. Validation checks exclude agent configuration and do not use the live model.
+Setup builds spellfix and runs checks, then writes private matching launchers without resetting `.data/thoughtloom.sqlite`. It preserves an explicit `THOUGHTLOOM_AGENT_CONFIG`; otherwise it selects `openai/gpt-6.1-sol` with `quick: low`, `standard: medium`, and `thorough: high`. The generated daemon discovers the operator-managed OpenCode service lazily when agent work needs it; that service must provide the selected model and variants. Supply explicit configuration to choose a different model or variants. Validation checks exclude agent configuration and do not use the live model.
 
 **Starting the generated daemon can process existing queued weaving; running the generated demo admits real Evolve and Agentic export work. These can incur model charges.** The smoke client waits up to 45 seconds per run, then prints an inspection hint without stopping the daemon-owned work. Rerunning setup generates new daemon credentials, so restart the test daemon with its matching new launcher. Setup does not start or change the OpenCode service.
 

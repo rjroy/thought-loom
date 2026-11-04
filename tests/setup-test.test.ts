@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 
 const firstToken = "aaaaaaaa-1111-4222-8333-444444444444";
 const secondToken = "bbbbbbbb-1111-4222-8333-444444444444";
-const selectedModel = { providerID: "operator-provider", id: "service-default-model", variant: "operator-default-variant" };
 const fakeBun = [
   "#!/bin/bash",
   "set -eu",
@@ -22,8 +21,11 @@ const fakeBun = [
   "  run:typecheck) [ \"${FAKE_FAIL-}\" != typecheck ] || exit 44; exit 0;;",
   "  run:daemon) exit 0;;",
   "esac",
-  // All other setup-time Bun invocations are the test-owned SDK discovery response.
-  "printf '%s\\n' \"$FAKE_DISCOVERY_CONFIG\"",
+  // Simulate the old SDK discovery path with an alternate test-owned selection.
+  "if [ \"${1-}\" = -e ] && [[ \"${2-}\" = *Service.discover* ]]; then printf '%s\\n' \"$FAKE_DISCOVERY_CONFIG\"; exit 0; fi",
+  // Execute only the model-free JSON construction, never SDK or network code.
+  "if [ \"${1-}\" = -e ] && [[ \"${2-}\" != *import* ]] && [[ \"${2-}\" != *fetch* ]]; then exec \"$REAL_BUN\" --no-env-file \"$@\"; fi",
+  "exit 45",
 ].join("\n") + "\n";
 
 async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -51,8 +53,8 @@ async function fixture(action: (f: { root: string; script: string; log: string; 
     await writeFile(join(root, ".data", "thoughtloom.sqlite"), "test-owned existing database sentinel");
     await writeFile(join(bin, "bun"), fakeBun); await chmod(join(bin, "bun"), 0o700);
     const log = join(root, "fake-calls.log"); const envFile = join(root, "fake-env.bin");
-    const discovered = { service: { discover: true }, directory: root, model: { providerID: selectedModel.providerID, id: selectedModel.id }, effort: { quick: selectedModel.variant, standard: selectedModel.variant, thorough: selectedModel.variant } };
-    const env = { HOME: root, TMPDIR: root, PATH: `${bin}:/usr/bin:/bin`, FAKE_LOG: log, FAKE_ENV: envFile, FAKE_CHECK_ENV: join(root, "test-agent-config-state"), FAKE_UUID_MARK: join(root, "uuid-used"), FAKE_DISCOVERY_CONFIG: JSON.stringify(discovered) };
+    const discovered = { service: { discover: true }, directory: root, model: { providerID: "fixture-provider", id: "fixture-model" }, effort: { quick: "fixture-variant", standard: "fixture-variant", thorough: "fixture-variant" } };
+    const env = { HOME: root, TMPDIR: root, PATH: `${bin}:/usr/bin:/bin`, REAL_BUN: process.execPath, FAKE_LOG: log, FAKE_ENV: envFile, FAKE_CHECK_ENV: join(root, "test-agent-config-state"), FAKE_UUID_MARK: join(root, "uuid-used"), FAKE_DISCOVERY_CONFIG: JSON.stringify(discovered) };
     await action({ root, script, log, envFile, env });
   } finally { await rm(root, { recursive: true, force: true }); }
 }
@@ -107,7 +109,7 @@ test("generated demo declares a user-triggered Evolve and Agentic export smoke w
   expect(smoke).not.toMatch(/\/runs\/[^\s"'`]+\/stop/);
 }));
 
-test("absent config uses the already-running service's selected default model and builds spellfix before checks", async () => fixture(async f => {
+test("absent config selects the OpenAI model and effort levels and builds spellfix before checks", async () => fixture(async f => {
   const setup = await command(["/bin/bash", f.script], f.root, f.env);
   expect(setup.code).toBe(0);
   await launchers(f.root);
@@ -119,7 +121,7 @@ test("absent config uses the already-running service's selected default model an
   expect(calls.some(value => /Service\.ensure|service\.start|service\.stop/.test(value))).toBe(false);
   const values = await launchEnv(f);
   const config: unknown = JSON.parse(values.agent ?? "");
-  expect(config).toEqual({ service: { discover: true }, directory: f.root, model: { providerID: selectedModel.providerID, id: selectedModel.id }, effort: { quick: selectedModel.variant, standard: selectedModel.variant, thorough: selectedModel.variant } });
+  expect(config).toEqual({ service: { discover: true }, directory: f.root, model: { providerID: "openai", id: "gpt-6.1-sol" }, effort: { quick: "low", standard: "medium", thorough: "high" } });
   expect(setup.stdout + setup.stderr).not.toContain(firstToken);
   expect(setup.stdout + setup.stderr).not.toContain(secondToken);
 }));
