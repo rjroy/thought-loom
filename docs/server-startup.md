@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Testing](testing.md)
 
-The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture, Explore, Idea and Evolve as described below; the export screen is still being implemented. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
+The daemon is a Hono application running on Bun with SQLite storage. It listens only on `127.0.0.1`. The separate Next.js/React client provides Capture, Explore, Idea, Evolve and Export as described below. Optional agents attach to an existing operator-managed OpenCode service; Thoughtloom does not start that service.
 
 ## Install
 
@@ -75,7 +75,7 @@ Direct `/ideas/<id>` bookmarks load the normally visible thought without requiri
 
 Thought text, authorship and ancestry are not editable. Edit title and Clear title change separate metadata; clearing permits later generation without promising when it will happen. Full reply, Sources, History and connection rationale stay on demand. History shows distinct thoughts and uses deliberate user inspection for rejected records; ordinary unavailable sources/parents never silently fall back to broader access. Response links cannot fetch an unrelated reply by bypassing the focused thought's associations.
 
-More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas; the export screen remains a later task. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
+More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
 
 Branch rejection uses the daemon's exact preview and affected count. If confirmation returns `409`, the dialog invalidates the old confirmation, loads a fresh preview, and requires another explicit confirmation. It never automatically repeats the destructive request. Branch restoration uses the existing bodyless operation, without an invented count/preview. Only confirmed command responses show success. Pending changes prevent duplicate submissions and keep their original target; unknown write outcomes stay unconfirmed without automatic replay or false success.
 
@@ -86,6 +86,16 @@ Branch rejection uses the daemon's exact preview and affected count. If confirma
 Send submits only the contribution text against the selected continuation. A canonical admission records the user contribution and establishes the known run ID; it is not a completed development. The workspace observes that run and separates recorded developments from its retained reply. Change selects an actual saved continuation; Open idea only browses. Complete fallback replies can use their associated contribution as the development, while interrupted fallback replies do not become continuation points.
 
 Unconfirmed admission retains its submitted snapshot without automatic resend or guessed run lookup. A failed status read does not mark the run failed. Temporary output/reply read errors retain previously confirmed display text with a warning, but unconfirmed points cannot be used for Send until checked successfully. Confirmed normal-scope unavailability removes those records; Change still permits deliberate selection of a remaining eligible thought. Check this run observes a known ID; Stop uses the daemon's existing stop operation and retains saved output and the next draft. An unconfirmed Stop is not proof of cancellation, and leaving the page is not Stop. All input/output reads remain normal-scoped; unavailable records do not silently fall back to rejected-history inspection. Model configuration remains daemon-side, with no client effort or model selector for Evolve.
+
+### Export workspace
+
+Idea's contextual Export action opens `/export?thoughtId=<id>`. Simple uses that read-only, normally visible root plus a positive whole count and breadth/depth traversal. A missing or unavailable root disables only Simple; Agentic remains independent. Simple previews the actual returned Markdown and downloads those same bytes as `thoughtloom-simple.md`, without another export request.
+
+Agentic takes a request and Quick/Standard/Thorough effort, not Simple's tree restrictions or model/cost limits. After confirmed admission its submitted request and effort stay read-only, with a known run ID for Check and Stop. Back to setup and in-app return retain mounted work; a fresh page or reload starts setup without replaying, resuming or stopping daemon work. Missing configuration means no report started; unknown admission is not silently resubmitted. Observation or Stop errors preserve the last real status. Leaving is not Stop, and Stop does not promise immediate native cancellation.
+
+Completed status is not enough for **Report ready**: the report must also be read successfully. Interrupted/failed work has no invented partial report. A transient artifact error does not replace an already read report with substitute content. Download saves the received artifact bytes as `thoughtloom-report.md` without requesting another report.
+
+Both previews format Markdown without active body links, external images or raw HTML. Local Idea links come only from the producer-appended Sources block after normal-scope identity checks. Later-rejected or unavailable sources do not fall back to history; source attribution is not endorsement. These display checks never rewrite the downloaded Markdown or make historical reports eligible agent context.
 
 ### Native spelling extension
 

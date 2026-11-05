@@ -13,6 +13,7 @@ import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture
 import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser } from "./evolve.runtime";
+import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -32,6 +33,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
+    "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
@@ -42,6 +44,10 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/evolve/thoughts/[id]/route.ts", "apps/web/src/app/api/evolve/thoughts/[id]/responses/[responseId]/route.ts",
     "apps/web/src/app/api/evolve/runs/[id]/route.ts", "apps/web/src/server/evolve.ts",
     "apps/web/src/features/evolve/location.ts", "apps/web/src/features/evolve/types.ts", "apps/web/src/features/evolve/validation.ts", "apps/web/src/features/evolve/request.ts",
+    "apps/web/src/app/api/export/simple/route.ts", "apps/web/src/app/api/export/agentic/route.ts", "apps/web/src/app/api/export/agentic/[id]/route.ts",
+    "apps/web/src/app/api/export/runs/[id]/route.ts", "apps/web/src/app/api/export/thoughts/[id]/route.ts", "apps/web/src/server/export.ts",
+    "apps/web/src/features/export/types.ts", "apps/web/src/features/export/request.ts", "apps/web/src/features/export/sources.ts",
+    "apps/web/src/components/export-markdown.ts",
     "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
@@ -201,8 +207,10 @@ async function main(): Promise<void> {
   const fixtureSearch = searchDaemon(token);
   const fixtureIdea = ideaDaemon(token);
   const fixtureEvolve = evolveDaemon(token);
+  const fixtureExport = exportDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
+    if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
+    else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
     else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
@@ -246,6 +254,7 @@ async function main(): Promise<void> {
     await checkSearchRoute({ origin, host, probe, daemon: fixtureSearch });
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
     await checkEvolveRoute({ origin, host, probe, daemon: fixtureEvolve });
+    await checkExportRoute({ origin, host, probe, daemon: fixtureExport });
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
@@ -276,6 +285,7 @@ async function main(): Promise<void> {
           await checkExploreBrowser(page, fixtureSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await checkIdeaBrowser(page, fixtureIdea, { origin, narrow: viewport.width < 500 });
           await checkEvolveBrowser(page, fixtureEvolve, { origin, narrow: viewport.width < 500 });
+          await checkExportBrowser(page, fixtureExport, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await page.evaluate(() => document.fonts.ready);
           assert.ok(await page.evaluate(() => Array.from(document.fonts).some(font => font.status === "loaded" && font.family.toLowerCase().includes("source"))), "local Source Sans font should load");
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "horizontal overflow");
