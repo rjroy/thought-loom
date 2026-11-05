@@ -4,10 +4,11 @@ export interface WebConfig {
   readonly userToken: string | undefined;
 }
 
-function localOrigin(value: string): string {
+function origin(value: string, allowRemoteHttps = false): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("Invalid local origin"); }
-  if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (!['http:', 'https:'].includes(url.protocol) || (!loopback && !(allowRemoteHttps && url.protocol === 'https:'))
       || url.username || url.password || (value !== url.origin && value !== `${url.origin}/`)) {
     throw new Error("Invalid local origin");
   }
@@ -17,8 +18,8 @@ function localOrigin(value: string): string {
 /** Pure boundary for explicit configuration; the server wrapper owns environment access. */
 export function readWebConfig(env: Readonly<Record<string, string | undefined>>): WebConfig {
   return {
-    daemonOrigin: localOrigin(env.THOUGHTLOOM_DAEMON_URL ?? "http://127.0.0.1:3001"),
-    webOrigin: localOrigin(env.THOUGHTLOOM_WEB_ORIGIN ?? "http://127.0.0.1:3000"),
+    daemonOrigin: origin(env.THOUGHTLOOM_DAEMON_URL ?? "http://127.0.0.1:3001"),
+    webOrigin: origin(env.THOUGHTLOOM_WEB_ORIGIN ?? "http://127.0.0.1:3000", true),
     userToken: env.THOUGHTLOOM_USER_TOKEN,
   };
 }

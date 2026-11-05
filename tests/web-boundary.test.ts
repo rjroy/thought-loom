@@ -6,6 +6,7 @@ import { createLogger, type LogRecord } from "../src/logging";
 
 const token = "owned-token-sentinel";
 const thought = "owned-private-thought-sentinel";
+const tailscaleOrigin = "https://gsai.raptor-piranha.ts.net";
 const config = () => readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://127.0.0.1:3001", THOUGHTLOOM_WEB_ORIGIN: "http://127.0.0.1:3000", THOUGHTLOOM_USER_TOKEN: token });
 const logger = (records: LogRecord[]) => createLogger("verbose", record => records.push(record));
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
@@ -18,17 +19,25 @@ describe("web server configuration", () => {
     expect(result.userToken).toBeUndefined();
   });
 
-  for (const value of ["https://example.com", "http://localhost.evil.test", "http://user:pass@127.0.0.1:3001", "http://127.0.0.1:3001/path", "http://127.0.0.1:3001/?q=x", "http://127.0.0.1:3001/#x", "file:///tmp/a", "not a url"]) {
+  for (const value of ["https://example.com", tailscaleOrigin, "http://localhost.evil.test", "http://user:pass@127.0.0.1:3001", "http://127.0.0.1:3001/path", "http://127.0.0.1:3001/?q=x", "http://127.0.0.1:3001/#x", "file:///tmp/a", "not a url"]) {
     test(`rejects invalid daemon origin ${value}`, () => {
       expect(() => readWebConfig({ THOUGHTLOOM_DAEMON_URL: value })).toThrow();
     });
   }
 
-  for (const value of ["http://evil.test:3000", "http://user@localhost:3000", "http://localhost:3000/path", "http://localhost:3000/?q=1", "http://localhost:3000/#x"]) {
+  for (const value of ["http://evil.test:3000", "http://gsai.raptor-piranha.ts.net", "https://user@gsai.raptor-piranha.ts.net", `${tailscaleOrigin}/path`, `${tailscaleOrigin}/?q=1`, `${tailscaleOrigin}/#x`, "http://user@localhost:3000", "http://localhost:3000/path", "http://localhost:3000/?q=1", "http://localhost:3000/#x"]) {
     test(`rejects invalid web origin ${value}`, () => {
       expect(() => readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: value })).toThrow();
     });
   }
+
+  test("accepts explicitly configured remote HTTPS web origins without changing the daemon default", () => {
+    for (const origin of [tailscaleOrigin, "https://other.example.test:8443"]) {
+      const result = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: origin });
+      expect(result.webOrigin).toBe(origin);
+      expect(result.daemonOrigin).toBe("http://127.0.0.1:3001");
+    }
+  });
 
   test("accepts explicit loopback origins including IPv6 and independent configurations", () => {
     const first = readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://localhost:4567", THOUGHTLOOM_WEB_ORIGIN: "http://[::1]:4568", THOUGHTLOOM_USER_TOKEN: "first" });
@@ -60,6 +69,19 @@ describe("browser request guard", () => {
     const ipv6 = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: "http://[::1]:4312" });
     expect(isTrustedRequest(ipv6, request("GET", { host: "[::1]:4312" }))).toBe(true);
     expect(isTrustedRequest(ipv6, request("GET", { host: "[::1]:4313" }))).toBe(false);
+  });
+  test("checks the actual Tailscale host and exact mutation origin without trusting forwarded headers", () => {
+    const served = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: tailscaleOrigin });
+    const host = "gsai.raptor-piranha.ts.net";
+    expect(isTrustedRequest(served, request("GET", { host }))).toBe(true);
+    expect(isTrustedRequest(served, request("GET", { host: "evil.test", "x-forwarded-host": host }))).toBe(false);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(isTrustedRequest(served, request(method, { host, origin: tailscaleOrigin }))).toBe(true);
+      expect(isTrustedRequest(served, request(method, { host }))).toBe(false);
+      expect(isTrustedRequest(served, request(method, { host, origin: "https://evil.test", "x-forwarded-host": host, "x-forwarded-proto": "https" }))).toBe(false);
+      expect(isTrustedRequest(served, request(method, { host, origin: "https://other.example.test:8443" }))).toBe(false);
+      expect(isTrustedRequest(served, request(method, { host: "evil.test", origin: tailscaleOrigin, "x-forwarded-host": host }))).toBe(false);
+    }
   });
 });
 

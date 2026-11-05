@@ -19,6 +19,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 | Document | What it covers |
 | --- | --- |
 | [Server startup](docs/server-startup.md) | Install and run the daemon and web client; configure their server-side boundary. |
+| [Production deployment](docs/production-deployment.md) | Build and supervise persistent loopback-bound services, with optional private HTTPS access; manage credentials, backups and upgrades. |
 | [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
 | [Daemon API](docs/daemon-api.md) | Authentication, request and response shapes, routes, and examples. |
 | [Database schema](docs/database-schema.md) | SQLite tables, relationships, constraints, and migrations. |
