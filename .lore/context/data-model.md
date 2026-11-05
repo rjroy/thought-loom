@@ -18,6 +18,7 @@ For product discussion, “note” is an umbrella term. Original source material
 ## Kinds of material
 
 - **Captured original:** what the user entered, with its date and provenance. This is a historical record, not text the AI may silently improve or replace.
+- **Imported original:** exact wording from an [imported source document](markdown-import.md), attributed as Imported source rather than automatically to the importer or AI. Original authorship is unverified; import does not imply endorsement.
 - **User contribution during development:** a question, challenge, or new thought entered in a discussion. Retain the user's actual words and the context in which they were contributed. Disagreement or correction is expressed as a new thought, not an edit to an existing one.
 - **AI interpretation:** an attributed reading of existing material. It is a hypothesis about meaning, not a replacement original or an assertion that the user agrees.
 - **Developing idea:** a retained thought emerging from interpretation or dialogue. It may be AI-authored or user-authored; kind and authorship are separate facts. Further development creates new thoughts, not new versions of this one.
@@ -26,7 +27,7 @@ A captured note can contain several ideas. Other notes can provide supporting co
 
 ## Immutable thoughts and evolution trees
 
-Every recorded thought's content and evolution ancestry are immutable, whether authored by the user or AI. There is no thought versioning, direct text-edit action, or in-place correction. The user can capture a new idea or evolve an existing one. A contradiction of an earlier thought is another thought in its own right. Editable title metadata is separate from this immutable record.
+Every recorded thought's content and evolution ancestry are immutable, whether authored by the user or AI, or retained from an imported source. There is no thought versioning, direct text-edit action, or in-place correction. The user can capture a new idea or evolve an existing one. A contradiction of an earlier thought is another thought in its own right. Editable title metadata is separate from this immutable record.
 
 Each non-root thought has exactly one evolution parent. A typical path is:
 
@@ -43,6 +44,8 @@ The agent's full conversational response is normally an addendum to its recorded
 Keep its identity, actual text, available title, authorship, creation date, and origin. Retain its evolution parent where applicable, supporting sources, and agent-response addenda. History is the tree of distinct thoughts and their provenance, not revisions of a single note. A title labels the text; it does not replace it. Alternate names or acronyms can help retrieval but are not new notes or conceptual connections.
 
 The daemon generates the identity and creation timestamp when creating a thought and returns the created values in its response. Public callers must not need to generate these values.
+
+Imported originals additionally retain document membership and byte position as source metadata, not thought-supporting sources or evolution parents. Retained whole-document artifacts are user-only. The initial segmentation agent may read the submitted document for that operation; later agents cannot retrieve the retained artifact or use its metadata to bypass individual thought rejection.
 
 ## Editable title metadata
 

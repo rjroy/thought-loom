@@ -69,11 +69,16 @@ export interface ImportPageCursor {
 export interface ImportPageRequest { readonly limit?: number; readonly cursor?: ImportPageCursor }
 export interface ImportPage<T> { readonly items: readonly T[]; readonly nextCursor: ImportPageCursor | null }
 export interface ImportPrivateInput { readonly fileId: string; readonly bytes: Uint8Array; readonly promptId: string; readonly input: string | null }
+/** Command metadata, separate from the persisted entity and its public representation. */
+export interface ImportBatchAdmission { readonly batch: ImportBatch; readonly replayed: boolean }
+export interface ImportFileAdmission { readonly file: ImportFile; readonly replayed: boolean }
 export interface MarkdownImportRepository {
   namespaces(actor: Actor): readonly ImportNamespace[];
   createBatch(actor: Actor, requestKey: string, namespaceId?: string): ImportBatch;
+  createBatchAdmission(actor: Actor, requestKey: string, namespaceId?: string): ImportBatchAdmission;
   sealBatch(actor: Actor, importId: string): ImportBatch;
   admitFile(actor: Actor, importId: string, requestKey: string, relativePath: string, bytes: Uint8Array): ImportFile;
+  admitFileAdmission(actor: Actor, importId: string, requestKey: string, relativePath: string, bytes: Uint8Array): ImportFileAdmission;
   batch(actor: Actor, importId: string): ImportBatch | null;
   file(actor: Actor, importId: string, fileId: string): ImportFile | null;
   claim(fileId: string): Claim;

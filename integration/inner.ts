@@ -45,7 +45,20 @@ class FixtureClient implements PublicClient {
   async sessionGet(input: { readonly sessionID: string }): Promise<NativeSession> { const value = this.sessions.get(input.sessionID); if (!value) throw new AgentSessionMissingError("Owned session absent"); return value; }
   async prompt(input: Parameters<PublicClient["prompt"]>[0]): Promise<InboxItem> {
     const history = this.prompts.get(input.sessionID) ?? []; history.push(input.text); this.prompts.set(input.sessionID, history);
-    const first = record(JSON.parse(history[0])); const job = record(record(first.context).job);
+    const first = record(JSON.parse(history[0]));
+    if (first.kind === "import-job") {
+      assert.equal(history.length, 1);
+      assert.deepEqual(Object.keys(first).sort(), ["capabilities", "document", "instructions", "kind", "manifest", "version"]);
+      assert.equal(first.version, 1); assert.deepEqual(first.capabilities, []);
+      const cuts = record(first.manifest).cuts; assert.ok(Array.isArray(cuts) && cuts.length >= 2);
+      const output = { version: 1, kind: "segmentation", cuts: [string(record(cuts[0]).id), string(record(cuts[cuts.length - 1]).id)] };
+      const messages = this.messages.get(input.sessionID); assert.ok(messages);
+      messages.push({ id: input.id, type: "user", time: { created: 10 }, text: input.text },
+        { id: `assistant-${input.id}`, type: "assistant", time: { created: 11, completed: 12 }, content: [{ type: "text", text: JSON.stringify(output) }], finish: "stop" },
+        { id: `idle-${input.id}`, type: "idle", time: { created: 13 }, outcome: "succeeded" });
+      return { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: 10 } };
+    }
+    const job = record(record(first.context).job);
     if (job.kind === "evolve" && this.holdEvolve) await new Promise<void>(done => { this.releaseHeld = done; });
     const step = history.length;
     const output = job.kind === "export" ? (step === 1
@@ -274,6 +287,74 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     const reportText = reportDownloaded.toString("utf8"); assert.ok(reportText.includes(id) && reportText.includes("Owned integrated report"));
     await settleKnowledge(dbPath, pulse);
     assert.deepEqual(knowledge(dbPath), beforeExport, "exports must not mutate knowledge tables");
+
+    // Import admission belongs to this server-side fixture, never the browser.
+    const importedText = `Indigo imported shared thinking ${viewport.width}`;
+    const request = async (path: string, init: RequestInit = {}) => fetch(new URL(path, running.url), {
+      ...init, headers: { authorization: `Bearer ${user}`, ...init.headers }, signal: AbortSignal.timeout(3000),
+    });
+    const batchResponse = await request("/imports/markdown", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "owned-batch" }, body: "{}" });
+    assert.equal(batchResponse.status, 201);
+    const batchId = string(record(record(await batchResponse.json()).import).id);
+    const form = new FormData(); form.set("metadata", JSON.stringify({ relativePath: "owned.md" }));
+    form.set("file", new Blob([importedText], { type: "text/markdown" }), "owned.md");
+    const upload = await request(`/imports/markdown/${batchId}/files`, { method: "POST", headers: { "idempotency-key": "owned-file" }, body: form });
+    assert.equal(upload.status, 202);
+    const fileId = string(record(record(await upload.json()).file).id);
+    const seal = await request(`/imports/markdown/${batchId}/seal`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(seal.status, 200);
+    let imported: Record<string, unknown> = {};
+    await until("Markdown import", async () => {
+      const result = await daemonCall(running, `/imports/markdown/${batchId}/files/${fileId}`);
+      assert.equal(result.status, 200); imported = record(record(result.value).file);
+      if (imported.state === "failed" || imported.state === "interrupted") throw new Error(`Import failed: ${JSON.stringify(imported)}`);
+      return imported.state === "imported";
+    }, pulse);
+    assert.deepEqual(imported.segmentation, { method: "ai", reason: null }); assert.equal(imported.thoughtCount, 1);
+    await settleKnowledge(dbPath, pulse);
+    const documentId = string(imported.documentId);
+    const parts = record((await daemonCall(running, `/import-sources/${documentId}/parts?scope=history`)).value).items;
+    assert.ok(Array.isArray(parts)); const thoughtParts = parts.map(record).filter(part => part.kind === "thought");
+    assert.equal(thoughtParts.length, 1); const importedId = string(thoughtParts[0]?.thoughtId);
+    const importedWeaves = dbRows(dbPath, "SELECT kind, status, weave_subject_id FROM runs WHERE kind = 'weave'")
+      .map(record).filter(row => row.weave_subject_id === importedId);
+    assert.equal(importedWeaves.length, 1); assert.equal(importedWeaves[0]?.status, "completed");
+    const importedThought = record((await daemonCall(running, `/thoughts/${importedId}?scope=normal`)).value);
+    assert.equal(importedThought.author, "source"); assert.equal(importedThought.kind, "imported-original");
+    assert.equal(importedThought.text, importedText); assert.equal(importedThought.parentId, null); assert.deepEqual(importedThought.sourceIds, []);
+    const raw = await request(`/import-sources/${documentId}/raw?scope=history`);
+    assert.equal(raw.status, 200); assert.deepEqual(Buffer.from(await raw.arrayBuffer()), Buffer.from(importedText));
+    const denied = await fetch(new URL(`/import-sources/${documentId}/raw?scope=history`, running.url), { headers: { authorization: `Bearer ${ai}` }, signal: AbortSignal.timeout(3000) });
+    assert.equal(denied.status, 403);
+    const importPrompts = [...fake.prompts.values()].map(history => record(JSON.parse(history[0]))).filter(value => value.kind === "import-job");
+    assert.equal(importPrompts.length, 1); assert.equal(importPrompts[0]?.document, importedText);
+    await page.goto(`${origin}/explore?q=indigo&author=source&kind=imported-original`, { waitUntil: "networkidle" });
+    const importedCard = page.locator("article").filter({ hasText: importedText.trim() });
+    await expect(importedCard).toBeVisible(); await expect(importedCard.getByText("Imported source", { exact: true }).first()).toBeVisible();
+    await importedCard.locator(`a[href^="/ideas/${encodeURIComponent(importedId)}"]`).first().click();
+    await expect(page.getByText(importedText.trim(), { exact: true }).first()).toBeVisible();
+    await expect(page.locator("main").getByText("Imported source", { exact: true }).first()).toBeVisible();
+    await page.getByRole("link", { name: /evolve this idea/i }).click();
+    await expect(page.locator("main").getByText("Imported source", { exact: true }).first()).toBeVisible();
+    await page.goto(`${origin}/export?thoughtId=${encodeURIComponent(importedId)}`, { waitUntil: "networkidle" });
+    await expect(page.getByText("Imported source · imported original", { exact: true })).toBeVisible();
+    const importedBeforeExport = knowledge(dbPath);
+    await page.getByRole("button", { name: /create simple export/i }).click();
+    await expect(page.getByRole("region", { name: "Simple Markdown preview" })).toContainText(importedText);
+    fake.sourceId = importedId;
+    await page.getByRole("textbox", { name: "Request" }).fill("Report on imported thinking");
+    const importedReport = await captureResponse(page, "/api/export/agentic", () => page.getByRole("button", { name: "Create report" }).click());
+    const importedReportId = string(record(importedReport.run).id);
+    await until("Imported source report", async () => record((await daemonCall(running, `/runs/${importedReportId}`)).value).status === "completed", pulse);
+    await page.getByRole("button", { name: "Check this run" }).click();
+    await expect(page.getByRole("heading", { name: "Report ready" })).toBeVisible();
+    await expect(page.locator(`a[href="/ideas/${encodeURIComponent(importedId)}"]`).last()).toBeVisible();
+    const importedArtifact = await request(`/exports/agentic/${importedReportId}`);
+    assert.equal(importedArtifact.status, 200);
+    const importedReportText = await importedArtifact.text();
+    assert.ok(importedReportText.includes(importedId) && importedReportText.includes("thought author: source; kind: imported-original"));
+    await settleKnowledge(dbPath, pulse);
+    assert.deepEqual(knowledge(dbPath), importedBeforeExport, "imported source exports must not mutate knowledge");
     assert.deepEqual(leaked, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     console.log(`Shared-record integration passed: ${viewport.width}x${viewport.height}`);

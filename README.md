@@ -29,7 +29,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, both Markdown export modes, and manual test scripts. Configured OpenCode integration supports background weaving, conversational development, and read-only report investigation through scoped application capabilities.
 
-Lossless Markdown import infrastructure includes internal queued execution with restricted configured segmentation or local structural fallback. HTTP import/source routes and import UI are not yet available.
+Lossless Markdown import is available through user-only daemon HTTP routes, with queued execution, restricted configured segmentation or local structural fallback, and retained original-byte inspection. An import UI is not yet available.
 
 The separate Next.js/React client provides Capture, bookmarkable Explore searches, Idea reading with title metadata and user rejection/restoration controls, Evolve with recorded developments and known-run status/Stop, and Simple/Agentic Markdown exports. Browser requests use a server-only daemon boundary. Without agent configuration, capture, search and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration. Settings remains reserved, with no implemented settings screen.
 

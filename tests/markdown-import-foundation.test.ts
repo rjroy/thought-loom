@@ -3,8 +3,8 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { ImportConflictError, ImportForbiddenError, type ImportPartition } from "../src/domain/markdown-import";
-import { RejectionService } from "../src/domain/rejection";
+import { ImportConflictError, ImportForbiddenError, ImportNotFoundError, type ImportBatch, type ImportFile, type ImportPartition } from "../src/domain/markdown-import";
+import { RejectionService, type Actor } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
 import { SqliteImportInspection } from "../src/storage/import-inspection";
@@ -21,6 +21,20 @@ const history = { actor: "user", mode: "history" } as const;
 const ai = { actor: "ai", mode: "normal" } as const;
 const encode = (s: string) => new TextEncoder().encode(s);
 const hash = (input: string | Uint8Array) => createHash("sha256").update(input).digest("hex");
+
+interface AdmissionCommands {
+  createBatchAdmission(actor: Actor, key: string, namespaceId?: string): { batch: ImportBatch; replayed: boolean };
+  admitFileAdmission(actor: Actor, batchId: string, key: string, relativePath: string, bytes: Uint8Array): { file: ImportFile; replayed: boolean };
+}
+
+function hasAdmissionCommands(repo: SqliteMarkdownImports): repo is SqliteMarkdownImports & AdmissionCommands {
+  return typeof Reflect.get(repo, "createBatchAdmission") === "function" && typeof Reflect.get(repo, "admitFileAdmission") === "function";
+}
+
+function requireAdmissions(repo: SqliteMarkdownImports): asserts repo is SqliteMarkdownImports & AdmissionCommands {
+  expect(hasAdmissionCommands(repo)).toBe(true);
+  if (!hasAdmissionCommands(repo)) throw new Error("Atomic import admission receipts are unavailable");
+}
 
 function fixture(action: (db: Database, other: Database, imports: SqliteMarkdownImports, second: SqliteMarkdownImports, inspection: SqliteImportInspection) => void) {
   const dir = mkdtempSync(join("/tmp/opencode", "import-foundation-"));
@@ -53,6 +67,60 @@ function ready(imports: SqliteMarkdownImports, fileId: string, bytes: Uint8Array
 }
 
 describe("Markdown import foundation", () => {
+  test("admission receipts distinguish replay from a newly admitted skip without changing entity wrappers", () => fixture((db, _other, imports) => {
+    requireAdmissions(imports);
+    const namespace = imports.namespaces("user")[0];
+    if (!namespace) throw new Error("Fixture default namespace missing");
+    db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,?,?,?)", ["owned-other-namespace", "fixture", "Fixture", "2030-01-02T03:04:05.000Z"]);
+    const first = imports.createBatchAdmission("user", "receipt-batch");
+    expect(first.replayed).toBe(false);
+    expect(first.batch.namespaceId).toBe(namespace.id);
+    expect(imports.createBatchAdmission("user", "receipt-batch", namespace.id)).toEqual({ batch: first.batch, replayed: true });
+    expect(imports.createBatch("user", "receipt-batch")).toEqual(first.batch);
+    expect(() => imports.createBatchAdmission("user", "receipt-batch", "owned-other-namespace")).toThrow(ImportConflictError);
+    expect(() => imports.createBatchAdmission("user", "receipt-batch", "owned-missing-namespace")).toThrow(ImportNotFoundError);
+    expect(db.query("SELECT count(*) AS n FROM markdown_imports").get()).toEqual({ n: 1 });
+
+    const bytes = encode("receipt owned words");
+    const holder = imports.admitFileAdmission("user", first.batch.id, "holder", "first.md", bytes);
+    expect(holder.replayed).toBe(false);
+    expect(holder.file.state).toBe("queued");
+    expect(imports.admitFileAdmission("user", first.batch.id, "holder", "first.md", bytes)).toEqual({ file: holder.file, replayed: true });
+    expect(imports.admitFile("user", first.batch.id, "holder", "first.md", bytes)).toEqual(holder.file);
+    expect(() => imports.admitFileAdmission("user", first.batch.id, "holder", "first.md", encode("different words"))).toThrow(ImportConflictError);
+    expect(() => imports.admitFileAdmission("user", first.batch.id, "holder", "different.md", bytes)).toThrow(ImportConflictError);
+    expect(db.query("SELECT count(*) AS n FROM markdown_import_files").get()).toEqual({ n: 1 });
+    const waiter = imports.admitFileAdmission("user", first.batch.id, "waiter", "copy.md", bytes);
+    expect(waiter).toMatchObject({ replayed: false, file: { state: "waiting", runId: null } });
+    const committed = imports.finalize(ready(imports, holder.file.id, bytes));
+    expect(imports.resolveWaiters()).toBe(1);
+    expect(imports.admitFileAdmission("user", first.batch.id, "holder", "first.md", bytes)).toEqual({ file: committed, replayed: true });
+    expect(imports.admitFileAdmission("user", first.batch.id, "waiter", "copy.md", bytes)).toMatchObject({ replayed: true, file: { id: waiter.file.id, state: "skipped-identical", documentId: committed.documentId } });
+    expect(imports.admitFileAdmission("user", first.batch.id, "new-copy", "another.md", bytes)).toMatchObject({ replayed: false, file: { state: "skipped-identical", documentId: committed.documentId, runId: null } });
+    expect(imports.admitFileAdmission("user", first.batch.id, "new-revision", "first.md", encode("revision"))).toMatchObject({ replayed: false, file: { state: "skipped-changed", documentId: committed.documentId, runId: null } });
+    expect(db.query("SELECT count(*) AS n FROM markdown_import_files").get()).toEqual({ n: 4 });
+  }));
+
+  test("ordered admissions across connections return one first receipt and one replay with current records", () => fixture((db, _other, imports, second) => {
+    requireAdmissions(imports);
+    requireAdmissions(second);
+    const first = imports.createBatchAdmission("user", "shared-batch");
+    const replay = second.createBatchAdmission("user", "shared-batch");
+    expect(first.replayed).toBe(false);
+    expect(replay).toEqual({ batch: first.batch, replayed: true });
+    const bytes = encode("shared owned input");
+    const file = second.admitFileAdmission("user", first.batch.id, "shared-file", "shared.md", bytes);
+    expect(file).toMatchObject({ replayed: false, file: { state: "queued" } });
+    expect(imports.admitFileAdmission("user", first.batch.id, "shared-file", "shared.md", bytes)).toEqual({ file: file.file, replayed: true });
+    const done = second.finalize(ready(second, file.file.id, bytes));
+    expect(imports.admitFileAdmission("user", first.batch.id, "shared-file", "shared.md", bytes)).toEqual({ file: done, replayed: true });
+    const currentBatch = imports.batch("user", first.batch.id);
+    if (!currentBatch) throw new Error("Shared batch missing");
+    expect(second.createBatchAdmission("user", "shared-batch")).toEqual({ batch: currentBatch, replayed: true });
+    expect(db.query("SELECT count(*) AS n FROM markdown_imports").get()).toEqual({ n: 1 });
+    expect(db.query("SELECT count(*) AS n FROM markdown_import_files").get()).toEqual({ n: 1 });
+  }));
+
   test("preserves a leading FEFF in the admitted path and receipt bytes", () => fixture((db, _other, imports) => {
     const path = "\ufeffname.md", bytes = encode("owned words");
     const batch = imports.createBatch("user", "batch");

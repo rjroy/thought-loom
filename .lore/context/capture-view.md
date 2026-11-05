@@ -37,4 +37,8 @@ The user does not have to wait for the weaver before continuing. Most captures a
 
 ## Not required
 
-Rich-text editing, attachments, folders, automatic import, or a conversation before saving. These can be discussed separately; they are not prerequisites for this view.
+Rich-text editing, attachments, folders, background folder watching, or a conversation before saving. These are not prerequisites for this view.
+
+## Separate import entry
+
+An **Import** button below the textarea is the agreed entry into a separate [Markdown import flow](markdown-import.md). Its daemon API is implemented, but the button and flow still require a designer-led comp-led design pass before client implementation. Import must not complicate or become a prerequisite for quick text capture.

@@ -21,6 +21,8 @@ import { RunSupervisor } from "../agent/supervisor";
 import { LocalMarkdownImportDriver } from "../agent/import-driver";
 import { AgentService } from "../domain/agent";
 import { SqliteAgentRuns } from "../storage/agent";
+import { SqliteMarkdownImports } from "../storage/markdown-import";
+import { SqliteImportInspection } from "../storage/import-inspection";
 import { ConfigError } from "./config-error";
 import { createLogger, type Logger, type LogSink } from "../logging";
 
@@ -68,6 +70,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     const valid = validateConfig(config);
     const diagnostics = createLogger(valid.logLevel, dependencies.logSink);
     failureLogger = diagnostics;
+    diagnostics.info("[import] transport configured",{maxBytes:valid.importMaxBytes ?? 1048576});
     await mkdir(dirname(valid.dbPath), { recursive: true });
     db = new Database(valid.dbPath, { create: true });
     migrate(db, diagnostics);
@@ -106,8 +109,10 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       supervisor = new RunSupervisor({db,worker,logger:diagnostics,startTimer});
       imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:worker.importWorker});
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
-    const app = createApp({ rejection, creation, titles, search, simpleExport, agents, diagnostics, credentials: valid.credentials, logger });
-    server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: app.fetch });
+    const app = createApp({ rejection, creation, titles, search, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
+      imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576} });
+    server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: app.fetch,
+      maxRequestBodySize:Math.max(128*1024*1024,Math.min(Number.MAX_SAFE_INTEGER,(valid.importMaxBytes ?? 1048576)+4096+65536)) });
     supervisor?.start();
     imports?.start();
     const url = server.url.toString();

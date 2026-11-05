@@ -6,7 +6,7 @@ import { protocolJson } from "../domain/run-protocol";
 import { nonEmpty, record } from "../domain/validation";
 import { equalBytes, importManifest, importPartition, importRelativePath, importRequestKey, requireImportUser, safeInteger, sourceText,
   ImportConflictError, ImportNotFoundError, ImportPreservationError,
-  type ImportBatch, type ImportEvidence, type ImportFailureCode, type ImportFile, type ImportNamespace,
+  type ImportBatch, type ImportBatchAdmission, type ImportEvidence, type ImportFailureCode, type ImportFile, type ImportFileAdmission, type ImportNamespace,
   type ImportManifest, type ImportOutcome, type ImportPartition, type ImportPartitionResult, type ImportPrivateInput, type MarkdownImportRepository, type Segmentation } from "../domain/markdown-import";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { admitWeave } from "./weave-admission";
@@ -43,6 +43,9 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     return this.db.query("SELECT id,kind,label,created_at AS createdAt FROM import_namespaces ORDER BY rowid").all() as ImportNamespace[];
   }
   createBatch(actor: Actor, requestKey: string, namespaceId?: string): ImportBatch {
+    return this.createBatchAdmission(actor,requestKey,namespaceId).batch;
+  }
+  createBatchAdmission(actor: Actor, requestKey: string, namespaceId?: string): ImportBatchAdmission {
     requireImportUser(actor); importRequestKey(requestKey);
     return this.transaction("create import batch","new",() => {
       const namespace = namespaceId ?? (this.db.query("SELECT id FROM import_namespaces WHERE kind='loose-markdown'").get() as {id:string} | null)?.id;
@@ -50,12 +53,12 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       const replay = this.db.query("SELECT id,namespace_id AS namespaceId FROM markdown_imports WHERE request_key=?").get(requestKey) as {id:string;namespaceId:string} | null;
       if (replay) {
         if (replay.namespaceId!==namespace) throw new ImportConflictError("idempotency-conflict");
-        return this.requireBatch(replay.id);
+        return {batch:this.requireBatch(replay.id),replayed:true};
       }
       const id = nonEmpty(this.sources.id(),"importId");
       this.db.run("INSERT INTO markdown_imports(id,request_key,namespace_id,created_at) VALUES (?,?,?,?)",[id,requestKey,namespace,nonEmpty(this.sources.now(),"createdAt")]);
       this.logger.info("[import] batch admitted",{importId:id});
-      return this.requireBatch(id);
+      return {batch:this.requireBatch(id),replayed:false};
     });
   }
   batch(actor: Actor, importId: string): ImportBatch | null {
@@ -107,6 +110,9 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       error:row.reason===null ? null : {code:row.reason,retryable:row.reason!=="ownership-conflict" && row.reason!=="interrupted"}};
   }
   admitFile(actor: Actor, importId: string, requestKey: string, relativePath: string, submitted: Uint8Array): ImportFile {
+    return this.admitFileAdmission(actor,importId,requestKey,relativePath,submitted).file;
+  }
+  admitFileAdmission(actor: Actor, importId: string, requestKey: string, relativePath: string, submitted: Uint8Array): ImportFileAdmission {
     requireImportUser(actor); nonEmpty(importId,"importId"); importRequestKey(requestKey); importRelativePath(relativePath);
     sourceText(submitted); const bytes = new Uint8Array(submitted), sha256 = digest(bytes);
     return this.transaction("admit import file",importId,() => {
@@ -116,7 +122,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
         if (replay.relativePath!==relativePath || replay.byteLength!==bytes.length || !equalBytes(replay.sha256,sha256)) throw new ImportConflictError("idempotency-conflict");
         const payload = this.payload(replay.id);
         if (payload && !equalBytes(payload,bytes)) throw new ImportPreservationError("digest-collision");
-        return this.report(replay);
+        return {file:this.report(replay),replayed:true};
       }
       if (batch.sealedAt!==null) throw new ImportConflictError("import-sealed");
       const choice = this.admissionChoice(batch.namespaceId,relativePath,bytes,sha256);
@@ -127,8 +133,8 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
         VALUES (?,?,?,?,?,CAST(? AS TEXT),?,?,?,?,?,?,?)`,[id,importId,batch.namespaceId,position,requestKey,pathBytes(relativePath),sha256,bytes.length,now,runId,
         choice.kind==="waiter" ? choice.fileId : null,choice.kind==="skip" ? choice.outcome : null,choice.kind==="skip" ? choice.documentId : null]);
       if (choice.kind!=="skip") this.db.run("INSERT INTO markdown_import_payloads(file_id,bytes) VALUES (?,?)",[id,bytes]);
-      this.logger.info("[import] file admitted",{importId,fileId:id,runId,decision:choice.kind,outcome:choice.kind==="skip" ? choice.outcome : null,byteLength:bytes.length});
-      return this.requireReport(id);
+      this.logger.info("[import] file admitted",{importId,fileId:id,runId,decision:choice.kind,outcome:choice.kind==="skip" ? choice.outcome : null});
+      return {file:this.requireReport(id),replayed:false};
     });
   }
   private newRun(now: string): RunRecord {
