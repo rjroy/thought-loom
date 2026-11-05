@@ -29,6 +29,8 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, both Markdown export modes, and manual test scripts. Configured OpenCode integration supports background weaving, conversational development, and read-only report investigation through scoped application capabilities.
 
+A pure, lossless Markdown import parser is present as domain infrastructure; import execution and HTTP routes are not yet available.
+
 The separate Next.js/React client provides Capture, bookmarkable Explore searches, Idea reading with title metadata and user rejection/restoration controls, Evolve with recorded developments and known-run status/Stop, and Simple/Agentic Markdown exports. Browser requests use a server-only daemon boundary. Without agent configuration, capture, search and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration. Settings remains reserved, with no implemented settings screen.
 
 Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above describe the implementation that exists today.

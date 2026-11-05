@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 const sources = {
   src: ["logging.ts"],
   "src/daemon": ["runtime.ts", "app.ts", "config.ts", "config-error.ts", "agent-config.ts"],
-  "src/domain": ["agent.ts", "agentic-export.ts", "capability.ts", "connection.ts", "creation.ts", "rejection.ts", "response.ts", "run-context.ts", "run-protocol.ts", "run-operations.ts", "search.ts", "run.ts", "thought.ts", "simple-export.ts", "shared-response.ts", "weave-scheduling.ts", "validation.ts", "title.ts"],
+  "src/domain": ["agent.ts", "agentic-export.ts", "capability.ts", "connection.ts", "creation.ts", "markdown-import.ts", "markdown-import-contract.ts", "markdown-import-parser.ts", "rejection.ts", "response.ts", "run-context.ts", "run-protocol.ts", "run-operations.ts", "search.ts", "run.ts", "thought.ts", "simple-export.ts", "shared-response.ts", "weave-scheduling.ts", "validation.ts", "title.ts"],
   "src/agent": ["configured-worker.ts", "binding.ts", "history.ts", "errors.ts", "opencode-client.ts", "opencode-adapter.ts", "supervisor.ts", "service.ts", "worker-prompts.ts", "worker.ts"],
   "src/storage": ["agent.ts", "agent-binding.ts", "weave-admission.ts", "title.ts", "sqlite.ts", "shared-response.ts", "search.ts", "run.ts", "run-worker.ts", "run-schema.ts", "run-record.ts", "run-receipt-schema.ts", "run-protocol.ts", "run-operations.ts", "run-aggregate.ts", "rejection.ts", "capability.ts", "agentic-export.ts", "agentic-export-schema.ts", "import-migration.ts", "import-schema.ts", "transaction.ts"],
   "apps/web/src": ["proxy.ts"],

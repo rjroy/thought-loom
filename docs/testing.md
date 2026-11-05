@@ -24,6 +24,8 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+The focused `bun --no-env-file test tests/markdown-import-parser.test.ts` checks the pure Markdown import parser's UTF-8 byte coverage, opaque frontmatter, complete blocks and dependency-safe grouping, strict selection envelope, and structural fallback. It makes no import, daemon, or provider calls. The parser is a foundation for future import execution, not an exposed import route.
+
 ### Web foundation checks
 
 ```sh
@@ -106,7 +108,7 @@ bun --no-env-file test tests/domain.test.ts tests/search-contract.test.ts tests/
 bun --no-env-file run typecheck
 ```
 
-Build spellfix first for `search-contract` as described above. These checks cover exact imported thought text and later title attribution, unchanged user/AI combinations, source/imported-original filter/count shapes, fresh import membership/seal FK declarations, and populated predecessor preservation/reopen. The dedicated foundation fixtures also exercise direct-SQL seal and mapping guards, deferred-commit failure and rollback, reservation interleaving across two connections, bounded write-lock contention, rejection-safe inspection, and finalization rollback at 11 injected points including the last weave admission. Migration fixtures inject failures during staging and after destructive rebuild work has begun. These establish controlled transaction behavior, not simultaneous independent-worker execution or a large-database performance benchmark. Neither these checks nor an owned diagnostic smoke establishes parser safety, import-native terminal correlation or HTTP upload behavior. The implemented storage layer accepts test-owned parser manifests/ranges; it makes no claim that a Markdown parser or import dispatch is already implemented.
+Build spellfix first for `search-contract` as described above. These checks cover exact imported thought text and later title attribution, unchanged user/AI combinations, source/imported-original filter/count shapes, fresh import membership/seal FK declarations, and populated predecessor preservation/reopen. The dedicated foundation fixtures also exercise direct-SQL seal and mapping guards, deferred-commit failure and rollback, reservation interleaving across two connections, bounded write-lock contention, rejection-safe inspection, and finalization rollback at 11 injected points including the last weave admission. Migration fixtures inject failures during staging and after destructive rebuild work has begun. These establish controlled transaction behavior, not simultaneous independent-worker execution or a large-database performance benchmark. The storage fixtures use test-owned parser manifests/ranges; the separate parser tests exercise the implemented Markdown preparation and selection functions. Neither suite establishes import-native terminal correlation or HTTP upload behavior; import dispatch and routes are not yet implemented.
 
 Exact-text fixtures must compare submitted wording, stored BLOB bytes and returned thought/search/projection text, including a segment beginning with U+FEFF after a leading separator. Equality between pre/post-migration database reads alone can hide a character lost during an earlier write. Thought writers bind UTF-8 bytes and cast to TEXT to avoid Bun's consumption of a leading U+FEFF in a string parameter.
 

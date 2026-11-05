@@ -55,7 +55,7 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): voi
 }
 
 /** JSON.parse validates syntax first; this scan rejects duplicate (including escaped) object keys. */
-function uniqueKeys(input: string): void {
+export function uniqueKeys(input: string): void {
   const tokens = input.match(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]/g) ?? [];
   const stack: (Set<string> | null)[] = [];
   tokens.forEach((token,index) => {
