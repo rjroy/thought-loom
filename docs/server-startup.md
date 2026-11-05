@@ -31,17 +31,19 @@ bun --no-env-file run web:build
 bun --no-env-file run web:start
 ```
 
+`web:start` is the production server command, not a development server; no separate `web:prod` alias is required. For persistent configuration, process supervision, backups and upgrades, follow [Production deployment](production-deployment.md).
+
 Dev and production listeners bind to `127.0.0.1`; the default web origin is `http://127.0.0.1:3000`. Open that exact origin. Capture is available at `/capture` and search at `/explore`. The daemon is started separately; starting the web client does not launch the daemon or OpenCode.
 
 | Web server variable | Default / purpose |
 | --- | --- |
-| `THOUGHTLOOM_WEB_ORIGIN` | `http://127.0.0.1:3000`; trusted browser origin and Host. Match this to the actual web listener if changing its port or loopback hostname. |
+| `THOUGHTLOOM_WEB_ORIGIN` | `http://127.0.0.1:3000`; the single trusted browser origin and Host. Accepts loopback HTTP(S) or an explicitly configured remote HTTPS origin, without credentials, paths, queries or fragments. |
 | `THOUGHTLOOM_DAEMON_URL` | `http://127.0.0.1:3001`; server-only daemon origin. Only loopback HTTP(S) origins are accepted, without embedded credentials, paths, queries, or fragments. |
 | `THOUGHTLOOM_USER_TOKEN` | The daemon's user-role bearer credential, validated when the server transport is used. Never expose it through a `NEXT_PUBLIC_*` variable. |
 
 Export these variables in the launching shell. Next.js has its own application environment-file handling; Bun's `--no-env-file` flag is not a guarantee that Next.js will ignore such files. Keep all daemon credentials server-only. The web client does not need the daemon's AI token, database path, or agent configuration. It does not make direct browser-to-daemon requests. Server requests reject redirects, use bounded timeouts and `no-store`, and sanitize failures. The web request boundary rejects untrusted Host values and missing or foreign Origin values on mutations; forwarded headers do not establish trust.
 
-This is a local operator client, not a remote or multi-user deployment. Loopback binding and origin checks are not an account/login system. Do not expose it through a public listener or reverse proxy without a separate security design. Use Ctrl-C to stop either web process without stopping the independently running daemon.
+For private Tailscale Serve access, set `THOUGHTLOOM_WEB_ORIGIN=https://gsai.raptor-piranha.ts.net` (using your actual HTTPS hostname), and configure Serve to proxy to the loopback web port while preserving the original Host. HTTPS and tailnet access must be controlled externally. The application has no built-in login; origin checks are not authentication. Do not enable Funnel or otherwise expose it publicly. See [production deployment](production-deployment.md) for the boundary. Use Ctrl-C to stop either web process without stopping the independently running daemon.
 
 Next.js development incoming-request logging is disabled in `apps/web/next.config.ts`: search and bookmarked page URLs contain private query text. This does not disable application diagnostics or critical-error logging. Do not re-enable request-URL logging to debug searches; server transport diagnostics intentionally omit query strings and content.
 
