@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AgentUncertainError, type AgentBinding, type Observation, type PersistedPrompt } from "../src/agent/opencode-adapter";
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
+import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
 import { RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
@@ -76,6 +77,30 @@ async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: st
   // Test harness bound only; the worker must not impose an effort quota.
   for (let i = 0; i < 20 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
 }
+
+test("weave alone renders discovery guidance alongside the shared evidence fences", () => {
+  const context = { thoughts: [], connections: [], responses: [] };
+  const render = (job: Parameters<typeof initialWorkerPrompt>[0]["job"]) => JSON.parse(initialWorkerPrompt({ ...context, job })) as { role: string; instructions: string[] };
+  const weave = render({ kind: "weave", subjectId: "subject" });
+  const text = weave.instructions.join(" ");
+  for (const phrase of ["claims, themes, and implications", "Actively search", "beyond lexical similarity", "snippets as discovery leads, not evidence", "Fully read promising candidate thoughts", "already fully read and needs no redundant reread", "does not read its endpoint thoughts", "supports, contradicts, extends, or related", "intended direction", "explain concretely", "only fully read supporting thoughts", "finding no useful connection is valid", "do not reconstruct it from indirect provenance"]) expect(text).toContain(phrase);
+  expect(weave.role).toContain("fill an absent title");
+  const evolve = render({ kind: "evolve", contributionId: "input", continuationId: null });
+  const exported = render({ kind: "export", request: "fixture question", effort: "standard" });
+  for (const other of [evolve, exported]) expect(other.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
+});
+
+test("weave can search and read a candidate then connect it to the preloaded subject without rereading it", async () => fixture(async f => {
+  f.store.saveThought({ id: "candidate", text: "zircon candidate", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "discovery" });
+  const outputs = [request("search", { query: "zircon" }), request("readThought", { id: "candidate" }), request("connection", { fromId: "root", toId: "candidate", category: "related", explanation: "The subject and candidate share a fixture theme", sourceIds: ["root", "candidate"] }), complete("done")];
+  const w = worker(f, index => outputs[index] ?? complete("done"));
+  await drive(w.instance, f, run.id);
+  expect(f.runs.get(run.id)?.status).toBe("completed");
+  expect(f.capabilities.fullReadWitnesses(run.id)).toEqual(expect.arrayContaining([{ kind: "thought", id: "root" }, { kind: "thought", id: "candidate" }]));
+  expect(f.db.query("SELECT from_id AS fromId,to_id AS toId,category,explanation FROM connections").get()).toEqual({ fromId: "root", toId: "candidate", category: "related", explanation: "The subject and candidate share a fixture theme" });
+  expect(w.native.submitted).toHaveLength(4);
+}));
 
 test("worker persists scoped initial context and ordered development result before the next prompt", async () => fixture(async f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "my contribution" });

@@ -42,7 +42,12 @@ export function initialWorkerPrompt(context: InitialRunContext): string {
     {capability:"interpretation",argumentsSchema:argumentsSchema({text:string,sourceIds:sources})},
     {capability:"title-fill",argumentsSchema:argumentsSchema({title:string})},
   ] : [{capability:"development",argumentsSchema:argumentsSchema({parentId:{type:"string",const:context.job.contributionId},text:string,sourceIds:sources})}];
-  return protocolJson({version:1,kind:"job",role,instructions:[...protocol,replyFormat,
+  const discovery = context.job.kind === "weave" ? [
+    "Examine the fixed subject's claims, themes, and implications. Actively search existing thinking for promising candidates, including conceptual relationships beyond lexical similarity.",
+    "Treat search snippets as discovery leads, not evidence. Fully read promising candidate thoughts before proposing a relationship; the subject in initial context is already fully read and needs no redundant reread. Optionally read a connection for context, but reading it does not read its endpoint thoughts.",
+    "When warranted, propose a meaningful supports, contradicts, extends, or related connection. Choose fromId and toId so the category reads in the intended direction, and explain concretely how the fully read thoughts relate. Include only fully read supporting thoughts in sourceIds. Never fabricate significance or relationships; finding no useful connection is valid."
+  ] : [];
+  return protocolJson({version:1,kind:"job",role,instructions:[...protocol,replyFormat,...discovery,
     "sourceIds is an array of supporting thought IDs; it may be empty."],capabilities:[...reads,...writes,connection],context});
 }
 

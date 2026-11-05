@@ -22,13 +22,15 @@ Exact scheduling, affected scope, and recovery from operational failures remain 
 ## What a pass does
 
 1. Read newly retained, non-rejected material and preserve its original wording and provenance.
-2. Search the existing collection for candidate notes and ideas, using useful retrieval rather than relying only on what was preloaded into a prompt.
-3. Read candidate material and relevant context before asserting a connection. A search result alone is not evidence.
+2. Examine the fixed subject's claims, themes and implications, then actively search the existing collection for candidate notes and ideas, including conceptual relationships beyond lexical similarity.
+3. Fully read promising candidate thoughts before asserting a connection. A search snippet is a discovery lead, not evidence; the subject in initial context is already fully read. Reading an existing connection does not read its endpoints.
 4. Record a useful interpretation where warranted, clearly AI-authored.
-5. Record meaningful connections with an explanation and supporting references, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
+5. Record warranted meaningful connections with correctly directed endpoints, a concrete explanation and supporting references to fully read thoughts, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
 6. Generate a concise, clearly AI-authored title for untitled notes. Capture must not require the client or user to supply one; use the first-five-word display fallback until a title is available. Store the title as separate metadata, never a rewrite of the original thought text or ancestry. The user may edit or clear the title, and clearing invites regeneration. Only fill a title that is still absent when the result is saved; a late result must not overwrite a user-supplied title. Rejected notes remain excluded from all weaver work, including title generation.
 
 Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
+
+These are instructions to a probabilistic model, not a guarantee of discovery or semantic correctness. Scoped reads and full-read witnesses enforce evidence access, not the quality of an explanation.
 
 The weaver may record AI hypotheses without requiring an approval click for each one. That does not make them accepted user beliefs. They must remain inspectable and challengeable through [Idea](idea-view.md) and [Evolve](evolve-view.md).
 
