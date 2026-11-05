@@ -92,6 +92,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const [titleError, setTitleError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [replyId, setReplyId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -360,6 +361,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
               setReplyOpen(!replyOpen);
               if (!replyId) setReplyId(view.responses[0]!.id);
             }}>Full reply</button>}
+            <button className={`${styles.textButton} ${styles.aboutButton}`} aria-expanded={aboutOpen}
+              aria-controls="idea-metadata" onClick={() => setAboutOpen(open => !open)}>About</button>
             <div className={styles.more} ref={more} onKeyDown={event => {
               if (event.key === "Escape" && menuOpen) { event.preventDefault(); setMenuOpen(false); menuButton.current?.focus(); }
             }}>
@@ -376,6 +379,13 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
                 </>}
               </div>
             </div>
+          </div>
+
+          <div id="idea-metadata" className={styles.metadataDetails} hidden={!aboutOpen}>
+            <dl><dt>Created (UTC)</dt><dd>{dateOf(thought.createdAt)}</dd>
+              <dt>Origin</dt><dd>{thought.origin}</dd>
+              <dt>Title by</dt><dd>{thought.titleAuthor ? actor(thought.titleAuthor) : "No attributed title"}</dd>
+              <dt>Idea ID</dt><dd className={styles.identifier}>{thought.id}</dd></dl>
           </div>
 
           {pending && <p role="status">Waiting for confirmation. Please do not send the change again.</p>}
@@ -413,14 +423,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
               <p className={styles.metadata}>A retained response is not a new development or an endorsement.</p>
             </>}
           </div>
-
-          <details className={styles.metadataDetails}>
-            <summary>About this idea</summary>
-            <dl><dt>Created (UTC)</dt><dd>{dateOf(thought.createdAt)}</dd>
-              <dt>Origin</dt><dd>{thought.origin}</dd>
-              <dt>Title by</dt><dd>{thought.titleAuthor ? actor(thought.titleAuthor) : "No attributed title"}</dd>
-              <dt>Idea ID</dt><dd className={styles.identifier}>{thought.id}</dd></dl>
-          </details>
 
           <section className={styles.context} aria-labelledby="idea-context-heading">
             <h2 id="idea-context-heading">{inspection ? "Inspected context" : "Surrounding context"}</h2>

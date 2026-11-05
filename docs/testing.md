@@ -56,6 +56,8 @@ The Export companion exercises independent methods, contextual normal-scope root
 
 `web-export-markdown` runs the actual shared renderer through ReactDOMServer, with positive formatting/text controls and hostile HTML/link/image inputs. It does not substitute a fake renderer for safety evidence. Bun test registration stays in the root wrapper; the app-local helper has no Bun test-runner dependency. Source parser tests separately cover the producer's code-delimited JSON-ID appendix grammar and reject arbitrary body links as source identity. These checks do not prove live provider report quality.
 
+The Idea metadata check requires About to share the existing desktop action row while allowing narrow wrapping. It exercises the disclosure's expanded state, keyboard activation and retained focus, then checks the existing metadata inside that disclosure rather than matching repeated source IDs elsewhere on the page. Opening About must not alter the selected thought or add a metadata-fetch operation. Resting-state checks require Edit title, Full reply, About and More actions to remain native buttons with underlined text using the existing link-color token, distinct from focal thought text.
+
 ### Shared-record browser acceptance
 
 `web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.

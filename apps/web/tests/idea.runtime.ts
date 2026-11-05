@@ -140,6 +140,61 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   await expect(page.getByText(original, { exact: true })).toBeVisible();
   await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
   await expect(resultsBack).toHaveAttribute("href", returnTo);
+  const about = page.getByRole("button", { name: /^about(?: this idea)?$/i });
+  const editAction = page.getByRole("button", { name: "Edit title" });
+  const replyAction = page.getByRole("button", { name: "Full reply" });
+  await page.mouse.move(0, 0);
+  for (const action of [editAction, replyAction, about, menu]) {
+    const style = await action.evaluate(element => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--color-link)";
+      probe.style.backgroundColor = "var(--color-text)";
+      element.appendChild(probe);
+      try {
+        const computed = getComputedStyle(element);
+        const tokens = getComputedStyle(probe);
+        return { tag: element.tagName, color: computed.color, linkColor: tokens.color, textColor: tokens.backgroundColor, decoration: computed.textDecorationLine };
+      } finally { probe.remove(); }
+    });
+    assert.equal(style.tag, "BUTTON", "secondary actions remain native buttons");
+    assert.ok(style.decoration.split(" ").includes("underline"), "secondary actions must be underlined at rest");
+    assert.equal(style.color, style.linkColor, "secondary actions use the existing link-color token at rest");
+    assert.notEqual(style.color, style.textColor, "secondary actions are distinct from ordinary text");
+  }
+  const aboutExpanded = () => about.evaluate(element => element.getAttribute("aria-expanded") ??
+    (element.tagName === "SUMMARY" && element.parentElement instanceof HTMLDetailsElement ? String(element.parentElement.open) : null));
+  await expect(about).toBeVisible();
+  await expect(about).toHaveText(/^About$/);
+  await expect.poll(aboutExpanded).toBe("false");
+  const metadataId = await about.getAttribute("aria-controls");
+  assert.ok(metadataId, "About identifies its controlled metadata region");
+  const metadata = page.locator(`[id=${JSON.stringify(metadataId)}]`);
+  await expect(metadata).toHaveCount(1);
+  await expect(metadata.getByText("Created (UTC)", { exact: true })).not.toBeVisible();
+  const aboutBox = await about.boundingBox();
+  const actionBoxes = await Promise.all([editAction, replyAction, menu].map(action => action.boundingBox()));
+  assert.ok(aboutBox && aboutBox.width >= 44 && aboutBox.height >= 44, "About must have a comfortable 44px target");
+  assert.ok(actionBoxes.every(box => box !== null));
+  if (!options.narrow) {
+    assert.ok(actionBoxes.every(box => box && Math.abs((box.y + box.height / 2) - (aboutBox.y + aboutBox.height / 2)) < Math.max(box.height, aboutBox.height) / 2), "About belongs on the existing desktop action row");
+  }
+  await about.focus();
+  await expect(about).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect.poll(aboutExpanded).toBe("true");
+  await expect(about).toBeFocused();
+  const created = metadata.getByText("Created (UTC)", { exact: true });
+  await expect(created).toBeVisible();
+  for (const label of ["Origin", "Title by", "Idea ID"]) await expect(metadata.getByText(label, { exact: true })).toBeVisible();
+  for (const value of ["Jan 1, 2032", "capture", "idea-root"]) await expect(metadata.getByText(value, { exact: true })).toBeVisible();
+  await expect(metadata.getByText("Title by", { exact: true }).locator("..").getByText("You", { exact: true })).toBeVisible();
+  const createdBox = await created.boundingBox();
+  assert.ok(createdBox && createdBox.y >= Math.max(aboutBox.y + aboutBox.height, ...actionBoxes.map(box => box ? box.y + box.height : 0)), "About metadata belongs below the action group");
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect.poll(aboutExpanded).toBe("false");
+  await expect(about).toBeFocused();
+  await expect(created).not.toBeVisible();
   await openMenu();
   for (const action of ["evolve", "export"] as const) {
     const href = await page.getByRole("link", { name: new RegExp(action, "i") }).getAttribute("href");
