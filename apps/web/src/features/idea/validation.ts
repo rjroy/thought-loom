@@ -3,12 +3,12 @@ import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaThought, IdeaView,
 export function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(item => typeof item === "string" && item.length > 0);
 const actor = (v: unknown) => v === "user" || v === "ai";
-const material = (v: unknown) => v === "captured-original" || v === "user-contribution" || v === "ai-interpretation" || v === "developing-idea";
+const material = (v: unknown) => v === "captured-original" || v === "user-contribution" || v === "ai-interpretation" || v === "developing-idea" || v === "imported-original";
 const optionalRejected = (v: unknown) => v === undefined || typeof v === "boolean";
 export function thought(v: unknown): v is IdeaThought {
   return record(v) && typeof v.id === "string" && !!v.id && typeof v.text === "string" && !!v.text.trim()
     && (typeof v.title === "string" || v.title === null) && (v.titleAuthor === undefined || v.titleAuthor === null || actor(v.titleAuthor))
-    && actor(v.author) && material(v.kind) && typeof v.createdAt === "string" && typeof v.origin === "string"
+    && (actor(v.author) || v.author === "source") && material(v.kind) && typeof v.createdAt === "string" && typeof v.origin === "string"
     && (typeof v.parentId === "string" || v.parentId === null) && strings(v.sourceIds) && optionalRejected(v.rejected);
 }
 export function connection(v: unknown): v is IdeaConnection {

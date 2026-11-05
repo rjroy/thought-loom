@@ -37,7 +37,10 @@ describe("SQLite foundation", () => {
     migrate(db);
     expect(db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     const columns = db.query("PRAGMA table_info(thoughts)").all() as { name: string }[];
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "author", "kind", "created_at", "origin", "parent_id"]));
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["id", "text", "author", "kind", "created_at", "origin", "parent_id", "import_document_id"]));
+    expect(db.query("PRAGMA foreign_key_list(thoughts)").all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: "import_document_id", table: "import_document_seals", to: "document_id" }),
+    ]));
     expect(columns.map(column => column.name)).not.toContain("title");
     const titleColumns = db.query("PRAGMA table_info(thought_titles)").all() as { name: string }[];
     expect(titleColumns.map(column => column.name)).toEqual(["thought_id", "title", "title_author"]);

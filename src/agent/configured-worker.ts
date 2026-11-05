@@ -35,6 +35,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     this.runs = new SqliteRunRepository(dependencies.db,dependencies);
     this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
     this.worker = new RunWorker({...dependencies,bindingFor:run => {
+      if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return null;
       const effort = run.kind === "export" ? this.exports.intent(run.id)?.effort : "standard";
       if (effort === undefined) return null; // Unknown legacy intent is blocked, never assigned an invented effort/question.
       const service = this.service;
@@ -84,6 +85,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   async tick(runId: string): Promise<void> {
     if (this.paused) return;
     const run = this.runs.get(runId);
+    if (run && run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return;
     // Canonical local output and terminal cleanup without a binding do not require discovery or a network connection.
     const selectable = run && (run.kind !== "export" || this.exports.intent(runId) !== null);
     if (selectable && ["queued","submitting","running","uncertain"].includes(run.status) && !this.bindings.get(runId)) {

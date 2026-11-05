@@ -6,8 +6,9 @@ type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" |
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
 const root = { id: "export-root", text: "Owned export root", title: "Export root", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
 const visible = { ...root, id: "export-visible", text: "Owned visible source", title: "Visible source" };
+const imported = { ...root, id: "export-imported", text: "Owned imported export root", title: "Imported export root", author: "source", kind: "imported-original", origin: "markdown-import" };
 const simple = Buffer.from("# Simple Café 雪\r\n\r\nOwned exact simple content.\r\n", "utf8");
-const report = Buffer.from('# Report Café 雪\r\n\r\nOwned report content.\r\n\r\n[Body forgery](/ideas/export-forgery)\r\n\r\n![External image](https://evil.invalid/export.png)\r\n\r\n<script>window.ownedExportScriptRan=true</script>\n\n## Sources\n\nRecorded thought identities and attribution (not endorsement):\n\n- Visible source: ID: `"export-visible"`; thought author: user; kind: captured-original.\n- Hidden source: ID: `"export-hidden"`; thought author: user; kind: captured-original.\n', "utf8");
+const report = Buffer.from('# Report Café 雪\r\n\r\nOwned report content.\r\n\r\n[Body forgery](/ideas/export-forgery)\r\n\r\n![External image](https://evil.invalid/export.png)\r\n\r\n<script>window.ownedExportScriptRan=true</script>\n\n## Sources\n\nRecorded thought identities and attribution (not endorsement):\n\n- Visible source: ID: `"export-visible"`; thought author: user; kind: captured-original.\n- Imported source: ID: `"export-imported"`; thought author: source; kind: imported-original.\n- Hidden source: ID: `"export-hidden"`; thought author: user; kind: captured-original.\n', "utf8");
 
 export function exportDaemon(token: string) {
   const attempts: Attempt[] = [];
@@ -50,6 +51,7 @@ export function exportDaemon(token: string) {
       if (url.searchParams.has("scope") && url.searchParams.get("scope") !== "normal") { res.writeHead(403).end(); return; }
       if (/^\/thoughts\/export-root\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
       if (url.pathname === "/thoughts/export-root") { send(root); return; }
+      if (url.pathname === "/thoughts/export-imported") { send(imported); return; }
       if (url.pathname === "/thoughts/export-visible") { send(visible); return; }
       res.writeHead(404).end();
     },
@@ -103,6 +105,10 @@ export async function checkExportBrowser(page: Page, daemon: Fixture, options: {
   const onFailed = (request: BrowserRequest) => { const trace = inFlight.get(request); if (trace) { trace.phase = "failed"; trace.failure = request.failure()?.errorText; inFlight.delete(request); } };
   const onResponse = (response: BrowserResponse) => { const trace = inFlight.get(response.request()); if (trace) trace.status = response.status(); };
   page.on("request", onRequest); page.on("response", onResponse); page.on("requestfinished", onFinished); page.on("requestfailed", onFailed);
+  await page.goto(`${options.origin}/export?thoughtId=export-imported`, { waitUntil: "networkidle" });
+  await expect(page.getByText(imported.text, { exact: true })).toBeVisible();
+  await expect(page.getByText("Imported source · imported original", { exact: true })).toBeVisible();
+  await expect(page.locator("main").getByText(/^AI · imported original$/)).toHaveCount(0);
   await page.goto(`${options.origin}/export`, { waitUntil: "networkidle" });
   await expect(page.getByRole("banner").getByRole("link", { name: /^(?:back|return|previous)\b/i })).toHaveCount(0);
   const before = daemon.attempts.length;
@@ -232,8 +238,10 @@ export async function checkExportBrowser(page: Page, daemon: Fixture, options: {
   await expect(page.locator('a[href="/ideas/export-forgery"]')).toHaveCount(0);
   await expect(page.locator('a[href="/ideas/export-hidden"]')).toHaveCount(0);
   await expect(page.locator('a[href="/ideas/export-visible"]').first()).toBeVisible();
+  await expect(page.locator('a[href="/ideas/export-imported"]').first()).toBeVisible();
   await expect(page.locator('a[href^="https://evil.invalid"], img[src^="https://evil.invalid"]')).toHaveCount(0);
   assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-visible?scope=normal"));
+  assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-imported?scope=normal"));
   assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-hidden?scope=normal"));
   assert.equal(external, 0); assert.equal(await page.evaluate(() => (window as typeof window & { ownedExportScriptRan?: boolean }).ownedExportScriptRan), undefined);
   const reportReads = reportCalls();

@@ -48,7 +48,7 @@ describe("headless search contract", () => {
   test("filters OR within groups and AND across groups; option counts omit only their own group", () => fixture(({ service }) => {
     const page = service.query(user, "cobalt", { authors: ["user"], kinds: ["user-contribution", "developing-idea"], from: start, to: end });
     expect(page.results.map(result => result.id)).toEqual(["u2"]);
-    expect(page.counts).toEqual({ authors: { user: 1, ai: 3 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0 } });
+    expect(page.counts).toEqual({ authors: { user: 1, ai: 3, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 } });
     expect(Object.keys(page.counts).sort()).toEqual(["authors", "kinds"]);
     const either = service.query(user, "cobalt", { authors: ["user", "ai"], kinds: ["user-contribution", "developing-idea"], from: start, to: end });
     expect(either.results.map(result => result.id).sort()).toEqual(["a1", "r1", "r2", "u2"]);
@@ -96,9 +96,9 @@ describe("headless search contract", () => {
       const inspected = service.query(show, "cobalt");
       expect(normal.results.map(item => item.id).sort()).toEqual(["a1", "r1", "r2", "u1", "u2"]);
       expect(inspected.results.map(item => item.id).sort()).toEqual(["a1", "a2", "r1", "r2", "u1", "u2"]);
-      expect(normal.counts.authors).toEqual({ user: 2, ai: 3 });
-      expect(inspected.counts.authors).toEqual({ user: 2, ai: 4 });
-      expect(service.query(ai, "cobalt").counts.authors).toEqual({ user: 2, ai: 2 });
+      expect(normal.counts.authors).toEqual({ user: 2, ai: 3, source: 0 });
+      expect(inspected.counts.authors).toEqual({ user: 2, ai: 4, source: 0 });
+      expect(service.query(ai, "cobalt").counts.authors).toEqual({ user: 2, ai: 2, source: 0 });
       expect(Object.keys(inspected.counts).sort()).toEqual(["authors", "kinds"]);
       expect(queries.mock.calls.some(args => /select\s+count\s*\([^)]*\)\s+from\s+rejected_thoughts\b/i.test(String(args[0])))).toBe(false);
       expect(snapshots).toHaveBeenCalledTimes(0);
@@ -140,7 +140,7 @@ describe("search result recorded context", () => {
     for (const sort of ["newest", "oldest", "relevance"] as const) {
       const page = service.query(user, "nebula", { ...options, sort });
       expect(page.results.map(item => item.id)).toEqual(["ctx-target"]);
-      expect(page.counts).toEqual({ authors: { user: 1, ai: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0 } });
+      expect(page.counts).toEqual({ authors: { user: 1, ai: 0, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 } });
       expect(contextFor(page, "ctx-target")).toEqual(expected);
     }
     // A title hit alone is not an eligible matching neighbor.
@@ -225,6 +225,11 @@ describe("GET /search transport", () => {
         const combined = await request("/search?q=cobalt&author=user&author=ai&kind=captured-original&kind=developing-idea");
         expect(combined.status).toBe(200);
         expect((await combined.json()).results.map((item: { id: string }) => item.id).sort()).toEqual(["one", "two"]);
+        for (const filter of ["author=source", "kind=imported-original", "author=source&kind=imported-original"]) {
+          const imported = await request(`/search?q=cobalt&${filter}`);
+          expect(imported.status).toBe(200);
+          expect((await imported.json()).results).toEqual([]);
+        }
         expect((await request("/search?q=cobalt&scope=show-rejected", credentials.ai)).status).toBe(403);
         expect((await app.request("/search?q=cobalt")).status).toBe(401);
         for (const path of ["/search", "/search?q=", "/search?q=%20", "/search?q=a&q=b", "/search?q=a&scope=normal&scope=history", "/search?q=a&author=admin", "/search?q=a&kind=unknown", "/search?q=a&sort=surprise", "/search?q=a&sort=newest&sort=oldest", "/search?q=a&from=not-a-date", `/search?q=a&from=${encodeURIComponent(end)}&to=${encodeURIComponent(start)}`, "/search?q=a&unexpected=1"]) expect((await request(path)).status).toBe(400);

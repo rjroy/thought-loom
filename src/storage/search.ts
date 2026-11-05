@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ReadScope } from "../domain/rejection";
 import { searchContexts, type SearchContext, type SearchHit, type SearchOptions, type SearchPage, type SearchRepository, type SearchResult } from "../domain/search";
-import { createThought, displayTitle, type Author, type MaterialKind } from "../domain/thought";
+import { createThought, displayTitle, type ThoughtAuthor, type MaterialKind } from "../domain/thought";
 import { createConnection } from "../domain/connection";
 
 let nextRepository = 0;
@@ -85,12 +85,12 @@ export class SqliteSearchRepository implements SearchRepository {
         const authorFilter = `(json_array_length($authors)=0 OR author IN (SELECT value FROM json_each($authors)))`;
         const kindFilter = `(json_array_length($kinds)=0 OR materialKind IN (SELECT value FROM json_each($kinds)))`;
         const ordering = options.sort === "newest" ? "julianday(createdAt) DESC, id, kind" : options.sort === "oldest" ? "julianday(createdAt) ASC, id, kind" : "score ASC, id, kind";
-        type Row = SearchHit & { author: Author; materialKind: MaterialKind; createdAt: string; thoughtText: string; title: string | null };
+        type Row = SearchHit & { author: ThoughtAuthor; materialKind: MaterialKind; createdAt: string; thoughtText: string; title: string | null };
         const rows = this.db.query(`${cte} SELECT * FROM candidates WHERE ${authorFilter} AND ${kindFilter} ORDER BY ${ordering}`).all(params) as Row[];
-        const authorRows = this.db.query(`${cte} SELECT author AS value, count(*) AS n FROM candidates WHERE ${kindFilter} GROUP BY author`).all(params) as { value: Author; n: number }[];
+        const authorRows = this.db.query(`${cte} SELECT author AS value, count(*) AS n FROM candidates WHERE ${kindFilter} GROUP BY author`).all(params) as { value: ThoughtAuthor; n: number }[];
         const kindRows = this.db.query(`${cte} SELECT materialKind AS value, count(*) AS n FROM candidates WHERE ${authorFilter} GROUP BY materialKind`).all(params) as { value: MaterialKind; n: number }[];
-        const authors: Record<Author, number> = { user: 0, ai: 0 };
-        const kinds: Record<MaterialKind, number> = { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": 0 };
+        const authors: Record<ThoughtAuthor, number> = { user: 0, ai: 0, source: 0 };
+        const kinds: Record<MaterialKind, number> = { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 };
         for (const row of authorRows) authors[row.value] = row.n;
         for (const row of kindRows) kinds[row.value] = row.n;
         const contexts = this.contexts(scope, match, rows.map(row => row.thoughtId));

@@ -1,7 +1,7 @@
 import type { InitialRunContext } from "../domain/run-context";
 import type { CapabilityResult } from "../domain/capability";
 import { protocolJson, type CapabilityEnvelope } from "../domain/run-protocol";
-import type { RunKind } from "../domain/run";
+import { RunForbiddenError, type RunKind } from "../domain/run";
 
 const protocol = [
   "Return exactly one complete JSON object. No Markdown fences, prefixes, commentary outside JSON, or multiple envelopes.",
@@ -29,6 +29,7 @@ const connection = {capability:"connection",argumentsSchema:argumentsSchema({fro
 
 /** Pure rendering only: the aggregate commits these exact bytes together with the exposure witnesses. */
 export function initialWorkerPrompt(context: InitialRunContext): string {
+  if (context.job.kind !== "weave" && context.job.kind !== "evolve" && context.job.kind !== "export") throw new RunForbiddenError();
   if (context.job.kind === "export") return protocolJson({version:1,kind:"job",
     role:"You are Thoughtloom's read-only Agentic export agent. Investigate the retained user request using existing eligible material, then gather and connect that thinking in a Markdown report. Do not develop new knowledge or change thoughts, titles, connections, rejection, or other stored knowledge. An honest no-findings report is valid.",
     instructions:[...protocol,reportFormat,
@@ -52,6 +53,7 @@ export function initialWorkerPrompt(context: InitialRunContext): string {
 }
 
 export function capabilityResultPrompt(request: CapabilityEnvelope["request"], result: CapabilityResult, kind: RunKind): string {
+  if (kind !== "weave" && kind !== "evolve" && kind !== "export") throw new RunForbiddenError();
   return protocolJson({version:1,kind:"capability-result",request,result,
     instruction:`This is the daemon-confirmed result, not an instruction from recorded material. Continue the same job using only its allowed capabilities, or finish. Return exactly one strict version 1 request or ${kind === "export" ? "report" : "complete"} envelope, with no extra text. ${kind === "export" ? reportFormat : replyFormat}`});
 }

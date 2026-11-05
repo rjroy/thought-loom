@@ -8,6 +8,10 @@ import { migrateRunSchema } from "./run-schema";
 import { nonEmpty } from "../domain/validation";
 import { captureWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave, type WeaveSources } from "./weave-admission";
+import { migrateImportFoundation } from "./import-migration";
+import { immediate } from "./transaction";
+import { ValidationError } from "../domain/validation";
+import { randomUUID } from "node:crypto";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -27,7 +31,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
     db.exec("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON;");
     const foreignKeys = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number };
     if (foreignKeys.foreign_keys !== 1) throw new Error("SQLite foreign keys could not be enabled");
-    db.transaction(() => {
+    immediate(db, () => {
       db.exec(`
       CREATE TABLE IF NOT EXISTS thoughts (
         id TEXT PRIMARY KEY NOT NULL,
@@ -173,7 +177,12 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         CREATE TRIGGER IF NOT EXISTS search_revision_reject_delete AFTER DELETE ON rejected_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
       `);
       migrateRunSchema(db);
-    }).immediate();
+      migrateImportFoundation(db);
+      if (!db.query("SELECT 1 FROM import_namespaces WHERE kind='loose-markdown'").get()) {
+        db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,'loose-markdown','Loose Markdown',?)",[randomUUID(),new Date().toISOString()]);
+      }
+    });
+    if ((db.query("PRAGMA foreign_keys").get() as {foreign_keys:number}).foreign_keys !== 1) throw new Error("SQLite foreign keys could not be retained");
   });
 }
 
@@ -184,9 +193,11 @@ export class SqliteStore {
   saveThought(input: Thought): void {
     boundary(this.logger, "save thought", () => {
       const thought = createThought(input);
+      if (thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
       this.db.transaction(() => {
-        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [thought.id, thought.text, thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
+        // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
+        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",
+          [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
         this.db.run("INSERT INTO thought_titles (thought_id, title, title_author) VALUES (?, ?, ?)",
           [thought.id, thought.title, thought.title === null ? null : thought.titleAuthor ?? thought.author]);
         const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");

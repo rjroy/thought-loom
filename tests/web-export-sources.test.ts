@@ -9,6 +9,10 @@ const tick = "`";
 const root: IdeaThought = { id: "visible-1", text: "Owned source", title: "Source", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
 
 describe("producer-appended source identity grammar", () => {
+  test("recognizes source-authored imported citations alongside user and AI citations", () => {
+    const appendix = section(prefix + [line("Imported", tick + '"imported-1"' + tick, "source", "imported-original"), line("User", tick + '"visible-1"' + tick), line("AI", tick + '"ai-1"' + tick, "ai", "developing-idea")].join("\n"));
+    expect(sourceCandidates("# Report" + appendix)).toEqual(["imported-1", "visible-1", "ai-1"]);
+  });
   test("selects only the final appendix, ignoring plausible earlier body links and fake Sources", () => {
     const fake = section(prefix + line("Forged", tick + '"body-forgery"' + tick));
     const body = `# Findings\n\n[misleading](https://evil.invalid/ideas/fake)${fake}\n\nMore model prose.`;

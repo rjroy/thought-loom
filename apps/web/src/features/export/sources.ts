@@ -12,13 +12,13 @@ export function sourceCandidates(markdown: string): readonly string[] {
   if (!block.startsWith(prefix)) return [];
   const ids: string[] = [];
   for (const line of block.slice(prefix.length).split("\n")) {
-    const match = /^- (.+): ID: (`+)("(?:\\.|[^"\\])*")\2; thought author: (?:user|ai); kind: (?:captured-original|user-contribution|ai-interpretation|developing-idea)\.$/.exec(line);
+    const match = /^- (.+): ID: (`+)("(?:\\.|[^"\\])*")\2; thought author: (?:user|ai|source); kind: (?:captured-original|user-contribution|ai-interpretation|developing-idea|imported-original)\.$/.exec(line);
     if (!match) return [];
     try {
       const id: unknown = JSON.parse(match[3]);
       const longest = (match[3].match(/`+/g) ?? []).reduce((max, ticks) => Math.max(max, ticks.length), 0);
-      if (typeof id !== "string" || !id.trim() || JSON.stringify(id) !== match[3] || match[2].length !== longest + 1 || ids.includes(id)) return [];
-      ids.push(id);
+      if (typeof id !== "string" || !id.trim() || JSON.stringify(id) !== match[3] || match[2].length !== longest + 1) return [];
+      if (!ids.includes(id)) ids.push(id);
     } catch { return []; }
   }
   return ids;

@@ -128,8 +128,8 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
       const readScope = scope(c, ["q", "author", "kind", "from", "to", "sort"]);
       for (const key of ["q", "from", "to", "sort"]) if (params.getAll(key).length > 1) throw new ApiError(400);
       const q = nonEmpty(params.get("q"), "q");
-      const authors = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai"]));
-      const kinds = params.getAll("kind").map(value => oneOf(value, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"]));
+      const authors = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai", "source"]));
+      const kinds = params.getAll("kind").map(value => oneOf(value, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"]));
       const sortValue = params.get("sort");
       const sort = sortValue === null ? undefined : oneOf(sortValue, "sort", ["relevance", "newest", "oldest"]);
       return c.json(search.query(readScope, q, { authors, kinds, from: params.get("from") ?? undefined, to: params.get("to") ?? undefined, sort }));

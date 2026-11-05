@@ -1,14 +1,17 @@
 import { nonEmpty, nullableString, oneOf, record, references, ValidationError } from "./validation";
 
 export type Author = "user" | "ai";
-export type MaterialKind = "captured-original" | "user-contribution" | "ai-interpretation" | "developing-idea";
+export type TitleAuthor = Author;
+/** Imported wording has unverified original authorship, not user or AI authority. */
+export type ThoughtAuthor = Author | "source";
+export type MaterialKind = "captured-original" | "user-contribution" | "ai-interpretation" | "developing-idea" | "imported-original";
 
 export interface Thought {
   readonly id: string;
   readonly text: string;
   readonly title: string | null;
-  readonly titleAuthor?: Author | null;
-  readonly author: Author;
+  readonly titleAuthor?: TitleAuthor | null;
+  readonly author: ThoughtAuthor;
   readonly kind: MaterialKind;
   readonly createdAt: string;
   readonly origin: string;
@@ -22,17 +25,26 @@ export function createThought(input: unknown): Thought {
   const title = nullableString(data.title, "title");
   const titleAuthor = data.titleAuthor === undefined ? undefined : data.titleAuthor === null ? null : oneOf(data.titleAuthor, "titleAuthor", ["user", "ai"]);
   if (titleAuthor !== undefined && ((title === null) !== (titleAuthor === null))) throw new ValidationError("Title attribution is invalid");
+  const author = oneOf(data.author, "author", ["user", "ai", "source"]);
+  const kind = oneOf(data.kind, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"]);
+  const origin = nonEmpty(data.origin, "origin");
+  const parentId = nullableString(data.parentId, "parentId");
+  const sourceIds = references(data.sourceIds, "sourceIds");
+  if ((author === "source") !== (kind === "imported-original")) throw new ValidationError("Imported-original requires source authorship");
+  if (kind === "imported-original" && (origin !== "markdown-import" || parentId !== null || sourceIds.length !== 0)) {
+    throw new ValidationError("Imported-original requires markdown-import origin, no evolution parent and no supporting sources");
+  }
   return Object.freeze({
     id: nonEmpty(data.id, "id"),
     text: nonEmpty(data.text, "text"),
     title,
     ...(titleAuthor === undefined ? {} : { titleAuthor }),
-    author: oneOf(data.author, "author", ["user", "ai"]),
-    kind: oneOf(data.kind, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"]),
+    author,
+    kind,
     createdAt: nonEmpty(data.createdAt, "createdAt"),
-    origin: nonEmpty(data.origin, "origin"),
-    parentId: nullableString(data.parentId, "parentId"),
-    sourceIds: references(data.sourceIds, "sourceIds"),
+    origin,
+    parentId,
+    sourceIds,
   });
 }
 

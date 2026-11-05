@@ -101,6 +101,7 @@ export class RunWorker {
     try {
       const run = this.runs.get(runId);
       if (!run) throw new RunConflictError("Worker run does not exist");
+      if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return; // Import dispatch belongs to the separately authorized import worker.
       if (terminal(run)) { this.forget(runId); await this.cancel(run); return; }
       let binding = this.bindings.get(runId);
       if (!binding) {

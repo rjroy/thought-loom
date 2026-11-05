@@ -1,14 +1,14 @@
 import type { SearchAuthor, SearchMaterialKind } from "./query";
 
 export interface ContextThought {
-  readonly id: string; readonly text: string; readonly title: string | null; readonly titleAuthor?: SearchAuthor | null;
+  readonly id: string; readonly text: string; readonly title: string | null; readonly titleAuthor?: "user" | "ai" | null;
   readonly author: SearchAuthor; readonly kind: SearchMaterialKind; readonly createdAt: string;
   readonly origin: string; readonly parentId: string | null; readonly sourceIds: readonly string[];
 }
 export interface ContextConnection {
   readonly id: string; readonly fromId: string; readonly toId: string;
   readonly category: "supports" | "contradicts" | "extends" | "related";
-  readonly proposedBy: SearchAuthor; readonly explanation: string; readonly sourceIds: readonly string[];
+  readonly proposedBy: "user" | "ai"; readonly explanation: string; readonly sourceIds: readonly string[];
 }
 export interface SearchResult {
   readonly kind: "thought" | "response"; readonly id: string; readonly thoughtId: string;
@@ -23,22 +23,23 @@ export interface SearchPage {
 }
 export interface WebSearchPage extends SearchPage { readonly rejectionStatus: Readonly<Record<string, boolean | null>>; }
 function object(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function author(value: unknown): value is SearchAuthor { return value === "user" || value === "ai"; }
+function actor(value: unknown): value is "user" | "ai" { return value === "user" || value === "ai"; }
+function author(value: unknown): value is SearchAuthor { return actor(value) || value === "source"; }
 function material(value: unknown): value is SearchMaterialKind {
-  return value === "captured-original" || value === "user-contribution" || value === "ai-interpretation" || value === "developing-idea";
+  return value === "captured-original" || value === "user-contribution" || value === "ai-interpretation" || value === "developing-idea" || value === "imported-original";
 }
 function strings(value: unknown): value is string[] { return Array.isArray(value) && value.every(item => typeof item === "string"); }
 function thought(value: unknown): value is ContextThought {
   return object(value) && typeof value.id === "string" && typeof value.text === "string"
     && (typeof value.title === "string" || value.title === null)
-    && (value.titleAuthor === undefined || value.titleAuthor === null || author(value.titleAuthor))
+    && (value.titleAuthor === undefined || value.titleAuthor === null || actor(value.titleAuthor))
     && author(value.author) && material(value.kind) && typeof value.createdAt === "string"
     && typeof value.origin === "string" && (typeof value.parentId === "string" || value.parentId === null) && strings(value.sourceIds);
 }
 function connection(value: unknown): value is ContextConnection {
   return object(value) && typeof value.id === "string" && typeof value.fromId === "string" && typeof value.toId === "string"
     && (value.category === "supports" || value.category === "contradicts" || value.category === "extends" || value.category === "related")
-    && author(value.proposedBy) && typeof value.explanation === "string" && strings(value.sourceIds);
+    && actor(value.proposedBy) && typeof value.explanation === "string" && strings(value.sourceIds);
 }
 function result(value: unknown): value is SearchResult {
   if (!object(value) || (value.kind !== "thought" && value.kind !== "response")
@@ -54,8 +55,8 @@ export function decodeSearchPage(value: unknown): SearchPage | undefined {
   if (!object(value) || !Array.isArray(value.results) || !value.results.every(result) || !object(value.counts)
       || !object(value.counts.authors) || !object(value.counts.kinds)) return undefined;
   const a = value.counts.authors, k = value.counts.kinds;
-  if (!count(a.user) || !count(a.ai) || !count(k["captured-original"]) || !count(k["user-contribution"])
-      || !count(k["ai-interpretation"]) || !count(k["developing-idea"])) return undefined;
+  if (!count(a.user) || !count(a.ai) || !count(a.source) || !count(k["captured-original"]) || !count(k["user-contribution"])
+      || !count(k["ai-interpretation"]) || !count(k["developing-idea"]) || !count(k["imported-original"])) return undefined;
   return value as unknown as SearchPage;
 }
 export function decodeWebSearchPage(value: unknown): WebSearchPage | undefined {

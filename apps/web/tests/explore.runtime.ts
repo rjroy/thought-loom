@@ -11,6 +11,7 @@ const replyText = "Owned response original full wording";
 const responseHit = { ...base, kind: "response", id: "response-1", text: replyText, snippet: replyText, author: "ai" };
 const rejected = { ...thought, id: "thought-2", thoughtId: "thought-2", title: "Owned rejected thought", text: "Rejected fixture thought", snippet: "Rejected fixture thought" };
 const unknown = { ...thought, id: "thought-3", thoughtId: "thought-3", title: "Inspection unknown thought", text: "Unknown inspection thought", snippet: "Unknown inspection thought" };
+const imported = { ...thought, id: "source-1", thoughtId: "source-1", title: "Owned imported search result", text: "Owned imported search text", snippet: "Owned imported search text", author: "source", materialKind: "imported-original", context: null };
 
 export function searchDaemon(token: string) {
   const attempts: Attempt[] = [];
@@ -37,12 +38,12 @@ export function searchDaemon(token: string) {
       const q = url.searchParams.get("q") ?? "";
       const authors = url.searchParams.getAll("author"), kinds = url.searchParams.getAll("kind");
       const from = url.searchParams.get("from"), to = url.searchParams.get("to");
-      const all = q === "empty-owned" ? [] : q === "newer-owned" ? [{ ...thought, title: "Newest response wins" }] : [thought, responseHit, ...(url.searchParams.get("scope") === "show-rejected" ? [rejected, unknown] : [])];
+      const all = q === "empty-owned" ? [] : q === "source-owned" ? [imported] : q === "newer-owned" ? [{ ...thought, title: "Newest response wins" }] : [thought, responseHit, ...(url.searchParams.get("scope") === "show-rejected" ? [rejected, unknown] : [])];
       const dated = all.filter(item => (!from || item.createdAt.slice(0, 10) >= from.slice(0, 10)) && (!to || item.createdAt.slice(0, 10) <= to.slice(0, 10)));
       const authorFiltered = dated.filter(item => !authors.length || authors.includes(item.author));
       const kindFiltered = dated.filter(item => !kinds.length || kinds.includes(item.materialKind));
       const results = authorFiltered.filter(item => !kinds.length || kinds.includes(item.materialKind));
-      const counts = { authors: { user: kindFiltered.filter(item => item.author === "user").length, ai: kindFiltered.filter(item => item.author === "ai").length }, kinds: { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": authorFiltered.length } };
+      const counts = { authors: { user: kindFiltered.filter(item => item.author === "user").length, ai: kindFiltered.filter(item => item.author === "ai").length, source: kindFiltered.filter(item => item.author === "source").length }, kinds: { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": authorFiltered.filter(item => item.materialKind === "developing-idea").length, "imported-original": authorFiltered.filter(item => item.materialKind === "imported-original").length } };
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ results, counts }));
     },
   };
@@ -101,11 +102,17 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   await expect(field).toBeVisible({ timeout: 5000 });
   await expect(field).toHaveValue("");
   assert.equal(searchCalls().length, before, "initial Explore must not query daemon");
+  await field.fill("source-owned"); await search.click();
+  const importedCard = page.locator("article").filter({ hasText: "Owned imported search result" });
+  await expect(importedCard).toBeVisible();
+  await expect(importedCard.getByText("Imported source", { exact: true }).first()).toBeVisible();
+  await expect(importedCard.getByText("AI", { exact: true })).toHaveCount(0);
+  const afterImported = searchCalls().length;
   await field.fill("owned");
   daemon.setMode("hold");
   try {
     await search.click();
-    await expect.poll(() => searchCalls().length).toBe(before + 1);
+    await expect.poll(() => searchCalls().length).toBe(afterImported + 1);
     await expect(page.getByText(/searching|loading/i).first()).toBeVisible();
   } finally { daemon.release(); daemon.setMode("normal"); }
   await expect(page.getByText("Owned development").first()).toBeVisible();

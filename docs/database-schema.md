@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md)
 
-Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative schema and migration are in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts). This document describes the current schema, not proposed search or agent tables.
+Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative migration starts in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts); import definitions and the FK-closure rebuild live in [`import-schema.ts`](../src/storage/import-schema.ts) and [`import-migration.ts`](../src/storage/import-migration.ts). This document describes implemented storage, not future HTTP import routes or native import execution.
 
 ## Model and relationships
 
@@ -24,13 +24,18 @@ Unless marked nullable, columns below are `NOT NULL`. Every listed foreign key r
 | --- | --- | --- |
 | `id` | `TEXT` | Primary key; assigned by the daemon's creation command. |
 | `text` | `TEXT` | Recorded wording. |
-| `author` | `TEXT` | Check: `user` or `ai`. |
-| `kind` | `TEXT` | Check: `captured-original`, `user-contribution`, `ai-interpretation`, or `developing-idea`. |
+| `author` | `TEXT` | Check: `user`, `ai`, or `source` (imported wording; original author unverified). |
+| `kind` | `TEXT` | Check: `captured-original`, `user-contribution`, `ai-interpretation`, `developing-idea`, or `imported-original`. |
 | `created_at` | `TEXT` | Daemon-generated UTC ISO timestamp. SQLite itself stores text rather than enforcing timestamp syntax. |
 | `origin` | `TEXT` | Provenance label. Current HTTP creation commands use `capture`, `contribution`, or `development`; this column is not a SQL enum. |
 | `parent_id` | `TEXT`, nullable | Foreign key to `thoughts.id`; a check forbids self-parenting. |
+| `import_document_id` | `TEXT`, nullable | Internal FK to `import_document_seals.document_id`, `DEFERRABLE INITIALLY DEFERRED`; present exactly for imported originals. Not part of the ordinary Thought DTO. |
 
 There is no title column in the current table. `BEFORE UPDATE` and `BEFORE DELETE` triggers abort mutations with an immutability error. Further development creates another thought rather than a revision of this row.
+
+`source` and `imported-original` must occur together, with `origin='markdown-import'` and a null evolution parent. Supporting-source inserts are forbidden for imported originals; source membership is not `sourceIds`. All existing user/AI and non-import kind combinations remain valid. Ordinary `saveThought()` refuses imports instead of inferring a title author from `source`; the dedicated import writer owns their mapping and initial null titles. Later user/AI title edits and fills remain valid.
+
+Thought writers bind UTF-8 bytes with `CAST(? AS TEXT)` rather than passing text directly as a Bun string parameter, which consumes an initial U+FEFF. This preserves recorded text even when a segment begins with U+FEFF somewhere other than the original file's initial BOM. Stored BLOB bytes and returned JavaScript text are separate validation boundaries. Migration preserves actual legacy stored bytes; it cannot infer characters already lost by an older write.
 
 ### `thought_titles`
 
@@ -136,7 +141,7 @@ These tables are initialized by core migration through [`run-schema.ts`](../src/
 | Column | Type | Constraint / meaning |
 | --- | --- | --- |
 | `id` | `TEXT` | Primary key; daemon-owned run identity. |
-| `kind` | `TEXT` | Check: `weave`, `evolve`, or `export`. |
+| `kind` | `TEXT` | Check: `weave`, `evolve`, `export`, or `import`. |
 | `status` | `TEXT` | Check: `queued`, `submitting`, `running`, `uncertain`, `completed`, `interrupted`, or `failed`. |
 | `session_id` | `TEXT` | Unique, stable external session identity. |
 | `prompt_id` | `TEXT` | Unique, immutable initial external prompt identity. Later prompt identities live in `run_steps`. |
@@ -167,6 +172,10 @@ Evolve contribution creation and run admission commit together. The persisted in
 Triggers enforce append order, immutable identities/input, durable completion, and immutable recorded envelopes/results. A run insert creates step zero. Preparation records its exact input once; migration never invents missing legacy input. A completed capability step can retain its confirmed result before advancement. Advancing atomically verifies or records that result and creates the successor's exact input and identity. Matching replay reuses that successor; a mismatch conflicts. Every successor begins with its own unknown native state.
 
 Protocol input is one strict version-1 JSON request or completion envelope. Duplicate keys, extra fields, unsupported versions, model-supplied operation IDs and malformed/truncated output are rejected. Machine envelopes are not retained conversational replies. Async acknowledgements are bound to the original prompt and cannot change a successor step.
+
+Import step zero has a separate private storage contract. Preparation saves a canonical version-1 `import-job` containing the unchanged decoded document, validated parser manifest, fixed segmentation instructions and an empty capabilities list. The manifest uses scalar-aligned UTF-8 byte ranges, ordered complete atoms and `b0` through `bN` cut IDs. The parser is responsible for Markdown/dependency safety; storage independently checks byte/range coverage and matches the chosen manifest against that exact prepared input.
+
+A write-once `result_json` with `type:'import-partition'` is allowed only for its owning pending import file's initial step. It retains the validated partition, source fingerprint and private never-submitted/terminal evidence. Choosing increments the run generation and ends initial-source access. A genuine terminal completion records completed native/step state; a failed terminal observation does not fabricate successful native completion. Only validated AI segmentation gets a `segmentation` envelope; structural choices may retain no envelope. Ordinary runs retain their previous result/envelope requirements. Generic protocol, binding, capability, knowledge-write and context paths reject import authority; the ordinary worker and supervisor deliberately do not dispatch import runs. Import-native observation/submission is not implemented by this foundation.
 
 Stop fences local execution before remote cancellation settles. Pending settlement remains durable even after local interruption; marking cancellation settled never restores execution authority. A binding alone is not evidence of submission: an untouched initial step proven never submitted can settle locally without native cleanup. Submitted steps and ambiguous legacy history still require reconciliation. Configured workers process these steps through the daemon-owned supervisor.
 
@@ -248,6 +257,8 @@ When the scheduling port is enabled, capture, an explicit user title-clear on an
 
 Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, weaver interpretations, connection writes and interrupted replies do not recursively schedule more weaving.
 
+The import writer admits one ordinary weave per imported thought with trigger `import:<document-id>:<ordinal>` in the same transaction as the canonical file. No model runs inside that transaction. Empty/metadata-only imports admit no thoughts or weaving.
+
 ### Agentic export artifacts
 
 These subordinate tables reuse run identities and claims; they are not another execution journal:
@@ -260,6 +271,29 @@ These subordinate tables reuse run identities and claims; they are not another e
 Insert/update/delete guards prevent replacement or mutation of stored intents and reports. Legacy export runs remain without an intent rather than receiving an invented request. Finalization validates the persisted version-1 report envelope, full-read source witnesses, current source eligibility and all exposed run context. Report insertion and local completion commit together; Stop, rejection or stale ownership fences publication.
 
 The report preserves model Markdown and appends validated source thought IDs, title/fallback, immutable thought author and material kind. This validates citation structure and eligibility, not the truth of the model's connective conclusions. Historical artifacts are deliberately user-only: they are not thoughts, conversation responses, search-index entries or AI-readable context. Artifact and run-state writes do not grant knowledge-write authority. The existing worker/supervisor executes export runs; immutable intent selects the configured effort variant before binding, and user routes admit and download reports through scoped application services.
+
+## Markdown import storage foundation
+
+These tables and internal adapters exist; there are **no HTTP import/source routes, Markdown parser or import-native worker yet**. [`domain/markdown-import.ts`](../src/domain/markdown-import.ts) defines the range/manifest, admission, report and inspection types. [`storage/markdown-import.ts`](../src/storage/markdown-import.ts) owns admission, private input, durable partition choice and finalization; [`import-inspection.ts`](../src/storage/import-inspection.ts) owns deliberately scoped user inspection.
+
+| Table | Columns and constraints |
+| --- | --- |
+| `import_namespaces` | `id` PK, `kind`, `label`, `created_at`. Migration creates one stable `loose-markdown` namespace with a constant label; a partial unique index enforces that kind's singleton. |
+| `import_documents` | `sequence INTEGER PRIMARY KEY AUTOINCREMENT`; unique `id`; `original_bytes BLOB`; 32-byte `sha256 BLOB`; `byte_length`; `encoding='utf-8'`; `original_namespace_id` FK; `original_path`; `created_at`; `parser_version`; `segmentation_method` (`ai`, `structural`, `not-needed`); nullable `segmentation_reason`, present exactly for structural fallback. Unique `(sha256,byte_length)`; byte length must match the BLOB. |
+| `import_locations` | `(namespace_id,relative_path)` PK, namespace/document FKs; document lookup index. Only a successful novel import binds its original locator. A duplicate skip does not add an alias. |
+| `import_document_parts` | `(document_id,position)` PK; `kind` (`thought`, `separator`, `frontmatter`, `bom`); `[start_byte,end_byte)`; nullable unique `thought_id` and nullable `thought_ordinal`, present exactly for thought parts. Unique `(document_id,thought_ordinal)`; composite FK `(document_id,thought_id)` to `thoughts(import_document_id,id)`. |
+| `import_document_seals` | `document_id` PK, immediate FK to the document. The document's own `id` has the reverse **deferred** FK to this seal, including when it has zero thoughts. |
+| `markdown_imports` | Auto-increasing `sequence`, unique `id` and `request_key`, namespace FK, immutable `created_at`, nullable write-once `sealed_at`. |
+| `markdown_import_files` | `id` PK; batch/namespace composite FK; ordered `position`; `request_key`; `relative_path`; digest/length; `created_at`; nullable unique import `run_id`; nullable `waiting_on_file_id`; nullable terminal `outcome`, `document_id`, `reason_code`. Unique batch-position and batch-request-key pairs. Document is required exactly for imported/skip outcomes; a reason is required exactly for failed/interrupted outcomes. |
+| `markdown_import_payloads` | `file_id` PK/FK; immutable exact staged `bytes`, length-matched to its pending file. Deletion requires terminal settlement. This is private staging, not a retained source or retrieval artifact. |
+
+Positions, ordinals, lengths and offsets use nonnegative safe integers; part ranges are nonempty. Documents, original locators, parts, seals and namespaces reject replacement/update/deletion. A sealed document refuses late parts and imported thoughts. Seal insertion checks the original locator, complete contiguous ordered byte coverage, BOM/frontmatter placement, ordered thought ordinals, mapping in both directions, null initial title metadata, sealed empty supporting-source sets and exact equality between each thought's UTF-8 bytes and its original slice. A missing seal cannot commit, even for an empty or metadata-only document with no thought rows. Application validation additionally checks well-formed UTF-8, no NUL, scalar boundaries, whitespace-only separators and frontmatter framing; it does not substitute for the future Markdown parser.
+
+Admission validates literal relative paths without opening them and compares actual bytes for matching fingerprints. Path writes and locator/reservation lookups bind UTF-8 bytes through `CAST(? AS TEXT)`, preserving a leading U+FEFF and keeping prefixed and unprefixed paths distinct. Known-locator changed bytes win over cross-document dedupe. Request-key replay compares immutable inputs; batch sealing does not block an already-admitted replay. Two partial unique indexes reserve pending-holder `(namespace_id,relative_path)` and `(sha256,byte_length)` pairs. A waiter owns no run and points to a pending holder, never another waiter. Bounded local waiter rechecks rerun admission after holder settlement; this is not native dispatch or an automatic retry of a terminal file.
+
+Finalization revalidates ownership, staged bytes, the durable manifest/partition and reservations. Document, imported thoughts and title/source metadata, complete parts, original locator, document seal, weave admissions, file result, completed run and staged-byte deletion commit together. The shared immediate-transaction helper explicitly rolls back a failed deferred-FK commit before releasing the connection. Stop similarly fences a pending import, settles its file as interrupted and removes staging atomically; it never reverses a committed source or its independent weave jobs.
+
+Source detail/raw/parts require a user `history` inspection scope even when all segments are active. Thought provenance requires a user and respects the target thought's current read scope. Reports/lists never include document bodies. Internal lists use bounded keyset pages (default 50, maximum 200) with route/parent/scope/limit-bound typed continuations and a fixed membership high-water mark; opaque authenticated HTTP cursor encoding remains a future route responsibility. Source metadata, filenames, raw bytes, staging and partition journals never enter thought/response search, ordinary AI context or export membership traversal. Rejection/restoration follows evolution, not document membership.
 
 ## Search indexes and vocabulary cache
 
@@ -306,3 +340,5 @@ Core migration also initializes run storage; callers do not need a separate run-
 Back up valuable data before upgrading and stop the daemon before replacing a disposable database. Automatic weaving is enabled only by explicit server-side agent configuration; schema migration itself does not call a model.
 
 Receipt migration rebuilds the receipt/issued-membership pair together to permit typed non-thought results, preserving legacy requests, results and issued positions. Foreign-key enforcement remains enabled throughout the core migration transaction. Legacy weave subject/trigger fields remain null; migration does not infer a subject from surrounding data.
+
+After predecessor upgrades, import migration stages the complete incoming FK closure of `thoughts`, `runs` and `run_steps`, drops children before parents, recreates the widened tables and restores rows with their original rowids. Cross-table triggers are suspended during copying, then restored with the original indexes; FKs remain enabled throughout. Both sides of the new document/seal cycle exist before copying rows. `foreign_key_check` must be empty before commit, and `foreign_keys=ON` is verified afterward. Existing thoughts receive null import membership; no source bytes, imports, titles, ancestry or native histories are inferred or reset.

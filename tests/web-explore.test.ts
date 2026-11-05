@@ -13,13 +13,22 @@ const contextThought = { id: "context-1", text: "Context original text", title: 
 const connection = { id: "connection-1", fromId: "t-1", toId: "context-1", category: "supports", proposedBy: "ai", explanation: "original explanation", sourceIds: [] } as const;
 const first = { kind: "response", id: "response-1", thoughtId: "t-1", text: "Full response original words", snippet: "response snippet", title: "Destination title", author: "ai", materialKind: "user-contribution", createdAt: "2032-02-01T00:00:00.000Z", context: { kind: "connection", thought: contextThought, connection } } as const;
 const second = { kind: "thought", id: "t-2", thoughtId: "t-2", text: "Full thought original words", snippet: "thought snippet", title: "Thought title", author: "user", materialKind: "captured-original", createdAt: "2032-02-02T00:00:00.000Z", context: { kind: "predecessor", thought: contextThought } } as const;
-const page = { results: [first, second], counts: { authors: { user: 7, ai: 12 }, kinds: { "captured-original": 3, "user-contribution": 5, "ai-interpretation": 0, "developing-idea": 9 } } };
+const page = { results: [first, second], counts: { authors: { user: 7, ai: 12, source: 0 }, kinds: { "captured-original": 3, "user-contribution": 5, "ai-interpretation": 0, "developing-idea": 9, "imported-original": 0 } } };
 const webPage = { ...page, rejectionStatus: { "t-2": false } };
 const request = (params: string) => new Request(`http://127.0.0.1:3000/api/search${params}`);
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
 
 describe("Explore query contract", () => {
+  test("round-trips source author and imported-original filters", () => {
+    const params = new URLSearchParams("q=owned&author=user&author=source&kind=captured-original&kind=imported-original");
+    const decoded = decodeSearchQuery(params);
+    expect(decoded).toBeDefined();
+    if (!decoded) throw new Error("Expected source filters");
+    expect(decoded.author).toEqual(["user", "source"]);
+    expect(decoded.kind).toEqual(["captured-original", "imported-original"]);
+    expect(decodeSearchQuery(encodeSearchQuery(decoded))).toEqual(decoded);
+  });
   test("round-trips repeated facets, inclusive dates and other selections", () => {
     const encoded = encodeSearchQuery(query);
     expect(encoded.getAll("author")).toEqual(["user", "ai"]);
@@ -59,6 +68,22 @@ describe("Explore query contract", () => {
 });
 
 describe("canonical search DTO", () => {
+  test("decodes source result, context and facet counts while keeping metadata actors restricted", () => {
+    const imported = { ...contextThought, author: "source", kind: "imported-original", origin: "markdown-import" } as const;
+    const data = { results: [{ ...second, author: "source", materialKind: "imported-original", context: { kind: "connection", thought: imported, connection } }], counts: { authors: { ...page.counts.authors, source: 2 }, kinds: { ...page.counts.kinds, "imported-original": 2 } } } as const;
+    const invalidTitle = { ...data, results: [{ ...data.results[0], context: { ...data.results[0].context, thought: { ...imported, titleAuthor: "source" } } }] };
+    const invalidProposer = { ...data, results: [{ ...data.results[0], context: { ...data.results[0].context, connection: { ...connection, proposedBy: "source" } } }] };
+    expect(decodeSearchPage(data)).toEqual(data);
+    expect(decodeSearchPage(invalidTitle)).toBeUndefined();
+    expect(decodeSearchPage(invalidProposer)).toBeUndefined();
+    expect(decodeWebSearchPage({ ...data, rejectionStatus: {} })).toEqual({ ...data, rejectionStatus: {} });
+    expect(decodeSearchPage({ ...data, counts: { ...data.counts, authors: { ...data.counts.authors, source: -1 } } })).toBeUndefined();
+    expect(decodeSearchPage({ ...data, counts: { ...data.counts, kinds: { ...data.counts.kinds, "imported-original": -1 } } })).toBeUndefined();
+    const { source: _source, ...authorsWithoutSource } = data.counts.authors;
+    const { "imported-original": _imported, ...kindsWithoutImported } = data.counts.kinds;
+    expect(decodeSearchPage({ ...data, counts: { ...data.counts, authors: authorsWithoutSource } })).toBeUndefined();
+    expect(decodeSearchPage({ ...data, counts: { ...data.counts, kinds: kindsWithoutImported } })).toBeUndefined();
+  });
   test("preserves response/thought identities, ordering, full records, contexts and counts", () => {
     expect(decodeSearchPage(page)).toEqual(page);
     expect(decodeWebSearchPage(webPage)).toEqual(webPage);

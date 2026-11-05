@@ -99,6 +99,17 @@ This proves controlled shared-record continuity, not real provider behavior, cro
 
 Names in the last column refer to `tests/<name>.test.ts`. Some files contain integration checks as well as small unit cases; choose the boundary needed for the change, not just the filename.
 
+The import-attribution/storage-foundation slice can be checked without a parser, browser, provider or operator service:
+
+```sh
+bun --no-env-file test tests/domain.test.ts tests/search-contract.test.ts tests/sqlite.test.ts tests/capability-migration.test.ts tests/markdown-import-foundation.test.ts
+bun --no-env-file run typecheck
+```
+
+Build spellfix first for `search-contract` as described above. These checks cover exact imported thought text and later title attribution, unchanged user/AI combinations, source/imported-original filter/count shapes, fresh import membership/seal FK declarations, and populated predecessor preservation/reopen. The dedicated foundation fixtures also exercise direct-SQL seal and mapping guards, deferred-commit failure and rollback, reservation interleaving across two connections, bounded write-lock contention, rejection-safe inspection, and finalization rollback at 11 injected points including the last weave admission. Migration fixtures inject failures during staging and after destructive rebuild work has begun. These establish controlled transaction behavior, not simultaneous independent-worker execution or a large-database performance benchmark. Neither these checks nor an owned diagnostic smoke establishes parser safety, import-native terminal correlation or HTTP upload behavior. The implemented storage layer accepts test-owned parser manifests/ranges; it makes no claim that a Markdown parser or import dispatch is already implemented.
+
+Exact-text fixtures must compare submitted wording, stored BLOB bytes and returned thought/search/projection text, including a segment beginning with U+FEFF after a leading separator. Equality between pre/post-migration database reads alone can hide a character lost during an earlier write. Thought writers bind UTF-8 bytes and cast to TEXT to avoid Bun's consumption of a leading U+FEFF in a string parameter.
+
 For example, title changes can be checked with:
 
 ```sh

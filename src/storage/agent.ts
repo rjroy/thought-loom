@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { AgentRunRepository, AgentRunView, EvolveAdmission } from "../domain/agent";
+import type { AgentRunRepository, AgentRunView, EvolveAdmission, OrdinaryAgentRunView } from "../domain/agent";
 import { RunAdmissionService, RunConflictError, RunNotFoundError, type RunSources } from "../domain/run";
 import { SqliteRunRepository } from "./run";
 import type { ExportIntent, ExportReport } from "../domain/agentic-export";
@@ -18,6 +18,11 @@ export class SqliteAgentRuns implements AgentRunRepository {
   private read(id: string): AgentRunView | null {
     const run = this.runs.get(id);
     if (!run) return null;
+    if (run.kind === "import") {
+      const file=this.db.query("SELECT id AS fileId,import_id AS importId FROM markdown_import_files WHERE run_id=?").get(id) as {fileId:string;importId:string}|null;
+      if (!file) throw new RunConflictError("Import run owner is unavailable");
+      return {id:run.id,kind:"import",status:run.status,...file};
+    }
     const issued = this.db.query("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position").all(id) as {id:string}[];
     const reply = this.db.query("SELECT response_id AS id FROM run_replies WHERE run_id=?").get(id) as {id:string|null} | null;
     return {id:run.id,kind:run.kind,status:run.status,confirmedThoughtIds:issued.map(thought => thought.id),responseId:reply?.id ?? null};
@@ -27,15 +32,15 @@ export class SqliteAgentRuns implements AgentRunRepository {
       // Run admission validates the selected parent under normal scope inside this same write transaction.
       const admission = this.admissions.admit("user","evolve",{parentId,text});
       const run = this.read(admission.run.id);
-      if (!admission.contribution || !run) throw new RunConflictError("Evolve admission was not retained");
+      if (!admission.contribution || !run || run.kind!=="evolve") throw new RunConflictError("Evolve admission was not retained");
       return {contribution:admission.contribution,run};
     }).immediate();
   }
-  admitExport(intent: ExportIntent): AgentRunView {
+  admitExport(intent: ExportIntent): OrdinaryAgentRunView {
     return this.db.transaction(() => {
       const admitted = this.exports.admit("user",intent);
       const run = this.read(admitted.id);
-      if (!run) throw new RunConflictError("Export admission was not retained");
+      if (!run || run.kind!=="export") throw new RunConflictError("Export admission was not retained");
       return run;
     }).immediate();
   }

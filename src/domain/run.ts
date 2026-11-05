@@ -5,7 +5,11 @@ import type { Thought } from "./thought";
 import type { Connection } from "./connection";
 import type { SharedResponse } from "./shared-response";
 
-export type RunKind = "weave" | "evolve" | "export";
+export type RunKind = "weave" | "evolve" | "export" | "import";
+export type OrdinaryRunKind = Exclude<RunKind, "import">;
+export function requireOrdinaryRun(run: RunRecord): void {
+  if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") throw new RunForbiddenError("Ordinary run authority required");
+}
 export type RunStatus = "queued" | "submitting" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 export type NativeState = "unknown" | "running" | "completed";
 export type ContextRef = { readonly kind: "thought" | "connection" | "response"; readonly id: string };
@@ -84,7 +88,7 @@ export class RunAdmissionError extends Error {}
 /** Admission has no native transport dependency; the repository commits run and contribution together. */
 export class RunAdmissionService {
   constructor(private readonly deps: RunSources & { readonly repository: RunRepository }) {}
-  admit(actor: "user", kind: RunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
+  admit(actor: "user", kind: OrdinaryRunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
     if (actor !== "user") throw new RunForbiddenError();
     if (!["weave", "evolve", "export"].includes(kind) || (kind === "evolve") !== (contribution !== undefined)) throw new RunAdmissionError();
     const { id, now, repository } = this.deps;
@@ -100,7 +104,7 @@ export class RunAdmissionService {
 
 export class RunService {
   constructor(private readonly deps: RunDependencies) {}
-  admit(actor: "user", kind: RunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
+  admit(actor: "user", kind: OrdinaryRunKind, contribution?: { readonly parentId: string; readonly text: string }): Admission {
     return new RunAdmissionService(this.deps).admit(actor,kind,contribution);
   }
   claim(id: string): Claim { return this.deps.repository.claim(id); }
@@ -108,6 +112,7 @@ export class RunService {
     const repo = this.deps.repository;
     const run = repo.get(claim.runId);
     if (!run) throw new RunNotFoundError();
+    requireOrdinaryRun(run);
     // This synchronous transaction is the authorization point; the external call owns no SQL lock.
     repo.setStatus(claim, "submitting", undefined, run.promptId);
     (this.deps.logger ?? createLogger()).verbose("[run] native submit attempt", { runId: run.id, promptId: run.promptId, generation: claim.generation });
@@ -125,6 +130,7 @@ export class RunService {
     const repo = this.deps.repository;
     const run = repo.get(id);
     if (!run) throw new RunNotFoundError();
+    requireOrdinaryRun(run);
     if (!["submitting", "uncertain", "running"].includes(run.status)) throw new RunConflictError();
     const claim = repo.claim(id);
     let observed = run.nativeState;
@@ -148,7 +154,7 @@ export class RunService {
   execute(claim: Claim, operation: Operation): OperationResult {
     const run = this.deps.repository.get(claim.runId);
     if (!run) throw new RunNotFoundError();
-    if (run.kind === "export") throw new RunForbiddenError();
+    if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
     return this.deps.repository.commit(claim, operation);
   }
   recordPartial(claim: Claim, draft: ReplyDraft): void { this.deps.repository.recordPartial(claim, draft); }

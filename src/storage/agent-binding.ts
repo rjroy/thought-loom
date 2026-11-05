@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/opencode-adapter";
 import { AgentBindingError, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
-import { RunFenceError, type Claim } from "../domain/run";
+import { requireOrdinaryRun, RunFenceError, type Claim } from "../domain/run";
 import { protocolJson } from "../domain/run-protocol";
 import { SqliteRunAggregate } from "./run-aggregate";
 
@@ -15,6 +15,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
     const valid = this.transaction("bind agent",runId,() => {
       const run = this.loadRun(runId);
       if (!run) throw new AgentBindingError("Run does not exist for agent binding");
+      requireOrdinaryRun(run);
       if (claim !== undefined && claim.runId !== runId) throw new RunFenceError();
       this.active(claim ?? {runId,generation:run.generation});
       if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run); return false; }

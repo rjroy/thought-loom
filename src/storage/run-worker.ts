@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { InitialRunContext } from "../domain/run-context";
-import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord, type RunSources } from "../domain/run";
+import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord, type RunSources } from "../domain/run";
 import type { CancellationState, RunStep } from "../domain/run-protocol";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import type { Thought } from "../domain/thought";
@@ -31,6 +31,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     });
   }
   private initialContext(run: RunRecord): InitialRunContext {
+    requireOrdinaryRun(run);
     if (run.kind === "export") {
       const intent = new SqliteAgenticExports(this.db,this.sources).intent(run.id);
       if (!intent) throw new RunConflictError("Legacy export request is unavailable; cannot infer intent");

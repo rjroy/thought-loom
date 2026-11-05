@@ -24,8 +24,10 @@ export function exportSources(input: unknown): readonly ExportSource[] {
     const source = record(item);
     const keys = ["id","title","author","kind"];
     if (Object.keys(source).length !== keys.length || keys.some(key => !Object.hasOwn(source,key))) throw new ValidationError("Invalid export source fields");
-    return Object.freeze({id:nonEmpty(source.id,"id"),title:nonEmpty(source.title,"title"),author:oneOf(source.author,"author",["user","ai"]),
-      kind:oneOf(source.kind,"kind",["captured-original","user-contribution","ai-interpretation","developing-idea"])});
+    const author = oneOf(source.author,"author",["user","ai","source"]);
+    const kind = oneOf(source.kind,"kind",["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original"]);
+    if ((author === "source") !== (kind === "imported-original")) throw new ValidationError("Invalid imported attribution");
+    return Object.freeze({id:nonEmpty(source.id,"id"),title:nonEmpty(source.title,"title"),author,kind});
   });
   if (new Set(result.map(source => source.id)).size !== result.length) throw new ValidationError("Duplicate export source");
   return Object.freeze(result);

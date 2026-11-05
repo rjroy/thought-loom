@@ -34,8 +34,8 @@ export class RunSupervisor {
     if (this.stopped) return;
     this.logger.verbose("[supervisor] poll attempt");
     try {
-      const rows = this.dependencies.db.query(`SELECT id FROM runs WHERE status IN ('queued','submitting','running','uncertain') OR
-         (status IN ('completed','interrupted','failed') AND cancellation_state='pending') ORDER BY rowid`).all() as { id: string }[];
+      const rows = this.dependencies.db.query(`SELECT id FROM runs WHERE kind IN ('weave','evolve','export') AND (status IN ('queued','submitting','running','uncertain') OR
+         (status IN ('completed','interrupted','failed') AND cancellation_state='pending')) ORDER BY rowid`).all() as { id: string }[];
       const flights = rows.map(({ id }) => {
         const existing = this.flights.get(id);
         if (existing) return existing;
