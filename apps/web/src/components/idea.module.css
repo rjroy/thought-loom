@@ -1,7 +1,4 @@
 .view { min-inline-size: 0; }
-.back { display: inline-flex; align-items: center; gap: 0.625rem; min-block-size: 2.75rem; margin-block-end: 1.5rem; color: var(--color-body); }
-.back svg { inline-size: 1.25rem; block-size: 1.25rem; }
-.previous { display: flex; max-inline-size: 72ch; margin-block-start: -0.75rem; overflow-wrap: anywhere; }
 .focus { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 2rem; }
 .thought { min-inline-size: 0; }
 .view h1 { margin: 0.5rem 0 0.75rem; color: var(--color-text); font-size: clamp(2rem, 2.75vw, 2.75rem); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; overflow-wrap: anywhere; }
@@ -69,7 +66,6 @@
 .ids { padding-inline-start: 1.25rem; }
 
 @media (max-width: 48rem) {
-  .back { margin-block-end: 1.25rem; }
   .focus { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
   .focus > .primary { inline-size: 100%; margin: 0; }
   .view h1 { font-size: 2rem; }

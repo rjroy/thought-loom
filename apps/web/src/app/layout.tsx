@@ -7,6 +7,7 @@ import { ExploreProvider } from "../components/explore-provider";
 import { IdeaNavigationProvider } from "../components/idea-navigation-provider";
 import { EvolveProvider } from "../components/evolve-provider";
 import { ExportProvider } from "../components/export-provider";
+import { ContextualBack, ContextualBackProvider } from "../components/contextual-back";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -36,16 +37,20 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <IdeaNavigationProvider>
            <EvolveProvider>
            <ExportProvider>
+           <ContextualBackProvider>
           <a className="skip-link" href="#main-content">
             Skip to content
           </a>
           <header className="site-header">
             <div className="site-header-inner">
-              <div className="brand">
+              <div className="site-header-identity">
+                <ContextualBack />
+                <div className="brand">
                 <Link className="brand-name" href="/explore" aria-label="Thoughtloom home">
                   thoughtloom
                 </Link>
                 <p className="brand-tagline">Where ideas take shape.</p>
+                </div>
               </div>
               <PrimaryNavigation />
             </div>
@@ -53,6 +58,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main-content" className="workspace" tabIndex={-1}>
             {children}
           </main>
+           </ContextualBackProvider>
            </ExportProvider>
            </EvolveProvider>
           </IdeaNavigationProvider>

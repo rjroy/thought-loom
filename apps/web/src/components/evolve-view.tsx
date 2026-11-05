@@ -8,6 +8,7 @@ import {
   type EvolveExchange, type EvolveWorkspace,
 } from "./evolve-provider";
 import styles from "./evolve.module.css";
+import { useContextualBack } from "./contextual-back";
 
 const titleOf = (thought: IdeaThought) => thought.title ?? thought.text.trim().split(/\s+/).slice(0, 5).join(" ");
 const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
@@ -26,6 +27,7 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   const contributionField = useRef<HTMLTextAreaElement>(null);
   const snapshot = useCallback(() => store.get(key), [store, key]);
   const workspace = useSyncExternalStore(store.subscribe, snapshot, () => null);
+  useContextualBack(thoughtId ? hrefOf(thoughtId) : "/explore", thoughtId ? "Back to idea" : "Back to Explore");
 
   useEffect(() => { if (thoughtId) setKey(store.open(thoughtId)); }, [store, thoughtId]);
   useEffect(() => {
@@ -41,7 +43,7 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   }, [store, key]);
   useEffect(() => { if (choicesOpen) firstChoice.current?.focus(); }, [choicesOpen]);
 
-  if (!thoughtId) return <section className={styles.view}><h1>Evolve link not valid</h1><p>Choose Evolve from an idea to begin.</p><Link href="/explore">Back to Explore</Link></section>;
+  if (!thoughtId) return <section className={styles.view}><h1>Evolve link not valid</h1><p>Choose Evolve from an idea to begin.</p></section>;
   if (!workspace || !key) return <section className={styles.view}><h1>Evolve</h1><p role="status">Opening the selected thought…</p></section>;
 
   const points = continuationPoints(workspace);
@@ -60,10 +62,6 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   }
 
   return <section className={styles.view}>
-    <Link className={styles.back} href={hrefOf(thoughtId)} prefetch={false}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m10 5-7 7 7 7M3 12h18" /></svg>
-      Back to idea
-    </Link>
     <h1>Evolve</h1>
     <div className={styles.columns}>
       <div className={styles.context}>

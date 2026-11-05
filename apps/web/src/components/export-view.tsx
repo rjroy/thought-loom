@@ -7,6 +7,7 @@ import type { MarkdownArtifact } from "../features/export/types";
 import { ExportMarkdown } from "./export-markdown";
 import { exportTerminal, useExportStore } from "./export-provider";
 import styles from "./export.module.css";
+import { useContextualBack } from "./contextual-back";
 
 function download(artifact: MarkdownArtifact, filename: string) {
   const bytes = downloadBytes(artifact);
@@ -19,6 +20,7 @@ function download(artifact: MarkdownArtifact, filename: string) {
 }
 
 export function ExportView({ thoughtId }: { thoughtId: string | null }) {
+  useContextualBack(thoughtId ? `/ideas/${encodeURIComponent(thoughtId)}` : null, "Back to idea");
   const store = useExportStore(), key = JSON.stringify(thoughtId);
   const workspace = useSyncExternalStore(store.subscribe, () => store.get(key), () => undefined);
   useEffect(() => { store.open(key); return store.watch(key, thoughtId); }, [key, thoughtId, store]);
@@ -61,7 +63,6 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
   const countInvalid = Boolean(workspace && (!Number.isInteger(Number(workspace.count)) || Number(workspace.count) < 1));
   const frozen = flow && workspace?.snapshot;
   return <div className={styles.export}>
-    {thoughtId && <Link className={styles.back} href={`/ideas/${encodeURIComponent(thoughtId)}`} prefetch={false}>Back to idea</Link>}
     <header className={styles.heading}>
       <h1>Export</h1><p>Take your thinking out as Markdown.</p>
     </header>

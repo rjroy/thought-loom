@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
@@ -29,7 +29,7 @@ async function createFixture(temp: string): Promise<string> {
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
     "apps/web/package.json", "apps/web/tsconfig.json", "apps/web/next.config.ts",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
-    "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/capture-form.tsx",
+    "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/contextual-back.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   daemon = createServer((request, response) => {
     if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
-    else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-")) void fixtureIdea.handler(request, response);
+    else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
   });
@@ -268,7 +268,15 @@ async function main(): Promise<void> {
         page.on("console", message => { if (secrets.some(secret => message.text().includes(secret))) leaks.push("console exposed daemon configuration"); });
         page.on("pageerror", error => { if (secrets.some(secret => error.message.includes(secret))) leaks.push("page error exposed daemon configuration"); });
         try {
+          const noContextBack = async () => {
+            const header = page.getByRole("banner");
+            await expect(header.getByRole("link", { name: /^(?:back|return|previous)\b/i })).toHaveCount(0);
+            await expect(header.getByRole("button", { name: /^(?:back|return|previous)\b/i })).toHaveCount(0);
+          };
+          await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+          await noContextBack();
           await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
+          await noContextBack();
           await page.keyboard.press("Tab");
           assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Skip to content");
           await page.keyboard.press("Enter");
@@ -278,11 +286,31 @@ async function main(): Promise<void> {
           assert.equal(await page.getByRole("link", { name: "Settings" }).count(), 0);
           await page.getByRole("link", { name: "Capture", exact: true }).click();
           await page.waitForURL("**/capture");
+          await noContextBack();
           assert.equal(await page.getByRole("heading", { name: "Capture" }).count(), 1);
           await checkCaptureBrowser(page, fixtureDaemon);
           await page.getByRole("link", { name: "Explore", exact: true }).click();
           await page.waitForURL("**/explore");
+          await noContextBack();
           await checkExploreBrowser(page, fixtureSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
+          const search = page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i });
+          await search.fill("owned");
+          await page.getByRole("button", { name: /^search$/i }).click();
+          await expect(page.getByText("Owned development").first()).toBeVisible();
+          await page.getByRole("button", { name: /expand|show more|read more/i }).first().click();
+          const resultLink = page.locator('a[href^="/ideas/thought-1"]').last();
+          await resultLink.scrollIntoViewIfNeeded();
+          await resultLink.evaluate(link => link.addEventListener("click", () => {
+            document.documentElement.dataset.ownedIdeaNavigationScroll = String(window.scrollY);
+          }, { capture: true, once: true }));
+          await resultLink.click();
+          const ideaScroll = Number(await page.locator("html").getAttribute("data-owned-idea-navigation-scroll"));
+          assert.ok(ideaScroll > 0, "Explore-to-Idea navigation must begin at a positive reading position");
+          await expect(page.getByRole("heading", { name: "Owned development", level: 1 })).toBeVisible();
+          await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*(?:results|explore)/i }).click();
+          await expect(search).toHaveValue("owned");
+          await expect(page.getByRole("combobox", { name: /sort/i })).toHaveValue("newest");
+          await expect.poll(async () => Math.abs(await page.evaluate(() => window.scrollY) - ideaScroll), { timeout: 5000 }).toBeLessThanOrEqual(2);
           await checkIdeaBrowser(page, fixtureIdea, { origin, narrow: viewport.width < 500 });
           await checkEvolveBrowser(page, fixtureEvolve, { origin, narrow: viewport.width < 500 });
           await checkExportBrowser(page, fixtureExport, { origin, daemonOrigin, token, narrow: viewport.width < 500 });

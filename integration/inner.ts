@@ -176,7 +176,10 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await expect(page.getByRole("heading", { level: 1, name: "Owned integrated interpretation", exact: true })).toBeVisible();
     await expect(page.locator(`a[href^="/ideas/${encodeURIComponent(id)}"]`).filter({ hasText: "Owned generated title" }).first()).toBeVisible();
     await expect(page.locator("article").filter({ has: page.locator(`a[href^="/ideas/${encodeURIComponent(id)}"]`) })).toContainText(/source|provenance/i);
-    await page.goto(`${origin}/ideas/${encodeURIComponent(id)}`, { waitUntil: "networkidle" });
+    const previousIdea = page.getByRole("banner").getByRole("link", { name: /(?:back|return|previous).*(?:idea|thought)/i });
+    await expect(previousIdea).toHaveAttribute("href", new RegExp(`^/ideas/${encodeURIComponent(id)}(?:\\?|$)`));
+    await previousIdea.click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(id)}`);
     await expect(page.getByText(content, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Edit title" }).click();
     await page.getByRole("textbox", { name: "Title" }).fill("Owned edited title");
@@ -233,7 +236,8 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     assert.equal(followup.kind, "weave");
     assert.equal(followup.status, "completed", `weave for confirmed development ${developmentId} must complete`);
     const beforeExport = knowledge(dbPath);
-    await page.getByRole("link", { name: "Back to idea" }).click();
+    await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(id)}`);
     await page.getByRole("button", { name: "More actions" }).click();
     await page.getByRole("link", { name: /export/i }).click();
     await expect(page.getByText(content, { exact: true })).toBeVisible();

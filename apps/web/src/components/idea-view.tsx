@@ -12,6 +12,7 @@ import styles from "./idea.module.css";
 import { useIdeaNavigation, type PreviousIdea } from "./idea-navigation-provider";
 import { useExploreMemory } from "./explore-provider";
 import { useEvolveStore } from "./evolve-provider";
+import { useContextualBack } from "./contextual-back";
 
 type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
 type PreviewState = { phase: "loading" | "error"; stale: boolean }
@@ -278,6 +279,15 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const thought = view?.thought;
   const reply = view?.responses.find(value => value.id === replyId) ?? null;
   const context = view ? contextItems(view) : [];
+  const recordPreviousReturn = useCallback(() => {
+    if (!previous || !location || !currentView.current) return;
+    let href = thoughtHref(location.id, location);
+    if (location.responseId) href += `&${new URLSearchParams({ responseId: location.responseId })}`;
+    navigation.current = { destination: previous.href, href, title: titleOf(currentView.current.thought) };
+  }, [previous, location, navigation]);
+  useContextualBack(previous?.href ?? back,
+    previous ? `Previous thought: ${previous.title}` : back === "/explore" ? "Back to Explore" : "Back to results",
+    previous ? recordPreviousReturn : undefined);
 
   return (
     <section className={styles.view} onClickCapture={event => {
@@ -290,13 +300,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       if (location.responseId) href += `&${new URLSearchParams({ responseId: location.responseId })}`;
       if (destination !== href) navigation.current = { destination, href, title: titleOf(thought) };
     }}>
-      <Link className={styles.back} href={back} prefetch={false}>
-        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m10 5-7 7 7 7M3 12h18" /></svg>
-        {back === "/explore" ? "Back to Explore" : "Back to results"}
-      </Link>
-      {previous && <Link className={`${styles.back} ${styles.previous}`} href={previous.href}
-        prefetch={false}>Previous thought: {previous.title}</Link>}
-
       {notice && !removed && <div className={unconfirmed ? styles.warning : styles.notice} role="status">
         <p>{notice}</p>
         {unconfirmed && <>

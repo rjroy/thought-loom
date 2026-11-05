@@ -47,6 +47,8 @@ export function ideaDaemon(token: string) {
         }
         if (url.pathname === "/thoughts/idea-root") { if (rootRejected && !inspection) { res.writeHead(404).end(); return; } send({ ...thought, title, titleAuthor: title === null ? null : "user", ...(inspection ? { rejected: rootRejected } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-plain") { send({ ...plain, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/thought-1") { send({ ...plain, id: "thought-1", text: "Owned matching thought for contextual navigation", title: "Owned development", author: "ai", kind: "developing-idea" }); return; }
+        if (/^\/thoughts\/thought-1\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
         if (url.pathname === "/thoughts/idea-source") { send({ ...source, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-child") { send({ ...child, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-grandchild") { send({ ...grandchild, ...(inspection ? { rejected: false } : {}) }); return; }
@@ -111,18 +113,40 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   await expect(page.getByText(plain.text, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /full reply/i })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /owned parent/i })).toHaveCount(0);
+  const header = page.getByRole("banner");
+  const resultsBack = header.getByRole("link", { name: /(?:back|return).*(?:results|explore)/i });
+  await expect(resultsBack).toHaveCount(1);
+  await expect(resultsBack).toHaveAttribute("href", "/explore");
+  await expect(page.locator("main").getByRole("link", { name: /(?:back|return).*(?:results|explore|previous)/i })).toHaveCount(0);
+  const size = await resultsBack.boundingBox();
+  assert.ok(size && size.width >= 44 && size.height >= 44, "contextual header navigation needs a 44px target");
+  const wordmark = await page.getByRole("link", { name: "Thoughtloom home" }).boundingBox();
+  assert.ok(wordmark && Math.abs((size.y + size.height / 2) - (wordmark.y + wordmark.height / 2)) < Math.max(size.height, wordmark.height) / 2, "back arrow and wordmark share the header row");
+  await resultsBack.hover();
+  await expect(page.getByText(/(?:back|return).*(?:results|explore)/i, { exact: false })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await page.getByRole("link", { name: "Thoughtloom home" }).focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(resultsBack).toBeFocused();
+  await expect(page.getByText(/(?:back|return).*(?:results|explore)/i, { exact: false })).toBeVisible();
+  assert.ok(await resultsBack.evaluate(element => element.matches(":focus-visible")), "header back control needs keyboard-visible focus");
+  assert.ok(await resultsBack.evaluate(element => {
+    const style = getComputedStyle(element);
+    const colors = `${style.outlineColor} ${style.boxShadow}`.matchAll(/rgba?\(\s*(\d+)[, ]+\s*(\d+)[, ]+\s*(\d+)/g);
+    return [...colors].some(match => Number(match[3]) > Number(match[1]) && Number(match[3]) > Number(match[2]));
+  }), "keyboard focus ring must be blue");
   const returnTo = "/explore?q=owned&sort=newest&scope=normal";
   await page.goto(`${options.origin}/ideas/idea-root?${new URLSearchParams({ responseId: "idea-reply", returnTo })}`, { waitUntil: "networkidle" });
   await expect(page.getByText(original, { exact: true })).toBeVisible();
   await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /back to results/i })).toHaveAttribute("href", returnTo);
+  await expect(resultsBack).toHaveAttribute("href", returnTo);
   await openMenu();
   for (const action of ["evolve", "export"] as const) {
     const href = await page.getByRole("link", { name: new RegExp(action, "i") }).getAttribute("href");
     const url = new URL(href ?? "", options.origin);
     assert.equal(url.pathname, `/${action}`); assert.equal(url.searchParams.get("thoughtId"), "idea-root");
   }
-  await page.getByRole("link", { name: /back to results/i }).click();
+  await resultsBack.click();
   await expect(page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toHaveValue("owned");
   await expect(page.getByRole("combobox", { name: /sort/i })).toHaveValue("newest");
   const beforeUnrelated = daemon.attempts.length;
@@ -170,6 +194,13 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   await expect(page.locator('a[href^="/ideas/idea-root"]').filter({ hasText: /Owned original idea wording, unchanged/i }).first()).toBeVisible();
   await expect(page.locator("article").filter({ has: page.locator('a[href^="/ideas/idea-root"]') })).toContainText(/source|provenance/i);
   await expect(page.getByText(parent.text, { exact: true })).toHaveCount(0);
+  const previous = header.getByRole("link", { name: /(?:back|return|previous).*(?:idea|thought)/i });
+  await expect(previous).toHaveCount(1);
+  await expect(previous).toHaveAttribute("href", /^\/ideas\/idea-root(?:\?|$)/);
+  await expect(page.locator("main").getByRole("link", { name: /previous thought/i })).toHaveCount(0);
+  await previous.click();
+  await expect(page).toHaveURL(url => url.pathname === "/ideas/idea-root");
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
   assert.ok(!daemon.attempts.some(call => call.path.includes("scope=history")));
   daemon.reset();
   await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });

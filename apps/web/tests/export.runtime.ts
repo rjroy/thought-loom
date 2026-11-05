@@ -48,6 +48,7 @@ export function exportDaemon(token: string) {
         send({ id, kind: "export", status, confirmedThoughtIds: [], responseId: null }); return;
       }
       if (url.searchParams.has("scope") && url.searchParams.get("scope") !== "normal") { res.writeHead(403).end(); return; }
+      if (/^\/thoughts\/export-root\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
       if (url.pathname === "/thoughts/export-root") { send(root); return; }
       if (url.pathname === "/thoughts/export-visible") { send(visible); return; }
       res.writeHead(404).end();
@@ -102,10 +103,14 @@ export async function checkExportBrowser(page: Page, daemon: Fixture, options: {
   const onFailed = (request: BrowserRequest) => { const trace = inFlight.get(request); if (trace) { trace.phase = "failed"; trace.failure = request.failure()?.errorText; inFlight.delete(request); } };
   const onResponse = (response: BrowserResponse) => { const trace = inFlight.get(response.request()); if (trace) trace.status = response.status(); };
   page.on("request", onRequest); page.on("response", onResponse); page.on("requestfinished", onFinished); page.on("requestfailed", onFailed);
+  await page.goto(`${options.origin}/export`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("banner").getByRole("link", { name: /^(?:back|return|previous)\b/i })).toHaveCount(0);
   const before = daemon.attempts.length;
   const navigation = await page.goto(`${options.origin}/export?thoughtId=export-root`, { waitUntil: "networkidle" });
   assert.equal(navigation?.status(), 200, "fresh Export bookmark must resolve to the actual page");
   await expect(page.getByText(root.text, { exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveAttribute("href", /^\/ideas\/export-root(?:\?|$)/);
+  await expect(page.locator("main").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveCount(0);
   const count = page.getByRole("spinbutton", { name: /count|number/i });
   const request = page.getByRole("textbox", { name: /request|question/i });
   const effort = page.getByRole("combobox", { name: /effort/i });
@@ -177,9 +182,9 @@ export async function checkExportBrowser(page: Page, daemon: Fixture, options: {
   await expect(request).toHaveValue("Owned independent report request");
   await expect(page.getByText("export-run-1", { exact: false }).first()).toBeVisible();
   const beforeLeave = daemon.attempts.length;
-  await page.getByRole("link", { name: "Explore", exact: true }).click();
-  await expect(page).toHaveURL(/\/explore(?:\?|$)/);
-  await expect(page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toBeVisible();
+  await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i }).click();
+  await expect(page).toHaveURL(url => url.pathname === "/ideas/export-root");
+  await expect(page.getByRole("heading", { name: "Export root", level: 1 })).toBeVisible();
   await page.goBack();
   await expect(page.getByText("export-run-1", { exact: false }).first()).toBeVisible();
   assert.ok(!daemon.attempts.slice(beforeLeave).some(call => call.method === "POST"), "leaving must not stop or resubmit");

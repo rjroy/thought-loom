@@ -1,7 +1,5 @@
 .view { min-inline-size: 0; }
 .view h1 { margin: 0.5rem 0 1.75rem; color: var(--color-text); font-size: 2rem; line-height: 1.2; letter-spacing: -0.02em; }
-.back { display: inline-flex; align-items: center; gap: 0.625rem; min-block-size: 2.75rem; color: var(--color-body); }
-.back svg { inline-size: 1.25rem; block-size: 1.25rem; }
 .columns { display: grid; grid-template-columns: minmax(13rem, 24%) minmax(0, 1fr); gap: 2rem; }
 .context { min-inline-size: 0; padding-inline-end: 2rem; border-inline-end: 1px solid var(--color-line); }
 .rail h2 { margin: 0 0 1rem; color: var(--color-muted); font-size: 1rem; font-weight: 600; }

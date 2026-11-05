@@ -130,8 +130,9 @@ Search, back and disclosure icons are simple SVG geometry, with a consistent thi
 
 - A visible-on-focus Skip to content link targets the focusable main landmark. Main navigation is labelled; Explore and Capture receive `aria-current="page"` only on their own routes.
 - Settings Reserved is disabled, noninteractive text, not a defined settings screen. Idea, Evolve and Export remain contextual routes; none is a third primary navigation link.
+- Contextual route return is a single left-arrow link beside the wordmark, with a 44px target, blue keyboard focus and a destination-named hover/focus tooltip. It uses the existing header row rather than a separate content row on desktop or narrow screens. Idea prefers the known previous viewed thought, otherwise its validated Explore return destination; this is not blind browser Back. Evolve returns to its selected Idea (or Explore for an invalid link); Export returns only when its root is known. Explore and Capture have no contextual arrow. Route-owned registration is cleared on unmount without clearing a newer route's entry. Immediate-parent navigation remains separate, and Export's Back to setup remains a content-stage action.
 - Links are ordinary links, including encoded canonical Idea IDs. Explore search/filter/sort/scope parameters support fresh bookmarks; valid result-return links preserve exploration intent. Evolve and Export roots use `thoughtId` in the URL.
-- Main action targets are generally 44–48px or taller. Narrow filter labels are 44px high; navigation links are at least 56px high. Text is not made smaller to force controls onto one line.
+- Main action targets are generally 44–48px or taller. Narrow filter labels are 44px high; primary navigation links are at least 56px high, while the contextual Back arrow has its own 44px target. Text is not made smaller to force controls onto one line.
 
 ### Buttons, fields and disclosures
 

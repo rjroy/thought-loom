@@ -28,7 +28,7 @@ The selected thought's immediate parent is a separate link using that parent's t
 - Open a connected thought, making it the new focus.
 - Follow the immediate parent or a directly linked development, connection or provenance thought; inspect attribution, creation details, retained replies or connection rationale as needed.
 - Choose **Evolve this idea** to open a new [Evolve](evolve-view.md) conversation about this selected thought.
-- Return to Search or the previous thought without losing the exploration path.
+- Use the contextual header Back arrow to return to the previous viewed thought when available, otherwise to the preserved Search results. This follows the exploration path, not the evolution parent; the parent-title link remains separate.
 - Reject or restore any note, including the user's own, or any connection; inspect earlier material. These are user-only secondary actions rather than a mandatory approval inbox.
 - Reject or restore an evolution branch from the selected point, following only evolution descendants. Branch rejection must show the affected idea count and request confirmation.
 

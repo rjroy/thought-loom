@@ -114,16 +114,20 @@ export async function checkEvolveBrowser(page: Page, daemon: Fixture, options: {
     await expect(page.locator("#evolve-starting-context").getByText(text, { exact: true })).toBeVisible();
   };
   const leaveAndReturn = async () => {
-    await page.getByRole("link", { name: "Explore", exact: true }).click();
-    await expect(page).toHaveURL(/\/explore(?:\?|$)/);
-    await expect(page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toBeVisible();
+    await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/ideas/evolve-start");
+    await expect(page.getByRole("heading", { name: "Starting thought", level: 1 })).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/evolve\?thoughtId=evolve-start/);
   };
+  await page.goto(`${options.origin}/evolve`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("banner").getByRole("link", { name: /(?:back|return).*(?:results|explore)/i })).toHaveAttribute("href", "/explore");
   const before = daemon.attempts.length;
   const navigation = await page.goto(`${options.origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });
   assert.equal(navigation?.status(), 200, "fresh Evolve bookmark must resolve to the actual page");
   await startingText(start.text);
+  await expect(page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveAttribute("href", /^\/ideas\/evolve-start(?:\?|$)/);
+  await expect(page.locator("main").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveCount(0);
   const composer = page.getByRole("textbox", { name: /contribution|your thought|message/i });
   const send = page.getByRole("button", { name: /^send$/i });
   await expect(composer).toBeVisible();

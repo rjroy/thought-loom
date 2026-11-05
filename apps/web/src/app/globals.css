@@ -103,6 +103,55 @@ a {
   padding-inline: var(--page-inset);
 }
 
+.site-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-inline-size: 0;
+}
+
+.contextual-back {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+}
+
+.contextual-back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border-radius: 0.25rem;
+  color: var(--color-body);
+}
+
+.contextual-back-link:hover { color: var(--color-link); }
+.contextual-back-link svg { inline-size: 1.25rem; block-size: 1.25rem; }
+
+.contextual-back-tooltip {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  inline-size: max-content;
+  max-inline-size: min(24rem, calc(100vw - 2.5rem));
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.375rem;
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  visibility: hidden;
+}
+
+.contextual-back[data-dismissed="false"]:is(:hover, :focus-within) .contextual-back-tooltip {
+  visibility: visible;
+}
+
 .brand {
   display: flex;
   align-items: baseline;

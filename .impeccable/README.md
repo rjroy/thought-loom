@@ -31,6 +31,8 @@ The manifest's `brand.palette` is the complete token handoff: exact ANSI values,
 
 **Navigation:** Explore / Capture / inactive Settings Reserved. Settings contents/behavior are undefined and excluded, not an additional design blocker. Idea, Evolve and Export are contextual; no extra shared destination, profile, bell, Ideas or Journal. Proposed Export entry is `Export…` in Idea's secondary actions, then Back to idea; the approved Idea image is unchanged. Opening another thought selects another Simple root—no root picker.
 
+**User-approved density correction:** contextual route-return navigation is a single left arrow beside the wordmark in the existing header, with a destination-specific accessible name and hover/keyboard-focus tooltip. It replaces the separate content-row Back links without adding a header row or primary destination. On Idea it returns to the previous viewed thought when available, otherwise the preserved Explore results; it is not blind browser Back or the evolution parent. Evolve and contextual Export retain their existing route-return destinations. The parent-title link and Export's internal Back to setup stage action stay in content. Preserve comfortable targets, blue focus and query/scroll/workspace return state; this does not authorize other density changes or repainting selected PNGs.
+
 **Approved shared rules and explicit raster exceptions:**
 
 - Show obvious separated blue keyboard focus, persistent labels, underlined links and worded errors; never rely on color or hover alone. Reading order is focus order.
