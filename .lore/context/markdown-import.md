@@ -26,7 +26,7 @@ Retain the exact original document for deliberate user inspection. Agents cannot
 
 ## View integration
 
-The agreed entry point is an **Import** button below the [Capture](capture-view.md) textarea, opening a separate import flow. The button and flow are not implemented yet. Complete a designer-led Impeccable comp-led design pass with the user before client implementation; use only capabilities supported by the daemon and discuss any gap rather than silently changing it.
+The agreed entry point is an **Import** button to the right of the [Capture](capture-view.md) page heading, outside the thought/title form, opening a separate import flow. This replaces the earlier below-textarea placement. The button and flow are not implemented yet. Complete a designer-led Impeccable comp-led design pass with the user before client implementation; use only capabilities supported by the daemon and discuss any gap rather than silently changing it.
 
 The daemon HTTP workflow is implemented. Existing client views can read imported thoughts, but that is not an implemented upload screen. Browser integration must keep the browser → Next.js server → Hono daemon boundary.
 

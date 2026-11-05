@@ -15,7 +15,7 @@ Add a **user-only source-document artifact, an immutable byte-range map to impor
 
 The daemon accepts submitted Markdown bytes, selects complete-block candidates, asks the initial import agent for boundary IDs, validates the entire selection, and slices the original itself. On an identified AI failure or invalid selection it uses a conservative structural partition automatically. A file's original, complete mapping, thoughts, and ordinary weaving admissions commit together. Bulk work continues independently per file. No preview/approval is required per file.
 
-This is the approved design, **not a description of existing endpoints**. Following independent review and the product confirmations below, the user authorized daemon-first implementation. It requires real schema, domain, protocol, and consumer changes. Current `docs/` contracts remain unchanged until implementation. A separate designer-led, Impeccable comp-led pass will design the Capture **Import button below the textarea** and the new flow before any UI implementation.
+This is the approved design, **not a description of existing endpoints**. Following independent review and the product confirmations below, the user authorized daemon-first implementation. It requires real schema, domain, protocol, and consumer changes. Current `docs/` contracts remain unchanged until implementation. A separate designer-led, Impeccable comp-led pass will design the Capture **Import button beside the page heading**, outside the thought/title form, and the new flow before any UI implementation. This placement supersedes the earlier below-textarea entry.
 
 ### Authority and evidence
 

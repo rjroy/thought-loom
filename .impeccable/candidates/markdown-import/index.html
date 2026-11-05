@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thoughtloom · Approved Markdown import design</title>
+<style>
+@font-face { font-family: 'Source Sans 3'; src: url('../../brand/fonts/SourceSans3-VariableFont_wght.ttf') format('truetype'); font-weight: 200 900; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 2rem; background: #031315; color: #fef6e1; font: 18px/1.5 'Source Sans 3',sans-serif; }
+h1 { margin: 0 0 .5rem; font-size: 2rem; line-height: 1.2; }
+h2 { margin: 0 0 .75rem; font-size: 1.5rem; }
+p { max-width: 75ch; margin: 0 0 1.5rem; color: #d5d3c5; }
+a { color: #65c4c5; text-underline-offset: .2em; }
+a:focus-visible { outline: 3px solid #8eaef2; outline-offset: 5px; }
+section { padding-block: 1.5rem; border-block-start: 1px solid #344548; }
+.views { display: grid; grid-template-columns: minmax(0,1fr) 390px; align-items: start; gap: 1.5rem; }
+figure { margin: 0; min-width: 0; }
+figcaption { margin-block-end: .75rem; }
+img { display: block; width: 100%; height: auto; }
+footer { padding-block-start: 1rem; }
+@media(max-width:900px) { body { padding: 1.25rem; } .views { grid-template-columns: minmax(0,1fr); } .phone { max-width: 390px; } }
+</style>
+</head>
+<body>
+<h1>Approved Markdown import design</h1>
+<p>Import Workspace with Import beside the Capture page heading, outside the form. Approved visual design only; no production implementation or runtime certification. Click an image for its full-size copy.</p>
+<section><h2>Capture entry</h2><div class="views">
+<figure><figcaption><a href="entry-desktop.png">Desktop · 1440px</a></figcaption><a href="entry-desktop.png"><img src="entry-desktop.png" alt="Approved Capture entry with Import to the right of the page heading, desktop"></a></figure>
+<figure class="phone"><figcaption><a href="entry-narrow.png">Narrow · 390px</a></figcaption><a href="entry-narrow.png"><img src="entry-narrow.png" alt="Approved Capture entry with Import outside the thought and title fields, narrow"></a></figure>
+</div></section>
+<section><h2>Import setup</h2><div class="views">
+<figure><figcaption><a href="option-1-ready-desktop.png">Desktop · 1440px</a></figcaption><a href="option-1-ready-desktop.png"><img src="option-1-ready-desktop.png" alt="Approved Import Workspace setup, desktop"></a></figure>
+<figure class="phone"><figcaption><a href="option-1-ready-narrow.png">Narrow · 390px</a></figcaption><a href="option-1-ready-narrow.png"><img src="option-1-ready-narrow.png" alt="Approved import setup, narrow"></a></figure>
+</div></section>
+<section><h2>Mixed processing/report</h2><div class="views">
+<figure><figcaption><a href="option-1-mixed-desktop.png">Desktop · 1440px</a></figcaption><a href="option-1-mixed-desktop.png"><img src="option-1-mixed-desktop.png" alt="Approved import report with independent file outcomes, desktop"></a></figure>
+<figure class="phone"><figcaption><a href="option-1-mixed-narrow.png">Narrow · 390px</a></figcaption><a href="option-1-mixed-narrow.png"><img src="option-1-mixed-narrow.png" alt="Approved import report, narrow"></a></figure>
+</div></section>
+<footer><a href="README.md">Scope and implementation rules</a> · <a href="manifest.json">Image identities and approvals</a> · <a href="study.html?state=entry">Entry source</a> · <a href="study.html?state=ready">Setup source</a> · <a href="study.html?state=mixed">Report source</a></footer>
+</body>
+</html>

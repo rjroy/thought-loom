@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thoughtloom · Markdown import study</title>
+<style>
+:root {
+  color-scheme: dark;
+
+  /* Personal-brand functional palette. Selected UI mixtures follow the manifest. */
+  --brand-color-0: #031315;
+  --brand-color-1: #d66b65;
+  --brand-color-2: #83b88a;
+  --brand-color-3: #efb83f;
+  --brand-color-4: #5e8bd6;
+  --brand-color-5: #8871c5;
+  --brand-color-6: #248f91;
+  --brand-color-7: #d5d3c5;
+  --brand-color-8: #344548;
+  --brand-color-9: #f18a83;
+  --brand-color-10: #a5d5a5;
+  --brand-color-11: #ffd477;
+  --brand-color-12: #8eaef2;
+  --brand-color-13: #b09ae5;
+  --brand-color-14: #65c4c5;
+  --brand-color-15: #fef6e1;
+
+  --color-ground: var(--brand-color-0);
+  --color-text: var(--brand-color-15);
+  --color-body: var(--brand-color-7);
+  --color-muted: #a5a8a0;
+  --color-line: var(--brand-color-8);
+  --color-control-line: #7b837f;
+  --color-focus: var(--brand-color-12);
+  --color-link: var(--brand-color-14);
+  --color-card: #122224;
+  --color-input: #0e1e20;
+  --color-caption: #0a2c2e;
+  --color-selection: #35557f;
+  --page-inset: clamp(1.25rem, 3.125vw, 3rem);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-inline-size: 20rem;
+  min-block-size: 100%;
+  background: var(--color-ground);
+  scrollbar-color: var(--color-control-line) var(--color-ground);
+}
+
+body {
+  margin: 0;
+  min-block-size: 100dvh;
+  background: var(--color-ground);
+  color: var(--color-body);
+  font-family: var(--font-source-sans), system-ui, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-selection);
+  color: var(--color-text);
+}
+
+a {
+  color: var(--color-link);
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 5px;
+}
+
+.skip-link {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 0.75rem;
+  inset-inline-start: var(--page-inset);
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--color-focus);
+  border-radius: 0.25rem;
+  background: var(--color-ground);
+  color: var(--color-text);
+  font-weight: 600;
+  transform: translateY(calc(-100% - 1.5rem));
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.site-header {
+  border-block-end: 1px solid var(--color-line);
+}
+
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  min-block-size: 4.625rem;
+  padding-inline: var(--page-inset);
+}
+
+.site-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-inline-size: 0;
+}
+
+.contextual-back {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+}
+
+.contextual-back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border-radius: 0.25rem;
+  color: var(--color-body);
+}
+
+.contextual-back-link:hover { color: var(--color-link); }
+.contextual-back-link svg { inline-size: 1.25rem; block-size: 1.25rem; }
+
+.contextual-back-tooltip {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  inline-size: max-content;
+  max-inline-size: min(24rem, calc(100vw - 2.5rem));
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.375rem;
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  visibility: hidden;
+}
+
+.contextual-back[data-dismissed="false"]:is(:hover, :focus-within) .contextual-back-tooltip {
+  visibility: visible;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+}
+
+.brand-name {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  border-radius: 0.125rem;
+  color: var(--color-text);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.brand-tagline {
+  margin: 0;
+  color: var(--color-body);
+  font-size: 1rem;
+}
+
+.primary-navigation {
+  display: flex;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.navigation-link,
+.navigation-reserved {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-block-size: 3.5rem;
+  padding: 0.625rem 1rem;
+  border-block-end: 3px solid transparent;
+  color: var(--color-text);
+  font-size: 1.125rem;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.navigation-link {
+  font-weight: 600;
+}
+
+.navigation-link:hover {
+  color: var(--color-focus);
+}
+
+.navigation-link:focus-visible {
+  /* Keep the full ring visible when the navigation meets the viewport edge. */
+  outline-offset: -6px;
+}
+
+.navigation-link[aria-current="page"] {
+  border-block-end-color: var(--color-focus);
+  color: var(--color-focus);
+}
+
+.navigation-reserved {
+  padding-inline-end: 0;
+  color: var(--color-muted);
+}
+
+.reserved-label {
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.workspace {
+  padding: 2rem var(--page-inset) 4rem;
+}
+
+.workspace:focus-visible {
+  outline-offset: -3px;
+}
+
+.workspace-intro {
+  max-inline-size: 65ch;
+}
+
+.workspace-intro h1 {
+  margin: 0 0 0.5rem;
+  color: var(--color-text);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.workspace-intro p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.capture-workspace {
+  inline-size: 87%;
+}
+
+.capture-heading {
+  margin-block-end: 2rem;
+}
+
+.capture-heading p {
+  color: var(--color-body);
+  font-size: 1.25rem;
+}
+
+.capture-status:not(:empty) {
+  margin-block-end: 1.5rem;
+}
+
+.capture-status h2 {
+  margin: 0 0 0.375rem;
+  color: var(--color-text);
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.capture-status p {
+  max-inline-size: 65ch;
+  margin: 0;
+}
+
+.capture-status--saving h2 {
+  color: var(--color-focus);
+}
+
+.capture-status--saved {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--brand-color-2);
+  border-radius: 0.75rem;
+  background: var(--color-card);
+}
+
+.capture-status--saved h2 {
+  color: var(--brand-color-10);
+}
+
+.capture-status--not-saved h2,
+.capture-field-error {
+  color: var(--brand-color-9);
+}
+
+.capture-status--uncertain h2 {
+  color: var(--brand-color-3);
+}
+
+.capture-field + .capture-field {
+  margin-block-start: 1.5rem;
+}
+
+.capture-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.capture-field label,
+.capture-receipt dt {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.capture-optional {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
+.capture-control {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 3rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: var(--color-input);
+  color: var(--color-text);
+  caret-color: var(--brand-color-3);
+  font: inherit;
+}
+
+.capture-control[aria-invalid="true"] {
+  border-color: var(--brand-color-9);
+}
+
+.capture-thought {
+  min-block-size: clamp(15rem, 34vh, 20rem);
+  padding-block: 0.75rem;
+  resize: vertical;
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.capture-form[data-recovery="true"] .capture-thought {
+  min-block-size: 8rem;
+}
+
+.capture-field-error,
+.capture-hint {
+  margin: 0;
+}
+
+.capture-hint {
+  max-inline-size: 65ch;
+  margin-block-start: 0.375rem;
+  color: var(--color-muted);
+  font-size: 1rem;
+}
+
+.capture-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-block-start: 1.5rem;
+}
+
+.capture-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 7.25rem;
+  min-block-size: 3rem;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.capture-button:hover:not(:disabled) {
+  border-color: var(--color-text);
+}
+
+.capture-button--primary {
+  border-color: var(--brand-color-3);
+  background: var(--brand-color-3);
+  color: var(--color-ground);
+  font-weight: 700;
+}
+
+.capture-button--primary:hover:not(:disabled) {
+  border-color: var(--brand-color-11);
+  background: var(--brand-color-11);
+}
+
+.capture-button:disabled {
+  border-color: var(--color-line);
+  background: var(--color-line);
+  color: var(--color-body);
+  cursor: default;
+}
+
+.capture-receipt {
+  margin: 0;
+}
+
+.capture-receipt dd {
+  max-inline-size: 65ch;
+  margin: 0.5rem 0 1.5rem;
+  color: var(--color-text);
+  font-size: 1.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.capture-actions--saved {
+  justify-content: flex-start;
+}
+
+.capture-recovery-actions {
+  display: grid;
+  gap: 1.5rem;
+  max-inline-size: 36rem;
+  margin-block-start: 1.5rem;
+}
+
+@media (max-width: 48rem) {
+  .site-header-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding-block-start: 1rem;
+  }
+
+  .brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .primary-navigation {
+    justify-content: space-between;
+    gap: 0.25rem;
+  }
+
+  .navigation-link,
+  .navigation-reserved {
+    padding-inline: 0.375rem;
+  }
+
+  .navigation-reserved {
+    gap: 0.375rem;
+    padding-inline-end: 0;
+  }
+
+  .workspace {
+    padding-block-start: 1.75rem;
+  }
+
+  .capture-workspace {
+    inline-size: 100%;
+  }
+
+  .capture-thought {
+    min-block-size: 15rem;
+  }
+
+  .capture-actions {
+    flex-direction: column;
+  }
+
+  .capture-button {
+    inline-size: 100%;
+  }
+}
+
+</style>
+<style>
+@font-face { font-family: 'Source Sans 3'; src: url('../../brand/fonts/SourceSans3-VariableFont_wght.ttf') format('truetype'); font-weight: 200 900; font-display: block; }
+:root { --font-source-sans: 'Source Sans 3'; }
+body { min-inline-size: 320px; }
+button,input,textarea { font: inherit; }
+button,a { -webkit-tap-highlight-color: var(--color-caption); }
+.study-main { padding: 2rem var(--page-inset) 3rem; }
+h1 { margin: 0 0 .5rem; color: var(--color-text); font-size: 2rem; line-height: 1.2; letter-spacing: -.02em; }
+h2 { margin: 0 0 .75rem; color: var(--color-text); font-size: 1.375rem; line-height: 1.25; }
+p { margin: 0; }
+.intro { max-inline-size: 72ch; color: var(--color-body); }
+.muted { color: var(--color-muted); }
+.small { font-size: 1rem; }
+.text-action { display: inline-flex; align-items: center; min-block-size: 44px; border: 0; padding: .375rem 0; background: transparent; color: var(--color-link); font: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; cursor: pointer; }
+.text-action:enabled:hover { color: var(--color-text); text-decoration-thickness: 2px; }
+.text-action:enabled:active { text-decoration-thickness: 3px; }
+.control { display: inline-flex; justify-content: center; align-items: center; min-block-size: 48px; padding: .5rem 1.25rem; border: 1px solid var(--color-control-line); border-radius: .5rem; background: var(--color-ground); color: var(--color-text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.control:hover { border-color: var(--color-text); }
+.gold { background: var(--brand-color-3); border-color: var(--brand-color-3); color: var(--color-ground); font-weight: 700; }
+.gold:hover { background: var(--brand-color-11); border-color: var(--brand-color-11); }
+.file-bar,.page-heading,.section-heading,.actions-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1.5rem; }
+.page-heading { align-items: start; margin-block-end: 1.75rem; }
+.page-heading .intro { margin-block-start: .5rem; }
+.file-bar { margin-block: 0 1rem; }
+.file-bar strong { color: var(--color-text); font-weight: 650; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0,1fr) 19rem; gap: 2.5rem; }
+.workspace-grid > * { min-inline-size: 0; }
+.explanation { padding-inline-start: 1.75rem; border-inline-start: 1px solid var(--color-line); }
+.explanation p + p { margin-block-start: .875rem; }
+.explanation h2:not(:first-child) { margin-block-start: 2rem; }
+.explanation dl { margin: 0; }
+.explanation dt { color: var(--color-text); font-weight: 600; }
+.explanation dd { margin: .25rem 0 1rem; }
+.file-list { margin: 0; padding: 0; list-style: none; border-block-start: 1px solid var(--color-line); }
+.file-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .5rem 1.75rem; min-block-size: 58px; border-block-end: 1px solid var(--color-line); }
+.file-name { color: var(--color-text); font-weight: 600; overflow-wrap: anywhere; }
+.file-size { color: var(--color-muted); font-size: 1rem; white-space: nowrap; }
+.file-row .text-action { font-size: 1rem; min-inline-size: 44px; }
+.not-sent { margin-block-start: 1rem; padding: .875rem 1rem; border: 1px solid var(--color-control-line); border-radius: .5rem; background: var(--color-input); }
+.not-sent strong { color: var(--brand-color-9); font-weight: 650; }
+.not-sent p { margin-block-start: .25rem; font-size: 1rem; }
+.ready-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-block-start: 1.25rem; }
+.ready-actions p { max-inline-size: 48ch; font-size: 1rem; }
+.study-note { margin-block-start: 2rem; font-size: 1rem; color: var(--color-muted); }
+.study-note a { margin-inline-start: .5rem; }
+.batch-summary { margin-block-end: 1.5rem; padding-block-end: 1.25rem; border-block-end: 1px solid var(--color-line); }
+.batch-summary h2 { margin: 0 0 .375rem; font-size: 1.5rem; }
+.batch-id { margin-block-start: .375rem; color: var(--color-muted); font-size: 1rem; overflow-wrap: anywhere; }
+.batch-id a { display: inline-flex; align-items: center; min-block-size: 44px; margin-inline-start: .75rem; }
+.results .file-row { grid-template-columns: minmax(10rem, 1.1fr) minmax(0, 1.8fr) 7.5rem; padding-block: .625rem; min-block-size: 78px; }
+.outcome { color: var(--color-text); font-weight: 600; }
+.outcome.success { color: var(--brand-color-10); }
+.outcome.warning { color: var(--brand-color-11); }
+.outcome.failed { color: var(--brand-color-9); }
+.outcome.running { color: var(--brand-color-12); }
+.detail-copy { margin-block-start: .125rem; font-size: 1rem; color: var(--color-muted); }
+.run-reference { color: var(--color-body); font-size: 1rem; overflow-wrap: anywhere; }
+.results .file-row > div { min-inline-size: 0; }
+.results .file-action { justify-self: end; }
+.import-info > summary { display: none; }
+.results .file-row .text-action { white-space: nowrap; }
+.count-line { font-variant-numeric: tabular-nums; }
+.report-foot { margin-block-start: 1.25rem; font-size: 1rem; color: var(--color-muted); max-inline-size: 72ch; }
+.sample { margin-block-start: 1.5rem; padding: 1.25rem; border: 1px solid var(--color-line); border-radius: .75rem; background: var(--color-card); }
+.sample > p + p { margin-block-start: .5rem; }
+.sample-text { color: var(--color-text); white-space: pre-wrap; font-size: 1.25rem; line-height: 1.5; }
+.sample .actions-line { justify-content: start; margin-block-start: .5rem; gap: .25rem 1.5rem; }
+.capture-background .capture-workspace { inline-size: 87%; }
+.capture-heading { max-inline-size: none; }
+.capture-heading-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1.5rem; margin-block-end: .5rem; }
+.capture-heading-row h1 { margin: 0; }
+.capture-heading-row .text-action { min-inline-size: 44px; }
+.contextual-link { align-self: flex-start; inline-size: 44px; block-size: 44px; display: inline-flex; align-items: center; justify-content: center; color: var(--color-body); border-radius: .25rem; position: relative; }
+.contextual-link svg { inline-size: 20px; block-size: 20px; }
+.contextual-tip { display: none; position: absolute; inset-block-start: 100%; inset-inline-start: 0; inline-size: max-content; padding: .5rem .75rem; background: var(--color-card); border: 1px solid var(--color-control-line); border-radius: .375rem; color: var(--color-text); font-size: 1rem; z-index: 5; }
+.contextual-link:is(:hover,:focus-visible) .contextual-tip { display: block; }
+dialog { inline-size: min(44rem,calc(100% - 2rem)); max-block-size: calc(100dvh - 2rem); padding: 1.5rem; border: 1px solid var(--color-control-line); border-radius: .75rem; background: var(--color-ground); color: var(--color-body); }
+dialog::backdrop { background: rgb(3 19 21 / 80%); }
+dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding-block: 1rem; }
+dialog > .actions-line { margin-block-start: 1rem; }
+@media(max-width:68rem) and (min-width:48.001rem) { .workspace-grid { grid-template-columns: minmax(0,1fr) 16rem; gap: 1.5rem; } }
+@media(max-width:48rem) {
+ .study-main { padding-block-start: 1.75rem; }
+ .workspace-grid { grid-template-columns: minmax(0,1fr); gap: 1.75rem; }
+ .import-info > summary { display: list-item; min-block-size: 44px; padding-block: .5rem; color: var(--color-link); text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
+ .import-info[open] > div { padding-block-start: .75rem; }
+ .explanation { padding: 1.5rem 0 0; border-inline-start: 0; border-block-start: 1px solid var(--color-line); }
+ .page-heading { margin-block-end: 1.5rem; }
+ .page-heading > .text-action { margin-block-start: -.25rem; }
+ .file-row { gap: .25rem .875rem; min-block-size: 64px; }
+ .file-name { font-size: 1rem; }
+ .results .file-row { grid-template-columns: minmax(0,1fr) auto; gap: .125rem .75rem; padding-block: .75rem; }
+ .results .file-row > .file-identity { grid-column: 1 / -1; }
+ .results .file-row > .file-status { min-inline-size: 0; }
+ .results .file-row > .file-action { align-self: end; }
+ .results .file-name { font-size: 1.125rem; }
+ .results .file-size { display: none; }
+ .ready-actions { flex-direction: column; align-items: stretch; }
+ .ready-actions .control { inline-size: 100%; }
+ .batch-summary h2 { font-size: 1.375rem; }
+ .batch-summary .actions-line { align-items: start; }
+ .batch-summary .text-action { min-block-size: 44px; }
+ .sample { padding: 1rem; }
+ .sample-text { font-size: 1.125rem; }
+ .capture-background .capture-workspace { inline-size: 100%; }
+ .study-note { margin-block-start: 1.5rem; }
+}
+</style>
+</head>
+<body><div id="root"></div>
+<dialog id="inspection" aria-labelledby="inspection-heading"><h2 id="inspection-heading">Original source</h2><p class="small muted" id="inspection-caption"></p><pre id="original-text"></pre><p class="small" id="inspection-policy">This retained original is not available as later AI context. Import is not endorsement.</p><div class="actions-line"><button class="control" id="close-inspection">Close</button></div></dialog>
+<script>
+const params=new URLSearchParams(location.search),state=params.get('state')||'ready';
+const root=document.getElementById('root'),data=[
+ {name:'garden-notes.md',status:'Imported',tone:'success',detail:'3 thoughts · AI grouping',action:'Inspect source'},
+ {name:'reading-notes.md',status:'Imported',tone:'success',detail:'2 thoughts · Structural fallback',action:'Details'},
+ {name:'garden-copy.md',status:'Skipped — identical',tone:'',detail:'Same original already imported.',action:'Inspect source'},
+ {name:'project-notes.md',status:'Skipped — changed',tone:'',detail:'Existing import kept. Nothing overwritten.',action:'Details'},
+ {name:'questions.md',status:'Running',tone:'running',detail:'Grouping the original words.',run:'import-run-demo-05',action:'Stop file'},
+ {name:'open-questions.md',status:'Outcome uncertain',tone:'warning',detail:'Check this same file; do not import it again.',run:'import-run-demo-06',action:'Check file'},
+ {name:'scratch.md',status:'Failed',tone:'failed',detail:'No source or thoughts saved.',action:'Details'}
+];
+const first='# Garden notes\n\nA small question can open a larger line of thought.';
+const original=first+'\n\nReturning to an idea changes what I notice around it.\n\nConnections are useful when I can explain why they matter.\n';
+const contents={
+ 'garden-notes.md':original, 'garden-copy.md':original,
+ 'reading-notes.md':'# Reading notes\n\nAn argument becomes useful when I can state what would change my mind.\n\nA question can hold two explanations open without endorsing either.\n',
+ 'project-notes.md':'# Project notes\n\nThe outline has changed since this file was first imported. The existing import should remain intact.\n',
+ 'questions.md':'# Questions\n\nWhat would make this connection useful rather than merely similar?\n',
+ 'open-questions.md':'# Open questions\n\nWhen does an unfinished thought become useful to revisit?\n',
+ 'scratch.md':'# Scratch\n\nA failure importing this file should not stop the other files.\n'
+};
+for(const file of data)file.size=new TextEncoder().encode(contents[file.name]).length+' B';
+const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const url=nextState=>`study.html?state=${nextState}`;
+const textButton=(text,attr='')=>`<button type="button" class="text-action" ${attr}>${text}</button>`;
+function shell(back=false){return `<a class="skip-link" href="#main">Skip to content</a><header class="site-header"><div class="site-header-inner"><div class="site-header-identity">${back?`<a class="contextual-link" href="${url('entry')}" aria-label="Back to Capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 5-7 7 7 7M7 12h14"/></svg><span class="contextual-tip" role="tooltip">Back to Capture</span></a>`:''}<div class="brand"><a class="brand-name" href="${url('entry')}" aria-label="Thoughtloom home">thoughtloom</a><p class="brand-tagline">Where ideas take shape.</p></div></div><nav class="primary-navigation" aria-label="Main navigation"><a class="navigation-link" href="${url('entry')}">Explore</a><a class="navigation-link" aria-current="page" href="${url('entry')}">Capture</a><span class="navigation-reserved" aria-disabled="true">Settings <span class="reserved-label">Reserved</span></span></nav></div></header>`;}
+function capture(){return `<main id="main" class="workspace capture-background" tabindex="-1"><section class="capture-workspace" aria-labelledby="capture-heading"><header class="workspace-intro capture-heading"><div class="capture-heading-row"><h1 id="capture-heading">Capture</h1>${textButton('Import',`id="import-entry" onclick="location.href='${url('ready')}'"`)}</div><p>Write or paste a thought.</p></header><form class="capture-form" onsubmit="return false"><div class="capture-field"><label for="capture-thought">Thought</label><textarea class="capture-control capture-thought" id="capture-thought">An idea can be useful before I know how to name it.</textarea></div><div class="capture-field"><label for="capture-title">Title <span class="capture-optional">(optional)</span></label><input class="capture-control" id="capture-title"></div><div class="capture-actions"><button type="button" class="capture-button capture-button--primary">Save</button></div></form><p class="study-note">Illustrative draft · Import entry study</p></section></main>`;}
+function disclaimer(){return `<p class="study-note">Illustrative files · Design study — no uploads or jobs run.</p>`;}
+function pageTop(){return `<div class="page-heading"><div><h1 id="import-heading">Import Markdown</h1><p class="intro">Bring in files without rewriting their words.</p></div>${textButton('Recent imports',`onclick="showRecent(this)"`)}</div>`;}
+function localError(){return `<section class="not-sent" aria-label="File not sent"><strong>scan.pdf · Not sent</strong><p>Choose a Markdown file instead. This file is not included in the import.</p></section>`;}
+function ready(){return `<section aria-labelledby="selected-heading"><div class="file-bar"><strong id="selected-heading">7 Markdown files ready</strong><button type="button" class="control" id="choose-files">Choose files</button></div><ul class="file-list" aria-label="Selected Markdown files">${data.map(file=>`<li class="file-row"><span class="file-name">${file.name}</span><span class="file-size">${file.size}</span>${textButton('Remove',`aria-label="Remove ${file.name}"`)}</li>`).join('')}</ul>${localError()}<div class="ready-actions"><p class="muted">Files are sent only when you choose Import.</p><button type="button" class="control gold" onclick="location.href='${url('mixed')}'">Import 7 files</button></div></section>`;}
+function explanation(){return `<aside class="explanation" aria-label="Import information"><details class="import-info" open><summary>How import works</summary><div><h2>Original words, unchanged</h2><p>AI groups the original words into thoughts. Structure is used automatically if AI grouping cannot be used.</p><p>Imported thoughts are labelled <strong>Imported source</strong>, not You or AI.</p><h2>No overwrite</h2><p>Identical files are skipped. Changed files at known paths are reported and skipped; the existing import stays untouched.</p>${state==='mixed'?`<h2>Keep working</h2><p>Leaving does not stop these files. Keep this report link to return later.</p><a class="text-action" href="${url('mixed')}&batch=import-demo-01">Report link</a>`:`<h2>No file-by-file approval</h2><p>Import the selection once. Each file reports its own result.</p>`}</div></details></aside>`;}
+function sample(){return `<section class="sample" aria-label="First imported thought"><p class="small muted">From garden-notes.md · First of 3 thoughts</p><p class="small">Imported source · Original authorship unverified</p><p class="sample-text">${esc(first)}</p><div class="actions-line"><a class="text-action" href="/ideas/illustrative-import-thought-1">Open idea</a>${textButton('Inspect original',`onclick="inspectSource(this)"`)}</div></section>`;}
+function mixed(){return `<section class="results" aria-labelledby="report-heading"><div class="batch-summary"><div class="actions-line"><h2 id="report-heading">7 files admitted · 2 still working</h2>${textButton('Check report')}</div><p class="count-line">2 imported · 2 skipped · 1 failed</p><p class="batch-id">Batch import-demo-01 <a href="${url('mixed')}&batch=import-demo-01">Report link</a></p></div><ul class="file-list" aria-label="Admitted file results">${data.map(file=>`<li class="file-row" data-state="${file.status}"><div class="file-identity"><p class="file-name">${file.name}</p><p class="file-size">${file.size}</p></div><div class="file-status"><p class="outcome ${file.tone}">${file.status}</p><p class="detail-copy">${file.detail}</p>${file.run?`<p class="run-reference">Run ${file.run}</p>`:''}</div><div class="file-action">${textButton(file.action,file.action==='Inspect source'?`onclick="inspectSource(this)"`:`onclick="inspectFile(this,'${file.name}')"`)}</div></li>`).join('')}</ul><p class="report-foot">One failed file does not stop the others. <span>scan.pdf was not sent and is not in these totals.</span></p>${sample()}</section>`;}
+function content(){return `${pageTop()}<div class="workspace-grid"><div>${state==='ready'?ready():mixed()}</div>${explanation()}</div>${disclaimer()}`;}
+if(state==='entry') root.innerHTML=shell(false)+capture();
+else root.innerHTML=shell(true)+`<main class="study-main" id="main" tabindex="-1">${content()}</main>`;
+if(matchMedia('(max-width:48rem)').matches)document.querySelectorAll('.import-info').forEach(details=>details.open=false);
+let returnTarget=null;const inspection=document.getElementById('inspection');
+function openInspection(trigger,title,copy,source=false){returnTarget=trigger;document.getElementById('inspection-heading').textContent=title;document.getElementById('original-text').textContent=copy;document.getElementById('inspection-caption').textContent=source?'User-only inspection · Original authorship unverified':'Illustrative import report';document.getElementById('inspection-policy').hidden=!source;inspection.showModal();document.getElementById('close-inspection').focus();}
+function inspectSource(trigger){openInspection(trigger,'Original source · garden-notes.md',original,true);}
+function inspectFile(trigger,name){const file=data.find(item=>item.name===name);let copy=file.status+'\n'+file.detail;if(file.run)copy+='\nRun '+file.run+'\nStop applies only to this file, not the batch. It requests cancellation; native work may not stop immediately.';if(name==='reading-notes.md')copy+='\nAI grouping was invalid, so safe structural grouping was used automatically. Both thoughts are saved.';if(name==='scratch.md')copy+='\nThis file failed before canonical import. Other files continue.';openInspection(trigger,'File report · '+name,copy);}
+function showRecent(trigger){openInspection(trigger,'Recent imports','Illustrative report\nimport-demo-01 · 7 admitted · 2 still working\nAn implementation can reopen the same bookmarkable batch report.');}
+document.getElementById('close-inspection').onclick=()=>inspection.close();inspection.addEventListener('close',()=>returnTarget?.focus());
+</script>
+</body></html>
