@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, SQLiteError, type SQLQueryBindings } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type InboxItem, type NativeMessage, type NativeSession, type PublicClient } from "../src/agent/opencode-adapter";
 import { AgentSessionMissingError } from "../src/agent/errors";
+import { importBusy, MarkdownImportWorker } from "../src/agent/import-worker";
 import { partitionMarkdown, prepareMarkdown } from "../src/domain/markdown-import";
 import { RunFenceError, RunService, type NativeDispatcher } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
@@ -19,9 +20,36 @@ const binding: AgentBinding = { sessionId: "fixture-session", serviceUrl: "http:
 const encode = (text: string) => new TextEncoder().encode(text);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 
-async function owned(action: (fixture: { db: Database; imports: SqliteMarkdownImports; bindings: SqliteAgentBindings; runs: SqliteRunRepository; sources: { id: () => string; now: () => string; logger: typeof quiet } }) => Promise<void>) {
+class ProofFaultDatabase extends Database {
+  proofFailure: SQLiteError | null = null;
+  override query<ReturnType, ParamsType extends SQLQueryBindings | SQLQueryBindings[]>(sql: string) {
+    if (this.proofFailure && sql === "SELECT bytes FROM markdown_import_payloads WHERE file_id=?") {
+      const failure = this.proofFailure;
+      this.proofFailure = null;
+      throw failure;
+    }
+    return super.query<ReturnType, ParamsType>(sql);
+  }
+}
+
+// Produce SQLite's own BUSY error using two test-owned connections; inject it once at the
+// owned-input proof query, because BEGIN IMMEDIATE normally encounters a writer lock first.
+function actualBusy(): SQLiteError {
+  const dir = mkdtempSync(join("/tmp/opencode", "import-proof-lock-"));
+  const path = join(dir, "lock.sqlite"), holder = new Database(path), contender = new Database(path);
+  try {
+    holder.exec("CREATE TABLE fixture (id INTEGER)");
+    contender.exec("PRAGMA busy_timeout=1");
+    holder.exec("BEGIN IMMEDIATE");
+    try { contender.exec("INSERT INTO fixture VALUES (1)"); }
+    catch (error) { if (error instanceof SQLiteError && importBusy(error)) return error; throw error; }
+    throw new Error("Expected SQLite lock contention");
+  } finally { if (holder.inTransaction) holder.exec("ROLLBACK"); contender.close(); holder.close(); rmSync(dir, { recursive: true, force: true }); }
+}
+
+async function owned(action: (fixture: { db: ProofFaultDatabase; imports: SqliteMarkdownImports; bindings: SqliteAgentBindings; runs: SqliteRunRepository; sources: { id: () => string; now: () => string; logger: typeof quiet } }) => Promise<void>) {
   const dir = mkdtempSync(join("/tmp/opencode", "import-authority-"));
-  const db = new Database(join(dir, "owned.sqlite"));
+  const db = new ProofFaultDatabase(join(dir, "owned.sqlite"));
   let sequence = 0;
   const sources = { id: () => `authority-${++sequence}`, now: () => "2030-01-02T03:04:05.000Z", logger: quiet };
   try {
@@ -262,4 +290,67 @@ test("terminal witness must identify the exact correlated user message", async (
   const evidence = { state: "terminal-failure" as const, sessionId: binding.sessionId, promptId: item.prompt.promptId, inputSha256: hash(item.prompt.input), userMessageId: "foreign-user", assistantMessageId: null, idleMessageId: "idle-failed", idleOutcome: "failed" as const, completedAt: null, finish: null, assistantError: false, idleError: false, outputByteLength: 0, outputSha256: hash("") };
   expect(() => imports.choose(item.claim, partition, evidence)).toThrow();
   expect(db.query("SELECT result_json FROM run_steps WHERE run_id=?").get(item.claim.runId)).toEqual({ result_json: null });
+}));
+
+test("operational SQLite busy during owned-input proof remains retryable and does not dispatch", async () => owned(async ({ db, imports, bindings, runs }) => {
+  const item = prepared(imports, "Transient proof database contention"), run = runs.get(item.claim.runId);
+  if (!run) throw new Error("Missing run");
+  const nativeBinding = { ...binding, sessionId: run.sessionId }, client = new TrackedClient();
+  bindings.bindImport(item.claim, nativeBinding);
+  const adapter = new OpenCodeAdapter(client, bindings, { ordinary: bindings.assertActive.bind(bindings), import: () => {} }, quiet);
+  await adapter.ensureImportSession(item.claim, nativeBinding, item.prompt);
+  await adapter.submitImport(item.claim, nativeBinding, item.prompt);
+  const saved = db.query("SELECT status FROM runs WHERE id=?").get(run.id);
+  const journal = db.query("SELECT state,native_state,result_json FROM run_steps WHERE run_id=?").get(run.id);
+  const before = client.calls.length;
+  const busy = actualBusy();
+  expect(busy.code).toMatch(/^SQLITE_(BUSY|LOCKED)/);
+  db.proofFailure = busy;
+  let error: unknown;
+  try { await adapter.observeImport(item.claim, nativeBinding, [item.prompt]); } catch (caught) { error = caught; }
+  expect(client.calls).toHaveLength(before);
+  expect(db.query("SELECT status FROM runs WHERE id=?").get(run.id)).toEqual(saved);
+  expect(db.query("SELECT state,native_state,result_json FROM run_steps WHERE run_id=?").get(run.id)).toEqual(journal);
+  expect(db.query("SELECT count(*) AS n FROM thoughts").get()).toEqual({ n: 0 });
+  expect(db.query("SELECT count(*) AS n FROM import_documents").get()).toEqual({ n: 0 });
+  expect(await adapter.observeImport(item.claim, nativeBinding, [item.prompt])).toEqual({ state: "pending" });
+  expect(client.calls.filter(call => call === "prompt")).toHaveLength(1);
+  const recoveredCalls = client.calls.length;
+  await expect(adapter.observeImport(item.claim, nativeBinding, [{ ...item.prompt, input: "foreign" }])).rejects.toThrow(RunFenceError);
+  expect(client.calls).toHaveLength(recoveredCalls);
+  expect(error).toBe(busy);
+  expect(importBusy(error)).toBe(true);
+}));
+
+test("worker retries SQLite busy during submitted import proof without terminal settlement or redispatch", async () => owned(async ({ db, imports, bindings, runs, sources }) => {
+  const item = prepared(imports, "Worker transient proof contention"), run = runs.get(item.claim.runId);
+  if (!run) throw new Error("Missing run");
+  const nativeBinding = { ...binding, sessionId: run.sessionId }, client = new TrackedClient();
+  bindings.bindImport(item.claim, nativeBinding);
+  const setup = new OpenCodeAdapter(client, bindings, { ordinary: bindings.assertActive.bind(bindings), import: () => {} }, quiet);
+  await setup.ensureImportSession(item.claim, nativeBinding, item.prompt);
+  await setup.submitImport(item.claim, nativeBinding, item.prompt);
+  const busy = actualBusy();
+  let inject = true;
+  const worker = new MarkdownImportWorker({ db, ...sources, native: (store, localFence) => {
+    const adapter = new OpenCodeAdapter(client, store, { ordinary: store.assertActive.bind(store), import: localFence }, quiet);
+    return {
+      bindingFor: async () => nativeBinding,
+      ensureSession: (claim, binding, prompt) => adapter.ensureImportSession(claim, binding, prompt),
+      submit: (claim, binding, prompt) => adapter.submitImport(claim, binding, prompt),
+      observe: (claim, binding, prompts) => { if (inject) { inject = false; db.proofFailure = busy; } return adapter.observeImport(claim, binding, prompts); },
+      cancel: (claim, binding, prompt) => adapter.cancelImport(claim, binding, prompt),
+    };
+  } });
+  const work = worker.candidates(0, null, 10).items.find(value => value.runId === run.id);
+  if (!work) throw new Error("Submitted import candidate missing");
+  const beforeCalls = client.calls.length;
+  await worker.tick(work);
+  expect(client.calls).toHaveLength(beforeCalls);
+  expect(db.query("SELECT count(*) AS n FROM thoughts").get()).toEqual({ n: 0 });
+  expect(db.query("SELECT count(*) AS n FROM import_documents").get()).toEqual({ n: 0 });
+  expect(imports.file("user", item.batch.id, item.file.id)).toMatchObject({ state: "submitting", error: null });
+  await worker.tick(work);
+  expect(imports.file("user", item.batch.id, item.file.id)).toMatchObject({ state: "uncertain", error: null });
+  expect(client.calls.filter(call => call === "prompt")).toHaveLength(1);
 }));

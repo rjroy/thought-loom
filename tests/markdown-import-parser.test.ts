@@ -1,10 +1,35 @@
 import { describe, expect, test } from "bun:test";
 import { importManifest, importPartition, partitionMarkdown, prepareMarkdown, validateMarkdownSelection, type ImportManifest, type ImportPartition, type Segmentation } from "../src/domain/markdown-import";
+import * as parserModule from "../src/domain/markdown-import-parser";
+import type { PreparedMarkdown } from "../src/domain/markdown-import-parser";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
+import type { Root } from "mdast";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const decode = (bytes: Uint8Array) => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 const structural: Segmentation = { method: "structural", reason: "ai-invalid" };
 const ai: Segmentation = { method: "ai", reason: null };
+
+// Proposed internal seam: a parser instance owns its private preparation proofs.
+// The AST dependency accepts the body and returns an actual mdast Root, never a manifest.
+interface ParserInstance {
+  prepareMarkdown(bytes: Uint8Array): PreparedMarkdown;
+  partitionMarkdown(bytes: Uint8Array, prepared: PreparedMarkdown, cuts: readonly string[], segmentation: Segmentation): ImportPartition;
+}
+function parserInstance(parse: (body: string) => Root): ParserInstance {
+  const factory: unknown = Reflect.get(parserModule, "createMarkdownParser");
+  if (typeof factory !== "function") throw new Error("Missing parser capability: createMarkdownParser");
+  const value: unknown = Reflect.apply(factory, undefined, [parse]);
+  if (!isParserInstance(value)) throw new Error("Invalid parser factory result");
+  return value;
+}
+function isParserInstance(value: unknown): value is ParserInstance {
+  return typeof value === "object" && value !== null && "prepareMarkdown" in value && typeof value.prepareMarkdown === "function"
+    && "partitionMarkdown" in value && typeof value.partitionMarkdown === "function";
+}
+const realParse = (body: string): Root => fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
 
 function prepared(bytes: Uint8Array) {
   const raw = prepareMarkdown(bytes);
@@ -62,6 +87,21 @@ describe("lossless Markdown parser and grouping", () => {
     expect(result.parts.find(part => part.kind === "thought")?.startByte).toBe(byteOffset(text, "# Same\r\n"));
   });
 
+  test("maps Unicode scalar widths to original byte offsets across mixed line endings", () => {
+    const text = "\ufeff---\r\nopaque: ✓\n---\r\n\r\n# First\r\nA é 漢 😀 e\u0301\n\r\n# Next\n\ufeffvalue\r\n";
+    const bytes = encode(text), p = prepared(bytes), next = byteOffset(text, "# Next");
+    const boundary = p.manifest.cuts.find(cut => cut.offset === next);
+    if (!boundary) throw new Error("Missing second section boundary");
+    const last = p.manifest.cuts.at(-1);
+    if (!last) throw new Error("Missing endpoint");
+    const parts = partition(bytes, p, ["b0", boundary.id, last.id], ai);
+    const thoughts = slices(bytes, parts);
+    expect(thoughts).toHaveLength(2);
+    expect(thoughts[0]).toContain("A é 漢 😀 e\u0301");
+    expect(thoughts[1]).toContain("\ufeffvalue");
+    expect(parts.parts.filter(part => part.kind === "thought")[1]?.startByte).toBe(next);
+  });
+
   test("never offers cuts inside complete containers, heading sequences or ending headings", () => {
     const text = "# First\n## Sub\n\n- one\n  - nested\n\n  continued\n\n> quoted\n>\n> more\n\n```md\n# not a heading\n\ncode\n```\n\n| a | b |\n| - | - |\n| c | d |\n\n<div>\ninside\n</div>\n\n# Last\n";
     const bytes = encode(text), p = prepared(bytes), offsets = cutOffsets(p.manifest);
@@ -82,6 +122,125 @@ describe("lossless Markdown parser and grouping", () => {
     expect(thoughts.map(thought => thought.trim())).not.toContain("[unused]: /unused");
     expect(thoughts.some(thought => thought.includes("Outside"))).toBe(true);
     expect(thoughts.some(thought => thought.includes("After"))).toBe(true);
+  });
+
+  test("closes repeated link and image uses across hundreds of blocks and duplicate definitions", () => {
+    const uses = Array.from({ length: 300 }, (_, i) => `Use ${i} [link][ref] ![image][ref]`).join("\n\n");
+    const text = `[ref]: /before\n\n${uses}\n\n[ref]: /duplicate\n\nOutside\n`;
+    const bytes = encode(text), p = prepared(bytes), offsets = cutOffsets(p.manifest);
+    expect(offsets.some(offset => offset > 0 && offset <= byteOffset(text, "[ref]: /duplicate"))).toBe(false);
+    const thoughts = slices(bytes, partition(bytes, p, p.manifest.cuts.map(cut => cut.id), ai));
+    expect(thoughts[0]).toContain("Use 299 [link][ref] ![image][ref]");
+    expect(thoughts[0]).toContain("[ref]: /duplicate");
+    expect(thoughts.at(-1)).toContain("Outside");
+  });
+
+  test("intersecting intervals sharing a block close transitively but disjoint intervals stay separate", () => {
+    const text = "[a]: /a\n\n[a]\n\n[a] and [b]\n\n[b]\n\n[b]: /b\n\nMiddle\n\n[c]: /c\n\n[c]\n\nOutside\n";
+    const bytes = encode(text), p = prepared(bytes), offsets = cutOffsets(p.manifest);
+    const end = byteOffset(text, "[b]: /b"), second = byteOffset(text, "[c]: /c");
+    expect(offsets.some(offset => offset > 0 && offset <= end)).toBe(false);
+    expect(offsets).toContain(second);
+    const thoughts = slices(bytes, partition(bytes, p, p.manifest.cuts.map(cut => cut.id), ai));
+    expect(thoughts[0]).toContain("[b]: /b");
+    expect(thoughts.some(thought => thought.includes("[c]: /c") && thought.includes("[c]"))).toBe(true);
+    expect(thoughts.some(thought => thought.trim() === "Middle")).toBe(true);
+  });
+
+  test("unrelated unused definitions inside separate containers do not merge the whole document", () => {
+    const text = "> first\n>\n> [unused-a]: /a\n\nMiddle\n\n- second\n\n  [unused-b]: /b\n\nAfter\n";
+    const bytes = encode(text), p = prepared(bytes);
+    expect(cutOffsets(p.manifest)).toContain(byteOffset(text, "Middle"));
+    expect(cutOffsets(p.manifest)).toContain(byteOffset(text, "- second"));
+    const thoughts = slices(bytes, partition(bytes, p, p.manifest.cuts.map(cut => cut.id), ai));
+    expect(thoughts.some(thought => thought.includes("unused-a") && !thought.includes("unused-b"))).toBe(true);
+    expect(thoughts.some(thought => thought.includes("unused-b") && !thought.includes("unused-a"))).toBe(true);
+  });
+
+  test("rejects fabricated scalar-aligned cuts inside a container or dependency atom", () => {
+    for (const [text, marker] of [["- one\n  - nested\n\nAfter\n", "  - nested"], ["[a]: /a\n\nUse [a]\n\nAfter\n", "Use [a]"]] as const) {
+      const bytes = encode(text), p = prepared(bytes), split = byteOffset(text, marker);
+      const first = p.manifest.atoms[0];
+      if (!first || split <= first.startByte || split >= first.endByte) throw new Error("Fixture split must be inside atom");
+      const atoms = [{ startByte: first.startByte, endByte: split }, { startByte: split, endByte: first.endByte }, ...p.manifest.atoms.slice(1)];
+      const cuts = [...atoms.map((atom, index) => ({ id: `b${index}`, offset: atom.startByte })), { id: `b${atoms.length}`, offset: atoms.at(-1)?.endByte ?? bytes.length }];
+      const forged = { ...p.raw, manifest: { ...p.manifest, atoms, cuts } };
+      expect(() => partitionMarkdown(bytes, forged, cuts.map(cut => cut.id), ai)).toThrow();
+    }
+  });
+
+  test("one real AST parse serves preparation, repeated selections and partitions", () => {
+    let calls = 0;
+    const parser = parserInstance(body => { calls++; return realParse(body); });
+    const bytes = encode("\ufeff---\r\nmeta: ✓\r\n---\r\n\r\n# A\nFirst 😀\n\n# B\nSecond\n");
+    const p = parser.prepareMarkdown(bytes), all = p.manifest.cuts.map(cut => cut.id);
+    const last = all.at(-1);
+    if (!last) throw new Error("Missing endpoint");
+    for (const cuts of [["b0", last], all, p.fallbackCuts]) {
+      const selected = validateMarkdownSelection(p.manifest, JSON.stringify({ version: 1, kind: "segmentation", cuts }));
+      const result = importPartition(bytes, parser.partitionMarkdown(bytes, p, selected, ai));
+      expect(slices(bytes, result).join("")).toContain("Second");
+    }
+    expect(calls).toBe(1);
+  });
+
+  test("only the exact prepared object is authorized, not spread or structured clones", () => {
+    const bytes = encode("First\n\nSecond\n"), p = prepareMarkdown(bytes);
+    const clones = [{ ...p }, { ...p, manifest: { ...p.manifest } }, structuredClone(p)];
+    for (const clone of clones) expect(() => partitionMarkdown(bytes, clone, p.fallbackCuts, structural)).toThrow();
+    expect(slices(bytes, partitionMarkdown(bytes, p, p.fallbackCuts, structural))).toHaveLength(1);
+  });
+
+  test("freezes preparation and all nested ranges, cuts and fallback IDs", () => {
+    const bytes = encode("# A\nOne\n\n# B\nTwo\n"), p = prepareMarkdown(bytes);
+    const atom = p.manifest.atoms[0], cut = p.manifest.cuts[0];
+    if (!atom || !cut) throw new Error("Fixture requires an atom and cut");
+    for (const value of [p, p.manifest, p.manifest.atoms, atom, p.manifest.cuts, cut, p.fallbackCuts]) expect(Object.isFrozen(value)).toBe(true);
+    expect(Reflect.set(atom, "endByte", atom.startByte + 1)).toBe(false);
+    expect(Reflect.set(cut, "offset", cut.offset + 1)).toBe(false);
+    expect(Reflect.set(p.fallbackCuts, "0", "foreign")).toBe(false);
+    expect(slices(bytes, partitionMarkdown(bytes, p, p.fallbackCuts, structural))).toHaveLength(2);
+  });
+
+  test("fingerprints source bytes without freezing or retaining the caller's mutable buffer", () => {
+    const bytes = encode("Alpha\n\nBeta\n"), original = bytes.slice(), p = prepareMarkdown(bytes);
+    bytes[0] = "Z".charCodeAt(0);
+    expect(bytes[0]).toBe("Z".charCodeAt(0));
+    expect(() => partitionMarkdown(bytes, p, p.fallbackCuts, structural)).toThrow();
+    expect(slices(original, partitionMarkdown(original, p, p.fallbackCuts, structural))[0]).toContain("Alpha");
+    const swapped = encode("Alpha\n\nZeta\n");
+    expect(swapped.length).toBe(original.length);
+    expect(() => partitionMarkdown(swapped, p, p.fallbackCuts, structural)).toThrow();
+  });
+
+  test("parses and fingerprints the same owned snapshot when the caller changes bytes during parsing", () => {
+    const bytes = encode("Alpha\n\nBeta\n"), original = bytes.slice();
+    let calls = 0;
+    const parser = parserInstance(body => { calls++; bytes[0] = "Z".charCodeAt(0); return realParse(body); });
+    const p = parser.prepareMarkdown(bytes);
+    expect(bytes[0]).toBe("Z".charCodeAt(0));
+    expect(() => parser.partitionMarkdown(bytes, p, p.fallbackCuts, structural)).toThrow();
+    expect(slices(original, parser.partitionMarkdown(original, p, p.fallbackCuts, structural))[0]).toContain("Alpha");
+    expect(calls).toBe(1);
+  });
+
+  test("proofs are private to each parser instance and cannot authorize the default facade", () => {
+    const first = parserInstance(realParse), second = parserInstance(realParse);
+    const bytes = encode("one\n\ntwo\n"), p = first.prepareMarkdown(bytes), q = second.prepareMarkdown(bytes), defaultPrepared = prepareMarkdown(bytes);
+    expect(slices(bytes, first.partitionMarkdown(bytes, p, p.fallbackCuts, structural))).toHaveLength(1);
+    expect(slices(bytes, second.partitionMarkdown(bytes, q, q.fallbackCuts, structural))).toHaveLength(1);
+    expect(() => second.partitionMarkdown(bytes, p, p.fallbackCuts, structural)).toThrow();
+    expect(() => first.partitionMarkdown(bytes, q, q.fallbackCuts, structural)).toThrow();
+    expect(() => partitionMarkdown(bytes, p, p.fallbackCuts, structural)).toThrow();
+    expect(() => first.partitionMarkdown(bytes, defaultPrepared, defaultPrepared.fallbackCuts, structural)).toThrow();
+  });
+
+  test("footnote marker detection requires a nonempty label closed on the same line", () => {
+    for (const [marker, whole] of [["[^x]", true], ["[^]", false], ["[^x\ny]", false], ["[^unclosed", false], ["[^x\ry]", false]] as const) {
+      const bytes = encode(`First ${marker}\n\n# Next\nSecond\n`), p = prepared(bytes);
+      expect(p.manifest.atoms.length).toBe(whole ? 1 : 2);
+      slices(bytes, partition(bytes, p, p.fallbackCuts));
+    }
   });
 
   test("uses whole-body fallback for unknown footnote dependencies and headingless prose", () => {

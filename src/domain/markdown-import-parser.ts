@@ -1,7 +1,8 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
-import type { Content, RootContent } from "mdast";
+import { createHash } from "node:crypto";
+import type { Content, Root, RootContent } from "mdast";
 import { importManifest, importPartition, ImportPreservationError, sourceText } from "./markdown-import-contract";
 import type { ByteRange, ImportManifest, ImportPartition, ImportPartRange, Segmentation } from "./markdown-import-contract";
 import { uniqueKeys } from "./run-protocol";
@@ -12,18 +13,30 @@ export interface PreparedMarkdown {
   readonly fallbackCuts: readonly string[];
 }
 
+export interface MarkdownParser {
+  prepareMarkdown(bytes: Uint8Array): PreparedMarkdown;
+  partitionMarkdown(bytes: Uint8Array, prepared: PreparedMarkdown, cuts: readonly string[], segmentation: Segmentation): ImportPartition;
+}
+
 const parserVersion = "mdast-util-from-markdown@2.1.0+gfm@3.0.0+mdast-gfm@3.1.0;frontmatter-v1";
 
-/** Offsets reported by mdast are UTF-16 positions in the exact input, not bytes. */
-function byteOffsets(text: string): Map<number, number> {
-  const result = new Map<number, number>([[0, 0]]);
+/** Advance only through requested UTF-16 boundaries in the unchanged input. */
+function byteCursor(text: string): (offset: number) => number {
   let utf16 = 0, bytes = 0;
-  for (const scalar of text) {
-    utf16 += scalar.length;
-    bytes += new TextEncoder().encode(scalar).length;
-    result.set(utf16, bytes);
-  }
-  return result;
+  return (offset: number): number => {
+    if (!Number.isSafeInteger(offset) || offset < utf16 || offset > text.length) throw new ImportPreservationError("Invalid Markdown source position");
+    while (utf16 < offset) {
+      const unit = text.charCodeAt(utf16);
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        if (utf16 + 2 > offset) throw new ImportPreservationError("Markdown position is not a scalar boundary");
+        utf16 += 2; bytes += 4;
+      } else {
+        utf16++;
+        bytes += unit < 0x80 ? 1 : unit < 0x800 ? 2 : 3;
+      }
+    }
+    return bytes;
+  };
 }
 
 function metadataEnd(text: string, start: number): number {
@@ -44,23 +57,42 @@ function nodeOffsets(node: RootContent): [number, number] {
 }
 
 function visit(node: Content, callback: (node: Content) => void): void {
-  callback(node);
-  if ("children" in node) for (const child of node.children) visit(child, callback);
+  const pending: Content[] = [node];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current) break;
+    callback(current);
+    if ("children" in current) for (let i = current.children.length - 1; i >= 0; i--) {
+      const child = current.children[i];
+      if (child) pending.push(child);
+    }
+  }
 }
 
-export function prepareMarkdown(bytes: Uint8Array): PreparedMarkdown {
+function possibleFootnote(text: string): boolean {
+  let labelStart = -1;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\n" || char === "\r") labelStart = -1;
+    else if (char === "]") {
+      if (labelStart >= 0 && i > labelStart) return true;
+      labelStart = -1;
+    } else if (labelStart < 0 && char === "[" && text[i + 1] === "^") {
+      labelStart = i + 2;
+      i++;
+    }
+  }
+  return false;
+}
+
+function prepareSnapshot(bytes: Uint8Array, parse: (body: string) => Root): { prepared: PreparedMarkdown; frontByte: number } {
   const text = sourceText(bytes);
   const bomEnd = text.startsWith("\ufeff") ? 1 : 0;
   const bodyStart = metadataEnd(text, bomEnd);
   const body = text.slice(bodyStart);
-  const root = fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+  const root = parse(body);
   const nodes = root.children;
-  const map = byteOffsets(text);
-  const byte = (offset: number): number => {
-    const value = map.get(offset);
-    if (value === undefined) throw new ImportPreservationError("Markdown position is not a scalar boundary");
-    return value;
-  };
+  const byte = byteCursor(text);
   const ranges = nodes.map(node => {
     const [start, end] = nodeOffsets(node);
     if (end > body.length) throw new ImportPreservationError("Markdown position exceeds source");
@@ -75,28 +107,41 @@ export function prepareMarkdown(bytes: Uint8Array): PreparedMarkdown {
   }
   if (text.slice(prior).trim()) throw new ImportPreservationError("Unclassified Markdown source");
 
-  const blocked = new Set<number>(); // boundary before node index
-  const definitions = new Map<string, number[]>(), references = new Map<string, number[]>();
+  // Store interval endings at their first blocked boundary; the later sweep
+  // unions overlaps without revisiting every boundary of every interval.
+  const through = new Uint32Array(nodes.length);
+  const close = (first: number, last: number): void => {
+    if (first < last) through[first + 1] = Math.max(through[first + 1] ?? 0, last);
+  };
+  const block = (boundary: number): void => close(boundary - 1, boundary);
+  const definitions = new Map<string, number[]>();
+  const references = new Map<string, { first: number; last: number }>();
   let footnotes = false;
   nodes.forEach((node, index) => visit(node, child => {
     if (child.type === "footnoteDefinition" || child.type === "footnoteReference") footnotes = true;
-    if (child.type === "text" && /\[\^[^\]\r\n]+\]/.test(child.value)) footnotes = true;
+    if (child.type === "text" && possibleFootnote(child.value)) footnotes = true;
     if (child.type === "definition" || child.type === "linkReference" || child.type === "imageReference") {
-      const target = child.type === "definition" ? definitions : references;
       const key = child.identifier.toUpperCase();
-      target.set(key, [...(target.get(key) ?? []), index]);
+      if (child.type === "definition") {
+        const positions = definitions.get(key);
+        if (positions) positions.push(index);
+        else definitions.set(key, [index]);
+      } else {
+        const interval = references.get(key);
+        if (interval) interval.last = index;
+        else references.set(key, { first: index, last: index });
+      }
     }
   }));
-  const close = (first: number, last: number): void => { for (let i = first + 1; i <= last; i++) blocked.add(i); };
   const unusedDefinitions = new Set<number>();
   for (const [key, positions] of definitions) {
     const uses = references.get(key);
-    if (uses?.length) {
-      const all = [...positions, ...uses]; close(Math.min(...all), Math.max(...all));
+    if (uses) {
+      let first = uses.first, last = uses.last;
+      for (const index of positions) { first = Math.min(first, index); last = Math.max(last, index); }
+      close(first, last);
     } else for (const index of positions) {
       if (nodes[index]?.type === "definition") unusedDefinitions.add(index);
-      else if (index > 0) blocked.add(index);
-      else if (index + 1 < nodes.length) blocked.add(index + 1);
     }
   }
   // A run of unused top-level definitions is not content of its own. Attach
@@ -106,26 +151,28 @@ export function prepareMarkdown(bytes: Uint8Array): PreparedMarkdown {
     let end = start + 1;
     while (unusedDefinitions.has(end)) end++;
     close(start, end - 1);
-    if (start > 0) blocked.add(start);
-    else if (end < nodes.length) blocked.add(end);
+    if (start > 0) block(start);
+    else if (end < nodes.length) block(end);
     start = end;
   }
   nodes.forEach((node, index) => {
     if (node.type === "heading") {
-      if (index + 1 < nodes.length) blocked.add(index + 1);
-      else if (index > 0) blocked.add(index);
+      if (index + 1 < nodes.length) block(index + 1);
+      else if (index > 0) block(index);
     }
   });
   // The whole terminal heading-only run belongs to preceding content, not
   // merely its final heading. A headings-only document is already joined.
   let terminalHeading = nodes.length;
   while (terminalHeading > 0 && nodes[terminalHeading - 1]?.type === "heading") terminalHeading--;
-  if (terminalHeading > 0 && terminalHeading < nodes.length) blocked.add(terminalHeading);
+  if (terminalHeading > 0 && terminalHeading < nodes.length) block(terminalHeading);
   if (footnotes && nodes.length > 1) close(0, nodes.length - 1);
   const atoms: ByteRange[] = [];
   const starts: number[] = [];
+  let closedThrough = 0;
   ranges.forEach((range, index) => {
-    if (index > 0 && blocked.has(index)) {
+    closedThrough = Math.max(closedThrough, through[index] ?? 0);
+    if (index > 0 && index <= closedThrough) {
       const last = atoms.pop();
       if (!last) throw new ImportPreservationError("Invalid atom closure");
       atoms.push({ startByte: last.startByte, endByte: range.endByte });
@@ -135,7 +182,11 @@ export function prepareMarkdown(bytes: Uint8Array): PreparedMarkdown {
     { id: `b${atoms.length}`, offset: atoms.at(-1)?.endByte ?? bytes.length }];
   const manifest = importManifest(bytes, { version: 1, parserVersion, atoms, cuts });
   const fallbackCuts = cuts.filter((_cut, index) => index === 0 || index === atoms.length || nodes[starts[index] ?? -1]?.type === "heading").map(cut => cut.id);
-  return { manifest, fallbackCuts };
+  for (const atom of manifest.atoms) Object.freeze(atom);
+  for (const cut of manifest.cuts) Object.freeze(cut);
+  Object.freeze(manifest.atoms); Object.freeze(manifest.cuts); Object.freeze(manifest);
+  Object.freeze(fallbackCuts);
+  return { prepared: Object.freeze({ manifest, fallbackCuts }), frontByte: byteCursor(text)(bodyStart) };
 }
 
 function selectedCuts(manifest: ImportManifest, input: unknown): string[] {
@@ -161,17 +212,10 @@ export function validateMarkdownSelection(manifest: ImportManifest, rawJSON: str
   } catch { throw new ValidationError("Invalid segmentation envelope"); }
 }
 
-export function partitionMarkdown(bytes: Uint8Array, prepared: PreparedMarkdown, cuts: readonly string[], segmentation: Segmentation): ImportPartition {
-  // Reparse to ensure neither a stale manifest nor fabricated cuts can authorize unsafe ranges.
-  const expected = prepareMarkdown(bytes);
-  if (JSON.stringify(prepared.manifest) !== JSON.stringify(expected.manifest)) throw new ImportPreservationError("Markdown manifest does not match source");
-  const manifest = expected.manifest;
+function partitionSnapshot(bytes: Uint8Array, prepared: PreparedMarkdown, frontByte: number, cuts: readonly string[], segmentation: Segmentation): ImportPartition {
+  const manifest = prepared.manifest;
   const selected = selectedCuts(manifest, cuts);
   const text = sourceText(bytes), bom = text.startsWith("\ufeff") ? 1 : 0;
-  const frontEnd = metadataEnd(text, bom);
-  const offsets = byteOffsets(text);
-  const frontByte = offsets.get(frontEnd);
-  if (frontByte === undefined) throw new ImportPreservationError("Invalid metadata boundary");
   const parts: ImportPartRange[] = [];
   let cursor = 0;
   const add = (kind: ImportPartRange["kind"], endByte: number): void => {
@@ -190,3 +234,33 @@ export function partitionMarkdown(bytes: Uint8Array, prepared: PreparedMarkdown,
   add("separator", bytes.length);
   return importPartition(bytes, { manifest, cuts: selected, parts, segmentation });
 }
+
+/** Internal injection seam; each instance recognizes only its own frozen preparations. */
+export function createMarkdownParser(parse: (body: string) => Root): MarkdownParser {
+  const proofs = new WeakMap<PreparedMarkdown, { readonly digest: string; readonly length: number; readonly frontByte: number }>();
+  const snapshot = (bytes: Uint8Array): Uint8Array => {
+    if (!(bytes instanceof Uint8Array)) throw new ImportPreservationError("Unsupported source content");
+    return new Uint8Array(bytes);
+  };
+  const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+  return {
+    prepareMarkdown(bytes) {
+      const owned = snapshot(bytes);
+      const hash = digest(owned);
+      const { prepared, frontByte } = prepareSnapshot(owned, parse);
+      proofs.set(prepared, { digest: hash, length: owned.length, frontByte });
+      return prepared;
+    },
+    partitionMarkdown(bytes, prepared, cuts, segmentation) {
+      const proof = proofs.get(prepared);
+      if (!proof) throw new ImportPreservationError("Unknown Markdown preparation");
+      const owned = snapshot(bytes);
+      if (owned.length !== proof.length || digest(owned) !== proof.digest) throw new ImportPreservationError("Markdown source differs from preparation");
+      return partitionSnapshot(owned, prepared, proof.frontByte, cuts, segmentation);
+    },
+  };
+}
+
+const defaultParser = createMarkdownParser(body => fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }));
+export const prepareMarkdown = defaultParser.prepareMarkdown;
+export const partitionMarkdown = defaultParser.partitionMarkdown;

@@ -4,7 +4,9 @@ import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/openc
 import { AgentBindingError, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
 import { requireOrdinaryRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
-import { protocolJson } from "../domain/run-protocol";
+import { protocolJson, ProtocolValidationError } from "../domain/run-protocol";
+import { ImportPreservationError } from "../domain/markdown-import-contract";
+import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 
@@ -47,11 +49,15 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       this.db.query(`SELECT 1 FROM runs WHERE id=? AND (weave_subject_id IS NOT NULL OR weave_trigger_id IS NOT NULL)
         UNION ALL SELECT 1 FROM run_operation_receipts WHERE run_id=? UNION ALL SELECT 1 FROM run_replies WHERE run_id=?
         UNION ALL SELECT 1 FROM run_issued_thoughts WHERE run_id=? LIMIT 1`).get(run.id,run.id,run.id,run.id)) throw new RunFenceError("Restricted import authority required");
-    try {
-      const {step}=readOwnedImportInput(this.db,run);
-      if (step.input===null || step.result!==null || this.db.query("SELECT 1 FROM run_steps WHERE run_id=? AND envelope_json IS NOT NULL").get(run.id)) throw new RunFenceError("Import observation authority has ended or was not prepared");
-      return {run,step};
-    } catch { throw new RunFenceError("Import input ownership is unavailable"); }
+    let step: ImportOwnedStep;
+    try { ({step}=readOwnedImportInput(this.db,run)); }
+    catch (error) {
+      if (error instanceof RunFenceError || error instanceof ImportPreservationError || error instanceof ValidationError ||
+        error instanceof ProtocolValidationError || error instanceof SyntaxError) throw new RunFenceError("Import input ownership is unavailable");
+      throw error;
+    }
+    if (step.input===null || step.result!==null || this.db.query("SELECT 1 FROM run_steps WHERE run_id=? AND envelope_json IS NOT NULL").get(run.id)) throw new RunFenceError("Import observation authority has ended or was not prepared");
+    return {run,step};
   }
   private matchImportPrompts(step: ImportOwnedStep, prompts: readonly PersistedPrompt[]): void {
     try {
