@@ -121,12 +121,26 @@ export async function checkExportBrowser(page: Page, daemon: Fixture, options: {
   await count.fill("3");
   daemon.hold("simple");
   try {
-    await simpleButton.dblclick({ delay: 40 });
+    await simpleButton.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
     await expect.poll(() => daemon.waiting()).toBe(true);
     assert.equal(simplePosts().length, 1);
     assert.deepEqual(JSON.parse(simplePosts()[0]?.body ?? "null"), { rootId: "export-root", count: 3, traversal: "breadth" });
   } finally { daemon.release(); }
   await expect(page.getByText("Simple Café 雪")).toBeVisible();
+  const preview = page.getByRole("region", { name: /simple markdown preview/i });
+  const previewHeading = preview.getByRole("heading", { name: /simple markdown preview/i });
+  await expect.poll(() => preview.evaluate(element => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && (active === element || active === element.querySelector("h2")) && active.tabIndex === -1;
+  }), { message: "confirmed Simple preview heading or region should receive programmatic focus" }).toBe(true);
+  await expect.poll(() => previewHeading.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= window.innerHeight;
+  }), { message: "confirmed Simple preview heading should be within the viewport" }).toBe(true);
+  const success = page.locator('[role="status"], [aria-live="polite"], [aria-live="assertive"]').filter({ hasText: /(?:ready|created|complete|prepared|available|success)/i }).filter({ hasText: /(?:export|markdown|preview)/i });
+  await expect(success.first()).toBeVisible();
   const simpleDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: /download/i }).first().click();
   const simpleFile = await simpleDownload;

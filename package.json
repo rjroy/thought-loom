@@ -16,7 +16,8 @@
     "web:start": "bun --no-env-file run --filter @thoughtloom/web start",
     "web:typecheck": "bun --no-env-file run --filter @thoughtloom/web typecheck",
     "web:test": "bun --no-env-file test tests/web-*.test.ts",
-    "web:test:runtime": "bun --no-env-file apps/web/tests/foundation.runtime.ts"
+    "web:test:runtime": "bun --no-env-file apps/web/tests/foundation.runtime.ts",
+    "web:test:integration": "bun --no-env-file apps/web/tests/integration.bootstrap.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",

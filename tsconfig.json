@@ -5,7 +5,8 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "paths": { "@playwright/test": ["./apps/web/node_modules/@playwright/test"] }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "integration/**/*.ts"]
 }

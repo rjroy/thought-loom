@@ -31,6 +31,7 @@ bun --no-env-file run web:test
 bun --no-env-file run web:typecheck
 bun --no-env-file run web:build
 bun --no-env-file run web:test:runtime
+bun --no-env-file run web:test:integration
 ```
 
 `web:test` runs the controlled `tests/web-*.test.ts` unit checks, also included in the ordinary Bun suite. The production runtime harness is a separate opt-in: it builds and starts an owned loopback Next.js server, then uses the installed Playwright package and `/usr/bin/chromium`. It checks trusted Host/mutation Origin handling, generated browser assets and output for test-owned credential sentinels, and the shared shell's navigation, focus, local font, and overflow at desktop/narrow widths. It does not contact the operator daemon or a model provider, and does not install a browser automatically.
@@ -52,6 +53,14 @@ Search integration tests also need the [native extension build prerequisites](se
 The Export companion exercises independent methods, contextual normal-scope roots, exact UTF-8/line-ending bytes in downloads without another export request, frozen Agentic admissions, known-run Check/Stop, and successful artifact-read gating rather than status-only readiness. It checks unavailable roots without disabling Agentic, uncertain admission without replay, safe previews and producer-appended source links resolved only in normal scope. Hidden-root navigation retains a bounded network-idle check with request diagnostics. Unit cancellation spies verify that abandoned browser response bodies are released even on unexpected status/content type, without changing outcome classification if cleanup fails. This protects navigation from unfinished no-store error responses.
 
 `web-export-markdown` runs the actual shared renderer through ReactDOMServer, with positive formatting/text controls and hostile HTML/link/image inputs. It does not substitute a fake renderer for safety evidence. Bun test registration stays in the root wrapper; the app-local helper has no Bun test-runner dependency. Source parser tests separately cover the producer's code-delimited JSON-ID appendix grammar and reject arbitrary body links as source identity. These checks do not prove live provider report quality.
+
+### Shared-record browser acceptance
+
+`web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.
+
+Unlike the per-screen fake-daemon runtime, this walkthrough connects the browser and production Next server to a real owned Hono daemon backed by temporary SQLite and injected deterministic fake-agent callbacks. Desktop and narrow paths follow the same Capture-created identity through Explore, Idea, Evolve and both exports, including title changes, rejection/restoration and mounted known-run return. Non-export work settles by explicit state predicates before knowledge-table snapshots; run/report bookkeeping may change without implying a knowledge mutation. Held fake responses are released before daemon drain, and cleanup attempts all owned resources even if an earlier release fails.
+
+This proves controlled shared-record continuity, not real provider behavior, cross-reload workspace persistence, physical-device usability or screen-reader certification. Keep the detailed per-screen tests for recovery, focus, safe Markdown and request boundaries rather than duplicating every edge case in this walkthrough. Neither browser command starts or changes the operator OpenCode service.
 
 ## Test boundaries
 

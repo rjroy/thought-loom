@@ -61,6 +61,7 @@ See [testing concepts](docs/testing.md) for focused checks and manual scripts. R
 
 - The Next.js client is the `apps/web` Bun workspace; keep the shared root lockfile reproducible. UI and server-only client code remain separate from the Hono daemon and domain/storage layers.
 - Use `web:test:runtime` for the explicit isolated production/browser foundation check. It copies an allowlist of current source into a test-owned workspace, installs the frozen lock there, and generates its own Next build files. Maintain that allowlist when runtime inputs change; do not load private `.env` files or rely on ignored working-tree build artifacts as fixtures. See the testing documentation for browser prerequisites and current coverage limits.
+- Use `web:test:integration` for the separate shared-record browser walkthrough over an owned real Hono/SQLite daemon and deterministic fake agent. Its bootstrap installs and builds spellfix inside its source copy. Keep that allowlist current, settle background work before knowledge snapshots, and release held fake responses before daemon shutdown. Neither browser harness may use the operator service or a provider as a fixture.
 
 - Add or improve meaningful tests for changed behavior; do not defer them. Preserve useful coverage when replacing obsolete contracts or fixtures.
 - Unit tests use test-owned data, clocks, IDs, configuration, and mocked dependencies. Valid content or configuration changes must not break tests by changing their hidden inputs.

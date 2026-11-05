@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore, type FormEvent } from "react";
 import { downloadBytes } from "../features/export/request";
 import type { MarkdownArtifact } from "../features/export/types";
 import { ExportMarkdown } from "./export-markdown";
@@ -25,6 +25,30 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
   const run = workspace?.run;
   const flow = Boolean(workspace && !workspace.setup);
   const progressHeading = useRef<HTMLHeadingElement>(null), requestField = useRef<HTMLTextAreaElement>(null);
+  const simpleForm = useRef<HTMLFormElement>(null), simpleHeading = useRef<HTMLHeadingElement>(null);
+  const simpleFocus = useRef<{ key: string; previous: MarkdownArtifact | null } | null>(null);
+  useEffect(() => () => { simpleFocus.current = null; }, [key]);
+  useEffect(() => {
+    const intent = simpleFocus.current;
+    if (!intent) return;
+    if (intent.key !== key || flow || workspace?.simpleError) { simpleFocus.current = null; return; }
+    const artifact = workspace?.simpleArtifact;
+    if (workspace?.simplePending || !artifact || artifact === intent.previous) return;
+    simpleFocus.current = null;
+    // A fresh result from this submission may move focus, not a cached artifact
+    // on return or a later Agentic observation. Respect an intervening action.
+    const active = document.activeElement;
+    if (active && active !== document.body && !simpleForm.current?.contains(active)) return;
+    simpleHeading.current?.focus({ preventScroll: true });
+    simpleHeading.current?.scrollIntoView({ block: "center", behavior: "instant" });
+  }, [key, flow, workspace?.simpleArtifact, workspace?.simplePending, workspace?.simpleError]);
+  function submitSimple(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const current = store.get(key);
+    if (!current || current.simplePending) return;
+    simpleFocus.current = { key, previous: current.simpleArtifact };
+    void store.simple(key);
+  }
   const previousFlow = useRef<boolean | null>(null);
   useEffect(() => {
     if (previousFlow.current !== null && previousFlow.current !== flow) {
@@ -46,7 +70,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
         {!flow && <section className={styles.method} aria-labelledby="simple-heading">
           <h2 id="simple-heading">Simple</h2>
           <p className={styles.description}>Recorded thoughts from a development branch.</p>
-          <form noValidate onSubmit={event => { event.preventDefault(); void store.simple(key); }}>
+          <form ref={simpleForm} noValidate onSubmit={submitSimple}>
             <div className={styles.field}>
               <h3>Starting idea</h3>
               {workspace.rootState === "loading" ? <p role="status">Loading starting idea…</p> : workspace.root ? <div className={styles.root}>
@@ -74,6 +98,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
             <div role="status">
               {workspace.simplePending && <p>Preparing Markdown… Waiting for the export response.</p>}
               {workspace.simpleError && <p className={styles.warning}>Could not obtain this export. Your inputs are retained. You can deliberately create the export again.</p>}
+              {!workspace.simplePending && !workspace.simpleError && workspace.simpleArtifact && <p>Simple Markdown export ready. Preview and download are available.</p>}
             </div>
             <button className={styles.primary} disabled={workspace.rootState !== "ready" || workspace.simplePending || countInvalid}>
               {workspace.simplePending ? "Preparing export…" : "Create simple export"}
@@ -143,7 +168,11 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
       </div>
 
       {!flow && workspace.simpleArtifact && <section className={`${styles.method} ${styles.simplePreview}`} aria-label="Simple Markdown preview">
-        <div className={styles.previewHeading}><h2>Simple Markdown preview</h2><button className={styles.primary} onClick={() => download(workspace.simpleArtifact!, "thoughtloom-simple.md")}>Download Markdown</button></div>
+        <div className={styles.previewHeading}><h2 ref={simpleHeading} tabIndex={-1}>Simple Markdown preview</h2><button className={styles.primary} onClick={() => download(workspace.simpleArtifact!, "thoughtloom-simple.md")}>Download Markdown</button></div>
+        <p>{workspace.simplePending
+          ? "Preparing a new export. This is the previously confirmed preview."
+          : workspace.simpleError ? "The latest export was not obtained. This previously confirmed preview is still available."
+            : "Simple Markdown export ready. Preview and download are available."}</p>
         <p className={styles.help}>This preview and download use the same returned Markdown bytes.{workspace.simplePending || workspace.simpleError ? " This is the previously confirmed export, not a result of the latest attempt." : ""}</p>
         {workspace.simpleArtifactSnapshot && <p className={styles.help}>Requested maximum: {workspace.simpleArtifactSnapshot.count} thoughts · {workspace.simpleArtifactSnapshot.traversal === "breadth" ? "Breadth-first" : "Depth-first"} · Starting ID: {workspace.simpleArtifactSnapshot.rootId}</p>}
         <div className={styles.markdown}><ExportMarkdown markdown={workspace.simpleArtifact.text} /></div>

@@ -1,0 +1,171 @@
+---
+name: "Thoughtloom: Quiet Night"
+description: A dark, text-first workspace for capturing and developing connected thinking.
+colors:
+  brand-color-0: "#031315"
+  brand-color-1: "#d66b65"
+  brand-color-2: "#83b88a"
+  brand-color-3: "#efb83f"
+  brand-color-4: "#5e8bd6"
+  brand-color-5: "#8871c5"
+  brand-color-6: "#248f91"
+  brand-color-7: "#d5d3c5"
+  brand-color-8: "#344548"
+  brand-color-9: "#f18a83"
+  brand-color-10: "#a5d5a5"
+  brand-color-11: "#ffd477"
+  brand-color-12: "#8eaef2"
+  brand-color-13: "#b09ae5"
+  brand-color-14: "#65c4c5"
+  brand-color-15: "#fef6e1"
+  color-muted: "#a5a8a0"
+  color-control-line: "#7b837f"
+  color-card: "#122224"
+  color-input: "#0e1e20"
+  color-caption: "#0a2c2e"
+  color-selection: "#35557f"
+typography:
+  body:
+    fontFamily: "Source Sans 3, system-ui, sans-serif"
+    fontSize: "1.125rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "Source Sans 3, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 600
+  metadata:
+    fontFamily: "Source Sans 3, system-ui, sans-serif"
+    fontSize: "1rem"
+rounded:
+  badge: "4px"
+  compact-control: "6px"
+  control: "8px"
+  surface: "12px"
+---
+
+# Design System: Thoughtloom
+
+## Overview
+
+**Quiet Night** is the approved working environment: dark teal ground, warm light text, gold primary actions, restrained borders and familiar controls. Thinking is the content, not an occasion for decoration. Thought text is focal; attribution, context and recovery information remain distinguishable and subordinate.
+
+This is an implementation-derived handoff for the `apps/web` workspace, not a replacement design proposal or an accessibility certification. The [approved screen/state handoff](../../.impeccable/README.md) and its [selection/palette manifest](../../.impeccable/selected-assets.json) retain visual authority, including explicit raster exceptions. Product and transport contracts remain in the repository's context and API documentation.
+
+The values above are extracted from [global CSS](src/app/globals.css), [the shared layout](src/app/layout.tsx) and the screen CSS modules. They record existing values; they do not introduce a new token library or require a styling rewrite. The full sixteen-color palette remains available, without a requirement to use every color on each screen.
+
+## Colors
+
+| Role | Existing CSS variable or palette entry | Application |
+| --- | --- | --- |
+| Ground and shell | `--color-ground` → `brand-color-0` | Page, header and ordinary secondary controls |
+| Focal text | `--color-text` → `brand-color-15` | Headings, original thought text, input values |
+| Body text | `--color-body` → `brand-color-7` | Supporting copy and secondary labels |
+| Muted text | `--color-muted` | Metadata and explanatory text, not unreadably dim body copy |
+| Divider | `--color-line` → `brand-color-8` | Structural rules, card boundaries |
+| Control boundary | `--color-control-line` | Input strokes and stronger outlined controls |
+| Primary action | `brand-color-3`; hover `brand-color-11` | Save, Search, Evolve, Send, Create and Download; ground-colored text |
+| Focus and selected navigation | `--color-focus` → `brand-color-12` | Separated keyboard outline, current navigation underline |
+| Links | `--color-link` → `brand-color-14` | Underlined navigation within content and secondary text actions |
+| User / AI attribution | `brand-color-2` / `brand-color-13` | Explicit You / AI labels; never agreement or confidence |
+| Confirmed success | `brand-color-10`, with `brand-color-2` boundary where used | Saved and Report ready feedback |
+| Error / destructive action | `brand-color-9` | Field errors, rejected labels and explicit reject confirmation |
+| Uncertainty / warning | `brand-color-3` or `brand-color-11` | Worded uncertainty and observation warnings |
+| Surfaces | `--color-card`, `--color-input`, `--color-caption` | Distinct reading containers, editable fields and subordinate context strips |
+| Text selection | `--color-selection` with focal text | Actual browser text selection |
+
+The six non-master colors in the frontmatter are the implemented rounded sRGB mixtures. Their source percentages live in the manifest; do not replace them with unrelated dark neutrals. The manifest also retains a `card-line` mixture that is **not** a separately declared runtime token in this client.
+
+**Color never supplies the whole meaning.** You / AI, Rejected / Status unknown, errors, run status and confirmation labels remain textual. Focal heading links use the text color and underline on hover rather than making an entire title cyan.
+
+## Typography
+
+Source Sans 3 supplies both reading and display roles. It is bundled through `next/font/local` from [the variable font](public/fonts/SourceSans3-VariableFont_wght.ttf), weight range 200–900, with [its OFL license](public/fonts/OFL.txt). The browser's generated family alias is not a second typeface. No network font service or separate decorative display face is used.
+
+The body is 18px with 27px line height at the default root size. Secondary copy and metadata are generally 16px. Weight 600–700, not uppercase decoration, establishes hierarchy. Reserved is a small 12px noninteractive badge.
+
+| Existing text role | Desktop | Narrow |
+| --- | --- | --- |
+| Capture / Evolve page heading | `2rem`, weight 700, line height 1.2 | Same |
+| Idea title | `clamp(2rem, 2.75vw, 2.75rem)`, weight 700, line height 1.15 | `2rem` |
+| Idea original words | `1.5rem`, line height 1.5, maximum 72ch | `1.25rem` |
+| Explore result title | `1.5rem`, weight 650, line height 1.25 | Same; wraps naturally |
+| Evolve contribution / reply | `1.375rem`, line height 1.5, maximum 72ch | `1.25rem` |
+| Export page heading | `2.75rem`, weight 700, line height 1.15 | `2.25rem` |
+| Export method heading | `2rem`, line height 1.2 | `1.75rem` |
+
+Explore has a visually hidden page heading and a visible search label on narrow screens. Most heading tracking is −0.02em; Export uses −0.025em for its page title. Thought text preserves whitespace and wraps long words rather than acquiring formatting from the generated comps. Counts use tabular numerals. Markdown code uses the browser's monospace fallback, not an additional brand font.
+
+## Layout
+
+The shell uses `--page-inset: clamp(1.25rem, 3.125vw, 3rem)`. Main content has 2rem top and 4rem bottom padding; narrow top padding is 1.75rem. Shared grouping gaps repeatedly use 0.5rem, 0.75rem, 1rem, 1.5rem and 2rem; these are existing literals, not a declared global spacing scale.
+
+The desktop header has a minimum height of 4.625rem. At `max-width: 48rem`, the wordmark/tagline stack above the visible navigation row. Explore alone keeps the shared header sticky and adds scroll margins for its controls. There is no added hamburger destination or permanently fixed composer.
+
+| Surface | Implemented composition | Narrow behavior |
+| --- | --- | --- |
+| Explore Compact | Full-width search above 15.875rem filter sidebar and fluid result column; 2rem column gap; close-spaced result cards with subordinate context strips | One column at 48rem; explicit Filters control with selected-value count, headed inline panel and Close filters; sort wraps above readable results |
+| Capture Wide / Roomy | Left-aligned form at 87% of workspace width; generous writing field, secondary optional title; Save at the far right | Full width at 48rem; writing field minimum 15rem; full-width Save below title |
+| Idea Rows | Focal thought with Evolve beside it; on-demand details precede subordinate connection rows; row columns are title/author, actual text/relation, actions | Single column at 48rem; full-width Evolve; context and actions flow below each thought |
+| Evolve Rail | Starting-thought rail at `minmax(13rem, 24%)`, 2rem gap, chronological exchange column; saved developments in two columns; composer follows the conversation | Starting context becomes a disclosure at 48rem; development rows stack; composer and Send use full available width |
+| Export Columns | Equal method columns, 1.5rem gap, shared maximum width 100rem; run view uses a narrower request column and wider status/preview column | Methods and run views stack at 760px; primary actions fill the width; an additional 360px rule reduces container padding |
+
+Reading containers generally stop at 65–75ch; original text and retained replies wrap rather than create horizontal page scrolling. The page may be substantially taller than a phone comp. Narrow comps were approximate hierarchy studies, not literal viewport or keyboard canvases. Native form controls and clear labels take precedence over shrinking the raster's contents into one frame.
+
+## Elevation & Depth
+
+Depth comes from tonal surfaces and thin boundaries, not decorative shadows, textures or glass. Cards use the card mixture; fields recede to the input mixture; recorded relationships use the caption mixture. The native Idea confirmation dialog uses a ground-colored panel and an 80%-opaque ground-colored backdrop.
+
+The global keyboard ring is a 3px solid focus outline, separated by 5px. Header navigation brings the outline inward by 6px so it remains visible against the viewport edge. Focus is not a glow or a persistent selected state. There are no authored entrance animations or animated progress effects in this implementation; do not document them as existing behavior.
+
+## Shapes
+
+Reading surfaces, details and dialogs use gently rounded 12px corners. Most Capture/Explore/Idea/Evolve controls use 8px; compact fields and Export controls use 6px. Badges use 4px. Borders are 1px. These are deliberate local variants in current CSS, not a single shared button component API.
+
+Search, back and disclosure icons are simple SVG geometry, with a consistent thin stroke where authored. Native details markers remain native. No illustrations, graphs, avatars or decorative artwork are shipped as part of these screens.
+
+## Components
+
+### Shared navigation and keyboard access
+
+- A visible-on-focus Skip to content link targets the focusable main landmark. Main navigation is labelled; Explore and Capture receive `aria-current="page"` only on their own routes.
+- Settings Reserved is disabled, noninteractive text, not a defined settings screen. Idea, Evolve and Export remain contextual routes; none is a third primary navigation link.
+- Links are ordinary links, including encoded canonical Idea IDs. Explore search/filter/sort/scope parameters support fresh bookmarks; valid result-return links preserve exploration intent. Evolve and Export roots use `thoughtId` in the URL.
+- Main action targets are generally 44–48px or taller. Narrow filter labels are 44px high; navigation links are at least 56px high. Text is not made smaller to force controls onto one line.
+
+### Buttons, fields and disclosures
+
+Gold marks the principal action; dark outlined controls are secondary; cyan underlined text actions open details or navigate. Destructive confirmation uses the error accent **and** an explicit Reject label. Disabled treatments differ locally: muted filled controls in Capture/Export, opacity in Idea/Evolve. They must not be mistaken for confirmed success.
+
+Fields keep real labels, input text colors and visible focus. Errors sit beside their field and use `aria-invalid` / `aria-describedby` where implemented. Textareas resize vertically. Pending or uncertain submissions retain copyable words; readonly and disabled controls are not interchangeable.
+
+Explore Filters, Idea More actions and Evolve Change are nonmodal disclosures using ordinary controls, not ARIA menus. Escape handling is scoped to the open disclosure; focus returns to its trigger. Idea More actions dismisses on outside pointer interaction without taking focus away from the clicked control. Native Idea confirmation dialogs focus Cancel, contain the modal interaction, and return focus to the stable trigger when closed. Pending writes cannot be cancelled by merely closing a dialog.
+
+### Screen patterns and states
+
+| Surface | Current states and interaction pattern |
+| --- | --- |
+| Capture | Editing/required-text validation → Saving with retained readonly snapshot → canonical Saved receipt, Open idea and Capture another thought. Known not-saved retains editable fields for Retry save. Unknown outcome retains its original readonly snapshot, warns of duplication and requires deliberate Save another copy. No cross-reload or autosave promise. |
+| Explore | Query-first initial, loading with unknown facet counts, successful results, no results and request error with Retry search. Author/kind facets use server counts; selected Filters count counts chosen values, not matches. Actual matching text expands in place; a retained-response hit is labelled Full reply. Inclusive rejected inspection distinguishes Rejected, active and Status unknown without guessing. Search remains available while a read is pending so a newer submitted query can supersede it. |
+| Idea | Loading, read failure/unavailable, ordinary view and explicitly labelled user inspection. Edit/Clear changes title metadata only. Full reply, Sources, History, About this idea and Why connected are on demand. Individual/branch/connection actions remain separate. Branch confirmation uses the server preview count; a stale preview invalidates confirmation and requires a fresh explicit decision. |
+| Evolve | Fresh workspace without a greeting; frozen admission, known-run statuses, observation warning, interrupted/failed/completed exchanges and preserved next draft. Only canonical contributions, replies and saved developments are presented as recorded. Continuation and Open idea are different actions; latest eligible issued work is the default, with deliberate Change when applicable. Unknown observation retains last-confirmed display without silently retaining unconfirmed eligibility. |
+| Export | Independent method validation, pending Simple export, actual Markdown preview/download, not-started Agentic request, unconfirmed admission, known run/status, interrupted/failed without invented output, report-not-yet-readable and Report ready. Completed status alone is insufficient. Back to setup retains inputs and a known run reference without resubmission. |
+
+Simple's current preview follows the setup methods in document order. A newly confirmed Simple submission announces that Markdown is ready and focuses its programmatically focusable preview heading, scrolling it into view. Cached return, failed requests and Agentic observations do not trigger that focus movement; an intervening action outside the Simple form is respected. Its snapshot caption identifies the request associated with the retained artifact separately from later field edits. Both export previews use the shared safe Markdown renderer: raw HTML is skipped, body links/images are inert, and separately resolved normal-scope source identities supply actual Idea links. Downloads preserve the returned bytes rather than recreating text or submitting another export. The user-facing copy is **Request** and **Report ready**.
+
+### Recovery and state lifetime
+
+Status is worded, not a percentage, invented ETA or model stream. A read failure is not proof that a run failed. Stop addresses the known run and requests cancellation; it does not guarantee an instant native stop. Neither an unknown admission nor an observation error automatically replays a write or guesses an ID.
+
+Explore memory and mounted Evolve/Export workspaces can survive in-app browsing in the current document. Reload/fresh-document policies are explicit; they are not persistence, automatic resume or background-queue guarantees. Capture retains its submitted snapshot in the current form's recovery state, not in persistent storage. Confirmed records and unsent drafts remain visually distinct.
+
+## Do's and Don'ts
+
+- **Do** use the complete existing palette and its documented mixtures through the current CSS variables; preserve the local font and license.
+- **Do** keep original words focal and use worded You / AI attribution. Keep source attribution separate from endorsement.
+- **Do** preserve reading order, visible keyboard focus, input values and safe long-text wrapping across narrow layouts.
+- **Do** show only canonical confirmed success and label uncertainty plainly; keep browsing, continuation and destructive scope distinct.
+- **Don't** copy tiny raster text, incidental generated header differences, decorative texture or invented italic emphasis into CSS.
+- **Don't** add a feed, graph, editable thought body, model/budget settings, extra shared navigation or Settings contents as a styling improvement.
+- **Don't** promote stale cached text into confirmed eligibility, silently broaden to rejected history, fabricate output or turn a read recovery action into a write retry.
+- **Don't** treat this system description, approximate comps or a passing browser probe as screen-reader, physical-device, software-keyboard or cross-browser certification.
