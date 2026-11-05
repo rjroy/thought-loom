@@ -80,6 +80,8 @@ Rejected inspection is a separate single-item snapshot, not the result of reject
 
 ### Evolve
 
+**Intentional user-approved composer deviation:** place Send beside the contribution textarea in the same composer row rather than in a separate row below it. Remove the redundant “Add a contribution to enable Send.” helper, while retaining the contribution label, meaningful validation/status warnings, accessible targets and existing admission guards. Preserve readable desktop/narrow wrapping and natural conversation growth; the approved raster's former Send placement does not override this correction. Do not regenerate or repaint the selected images.
+
 Starting context rail on desktop, compact disclosure above chronological conversation on narrow screens. Opening starts a fresh workspace: no greeting, automatically resumed opaque session or fabricated output. Recorded developments remain subordinate to the user-facing reply; all are distinct immutable thoughts. Latest **issued confirmed** development is the continuation default. Change selects another issued development/branch point deliberately; Open idea only browses. Choosing Evolve from an earlier Idea starts a new workspace. No repeated Evolve action, attachments or forced complex selector on every turn.
 
 Admission atomically creates contribution + queued run and returns201. Status uses only `{id,kind,status,confirmedThoughtIds,responseId}`. Resolve saved IDs and canonical reply reads before presenting text as recorded. No stream, percentages, ETA, hidden reasoning, native bindings, invented error cause or cancellation-settlement field. Keep the next unsent draft; freeze admitted continuation and disable Send while active/uncertain.

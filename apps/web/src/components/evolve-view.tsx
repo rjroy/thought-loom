@@ -56,6 +56,10 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
     || item.stopping || item.checking || (item.run && !terminalRun(item.run.status)));
   const frozen = latest?.admission === "pending" || latest?.admission === "unconfirmed";
   const canSend = !!workspace.draft.trim() && !!selected && workspace.rootState !== "loading" && !blocked;
+  const composerHelp = frozen
+    ? "The submitted words are preserved. They will not be sent again automatically."
+    : blocked ? "You can keep a next draft. Send is paused while this run is active or being checked."
+      : workspace.draft.trim() ? "Send records a new contribution. Saved thoughts are not edited." : null;
   function submit(event: FormEvent) {
     event.preventDefault();
     if (key && canSend) void store.send(key);
@@ -110,17 +114,13 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
             </button>)}
           </div>}
           <label htmlFor="evolve-contribution">Your contribution</label>
-          <textarea id="evolve-contribution" ref={contributionField} value={workspace.draft} readOnly={!!frozen}
-            placeholder="Add a question, challenge, or new thought" aria-describedby="evolve-composer-help"
-            onChange={event => store.draft(key, event.target.value)} />
           <div className={styles.sendRow}>
-            <p id="evolve-composer-help" className={styles.muted}>{frozen
-              ? "The submitted words are preserved. They will not be sent again automatically."
-              : blocked ? "You can keep a next draft. Send is paused while this run is active or being checked."
-                : !workspace.draft.trim() ? "Add a contribution to enable Send."
-                  : "Send records a new contribution. Saved thoughts are not edited."}</p>
+            <textarea id="evolve-contribution" ref={contributionField} value={workspace.draft} readOnly={!!frozen}
+              placeholder="Add a question, challenge, or new thought" aria-describedby={composerHelp ? "evolve-composer-help" : undefined}
+              onChange={event => store.draft(key, event.target.value)} />
             <button className={`${styles.button} ${styles.primary}`} type="submit" disabled={!canSend}>Send</button>
           </div>
+          {composerHelp && <p id="evolve-composer-help" className={`${styles.composerHelp} ${styles.muted}`}>{composerHelp}</p>}
         </form>
         <p className={styles.policy}>Drafts and known run references stay while you browse in this tab. Reload opens a fresh workspace; it does not stop existing work. Keep the displayed run IDs before reloading.</p>
       </div>
