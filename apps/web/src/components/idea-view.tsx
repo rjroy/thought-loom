@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { ideaActionHref, type IdeaLocation, type IdeaScope } from "../features/idea/location";
 import { commandIdea, readIdea } from "../features/idea/request";
 import type {
-  BranchPreview, IdeaCommand, IdeaConnection, IdeaHistory, IdeaSources,
+  BranchPreview, IdeaCommand, IdeaConnection,
   IdeaThought, IdeaView as IdeaRecord,
 } from "../features/idea/types";
 import styles from "./idea.module.css";
@@ -13,7 +13,6 @@ import { useIdeaNavigation, type PreviousIdea } from "./idea-navigation-provider
 import { useExploreMemory } from "./explore-provider";
 import { useEvolveStore } from "./evolve-provider";
 
-type Detail<T> = { phase: "loading" } | { phase: "ready"; value: T } | { phase: "error" };
 type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
 type PreviewState = { phase: "loading" | "error"; stale: boolean }
   | { phase: "ready"; stale: boolean; value: BranchPreview };
@@ -45,6 +44,35 @@ function relationship(connection: IdeaConnection, focus: string) {
   }
 }
 
+interface ContextItem {
+  readonly id: string;
+  thought: IdeaThought | null;
+  child: boolean;
+  source: boolean;
+  readonly connections: IdeaConnection[];
+}
+
+/** Group direct records for presentation, preserving relation order and identity. */
+function contextItems(view: IdeaRecord): ContextItem[] {
+  const items = new Map<string, ContextItem>();
+  const include = (id: string, thought: IdeaThought | null) => {
+    let item = items.get(id);
+    if (!item) {
+      item = { id, thought, child: false, source: false, connections: [] };
+      items.set(id, item);
+    } else if (!item.thought && thought) item.thought = thought;
+    return item;
+  };
+  for (const thought of view.children) include(thought.id, thought).child = true;
+  for (const { connection, thought } of view.connections) {
+    const id = connection.fromId === view.thought.id ? connection.toId : connection.fromId;
+    const item = include(id, thought);
+    if (!item.connections.some(value => value.id === connection.id)) item.connections.push(connection);
+  }
+  for (const { id, thought } of view.sources) include(id, thought).source = true;
+  return [...items.values()];
+}
+
 /** A location-keyed reader: late responses cannot replace another focused idea. */
 export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const navigation = useIdeaNavigation();
@@ -62,10 +90,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const [title, setTitle] = useState("");
   const [titleError, setTitleError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sources, setSources] = useState<Detail<IdeaSources> | null>(null);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [history, setHistory] = useState<Detail<IdeaHistory> | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyId, setReplyId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -74,8 +98,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const readGeneration = useRef(0);
   const previewGeneration = useRef(0);
   const admittedPreview = useRef<BranchPreview | null>(null);
-  const sourcesGeneration = useRef(0);
-  const historyGeneration = useRef(0);
   const writing = useRef(false);
   const currentView = useRef(view);
   const titleInput = useRef<HTMLInputElement>(null);
@@ -122,8 +144,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       alive.current = false;
       readGeneration.current++;
       previewGeneration.current++;
-      sourcesGeneration.current++;
-      historyGeneration.current++;
     };
   }, [load, navigation]);
 
@@ -145,22 +165,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     return () => document.removeEventListener("pointerdown", dismissOutside, true);
   }, [menuOpen]);
 
-  async function loadSources() {
-    if (!location) return;
-    const generation = ++sourcesGeneration.current;
-    setSources({ phase: "loading" });
-    const result = await readIdea(location.id, { scope: location.scope, part: "sources" }, { fetch: window.fetch.bind(window) });
-    if (!alive.current || generation !== sourcesGeneration.current) return;
-    setSources(result.kind === "sources" ? { phase: "ready", value: result.value } : { phase: "error" });
-  }
-  async function loadHistory() {
-    if (!location) return;
-    const generation = ++historyGeneration.current;
-    setHistory({ phase: "loading" });
-    const result = await readIdea(location.id, { scope: "history", part: "history" }, { fetch: window.fetch.bind(window) });
-    if (!alive.current || generation !== historyGeneration.current) return;
-    setHistory(result.kind === "history" ? { phase: "ready", value: result.value } : { phase: "error" });
-  }
   async function loadPreview(stale = false) {
     if (!location) return;
     const generation = ++previewGeneration.current;
@@ -245,8 +249,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         : "Title saved. The original words are unchanged.");
       return;
     }
-    setSources(null); setSourcesOpen(false); setHistory(null); setHistoryOpen(false);
-    sourcesGeneration.current++; historyGeneration.current++;
     setReplyOpen(false); setReplyId(null);
     if (command.action === "reject-thought" || command.action === "reject-branch") {
       // Confirmed rejection is not permission to broaden the ordinary read scope.
@@ -275,6 +277,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const inspection = location?.scope !== "normal";
   const thought = view?.thought;
   const reply = view?.responses.find(value => value.id === replyId) ?? null;
+  const context = view ? contextItems(view) : [];
 
   return (
     <section className={styles.view} onClickCapture={event => {
@@ -335,16 +338,21 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
                 onNavigate={() => evolve.startFromIdea(thought.id)}>Evolve this idea</Link>}
           </div>
 
+          {view.parent && <p className={styles.parent}>
+            <span>Developed from:</span>{" "}
+            {view.parent.thought ? <>
+              <Link href={thoughtHref(view.parent.id, location)} prefetch={false}>{titleOf(view.parent.thought)}</Link>
+              {view.parent.thought.rejected === true && <span className={styles.rejected}>Rejected</span>}
+            </> : <>
+              <span>Parent unavailable in this view.</span>
+              {!inspection && <Link href={thoughtHref(view.parent.id, location, "show-rejected")} prefetch={false}>Inspect parent</Link>}
+            </>}
+          </p>}
+
           <div className={styles.tools}>
             <button className={styles.textButton} disabled={disabled} onClick={() => {
               setTitle(thought.title ?? ""); setTitleError(false); setEditing(true);
             }}>Edit title</button>
-            <button className={styles.textButton} aria-expanded={sourcesOpen} aria-controls="idea-sources" onClick={() => {
-              setSourcesOpen(!sourcesOpen); if (!sourcesOpen && !sources) void loadSources();
-            }}>Sources</button>
-            <button className={styles.textButton} aria-expanded={historyOpen} aria-controls="idea-history" onClick={() => {
-              setHistoryOpen(!historyOpen); if (!historyOpen && !history) void loadHistory();
-            }}>History</button>
             {view.responses.length > 0 && <button className={styles.textButton} aria-expanded={replyOpen} aria-controls="idea-reply" onClick={() => {
               setReplyOpen(!replyOpen);
               if (!replyId) setReplyId(view.responses[0]!.id);
@@ -402,30 +410,6 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
               <p className={styles.metadata}>A retained response is not a new development or an endorsement.</p>
             </>}
           </div>
-          <div id="idea-sources" hidden={!sourcesOpen} className={styles.detail}>
-            <h2>Sources</h2>
-            {sources?.phase === "loading" ? <p role="status">Reading sources…</p>
-              : sources?.phase === "error" ? <><p>Sources could not be read.</p><button className={styles.textButton} onClick={() => void loadSources()}>Try reading sources again</button></>
-              : sources?.phase === "ready" && (sources.value.sources.length === 0 ? <p>No sources are recorded for this idea.</p>
-                : sources.value.sources.map(item => item.thought
-                  ? <ThoughtDetail key={item.id} thought={item.thought} location={location} />
-                  : <p key={item.id}>Source unavailable in this view: <span className={styles.identifier}>{item.id}</span></p>))}
-          </div>
-          <div id="idea-history" hidden={!historyOpen} className={styles.detail}>
-            <h2>History</h2>
-            <p className={styles.metadata}>User inspection · Distinct thoughts, not versions. Rejected history is not AI context.</p>
-            {history?.phase === "loading" ? <p role="status">Reading history…</p>
-              : history?.phase === "error" ? <><p>History could not be read.</p><button className={styles.textButton} onClick={() => void loadHistory()}>Try reading history again</button></>
-              : history?.phase === "ready" && <>
-                <h3>Earlier thoughts</h3>
-                {history.value.ancestors.length === 0 && <p>No earlier thoughts are available.</p>}
-                {history.value.ancestors.map(item => <ThoughtDetail key={item.id} thought={item} location={location} scope="history" />)}
-                {history.value.unavailableParentId && <p>Earlier history is unavailable beyond <span className={styles.identifier}>{history.value.unavailableParentId}</span>.</p>}
-                <h3>Direct developments</h3>
-                {history.value.children.length === 0 && <p>No direct developments are recorded.</p>}
-                {history.value.children.map(item => <ThoughtDetail key={item.id} thought={item} location={location} scope="history" />)}
-              </>}
-          </div>
 
           <details className={styles.metadataDetails}>
             <summary>About this idea</summary>
@@ -436,12 +420,12 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </details>
 
           <section className={styles.context} aria-labelledby="idea-context-heading">
-            <h2 id="idea-context-heading">{inspection ? "Inspected connections" : "Surrounding context"}</h2>
-            {view.connections.length === 0 && <p>No connections are available in this view.</p>}
-            {view.connections.map(item => <ConnectionRow key={item.connection.id} item={item}
+            <h2 id="idea-context-heading">{inspection ? "Inspected context" : "Surrounding context"}</h2>
+            {context.length === 0 && <p>No directly linked thoughts are available in this view.</p>}
+            {context.map(item => <ContextRow key={item.id} item={item}
               location={location} focus={thought.id} inspection={inspection} disabled={disabled}
-              onReject={() => openConfirmation({ kind: "connection", id: item.connection.id })}
-              onRestore={() => void submitCommand({ action: "restore-connection", thoughtId: thought.id, connectionId: item.connection.id })} />)}
+              onReject={id => openConfirmation({ kind: "connection", id })}
+              onRestore={id => void submitCommand({ action: "restore-connection", thoughtId: thought.id, connectionId: id })} />)}
           </section>
         </>}
 
@@ -492,27 +476,18 @@ function Byline({ thought }: { thought: IdeaThought }) {
   </p>;
 }
 
-function ThoughtDetail({ thought, location, scope }: { thought: IdeaThought; location: IdeaLocation; scope?: IdeaScope }) {
-  return <div className={styles.historyRow}>
-    <h4><Link href={thoughtHref(thought.id, location, scope)} prefetch={false}>{titleOf(thought)}</Link></h4>
-    <Byline thought={thought} /><p className={styles.retained}>{thought.text}</p>
-    <p className={styles.metadata}>{dateOf(thought.createdAt)} (UTC)</p>
-  </div>;
-}
-
-function ConnectionRow({ item, location, focus, inspection, disabled, onReject, onRestore }: {
-  item: IdeaRecord["connections"][number]; location: IdeaLocation; focus: string;
-  inspection: boolean; disabled: boolean; onReject: () => void; onRestore: () => void;
+function ContextRow({ item, location, focus, inspection, disabled, onReject, onRestore }: {
+  item: ContextItem; location: IdeaLocation; focus: string;
+  inspection: boolean; disabled: boolean; onReject: (id: string) => void; onRestore: (id: string) => void;
 }) {
-  const { thought, connection } = item;
-  const [why, setWhy] = useState(inspection);
-  const [actions, setActions] = useState(false);
+  const { thought } = item;
   const [expanded, setExpanded] = useState(false);
   const abbreviate = thought !== null && thought.text.length > 240;
   return <article className={styles.connectionRow}>
     <div>
-      <h3>{thought ? <Link href={thoughtHref(thought.id, location)} prefetch={false}>{titleOf(thought)}</Link> : "Connected idea unavailable"}</h3>
+      <h3>{thought ? <Link href={thoughtHref(thought.id, location)} prefetch={false}>{titleOf(thought)}</Link> : "Idea unavailable in this view"}</h3>
       {thought && <Byline thought={thought} />}
+      {!thought && <p className={styles.metadata}>{item.id}</p>}
     </div>
     <div>
       {thought && <p className={styles.contextText}>
@@ -521,6 +496,25 @@ function ConnectionRow({ item, location, focus, inspection, disabled, onReject, 
           aria-label={`${expanded ? "Collapse" : "Expand"} context text for ${titleOf(thought)}`}
           onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "…"}</button></>}
       </p>}
+      {item.child && <p className={`${styles.relationship} ${styles.directRelationship}`}>Developed from this idea</p>}
+      {item.source && <p className={`${styles.relationship} ${styles.directRelationship}`}>Used as a source for this idea</p>}
+      {item.connections.map(connection => <RecordedConnection key={connection.id} connection={connection}
+        focus={focus} inspection={inspection} disabled={disabled}
+        onReject={() => onReject(connection.id)} onRestore={() => onRestore(connection.id)} />)}
+    </div>
+    <div className={styles.connectionActions}>
+      {thought && <Link href={thoughtHref(thought.id, location)} prefetch={false}>Open idea</Link>}
+    </div>
+  </article>;
+}
+
+function RecordedConnection({ connection, focus, inspection, disabled, onReject, onRestore }: {
+  connection: IdeaConnection; focus: string; inspection: boolean; disabled: boolean;
+  onReject: () => void; onRestore: () => void;
+}) {
+  const [why, setWhy] = useState(inspection);
+  const [actions, setActions] = useState(false);
+  return <div className={styles.recordedConnection} role="group" aria-label={`${relationship(connection, focus)} connection ${connection.id}`}>
       <div className={styles.relationship}>
         <strong>{relationship(connection, focus)}</strong>
         <button className={styles.textButton} aria-expanded={why}
@@ -532,9 +526,7 @@ function ConnectionRow({ item, location, focus, inspection, disabled, onReject, 
         <p className={styles.metadata}>Recorded direction: <span className={styles.identifier}>{connection.fromId}</span> to <span className={styles.identifier}>{connection.toId}</span>.</p>
         {connection.sourceIds.length > 0 && <p className={styles.metadata}>Recorded source IDs: {connection.sourceIds.join(", ")}</p>}
       </div>
-    </div>
     <div className={styles.connectionActions}>
-      {thought && <Link href={thoughtHref(thought.id, location)} prefetch={false}>Open idea</Link>}
       {inspection && <p className={styles.metadata}>{connection.rejected === true ? "Explicitly rejected connection" : connection.rejected === false ? "Connection not independently rejected" : "Connection rejection status unavailable"}</p>}
       {connection.rejected === true
         ? <button className={styles.textButton} disabled={disabled} onClick={onRestore}>Restore connection</button>
@@ -543,5 +535,5 @@ function ConnectionRow({ item, location, focus, inspection, disabled, onReject, 
           <button className={styles.textButton} disabled={disabled} onClick={onReject}>Reject connection…</button>
         </details>}
     </div>
-  </article>;
+  </div>;
 }

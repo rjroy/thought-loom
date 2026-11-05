@@ -15,7 +15,7 @@ export async function handleIdeaRead(request: Request, id: string, deps: IdeaDep
       || ["scope", "part", "responseId"].some(key => params.getAll(key).length > 1)) return problem(400);
   const scope = params.get("scope") ?? "normal", part = params.get("part") ?? "view";
   if ((scope !== "normal" && scope !== "history" && scope !== "show-rejected")
-      || (part !== "view" && part !== "sources" && part !== "history" && part !== "preview")
+      || (part !== "view" && part !== "preview")
       || (params.has("responseId") && (part !== "view" || !params.get("responseId")?.trim()))) return problem(400);
   const path = `/thoughts/${encodeURIComponent(id)}`;
   const suffix = `?scope=${scope}`;
@@ -39,13 +39,13 @@ export async function handleIdeaRead(request: Request, id: string, deps: IdeaDep
       const cached = cache.get(target);
       if (cached) return cached;
       const pending = (async () => {
-        if (!safeId(target)) return null;
-        try {
-          const res = await get(`/thoughts/${encodeURIComponent(target)}${suffix}`);
-          if (res.status !== 200) return null;
-          const data: unknown = await res.json();
-          return thought(data) && data.id === target ? data : null;
-        } catch { return null; }
+        if (!safeId(target)) throw new Error("Invalid referenced identity");
+        const res = await get(`/thoughts/${encodeURIComponent(target)}${suffix}`);
+        if (res.status === 404) return null;
+        if (res.status !== 200) throw new Error("Referenced read failed");
+        const data: unknown = await res.json();
+        if (!thought(data) || data.id !== target) throw new Error("Invalid referenced record");
+        return data;
       })();
       cache.set(target, pending);
       return pending;
@@ -56,35 +56,22 @@ export async function handleIdeaRead(request: Request, id: string, deps: IdeaDep
       async function worker() { while (index < unique.length) { const target = unique[index++]; if (target !== undefined) await fetchThought(target); } }
       await Promise.all(Array.from({ length: Math.min(4, unique.length) }, () => worker()));
     };
-    if (part === "sources") {
-      await resolveMany(root.sourceIds);
-      return json({ sources: await Promise.all(root.sourceIds.map(async sourceId => ({ id: sourceId, thought: await fetchThought(sourceId) }))) });
-    }
-    if (part === "history") {
-      const childrenResponse = await get(`${path}/children${suffix}`);
-      if (childrenResponse.status !== 200) return problem(502);
-      const children: unknown = await childrenResponse.json();
-      if (!Array.isArray(children) || !children.every(item => thought(item) && item.parentId === id)) return problem(502);
-      const ancestors: IdeaThought[] = [], visited = new Set([id]);
-      let parentId = root.parentId;
-      while (parentId && !visited.has(parentId) && visited.size < 1000) {
-        visited.add(parentId);
-        const parent = await fetchThought(parentId);
-        if (!parent) break;
-        ancestors.push(parent); parentId = parent.parentId;
-      }
-      return json({ ancestors, children, unavailableParentId: parentId });
-    }
-    const [edgeResponse, responseResponse] = await Promise.all([get(`${path}/connections${suffix}`), get(`${path}/responses${suffix}`)]);
-    if (edgeResponse.status !== 200 || responseResponse.status !== 200) return problem(502);
-    const edges: unknown = await edgeResponse.json(), replies: unknown = await responseResponse.json();
+    const [edgeResponse, responseResponse, childrenResponse] = await Promise.all([
+      get(`${path}/connections${suffix}`), get(`${path}/responses${suffix}`), get(`${path}/children${suffix}`),
+    ]);
+    if (edgeResponse.status !== 200 || responseResponse.status !== 200 || childrenResponse.status !== 200) return problem(502);
+    const edges: unknown = await edgeResponse.json(), replies: unknown = await responseResponse.json(), children: unknown = await childrenResponse.json();
     if (!Array.isArray(edges) || !edges.every(edge => connection(edge) && (edge.fromId === id || edge.toId === id))
-        || !Array.isArray(replies) || !replies.every(reply => sharedResponse(reply) && reply.thoughtIds.includes(id))) return problem(502);
+        || !Array.isArray(replies) || !replies.every(reply => sharedResponse(reply) && reply.thoughtIds.includes(id))
+        || !Array.isArray(children) || !children.every(child => thought(child) && child.parentId === id)) return problem(502);
+    for (const child of children) if (!cache.has(child.id)) cache.set(child.id, Promise.resolve(child));
     const neighbors = edges.map(edge => edge.fromId === id ? edge.toId : edge.fromId);
-    await resolveMany(neighbors);
+    await resolveMany([...neighbors, ...root.sourceIds, ...(root.parentId === null ? [] : [root.parentId])]);
     const connections = await Promise.all(edges.map(async (edge, i) => ({ connection: edge, thought: await fetchThought(neighbors[i]) })));
+    const parent = root.parentId === null ? null : { id: root.parentId, thought: await fetchThought(root.parentId) };
+    const sources = await Promise.all(root.sourceIds.map(async sourceId => ({ id: sourceId, thought: await fetchThought(sourceId) })));
     const focusedResponse = replies.find(reply => reply.id === params.get("responseId")) ?? null;
-    return json({ thought: root, connections, responses: replies, focusedResponse });
+    return json({ thought: root, parent, children, sources, connections, responses: replies, focusedResponse });
   } catch { return problem(502); }
 }
 

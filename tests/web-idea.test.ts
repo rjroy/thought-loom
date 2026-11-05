@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { decodeIdeaLocation, ideaActionHref } from "../apps/web/src/features/idea/location";
 import { commandIdea, readIdea } from "../apps/web/src/features/idea/request";
-import type { BranchPreview, IdeaCommand } from "../apps/web/src/features/idea/types";
+import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaThought, SharedResponse } from "../apps/web/src/features/idea/types";
 import { handleIdeaCommand, handleIdeaRead } from "../apps/web/src/server/idea";
 import type { DaemonRequest } from "../apps/web/src/server/daemon";
 
-const root = { id: "root-1", text: "immutable original thought", title: "Title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "parent-1", sourceIds: ["source-1", "missing-source"] };
+const root = { id: "root-1", text: "immutable original thought", title: "Title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "parent-1", sourceIds: ["source-1", "missing-source"] } satisfies IdeaThought;
 const parent = { ...root, id: "parent-1", text: "parent text", parentId: "hidden-parent", sourceIds: [] };
 const child = { ...root, id: "child-1", text: "direct child", parentId: "root-1", sourceIds: [] };
 const source = { ...root, id: "source-1", text: "source text", parentId: null, sourceIds: [] };
-const edge = { id: "edge-1", fromId: "root-1", toId: "source-1", category: "supports", proposedBy: "ai", explanation: "directed explanation", sourceIds: [], rejected: false };
+const edge = { id: "edge-1", fromId: "root-1", toId: "source-1", category: "supports", proposedBy: "ai", explanation: "directed explanation", sourceIds: [], rejected: false } satisfies IdeaConnection;
 const rejectedEdge = { ...edge, id: "edge-2", fromId: "missing-source", toId: "root-1", rejected: true };
-const reply = { id: "reply-1", text: "associated reply", role: "addendum", state: "complete", thoughtIds: ["prior-1", "root-1"] };
-const fallback = { id: "reply-2", text: "interrupted fallback", role: "fallback", state: "interrupted", thoughtIds: ["root-1"] };
+const reply = { id: "reply-1", text: "associated reply", role: "addendum", state: "complete", thoughtIds: ["prior-1", "root-1"] } satisfies SharedResponse;
+const fallback = { id: "reply-2", text: "interrupted fallback", role: "fallback", state: "interrupted", thoughtIds: ["root-1"] } satisfies SharedResponse;
 const preview: BranchPreview = { rootId: "root-1", branchIds: ["root-1", "child-1"], affectedIds: ["child-1"], count: 1 };
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 const noContent = () => new Response(null, { status: 204 });
@@ -49,6 +49,14 @@ describe("Idea location", () => {
 });
 
 describe("scoped Idea reads", () => {
+  for (const part of ["sources", "history"] as const) {
+    test(`obsolete ${part} part is rejected before any daemon read`, async () => {
+      const calls: DaemonRequest[] = [];
+      const response = await handleIdeaRead(req(`?scope=normal&part=${part}`), "root-1", { callDaemon: async command => { calls.push(command); return new Response(null, { status: 404 }); } });
+      expect(response.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    });
+  }
   test("missing focused thought stops without fetching relationships or broadening", async () => {
     const calls: DaemonRequest[] = [];
     const response = await handleIdeaRead(req("?scope=normal&part=view"), "root-1", { callDaemon: async command => { calls.push(command); return new Response(null, { status: 404 }); } });
@@ -65,6 +73,7 @@ describe("scoped Idea reads", () => {
       if (url.pathname === "/thoughts/root-1") return json({ ...root, rejected: true });
       if (url.pathname === "/thoughts/root-1/connections") return json([edge, { ...edge, id: "edge-3" }, rejectedEdge]);
       if (url.pathname === "/thoughts/root-1/responses") return json([reply, fallback]);
+      if (url.pathname === "/thoughts/root-1/children") return json([]);
       if (url.pathname === "/thoughts/source-1") return json({ ...source, rejected: true });
       return new Response(null, { status: 404 });
     } });
@@ -85,6 +94,7 @@ describe("scoped Idea reads", () => {
       if (path === "/thoughts/root-1") return json(root);
       if (path.endsWith("/responses")) return json([reply, fallback]);
       if (path.endsWith("/connections")) return json([]);
+      if (path.endsWith("/children")) return json([]);
       return new Response(null, { status: 404 });
     } });
     expect(response.status).toBe(200);
@@ -101,6 +111,7 @@ describe("scoped Idea reads", () => {
       if (path === "/thoughts/root-1") return json(root);
       if (path === "/thoughts/root-1/connections") return json(links);
       if (path === "/thoughts/root-1/responses") return json([]);
+      if (path === "/thoughts/root-1/children") return json([]);
       active++; maximum = Math.max(maximum, active);
       await new Promise(resolve => setTimeout(resolve, 5));
       active--;
@@ -110,51 +121,116 @@ describe("scoped Idea reads", () => {
     expect(maximum).toBeLessThanOrEqual(4);
     expect((await response.json()).connections).toEqual(links.map(connection => ({ connection, thought: null })));
   });
-  test("sources are explicit on-demand scoped reads and missing sources stay unavailable", async () => {
+  test("initial context contains the immediate parent, direct children and ordered sources without walking ancestors or descendants", async () => {
     const calls: string[] = [];
-    const response = await handleIdeaRead(req("?scope=normal&part=sources"), "root-1", { callDaemon: async command => {
+    const interpretation = { ...child, author: "ai", kind: "ai-interpretation", sourceIds: ["root-1"] };
+    const response = await handleIdeaRead(req("?scope=normal&part=view"), "root-1", { callDaemon: async command => {
       calls.push(command.path);
       const url = new URL(command.path, "http://daemon.invalid");
       expect([null, "normal"]).toContain(url.searchParams.get("scope"));
       if (url.pathname === "/thoughts/root-1") return json(root);
+      if (url.pathname === "/thoughts/root-1/children") return json([interpretation]);
+      if (url.pathname === "/thoughts/root-1/connections") return json([edge]);
+      if (url.pathname === "/thoughts/root-1/responses") return json([reply]);
+      if (url.pathname === "/thoughts/parent-1") return json(parent);
       if (url.pathname === "/thoughts/source-1") return json(source);
-      return new Response(null, { status: 404 });
+      if (url.pathname === "/thoughts/missing-source") return new Response(null, { status: 404 });
+      throw new Error(`unexpected read ${url.pathname}`);
     } });
     expect(response.status).toBe(200);
-    expect((await response.json()).sources).toEqual([{ id: "source-1", thought: source }, { id: "missing-source", thought: null }]);
+    const view = await response.json();
+    expect(view.parent).toEqual({ id: "parent-1", thought: parent });
+    expect(view.children).toEqual([interpretation]);
+    expect(view.sources).toEqual([{ id: "source-1", thought: source }, { id: "missing-source", thought: null }]);
+    expect(view.connections).toEqual([{ connection: edge, thought: source }]);
+    expect(view.responses).toEqual([reply]);
+    expect(calls.filter(path => new URL(path, "http://daemon.invalid").pathname === "/thoughts/source-1")).toHaveLength(1);
     expect(calls.every(path => !path.startsWith("/thoughts?"))).toBe(true);
     expect(calls.every(path => !path.includes("history"))).toBe(true);
+    expect(calls.some(path => path.includes("hidden-parent") || path.includes("child-1/children"))).toBe(false);
   });
-  test("history follows known parents and direct children without crossing an unavailable ancestor", async () => {
+  test("an interpretation exposes its own provenance and its immediate parent only", async () => {
     const calls: string[] = [];
-    const response = await handleIdeaRead(req("?scope=normal&part=history"), "root-1", { callDaemon: async command => {
+    const interpretation = { ...child, author: "ai", kind: "ai-interpretation", sourceIds: ["root-1"] };
+    const response = await handleIdeaRead(req("?scope=normal&part=view"), "child-1", { callDaemon: async command => {
       calls.push(command.path);
       const url = new URL(command.path, "http://daemon.invalid");
       expect([null, "normal"]).toContain(url.searchParams.get("scope"));
+      if (url.pathname === "/thoughts/child-1") return json(interpretation);
+      if (url.pathname === "/thoughts/child-1/children" || url.pathname === "/thoughts/child-1/connections" || url.pathname === "/thoughts/child-1/responses") return json([]);
       if (url.pathname === "/thoughts/root-1") return json(root);
-      if (url.pathname === "/thoughts/parent-1") return json(parent);
-      if (url.pathname === "/thoughts/root-1/children") return json([child]);
-      return new Response(null, { status: 404 });
+      throw new Error(`unexpected read ${url.pathname}`);
     } });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ancestors: [parent], children: [child], unavailableParentId: "hidden-parent" });
-    expect(calls.some(path => path.startsWith("/thoughts/child-1/children"))).toBe(false);
-    expect(calls.some(path => path.startsWith("/thoughts?"))).toBe(false);
+    const view = await response.json();
+    expect(view.parent).toEqual({ id: "root-1", thought: root });
+    expect(view.sources).toEqual([{ id: "root-1", thought: root }]);
+    expect(view.children).toEqual([]);
+    expect(calls.filter(path => new URL(path, "http://daemon.invalid").pathname === "/thoughts/root-1")).toHaveLength(1);
+    expect(calls.some(path => path.includes("parent-1"))).toBe(false);
   });
-  test("history detects parent cycles without recursive daemon reads", async () => {
+  for (const scenario of ["root", "untitled", "unavailable"] as const) {
+    test(`${scenario} parent is represented without inventing an ancestor or broadening scope`, async () => {
+      const calls: string[] = [];
+      const selected = { ...root, parentId: scenario === "root" ? null : "parent-1", sourceIds: [] };
+      const untitled = { ...parent, title: null, titleAuthor: null };
+      const response = await handleIdeaRead(req("?scope=normal&part=view"), "root-1", { callDaemon: async command => {
+        calls.push(command.path);
+        const url = new URL(command.path, "http://daemon.invalid");
+        expect([null, "normal"]).toContain(url.searchParams.get("scope"));
+        if (url.pathname === "/thoughts/root-1") return json(selected);
+        if (["/thoughts/root-1/children", "/thoughts/root-1/connections", "/thoughts/root-1/responses"].includes(url.pathname)) return json([]);
+        if (url.pathname === "/thoughts/parent-1") return scenario === "untitled" ? json(untitled) : new Response(null, { status: 404 });
+        throw new Error(`unexpected read ${url.pathname}`);
+      } });
+      expect(response.status).toBe(200);
+      expect((await response.json()).parent).toEqual(scenario === "root" ? null : { id: "parent-1", thought: scenario === "untitled" ? untitled : null });
+      expect(calls.some(path => path.includes("hidden-parent"))).toBe(false);
+      expect(calls.filter(path => path.startsWith("/thoughts/parent-1?")).length).toBe(scenario === "root" ? 0 : 1);
+    });
+  }
+  test("shared parent, source and connection references are resolved once with at most four concurrent reads", async () => {
+    const ids = Array.from({ length: 9 }, (_, i) => `ref-${i}`);
+    const selected = { ...root, parentId: ids[0], sourceIds: ids };
+    const links = ids.map((id, i) => ({ ...edge, id: `link-${i}`, toId: id }));
     const calls: string[] = [];
-    const response = await handleIdeaRead(req("?scope=history&part=history"), "root-1", { callDaemon: async command => {
-      calls.push(command.path);
-      const path = new URL(command.path, "http://daemon.invalid").pathname;
-      if (path === "/thoughts/root-1") return json({ ...root, rejected: false });
-      if (path === "/thoughts/parent-1") return json({ ...parent, parentId: "root-1", rejected: true });
-      if (path === "/thoughts/root-1/children") return json([]);
-      throw new Error("unexpected read");
+    let active = 0, maximum = 0;
+    const response = await handleIdeaRead(req("?scope=show-rejected&part=view"), "root-1", { callDaemon: async command => {
+      const url = new URL(command.path, "http://daemon.invalid");
+      calls.push(url.pathname);
+      expect(url.searchParams.get("scope")).toBe("show-rejected");
+      if (url.pathname === "/thoughts/root-1") return json(selected);
+      if (url.pathname === "/thoughts/root-1/connections") return json(links);
+      if (url.pathname === "/thoughts/root-1/children" || url.pathname === "/thoughts/root-1/responses") return json([]);
+      const id = url.pathname.slice("/thoughts/".length);
+      if (!ids.includes(id)) throw new Error("unexpected read");
+      active++; maximum = Math.max(maximum, active);
+      try { await new Promise(resolve => setTimeout(resolve, 5)); return json({ ...source, id }); }
+      finally { active--; }
     } });
     expect(response.status).toBe(200);
-    expect(calls.length).toBeLessThanOrEqual(3);
-    expect(calls.every(path => path.includes("scope=history"))).toBe(true);
+    const view = await response.json();
+    expect(view.parent).toEqual({ id: ids[0], thought: { ...source, id: ids[0] } });
+    expect(view.sources).toEqual(ids.map(id => ({ id, thought: { ...source, id } })));
+    expect(view.connections).toEqual(links.map((connection, i) => ({ connection, thought: { ...source, id: ids[i] } })));
+    for (const id of ids) expect(calls.filter(path => path === `/thoughts/${id}`)).toHaveLength(1);
+    expect(maximum).toBeLessThanOrEqual(4);
   });
+  for (const failingPath of ["/thoughts/root-1/children", "/thoughts/root-1/connections", "/thoughts/root-1/responses", "/thoughts/parent-1", "/thoughts/source-1"] as const) {
+    test(`a failed ${failingPath} read is an error, not empty or unavailable context`, async () => {
+      const response = await handleIdeaRead(req("?scope=normal&part=view"), "root-1", { callDaemon: async command => {
+        const path = new URL(command.path, "http://daemon.invalid").pathname;
+        if (path === failingPath) return new Response("private upstream content", { status: 500 });
+        if (path === "/thoughts/root-1") return json(root);
+        if (path === "/thoughts/root-1/connections" || path === "/thoughts/root-1/children" || path === "/thoughts/root-1/responses") return json([]);
+        if (path === "/thoughts/parent-1") return json(parent);
+        if (path === "/thoughts/source-1") return json(source);
+        return new Response(null, { status: 404 });
+      } });
+      expect(response.status).toBe(502);
+      expect(await response.text()).not.toContain("private upstream content");
+    });
+  }
 });
 
 describe("fixed Idea commands", () => {
@@ -220,6 +296,15 @@ describe("fixed Idea commands", () => {
 
 describe("Idea client request outcomes", () => {
   const command: IdeaCommand = { action: "reject-branch", thoughtId: "root-1", preview };
+  test("view decoding retains direct context and rejects a missing or malformed projection", async () => {
+    const value = { thought: root, parent: { id: "parent-1", thought: parent }, children: [child], sources: [{ id: "source-1", thought: source }, { id: "missing-source", thought: null }], connections: [{ connection: edge, thought: source }], responses: [reply], focusedResponse: reply };
+    const read = (body: unknown) => readIdea("root-1", { scope: "normal", part: "view" }, { fetch: fakeFetch(async () => json(body)) });
+    expect(await read(value)).toEqual({ kind: "view", value });
+    const { parent: _parent, ...missingParent } = value;
+    expect((await read(missingParent)).kind).toBe("error");
+    expect((await read({ ...value, children: [{ ...child, parentId: "other" }] })).kind).toBe("error");
+    expect((await read({ ...value, sources: [{ id: "source-1", thought: { ...source, id: "foreign" } }] })).kind).toBe("error");
+  });
   for (const [status, kind] of [[400, "not-applied"], [401, "not-applied"], [403, "not-applied"], [404, "not-applied"], [409, "conflict"], [500, "uncertain"], [200, "uncertain"]] as const) {
     test(`classifies branch command ${status} as ${kind} without retry or private error`, async () => {
       let calls = 0;

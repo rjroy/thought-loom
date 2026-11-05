@@ -15,18 +15,18 @@ Read one thought, understand useful surrounding context, and decide whether to f
 
 The selected thought is the focal content: prominent title, actual text, and clear authorship. If the title is missing, use the first five words. Where text is abbreviated, make full-text expansion obvious and available in place.
 
-Below or alongside it, show a compact amount of useful recorded context: a related interpretation, implication, tension, question, or connected thought. Explain connections in ordinary language using recorded material. Do not generate fresh significance merely because the page was opened.
+Below or alongside it, **Surrounding Context** shows items directly linked to the selected thought: its immediate evolution children (including AI interpretations), discovered connections, and the thoughts recorded as provenance sources for the selected thought. Opening an original idea exposes its recorded AI interpretation here; opening that interpretation exposes the other thoughts it drew from. Explain each relationship in ordinary language using recorded material. Do not recursively walk ancestors or descendants, or generate fresh significance merely because the page was opened.
 
 The underlying user source must not be confused with the AI's reading of it. Each thought is immutable and remains that exact thought. Later developments are separate thoughts in an evolution tree, not newer versions silently substituted for the selected thought.
 
-Sources, creation dates, evolution history, agent-response addenda, and the explanation/evidence behind a connection are available on demand. History also allows inspection of rejected material. These details should not dominate the first view. Do not require a graph, node taxonomy, ancestor chain, or relationship-management vocabulary to understand the content. Mockup references to versions or revision counts must be interpreted as distinct earlier thoughts and evolution history, not note versioning.
+The selected thought's immediate parent is a separate link using that parent's title, or the normal first-five-word fallback if untitled. Resolve it solely from the selected thought's evolution parent ID; a root has no parent. This replaces the catch-all **History** panel, not the immutable evolution relationships themselves. Creation details, agent-response addenda and the explanation/evidence behind a connection remain available on demand. Rejected material still requires deliberate user inspection; ordinary context and parent reads must not silently broaden scope. Do not require a graph, node taxonomy, ancestor chain, or relationship-management vocabulary to understand the content. Mockup references to versions or revision counts are not note versioning.
 
 ## Actions
 
 - Read or expand the selected thought and contextual text.
 - Edit or clear its title metadata. Clearing invites the weaver to generate another; show the first-five-word fallback in the meantime.
 - Open a connected thought, making it the new focus.
-- Inspect original sources, attribution, development history, or connection rationale.
+- Follow the immediate parent or a directly linked development, connection or provenance thought; inspect attribution, creation details, retained replies or connection rationale as needed.
 - Choose **Evolve this idea** to open a new [Evolve](evolve-view.md) conversation about this selected thought.
 - Return to Search or the previous thought without losing the exploration path.
 - Reject or restore any note, including the user's own, or any connection; inspect earlier material. These are user-only secondary actions rather than a mandatory approval inbox.

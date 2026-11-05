@@ -5,12 +5,13 @@ export type IdeaConnection = ContextConnection & { readonly rejected?: boolean }
 export interface SharedResponse { readonly id: string; readonly text: string; readonly role: "addendum" | "fallback"; readonly state: "complete" | "interrupted"; readonly thoughtIds: readonly string[]; }
 export interface IdeaView {
   readonly thought: IdeaThought;
+  readonly parent: { readonly id: string; readonly thought: IdeaThought | null } | null;
+  readonly children: readonly IdeaThought[];
+  readonly sources: readonly { readonly id: string; readonly thought: IdeaThought | null }[];
   readonly connections: readonly { readonly connection: IdeaConnection; readonly thought: IdeaThought | null }[];
   readonly responses: readonly SharedResponse[];
   readonly focusedResponse: SharedResponse | null;
 }
-export interface IdeaSources { readonly sources: readonly { readonly id: string; readonly thought: IdeaThought | null }[]; }
-export interface IdeaHistory { readonly ancestors: readonly IdeaThought[]; readonly children: readonly IdeaThought[]; readonly unavailableParentId: string | null; }
 export interface BranchPreview { readonly rootId: string; readonly branchIds: readonly string[]; readonly affectedIds: readonly string[]; readonly count: number; }
 export type IdeaCommand =
   | { readonly action: "title"; readonly thoughtId: string; readonly title: string | null }

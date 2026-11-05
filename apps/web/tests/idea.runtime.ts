@@ -4,26 +4,29 @@ import { expect, type Page } from "@playwright/test";
 
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
 const original = "Owned original idea wording, unchanged by title edits.";
-const thought = { id: "idea-root", text: original, title: "Owned original title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "idea-parent", sourceIds: ["idea-source", "idea-hidden"] };
+const thought = { id: "idea-root", text: original, title: "Owned original title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "idea-parent", sourceIds: ["idea-source", "idea-hidden", "idea-child"] };
 const source = { ...thought, id: "idea-source", text: "Owned supporting source", title: "Owned source", parentId: null, sourceIds: [] };
 const parent = { ...thought, id: "idea-parent", text: "Owned rejected ancestor", title: "Owned parent", parentId: null, sourceIds: [] };
 const plain = { ...thought, id: "idea-plain", text: "Owned plain idea with no reply", title: "Plain idea", parentId: null, sourceIds: [] };
+const child = { ...thought, id: "idea-child", text: "Owned direct interpretation", title: "Owned interpretation", titleAuthor: null, author: "ai", kind: "ai-interpretation", parentId: "idea-root", sourceIds: ["idea-root", "idea-hidden"] };
+const grandchild = { ...child, id: "idea-grandchild", text: "Owned grandchild not direct context", title: "Owned grandchild", parentId: "idea-child", sourceIds: [] };
 const edge = { id: "idea-edge", fromId: "idea-root", toId: "idea-source", category: "supports", proposedBy: "ai", explanation: "Owned directed connection rationale", sourceIds: [] };
 const hiddenEdge = { ...edge, id: "idea-hidden-edge", toId: "idea-hidden", explanation: "Endpoint hidden only" };
+const childEdge = { ...edge, id: "idea-child-edge", toId: "idea-child", explanation: "Owned overlapping connection rationale" };
 const reply = { id: "idea-reply", text: "Owned associated full reply", role: "addendum", state: "complete", thoughtIds: ["idea-root"] };
 const preview3 = { rootId: "idea-root", branchIds: ["idea-root", "idea-child-1", "idea-child-2"], affectedIds: ["idea-root", "idea-child-1", "idea-child-2"], count: 3 };
 const preview4 = { rootId: "idea-root", branchIds: [...preview3.branchIds, "idea-child-3"], affectedIds: [...preview3.affectedIds, "idea-child-3"], count: 4 };
 
 export function ideaDaemon(token: string) {
   const attempts: Attempt[] = [];
-  let title: string | null = thought.title, rootRejected = false, branchAttempt = 0;
+  let title: string | null = thought.title, rootRejected = false, childEdgeRejected = false, branchAttempt = 0;
   let holdPreview = false, holdTitle = false, failure = false;
   let releasePreview: (() => void) | undefined, releaseTitle: (() => void) | undefined;
   return {
     attempts, expectedAuthorization: `Bearer ${token}`,
     currentTitle() { return title; },
     freshPreviewWaiting() { return releasePreview !== undefined; },
-    reset() { title = thought.title; rootRejected = false; branchAttempt = 0; holdPreview = false; holdTitle = false; failure = false; },
+    reset() { title = thought.title; rootRejected = false; childEdgeRejected = false; branchAttempt = 0; holdPreview = false; holdTitle = false; failure = false; },
     holdFreshPreview() { holdPreview = true; },
     releasePreview() { releasePreview?.(); releasePreview = undefined; holdPreview = false; },
     holdTitle() { holdTitle = true; },
@@ -45,11 +48,13 @@ export function ideaDaemon(token: string) {
         if (url.pathname === "/thoughts/idea-root") { if (rootRejected && !inspection) { res.writeHead(404).end(); return; } send({ ...thought, title, titleAuthor: title === null ? null : "user", ...(inspection ? { rejected: rootRejected } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-plain") { send({ ...plain, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-source") { send({ ...source, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-child") { send({ ...child, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-grandchild") { send({ ...grandchild, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-parent") { if (!inspection) { res.writeHead(404).end(); return; } send({ ...parent, rejected: true }); return; }
         if (url.pathname === "/thoughts/idea-hidden") { res.writeHead(404).end(); return; }
-        if (url.pathname.endsWith("/connections")) { send(url.pathname.includes("idea-root") ? (inspection ? [{ ...edge, rejected: true }, { ...hiddenEdge, rejected: false }] : [edge]) : []); return; }
+        if (url.pathname.endsWith("/connections")) { send(url.pathname.includes("idea-root") ? (inspection ? [{ ...edge, rejected: true }, { ...hiddenEdge, rejected: false }, { ...childEdge, rejected: childEdgeRejected }] : [edge, ...(!childEdgeRejected ? [childEdge] : [])]) : []); return; }
         if (url.pathname.endsWith("/responses")) { send(url.pathname.includes("idea-root") ? [reply] : []); return; }
-        if (url.pathname.endsWith("/children")) { send([]); return; }
+        if (url.pathname.endsWith("/children")) { send(url.pathname === "/thoughts/idea-root/children" ? [child] : url.pathname === "/thoughts/idea-child/children" ? [grandchild] : []); return; }
         res.writeHead(404).end(); return;
       }
       if (failure) { res.writeHead(500).end("owned private write failure"); return; }
@@ -61,6 +66,7 @@ export function ideaDaemon(token: string) {
         send({ ...thought, title, titleAuthor: title === null ? null : "user" }); return;
       }
       if (url.pathname === "/thoughts/idea-root/branch/reject") { branchAttempt++; if (branchAttempt === 1) { res.writeHead(409).end(); return; } rootRejected = true; res.writeHead(204).end(); return; }
+      if (url.pathname === "/connections/idea-child-edge/reject") childEdgeRejected = true;
       if (url.pathname === "/thoughts/idea-root/reject") rootRejected = true;
       if (url.pathname === "/thoughts/idea-root/restore" || url.pathname === "/thoughts/idea-root/branch/restore") rootRejected = false;
       res.writeHead(204).end();
@@ -104,6 +110,7 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   assert.equal(navigation?.status(), 200, "direct Idea bookmark must resolve to the actual page");
   await expect(page.getByText(plain.text, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /full reply/i })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /owned parent/i })).toHaveCount(0);
   const returnTo = "/explore?q=owned&sort=newest&scope=normal";
   await page.goto(`${options.origin}/ideas/idea-root?${new URLSearchParams({ responseId: "idea-reply", returnTo })}`, { waitUntil: "networkidle" });
   await expect(page.getByText(original, { exact: true })).toBeVisible();
@@ -137,15 +144,35 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   await expect(page.getByText(original, { exact: true })).toBeVisible();
   assert.ok(daemon.attempts.some(call => call.method === "PUT" && call.body === '{"title":null}'));
 
-  const beforeDetails = daemon.attempts.length;
-  await page.getByRole("button", { name: /^sources/i }).click();
-  await expect(page.locator("#idea-sources").getByText(source.text, { exact: true })).toBeVisible();
-  assert.ok(!daemon.attempts.slice(beforeDetails).some(call => call.path.includes("scope=history")));
+  await expect(page.getByRole("button", { name: /^(history|sources)$/i })).toHaveCount(0);
+  await expect(page.getByText(/parent.*unavailable|unavailable.*parent/i).first()).toBeVisible();
+  await expect(page.getByText(source.text, { exact: true })).toBeVisible();
+  await expect(page.getByText(/unavailable/i).first()).toBeVisible();
   await page.locator("article").filter({ has: page.getByRole("heading", { name: "Owned source" }) }).getByRole("button", { name: "Why connected" }).click();
   await expect(page.getByText(edge.explanation, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /^history/i }).click();
-  await expect(page.getByText(parent.text, { exact: true })).toBeVisible();
-  assert.ok(daemon.attempts.some(call => call.path.includes("scope=history")));
+  const childRow = page.locator("article").filter({ has: page.locator('a[href^="/ideas/idea-child"]') });
+  await expect(childRow).toHaveCount(1);
+  await expect(childRow).toContainText(/interpretation|child/i);
+  await expect(childRow).toContainText(/source|provenance/i);
+  await expect(childRow).toContainText(/connection|supports/i);
+  await expect(page.getByText(grandchild.text, { exact: true })).toHaveCount(0);
+  await childRow.getByRole("button", { name: "Why connected" }).click();
+  await expect(childRow.getByText(childEdge.explanation, { exact: true })).toBeVisible();
+  await childRow.getByText("Connection actions", { exact: true }).click();
+  await childRow.getByRole("button", { name: /reject connection/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Reject connection" }).click();
+  await expect.poll(() => daemon.attempts.filter(call => call.path === "/connections/idea-child-edge/reject").length).toBe(1);
+  await expect(childRow).toBeVisible();
+  await expect(childRow).toContainText(/interpretation|child/i);
+  assert.ok(!daemon.attempts.some(call => call.method === "POST" && call.path === "/thoughts/idea-child/reject"));
+  await childRow.locator('a[href^="/ideas/idea-child"]').first().click();
+  await expect(page.getByText(child.text, { exact: true })).toBeVisible();
+  await expect(page.locator('a[href^="/ideas/idea-root"]').filter({ hasText: /Owned original idea wording, unchanged/i }).first()).toBeVisible();
+  await expect(page.locator("article").filter({ has: page.locator('a[href^="/ideas/idea-root"]') })).toContainText(/source|provenance/i);
+  await expect(page.getByText(parent.text, { exact: true })).toHaveCount(0);
+  assert.ok(!daemon.attempts.some(call => call.path.includes("scope=history")));
+  daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-root`, { waitUntil: "networkidle" });
 
   const writes = () => daemon.attempts.filter(call => call.method !== "GET");
   const beforeCancel = writes().length;
@@ -161,6 +188,7 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   assert.equal(normal.status(), 404);
   await page.goto(`${options.origin}/ideas/idea-root?scope=show-rejected`, { waitUntil: "networkidle" });
   await expect(page.getByText(original, { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Owned parent" }).first()).toBeVisible();
   const evolve = page.getByRole("link", { name: /evolve/i }).or(page.getByRole("button", { name: /evolve/i }));
   await expect(evolve).toHaveAttribute("aria-disabled", "true");
   await openMenu();

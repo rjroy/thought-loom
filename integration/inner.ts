@@ -54,6 +54,8 @@ class FixtureClient implements PublicClient {
       : job.kind === "evolve" && step === 1
         ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "Owned integrated development", sourceIds: [] } } }
         : job.kind === "weave" && step === 1
+          ? { version: 1, kind: "request", request: { capability: "interpretation", arguments: { text: "Owned integrated interpretation", sourceIds: [string(job.subjectId)] } } }
+        : job.kind === "weave" && step === 2
           ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Owned generated title" } } }
         : { version: 1, kind: "complete", reply: job.kind === "evolve" ? "Owned integrated reply" : "No further findings" };
     const messages = this.messages.get(input.sessionID); assert.ok(messages);
@@ -149,12 +151,32 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     const captured = await captureResponse(page, "/api/capture", () => page.getByRole("button", { name: /^save$/i }).click());
     const id = string(captured.id); fake.sourceId = id;
     await settleKnowledge(dbPath, pulse);
+    const childResult = await daemonCall(running, `/thoughts/${encodeURIComponent(id)}/children?scope=normal`);
+    assert.equal(childResult.status, 200);
+    assert.ok(Array.isArray(childResult.value));
+    const interpretation = childResult.value.map(record).find(item => item.text === "Owned integrated interpretation");
+    assert.ok(interpretation);
+    assert.equal(interpretation.kind, "ai-interpretation");
+    assert.equal(interpretation.parentId, id);
+    assert.ok(Array.isArray(interpretation.sourceIds) && interpretation.sourceIds.includes(id));
+    const interpretationId = string(interpretation.id);
     await page.getByRole("link", { name: "Explore", exact: true }).click();
     await page.getByRole("textbox", { name: /^search thoughts$/i }).fill("cobalt");
     await page.getByRole("button", { name: /^search$/i }).click();
     const card = page.locator("article").filter({ hasText: content });
     await expect(card).toBeVisible();
     const idea = card.locator(`a[href^="/ideas/${encodeURIComponent(id)}"]`).first(); await idea.click();
+    await expect(page.getByText(content, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^history$/i })).toHaveCount(0);
+    const interpretationRow = page.locator("article").filter({ has: page.locator(`a[href^="/ideas/${encodeURIComponent(interpretationId)}"]`) });
+    await expect(interpretationRow).toHaveCount(1);
+    await expect(interpretationRow).toContainText(/interpretation|child/i);
+    await interpretationRow.locator(`a[href^="/ideas/${encodeURIComponent(interpretationId)}"]`).first().click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(interpretationId)}`);
+    await expect(page.getByRole("heading", { level: 1, name: "Owned integrated interpretation", exact: true })).toBeVisible();
+    await expect(page.locator(`a[href^="/ideas/${encodeURIComponent(id)}"]`).filter({ hasText: "Owned generated title" }).first()).toBeVisible();
+    await expect(page.locator("article").filter({ has: page.locator(`a[href^="/ideas/${encodeURIComponent(id)}"]`) })).toContainText(/source|provenance/i);
+    await page.goto(`${origin}/ideas/${encodeURIComponent(id)}`, { waitUntil: "networkidle" });
     await expect(page.getByText(content, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Edit title" }).click();
     await page.getByRole("textbox", { name: "Title" }).fill("Owned edited title");
@@ -198,6 +220,18 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await expect(page.getByText("Owned integrated reply")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Owned integrated development" })).toBeVisible();
     await settleKnowledge(dbPath, pulse);
+    const completedEvolve = record((await daemonCall(running, `/runs/${runId}`)).value);
+    assert.ok(Array.isArray(completedEvolve.confirmedThoughtIds));
+    assert.equal(completedEvolve.confirmedThoughtIds.length, 1);
+    const developmentId = string(completedEvolve.confirmedThoughtIds[0]);
+    const followups = dbRows(dbPath, "SELECT id, kind, status, weave_subject_id FROM runs WHERE kind = 'weave'")
+      .map(record).filter(row => row.weave_subject_id === developmentId);
+    assert.equal(followups.length, 1, "the confirmed development must have its own weave run");
+    const followupId = string(followups[0]?.id);
+    const followup = record((await daemonCall(running, `/runs/${encodeURIComponent(followupId)}`)).value);
+    assert.equal(followup.id, followupId);
+    assert.equal(followup.kind, "weave");
+    assert.equal(followup.status, "completed", `weave for confirmed development ${developmentId} must complete`);
     const beforeExport = knowledge(dbPath);
     await page.getByRole("link", { name: "Back to idea" }).click();
     await page.getByRole("button", { name: "More actions" }).click();

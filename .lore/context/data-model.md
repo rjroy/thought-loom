@@ -66,7 +66,7 @@ Only the user may reject or restore material. Neither the weaver nor the evoluti
 
 Branch operations never follow weaver-discovered connections. The one-parent rule makes evolution a tree, not a graph of shared evolution descendants.
 
-Rejected material is hidden from ordinary views but remains inspectable through idea history and Search's **Show rejected** toggle. For every AI agent, rejected notes and connections are effectively nonexistent: exclude them from retrieval, context, and reasoning, even when the user is inspecting them. Active descendants of a rejected thought remain usable without supplying the rejected ancestor's content to the AI.
+Rejected material is hidden from ordinary views but remains inspectable through explicit Idea inspection and Search's **Show rejected** toggle. For every AI agent, rejected notes and connections are effectively nonexistent: exclude them from retrieval, context, and reasoning, even when the user is inspecting them. Active descendants of a rejected thought remain usable without supplying the rejected ancestor's content to the AI.
 
 If a reply is shared by several developments and any of them is rejected, exclude that entire reply from AI access, even through another active development. Other active thoughts remain usable; users can still inspect the retained reply deliberately.
 

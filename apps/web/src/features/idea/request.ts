@@ -1,10 +1,9 @@
 import type { IdeaScope } from "./location";
-import type { BranchPreview, CommandResult, IdeaCommand, IdeaHistory, IdeaSources, IdeaView } from "./types";
-import { command as validCommand, history, preview, sources, thought, view } from "./validation";
-export type IdeaReadResult = { readonly kind: "view"; readonly value: IdeaView } | { readonly kind: "sources"; readonly value: IdeaSources }
-  | { readonly kind: "history"; readonly value: IdeaHistory } | { readonly kind: "preview"; readonly value: BranchPreview }
+import type { BranchPreview, CommandResult, IdeaCommand, IdeaView } from "./types";
+import { command as validCommand, preview, thought, view } from "./validation";
+export type IdeaReadResult = { readonly kind: "view"; readonly value: IdeaView } | { readonly kind: "preview"; readonly value: BranchPreview }
   | { readonly kind: "unavailable" | "error"; readonly message: string };
-export async function readIdea(id: string, options: { readonly scope: IdeaScope; readonly part: "view" | "sources" | "history" | "preview"; readonly responseId?: string }, deps: { readonly fetch: typeof fetch }): Promise<IdeaReadResult> {
+export async function readIdea(id: string, options: { readonly scope: IdeaScope; readonly part: "view" | "preview"; readonly responseId?: string }, deps: { readonly fetch: typeof fetch }): Promise<IdeaReadResult> {
   const error: IdeaReadResult = { kind: "error", message: "Idea unavailable." };
   try {
     const params = new URLSearchParams({ scope: options.scope, part: options.part });
@@ -14,8 +13,6 @@ export async function readIdea(id: string, options: { readonly scope: IdeaScope;
     if (response.status !== 200) return error;
     const data: unknown = await response.json();
     if (options.part === "view" && view(data) && data.thought.id === id) return { kind: "view", value: data };
-    if (options.part === "sources" && sources(data)) return { kind: "sources", value: data };
-    if (options.part === "history" && history(data)) return { kind: "history", value: data };
     if (options.part === "preview" && preview(data, id)) return { kind: "preview", value: data };
     return error;
   } catch { return error; }

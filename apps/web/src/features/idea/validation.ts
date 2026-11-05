@@ -1,4 +1,4 @@
-import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaHistory, IdeaSources, IdeaThought, IdeaView, SharedResponse } from "./types";
+import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaThought, IdeaView, SharedResponse } from "./types";
 
 export function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(item => typeof item === "string" && item.length > 0);
@@ -37,15 +37,21 @@ export function command(v: unknown, id: string): v is IdeaCommand {
   }
 }
 export function view(v: unknown): v is IdeaView {
-  return record(v) && thought(v.thought) && Array.isArray(v.connections)
-    && v.connections.every(x => record(x) && connection(x.connection) && (x.thought === null || thought(x.thought)))
-    && Array.isArray(v.responses) && v.responses.every(sharedResponse)
-    && (v.focusedResponse === null || sharedResponse(v.focusedResponse));
-}
-export function sources(v: unknown): v is IdeaSources {
-  return record(v) && Array.isArray(v.sources) && v.sources.every(x => record(x) && typeof x.id === "string" && (x.thought === null || thought(x.thought)));
-}
-export function history(v: unknown): v is IdeaHistory {
-  return record(v) && Array.isArray(v.ancestors) && v.ancestors.every(thought) && Array.isArray(v.children) && v.children.every(thought)
-    && (v.unavailableParentId === null || typeof v.unavailableParentId === "string");
+  if (!record(v) || !thought(v.thought)) return false;
+  const root = v.thought;
+  const reference = (x: unknown, id: string) => record(x) && x.id === id && (x.thought === null || (thought(x.thought) && x.thought.id === id));
+  return (root.parentId === null ? v.parent === null : reference(v.parent, root.parentId))
+    && Array.isArray(v.children) && v.children.every(child => thought(child) && child.parentId === root.id)
+    && Array.isArray(v.sources) && v.sources.length === root.sourceIds.length
+    && v.sources.every((source, index) => reference(source, root.sourceIds[index]))
+    && Array.isArray(v.connections) && v.connections.every(item => {
+      if (!record(item) || !connection(item.connection)) return false;
+      const edge = item.connection;
+      if (edge.fromId !== root.id && edge.toId !== root.id) return false;
+      const neighborId = edge.fromId === root.id ? edge.toId : edge.fromId;
+      return item.thought === null || (thought(item.thought) && item.thought.id === neighborId);
+    })
+    && Array.isArray(v.responses) && v.responses.every(reply => sharedResponse(reply) && reply.thoughtIds.includes(root.id))
+    && (v.focusedResponse === null || (sharedResponse(v.focusedResponse) && v.focusedResponse.thoughtIds.includes(root.id)
+      && v.responses.some(reply => reply.id === (v.focusedResponse as SharedResponse).id)));
 }
