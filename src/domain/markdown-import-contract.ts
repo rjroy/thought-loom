@@ -27,12 +27,16 @@ export interface ImportPartition {
   readonly parts: readonly ImportPartRange[];
   readonly segmentation: Segmentation;
 }
+/** Private, daemon-observed native facts; never a model-selected completion or consumer artifact. */
+export interface ImportTerminalEvidence {
+  readonly sessionId: string; readonly promptId: string;
+  readonly inputSha256: string; readonly userMessageId: string; readonly assistantMessageId: string | null;
+  readonly idleMessageId: string; readonly idleOutcome: "succeeded" | "failed" | "interrupted";
+  readonly completedAt: number | null; readonly finish: string | null; readonly assistantError: boolean; readonly idleError: boolean;
+  readonly outputByteLength: number; readonly outputSha256: string;
+}
 export type ImportEvidence = { readonly state: "not-submitted"; readonly promptId: string; readonly inputSha256: string }
-  | { readonly state: "terminal-failure" | "terminal-completion"; readonly sessionId: string; readonly promptId: string;
-      readonly inputSha256: string; readonly userMessageId: string; readonly assistantMessageId: string | null;
-      readonly idleMessageId: string; readonly idleOutcome: "succeeded" | "failed" | "interrupted";
-      readonly completedAt: number | null; readonly finish: string | null; readonly assistantError: boolean; readonly idleError: boolean;
-      readonly outputByteLength: number; readonly outputSha256: string };
+  | (ImportTerminalEvidence & { readonly state: "terminal-failure" | "terminal-completion" });
 export interface ImportPartitionResult {
   readonly type: "import-partition"; readonly fileId: string; readonly sha256: string;
   readonly partition: ImportPartition; readonly evidence: ImportEvidence;

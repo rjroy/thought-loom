@@ -18,6 +18,7 @@ import type { PublicClient, ResolvedAgentService } from "../agent/opencode-adapt
 import { createPublicClient, resolveAgentService } from "../agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../agent/configured-worker";
 import { RunSupervisor } from "../agent/supervisor";
+import { LocalMarkdownImportDriver } from "../agent/import-driver";
 import { AgentService } from "../domain/agent";
 import { SqliteAgentRuns } from "../storage/agent";
 import { ConfigError } from "./config-error";
@@ -49,12 +50,14 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let db: Database | undefined;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let supervisor: RunSupervisor | undefined;
+  let imports: LocalMarkdownImportDriver | undefined;
   let failureLogger: Logger | undefined;
   async function close(force: boolean): Promise<boolean> {
     let failed = false;
     const pending: Promise<unknown>[] = [];
     // Pause the worker synchronously before awaiting either drain; a late native callback cannot advance local work.
     try { if (supervisor) pending.push(supervisor.stop()); } catch { failed = true; }
+    try { if (imports) pending.push(imports.stop()); } catch { failed = true; }
     try { if (server) pending.push(Promise.resolve(server.stop(force))); } catch { failed = true; }
     const results = await Promise.allSettled(pending);
     if (results.some(result => result.status === "rejected")) failed = true;
@@ -80,18 +83,33 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     const search = new SearchService(new SqliteSearchRepository(db,undefined,diagnostics));
     const simpleExport = new SimpleExportService(rejection);
     const agents = new AgentService(new SqliteAgentRuns(db,scheduling),valid.agent != null);
+    const startPolling=dependencies.startTimer ?? ((poll: () => void) => {
+      // Technical polling cadence only, never a model turn/time/token budget.
+      const timer=setInterval(poll,250);
+      return () => clearInterval(timer);
+    });
+    // One owned technical clock serves both independent bounded queues. Subscribers own their drains.
+    const polls=new Set<() => void>();
+    let cancelPolling: (() => void) | undefined;
+    const startTimer=(poll: () => void): (() => void) => {
+      polls.add(poll);
+      try { cancelPolling ??= startPolling(() => { for (const callback of polls) callback(); }); }
+      catch (error) { polls.delete(poll); throw error; }
+      return () => {
+        polls.delete(poll);
+        if (polls.size===0) { const cancel=cancelPolling; cancelPolling=undefined; cancel?.(); }
+      };
+    };
     if (valid.agent) {
       const worker = new ConfiguredRunWorker({db,...scheduling,config:valid.agent,
         resolve:dependencies.resolveAgentService ?? resolveAgentService,client:dependencies.createPublicClient ?? createPublicClient});
-      supervisor = new RunSupervisor({db,worker,logger:diagnostics,startTimer:dependencies.startTimer ?? (poll => {
-        // Technical polling cadence only, never a model turn/time/token budget.
-        const timer = setInterval(poll,250);
-        return () => clearInterval(timer);
-      })});
-    }
+      supervisor = new RunSupervisor({db,worker,logger:diagnostics,startTimer});
+      imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:worker.importWorker});
+    } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
     const app = createApp({ rejection, creation, titles, search, simpleExport, agents, diagnostics, credentials: valid.credentials, logger });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: app.fetch });
     supervisor?.start();
+    imports?.start();
     const url = server.url.toString();
     let stopping: Promise<void> | undefined;
     logger({ phase: "outcome", operation: "start", success: true, url });

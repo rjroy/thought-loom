@@ -10,6 +10,7 @@ import { RunWorker, type WorkerNative } from "./worker";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteAgenticExports } from "../storage/agentic-export";
+import { MarkdownImportWorker, type ImportNative } from "./import-worker";
 
 export interface ConfiguredWorkerDependencies extends RunSources {
   readonly db: Database;
@@ -20,6 +21,7 @@ export interface ConfiguredWorkerDependencies extends RunSources {
 
 /** One worker and one lazy attachment snapshot; no SDK/service work at construction or daemon readiness. */
 export class ConfiguredRunWorker implements SupervisedWorker {
+  readonly importWorker: MarkdownImportWorker;
   private readonly logger: Logger;
   private unavailable = false;
   private readonly worker: RunWorker;
@@ -34,6 +36,34 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     this.bindings = new SqliteAgentBindings(dependencies.db,this.logger);
     this.runs = new SqliteRunRepository(dependencies.db,dependencies);
     this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
+    this.importWorker=new MarkdownImportWorker({...dependencies,native:(bindings,localFence) => {
+      let adapter: OpenCodeAdapter | undefined;
+      const owned=async (binding: AgentBinding): Promise<OpenCodeAdapter> => {
+        localFence(); await this.resolve(); localFence();
+        const service=this.service;
+        if (this.paused || !service || service.url!==binding.serviceUrl) throw new AgentUnavailableError("Import-owned service is unavailable");
+        if (!adapter) {
+          try { adapter=new OpenCodeAdapter(dependencies.client(service),bindings,{ordinary:bindings.assertActive.bind(bindings),import:localFence},this.logger); }
+          catch { throw new AgentUnavailableError("Import client is unavailable"); }
+        }
+        return adapter;
+      };
+      const native: ImportNative={
+        bindingFor:async run => {
+          localFence(); await this.resolve(); localFence();
+          const service=this.service, config=dependencies.config;
+          if (!service || this.paused) throw new AgentUnavailableError("Import agent service is unavailable");
+          const variant=config.effort.standard;
+          return normalizeBinding({sessionId:run.sessionId,serviceUrl:service.url,location:{directory:config.directory},
+            model:{...config.model,...(variant===null ? {} : {variant})},permissions:[{action:"*",resource:"*",effect:"deny"}],protocolVersion:1});
+        },
+        ensureSession:async (claim,binding,prompt) => (await owned(binding)).ensureImportSession(claim,binding,prompt),
+        submit:async (claim,binding,prompt) => (await owned(binding)).submitImport(claim,binding,prompt),
+        observe:async (claim,binding,prompts) => (await owned(binding)).observeImport(claim,binding,prompts),
+        cancel:async (claim,binding,prompt) => (await owned(binding)).cancelImport(claim,binding,prompt),
+      };
+      return native;
+    }});
     this.worker = new RunWorker({...dependencies,bindingFor:run => {
       if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return null;
       const effort = run.kind === "export" ? this.exports.intent(run.id)?.effort : "standard";
@@ -93,5 +123,5 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     }
     if (!this.paused) await this.worker.tick(runId);
   }
-  pause(): void { this.paused = true; this.worker.pause(); }
+  pause(): void { this.paused = true; this.worker.pause(); this.importWorker.pause(); }
 }

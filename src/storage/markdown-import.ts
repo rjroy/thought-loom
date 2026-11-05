@@ -10,6 +10,7 @@ import { equalBytes, importManifest, importPartition, importRelativePath, import
   type ImportManifest, type ImportOutcome, type ImportPartition, type ImportPartitionResult, type ImportPrivateInput, type MarkdownImportRepository, type Segmentation } from "../domain/markdown-import";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { admitWeave } from "./weave-admission";
+import { readOwnedImportInput } from "./import-authority";
 
 interface FileRow {
   id: string; importId: string; namespaceId: string; position: number; requestKey: string; relativePath: string;
@@ -17,6 +18,16 @@ interface FileRow {
   outcome: ImportOutcome | null; documentId: string | null; reason: string | null;
 }
 interface StepRow { promptId: string; input: string | null; state: string; nativeState: string; result: string | null }
+export interface ImportLocalWork { readonly fileId: string; readonly runId: string; readonly generation: number; readonly position: number }
+// Binding/session setup precedes intent. Only the untouched initial journal proves no prompt dispatch;
+// a bound row also needs its retained preparation, never a reconstructed unknown historical input.
+const localWork = `FROM markdown_import_files f JOIN runs r ON r.id=f.run_id
+  JOIN run_steps s ON s.run_id=r.id AND s.position=0
+  WHERE r.kind='import' AND r.status IN ('queued','submitting','running','uncertain')
+    AND f.outcome IS NULL AND f.waiting_on_file_id IS NULL
+    AND NOT EXISTS(SELECT 1 FROM run_steps later WHERE later.run_id=r.id AND later.position!=0)
+    AND (s.result_json IS NOT NULL OR (r.status='queued' AND s.state='prepared' AND s.native_state='unknown'
+      AND s.envelope_json IS NULL AND (s.input IS NOT NULL OR NOT EXISTS(SELECT 1 FROM agent_bindings b WHERE b.run_id=r.id))))`;
 const fileColumns = "id,import_id AS importId,namespace_id AS namespaceId,position,request_key AS requestKey,relative_path AS relativePath,sha256,byte_length AS byteLength,created_at AS createdAt,run_id AS runId,waiting_on_file_id AS waitingOn,outcome,document_id AS documentId,reason_code AS reason";
 const digest = (bytes: Uint8Array | string): Uint8Array => new Uint8Array(createHash("sha256").update(bytes).digest());
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -174,19 +185,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     if (run.kind!=="import") throw new RunFenceError("Import authority required");
     const file = this.db.query(`SELECT ${fileColumns} FROM markdown_import_files WHERE run_id=?`).get(run.id) as FileRow|null;
     if (!file || file.outcome!==null || file.waitingOn!==null) throw new RunFenceError("Import reservation is no longer owned");
-    const bytes = this.payload(file.id);
-    if (!bytes || bytes.length!==file.byteLength || !equalBytes(digest(bytes),file.sha256)) throw new ImportPreservationError("Import staged input mismatch");
-    const step = this.db.query("SELECT prompt_id AS promptId,input,state,native_state AS nativeState,result_json AS result FROM run_steps WHERE run_id=? AND position=0").get(run.id) as StepRow|null;
-    if (!step || step.promptId!==run.promptId || (this.db.query("SELECT count(*) AS n FROM run_steps WHERE run_id=?").get(run.id) as {n:number}).n!==1) throw new RunFenceError("Import must own its initial prompt");
-    if (step.input!==null) {
-      const job=record(JSON.parse(step.input));
-      const keys=["version","kind","document","manifest","capabilities","instructions"];
-      if (protocolJson(job)!==step.input || Object.keys(job).length!==keys.length || keys.some(key => !Object.hasOwn(job,key)) ||
-        job.version!==1 || job.kind!=="import-job" || job.document!==sourceText(bytes) ||
-        !Array.isArray(job.capabilities) || job.capabilities.length!==0 || !Array.isArray(job.instructions) ||
-        job.instructions.some((value:unknown) => typeof value!=="string")) throw new ImportPreservationError("Import prepared input does not own its submitted source");
-      importManifest(bytes,job.manifest);
-    }
+    const {step,bytes}=readOwnedImportInput(this.db,run);
     return {run,file,step,bytes};
   }
   claim(fileId: string): Claim {
@@ -195,6 +194,86 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       const run=this.require(row.runId); this.owned({runId:run.id,generation:run.generation});
       this.db.run("UPDATE runs SET generation=generation+1 WHERE id=?",[run.id]);
       return {runId:run.id,generation:run.generation+1};
+    });
+  }
+  /** Metadata-only finite scan; private bytes are read only after this work is claimed. */
+  localCandidates(after: number, through: number | null, limit: number): { readonly items: readonly ImportLocalWork[]; readonly through: number } {
+    safeInteger(after,"local scan position"); safeInteger(limit,"local scan limit");
+    if (through!==null) safeInteger(through,"local scan high-water");
+    if (limit<1 || limit>200) throw new RunConflictError("Invalid local scan limit");
+    return this.transaction("scan local imports","imports",() => {
+      const highWater=through ?? (this.db.query("SELECT COALESCE(MAX(rowid),0) AS n FROM markdown_import_files").get() as {n:number}).n;
+      const items=this.db.query(`SELECT f.id AS fileId,r.id AS runId,r.generation,f.rowid AS position ${localWork}
+        AND f.rowid>? AND f.rowid<=? ORDER BY f.rowid LIMIT ?`).all(after,highWater,limit) as ImportLocalWork[];
+      return {items,through:highWater};
+    });
+  }
+  /** Configured imports include observation-only attempts and fenced native cleanup, in finite row order. */
+  nativeCandidates(after: number, through: number | null, limit: number): { readonly items: readonly ImportLocalWork[]; readonly through: number } {
+    safeInteger(after,"import scan position"); safeInteger(limit,"import scan limit");
+    if (through!==null) safeInteger(through,"import scan high-water");
+    if (limit<1 || limit>200) throw new RunConflictError("Invalid import scan limit");
+    const highWater=through ?? (this.db.query("SELECT COALESCE(MAX(rowid),0) AS n FROM markdown_import_files").get() as {n:number}).n;
+    const items=this.db.query(`SELECT f.id AS fileId,r.id AS runId,r.generation,f.rowid AS position
+      FROM markdown_import_files f JOIN runs r ON r.id=f.run_id
+      WHERE r.kind='import' AND f.waiting_on_file_id IS NULL AND
+        ((f.outcome IS NULL AND r.status IN ('queued','submitting','running','uncertain')) OR
+         (f.outcome IS NOT NULL AND r.status IN ('completed','failed','interrupted') AND r.cancellation_state='pending'))
+        AND f.rowid>? AND f.rowid<=? ORDER BY f.rowid LIMIT ?`).all(after,highWater,limit) as ImportLocalWork[];
+    return {items,through:highWater};
+  }
+  claimNative(work: ImportLocalWork): Claim | null {
+    return this.transaction("claim native import",work.runId,() => {
+      const row=this.db.query(`SELECT r.generation FROM runs r JOIN markdown_import_files f ON f.run_id=r.id
+        WHERE r.id=? AND f.id=? AND r.kind='import' AND r.generation=? AND f.outcome IS NULL AND f.waiting_on_file_id IS NULL
+          AND r.status IN ('queued','submitting','running','uncertain')`).get(work.runId,work.fileId,work.generation) as {generation:number}|null;
+      if (!row) return null;
+      this.db.run("UPDATE runs SET generation=generation+1 WHERE id=?",[work.runId]);
+      return {runId:work.runId,generation:row.generation+1};
+    });
+  }
+  progress(claim: Claim): {readonly chosen:boolean;readonly submitted:boolean} {
+    return this.transaction("read import progress",claim.runId,() => {
+      const {run,step}=this.owned(claim);
+      return {chosen:step.result!==null,submitted:run.status!=="queued" || step.state!=="prepared" || step.nativeState!=="unknown"};
+    });
+  }
+  /** Historical input is available only for cleanup of a fenced import, never for a new dispatch. */
+  cancellationPrompt(runId: string): {readonly promptId:string;readonly input:string} | null {
+    const run=this.require(runId);
+    if (run.kind!=="import" || !["completed","failed","interrupted"].includes(run.status)) throw new RunFenceError();
+    return this.db.query(`SELECT s.prompt_id AS promptId,s.input FROM run_steps s JOIN runs r ON r.id=s.run_id
+      JOIN markdown_import_files f ON f.run_id=r.id WHERE r.id=? AND r.cancellation_state='pending' AND f.outcome IS NOT NULL
+        AND s.position=0 AND s.prompt_id=r.prompt_id AND s.input IS NOT NULL
+        AND NOT EXISTS(SELECT 1 FROM run_steps later WHERE later.run_id=r.id AND later.position!=0)`).get(runId) as {promptId:string;input:string}|null;
+  }
+  /** Claim control first so corrupt private input can be failed under a real generation, never published. */
+  claimLocal(work: ImportLocalWork): {readonly claim:Claim;readonly chosen:boolean} | null {
+    return this.transaction("claim local import",work.runId,() => {
+      const row=this.db.query(`SELECT r.id,r.generation,s.result_json IS NOT NULL AS chosen ${localWork}
+        AND f.id=? AND r.id=? AND r.generation=?`).get(work.fileId,work.runId,work.generation) as {id:string;generation:number;chosen:number}|null;
+      if (!row) return null;
+      this.active({runId:row.id,generation:row.generation});
+      this.db.run("UPDATE runs SET generation=generation+1 WHERE id=?",[row.id]);
+      return {claim:{runId:row.id,generation:row.generation+1},chosen:row.chosen===1};
+    });
+  }
+  /** An untouched initial journal proves no prompt dispatch, regardless of whether session setup was attempted. */
+  settleLocalCancellations(limit: number): void {
+    safeInteger(limit,"local cancellation limit");
+    if (limit<1 || limit>200) throw new RunConflictError("Invalid local cancellation limit");
+    this.transaction("settle local import cancellations","imports",() => {
+      const result=this.db.run(`UPDATE runs SET cancellation_state='settled' WHERE id IN (
+        SELECT r.id FROM runs r JOIN markdown_import_files f ON f.run_id=r.id
+        JOIN run_steps s ON s.run_id=r.id AND s.position=0
+        WHERE r.kind='import' AND r.status IN ('completed','interrupted','failed') AND r.cancellation_state='pending' AND f.outcome IS NOT NULL
+          AND s.prompt_id=r.prompt_id AND s.state='prepared' AND s.native_state='unknown' AND s.envelope_json IS NULL
+          AND (s.result_json IS NULL OR json_extract(s.result_json,'$.evidence.state')='not-submitted')
+          AND (r.status!='completed' OR s.result_json IS NOT NULL)
+          AND (s.input IS NOT NULL OR (r.status='interrupted' AND NOT EXISTS(SELECT 1 FROM agent_bindings b WHERE b.run_id=r.id)))
+          AND NOT EXISTS(SELECT 1 FROM run_steps later WHERE later.run_id=r.id AND later.position!=0)
+         ORDER BY r.rowid LIMIT ?)`,[limit]);
+      if (result.changes) this.logger.info("[import] never-submitted cancellation settled",{count:result.changes});
     });
   }
   privateInput(claim: Claim): ImportPrivateInput {
@@ -230,7 +309,8 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       const state=completed ? "completed" : evidence.state==="terminal-failure" ? "uncertain" : "prepared";
       const envelope=partition.segmentation.method==="ai" ? protocolJson({version:1,kind:"segmentation",cuts:partition.cuts}) : null;
       this.db.run("UPDATE run_steps SET state=?,native_state=?,result_json=?,envelope_json=? WHERE run_id=? AND position=0",[state,completed ? "completed" : step.nativeState,json,envelope,run.id]);
-      this.db.run("UPDATE runs SET generation=generation+1,status='uncertain' WHERE id=?",[run.id]);
+      this.db.run(`UPDATE runs SET generation=generation+1,status='uncertain',cancellation_state=CASE
+        WHEN EXISTS(SELECT 1 FROM agent_bindings WHERE run_id=?) THEN 'pending' ELSE cancellation_state END WHERE id=?`,[run.id,run.id]);
       const details={runId:run.id,fileId:file.id,method:partition.segmentation.method,reason:partition.segmentation.reason,partCount:partition.parts.length};
       if (partition.segmentation.method==="structural") this.logger.warning("[import] structural partition retained",details);
       else this.logger.info("[import] partition retained",details);
@@ -251,6 +331,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     if (data.state!=="terminal-completion" && data.state!=="terminal-failure") throw new ImportPreservationError("Invalid terminal import witness");
     const binding=this.db.query("SELECT session_id AS sessionId FROM agent_bindings WHERE run_id=?").get(run.id) as {sessionId:string}|null;
     if (!binding || binding.sessionId!==data.sessionId || (initial && !["submitting","uncertain"].includes(step.state))) throw new RunFenceError("Import terminal witness lacks owned submission");
+    if (data.userMessageId!==step.promptId) throw new RunFenceError("Import terminal witness user message differs from its persisted prompt");
     nonEmpty(data.userMessageId,"user message"); nonEmpty(data.idleMessageId,"idle message");
     if (data.assistantMessageId!==null) nonEmpty(data.assistantMessageId,"assistant message");
     if (new Set([data.userMessageId,data.idleMessageId,...(data.assistantMessageId===null ? [] : [data.assistantMessageId])]).size!==(data.assistantMessageId===null ? 2 : 3) ||
