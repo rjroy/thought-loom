@@ -9,9 +9,14 @@ import { nonEmpty } from "../domain/validation";
 import { captureWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave, type WeaveSources } from "./weave-admission";
 import { migrateImportFoundation } from "./import-migration";
+import { migrateSearchFoundation } from "./search-migration";
 import { immediate } from "./transaction";
 import { ValidationError } from "../domain/validation";
 import { randomUUID } from "node:crypto";
+import { SearchSessionService, type SearchSessionSources, type SearchSessions } from "../domain/agentic-search";
+import { SqliteSearchSessions } from "./search-sessions";
+import type { SearchPublication } from "../domain/search-publication";
+import { SqliteSearchPublication } from "./search-publication";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -178,6 +183,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       `);
       migrateRunSchema(db);
       migrateImportFoundation(db);
+      migrateSearchFoundation(db);
       if (!db.query("SELECT 1 FROM import_namespaces WHERE kind='loose-markdown'").get()) {
         db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,'loose-markdown','Loose Markdown',?)",[randomUUID(),new Date().toISOString()]);
       }
@@ -189,6 +195,15 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
 /** Internal raw persistence; future routes and agents must use scoped RejectionService reads. */
 export class SqliteStore {
   constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
+
+  searchSessions(sources: SearchSessionSources): SearchSessions {
+    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger), { ...sources, logger: sources.logger ?? this.logger });
+  }
+
+  /** Trusted dispatcher integration only; never expose this facet as user/model-selected authority. */
+  searchPublication(sources: SearchSessionSources): SearchPublication {
+    return new SqliteSearchPublication(this.db, { ...sources, logger: sources.logger ?? this.logger });
+  }
 
   saveThought(input: Thought): void {
     boundary(this.logger, "save thought", () => {
