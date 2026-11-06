@@ -9,7 +9,7 @@ import { SqliteRunProtocolRepository } from "../storage/run-protocol";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteRunWorkerState } from "../storage/run-worker";
 import { SqliteAgenticExports } from "../storage/agentic-export";
-import { AgentBindingError, normalizeBinding } from "./binding";
+import { AgentBindingError, assertBindingPermissions, normalizeBinding } from "./binding";
 import type { AgentBinding, NativePhase, Observation, PersistedPrompt } from "./opencode-adapter";
 import { capabilityResultPrompt, initialWorkerPrompt } from "./worker-prompts";
 import { SqliteSearchCapabilityDispatcher } from "../storage/search-capability";
@@ -158,6 +158,7 @@ export class RunWorker {
         if (selected === null) return; // No claim, preparation, client construction, or HTTP without configuration.
         binding = normalizeBinding(selected);
       }
+      assertBindingPermissions(run.kind,binding);
       if (!claim) { claim = this.runs.claim(runId); this.owners.set(runId,claim); }
       const owner = claim;
       this.active(owner);
@@ -165,14 +166,14 @@ export class RunWorker {
       const step = this.steps.steps(runId).at(-1);
       if (!step) throw new RunConflictError("Run has no current step");
       if (step.input === null) {
-        this.state.prepareInitial(owner,initialWorkerPrompt);
+        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding));
         this.bindings.bind(runId,binding,owner);
         return;
       }
       if (!this.bindings.get(runId)) { this.bindings.bind(runId,binding,owner); return; }
       const prompt = {promptId:step.promptId,input:step.input};
       this.active(owner,prompt);
-      if (step.envelope !== null) { this.process(owner,step,run.kind); return; }
+      if (step.envelope !== null) { this.process(owner,step,run.kind,binding); return; }
       if (!this.ensured.has(runId)) {
         if ((await this.call(owner,prompt,"ensure session",() => this.transport().ensureSession(owner,binding))).ok) this.ensured.add(runId);
         return;
@@ -213,7 +214,7 @@ export class RunWorker {
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
   }
-  private process(claim: Claim, step: RunStep, kind: RunKind): void {
+  private process(claim: Claim, step: RunStep, kind: RunKind, binding: AgentBinding): void {
     this.active(claim);
     if (kind === "search") {
       if (step.envelope?.kind === "search-reply") {
@@ -235,7 +236,7 @@ export class RunWorker {
     if (step.envelope?.kind !== "request") throw new RunConflictError("Completed step has no canonical envelope");
     const result = this.capabilities.dispatch(claim,step.promptId,step.envelope.request);
     if (step.result === null) return;
-    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind)});
+    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind,binding)});
   }
   private async call<T>(claim: Claim, prompt: PersistedPrompt, operation: "ensure session" | "submit" | "observe", action: () => Promise<T>): Promise<{readonly ok:true;readonly value:T} | {readonly ok:false}> {
     this.active(claim,prompt);

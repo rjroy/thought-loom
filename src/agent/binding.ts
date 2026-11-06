@@ -2,6 +2,7 @@ import type { ModelRef as SdkModelRef } from "@opencode/client";
 import { isAbsolute } from "node:path";
 import { nonEmpty, record } from "../domain/validation";
 import { protocolJson } from "../domain/run-protocol";
+import type { RunKind } from "../domain/run";
 
 export type ModelRef = Readonly<SdkModelRef>;
 export interface AgentBinding {
@@ -9,10 +10,20 @@ export interface AgentBinding {
   readonly serviceUrl: string;
   readonly location: { readonly directory: string };
   readonly model: ModelRef;
-  readonly permissions: readonly { readonly action: string; readonly resource: string; readonly effect: "deny" }[];
+  readonly permissions: readonly { readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" }[];
   readonly protocolVersion: 1;
 }
 export class AgentBindingError extends Error {}
+
+/** Only this exact session policy grants native tools; saved deny rules retain their original order and meaning. */
+export function allowsNativeTools(binding: Pick<AgentBinding,"permissions">): boolean {
+  const rule = binding.permissions[0];
+  return binding.permissions.length === 1 && rule?.action === "*" && rule.resource === "*" && rule.effect === "allow";
+}
+
+export function assertBindingPermissions(kind: RunKind, binding: AgentBinding): void {
+  if (allowsNativeTools(binding) && kind !== "weave" && kind !== "evolve") throw new AgentBindingError("Run kind requires deny-all native permissions");
+}
 
 export function validateServiceUrl(input: unknown): string {
   try {
@@ -39,10 +50,11 @@ export function normalizeBinding(input: unknown): AgentBinding {
     if (!Array.isArray(data.permissions)) throw new AgentBindingError();
     const permissions = data.permissions.map((value: unknown) => {
       const rule = record(value); fields(rule,["action","resource","effect"]);
-      if (rule.effect !== "deny") throw new AgentBindingError();
-      return Object.freeze({action:nonEmpty(rule.action,"action"),resource:nonEmpty(rule.resource,"resource"),effect:"deny" as const});
+      if (rule.effect !== "deny" && rule.effect !== "allow") throw new AgentBindingError();
+      return Object.freeze({action:nonEmpty(rule.action,"action"),resource:nonEmpty(rule.resource,"resource"),effect:rule.effect});
     });
-    if (!permissions.some(rule => rule.action === "*" && rule.resource === "*")) throw new AgentBindingError();
+    const denied = permissions.every(rule => rule.effect === "deny") && permissions.some(rule => rule.action === "*" && rule.resource === "*");
+    if (!denied && !allowsNativeTools({permissions})) throw new AgentBindingError();
     return Object.freeze({sessionId:nonEmpty(data.sessionId,"sessionId"),serviceUrl:validateServiceUrl(data.serviceUrl),
       location:Object.freeze({directory}), model:Object.freeze({providerID:nonEmpty(model.providerID,"providerID"),id:nonEmpty(model.id,"id"),
         ...(model.variant === undefined ? {} : {variant:nonEmpty(model.variant,"variant")})}),

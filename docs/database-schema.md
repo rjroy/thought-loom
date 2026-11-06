@@ -192,7 +192,7 @@ Stop fences local execution before remote cancellation settles. Pending settleme
 | `session_id` | `TEXT` | Unique native session identity bound to the run. |
 | `service_url`, `directory` | `TEXT` | Selected service and native location. |
 | `model_json` | `TEXT` | Explicit provider/model/variant reference. |
-| `permissions_json` | `TEXT` | Bound deny rules. |
+| `permissions_json` | `TEXT` | Immutable native permission rules: existing deny policies or the singleton wildcard allow policy for Weaver/Evolve. Restricted run kinds cannot bind an allow policy. Existing bindings retain their saved policy on recovery. |
 | `protocol_version` | `INTEGER` | Check: `1`. |
 | `execution_owner_id` | `TEXT`, nullable | FK to `execution_owners.id`; immutable setup attribution for new deployed search bindings. Existing bindings and ordinary/import bindings remain null. |
 

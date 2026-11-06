@@ -4,9 +4,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { AgentSessionMissingError, AgentUncertainError } from "../src/agent/errors";
 import { ConfiguredRunWorker } from "../src/agent/configured-worker";
-import type { InboxItem, NativeMessage, NativeSession, PublicClient, ResolvedAgentService } from "../src/agent/opencode-adapter";
+import { OpenCodeAdapter, type AgentBinding, type InboxItem, type NativeMessage, type NativeSession, type PublicClient, type ResolvedAgentService } from "../src/agent/opencode-adapter";
 import type { AgentConfig } from "../src/daemon/agent-config";
 import { startDaemon, type DaemonEvent, type RunningDaemon, type RuntimeDependencies } from "../src/daemon/runtime";
+import { RunService } from "../src/domain/run";
+import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
@@ -147,6 +149,7 @@ test("agentic export searches, fully reads and downloads cited Markdown without 
     expect(snapshot(path)).toEqual(before);
     const first = client.prompts[0];
     if (!first) throw new Error("Expected export prompt");
+    expect(client.sessions.get(first.sessionID)?.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
     const initial = object(JSON.parse(first.text));
     expect(JSON.stringify(initial)).toContain("Connect existing cobalt thinking");
     if (!Array.isArray(initial.capabilities)) throw new Error("Expected explicit capability list");
@@ -305,6 +308,52 @@ test("bound export effort and model survive daemon restart with changed configur
   } finally { if (daemon) await bounded(daemon.stop(), "stop"); }
 }));
 
+for (const kind of ["weave", "evolve"] as const) test(`persisted legacy deny ${kind} recovers after lost acknowledgement without upgrading or resubmitting`, async () => fixture(async dir => {
+  const path = join(dir, "legacy-deny.sqlite");
+  let db = new Database(path), worker: ConfiguredRunWorker | undefined;
+  let sequence = 0;
+  const sources = { id: () => `legacy-${++sequence}`, now: () => "2030-01-02T03:04:05.000Z" };
+  class LostAckClient extends Client {
+    override async prompt(input: Parameters<PublicClient["prompt"]>[0]): Promise<InboxItem> {
+      await super.prompt(input);
+      throw new AgentUncertainError("fixture admitted before acknowledgement loss");
+    }
+  }
+  const client = new LostAckClient(); client.completeFirst = true;
+  try {
+    migrate(db);
+    new SqliteStore(db).saveThought({ id: "legacy-root", text: "test-owned legacy context", title: null, author: "user", kind: "captured-original", createdAt: sources.now(), origin: "fixture", parentId: null, sourceIds: [] });
+    const runs = new SqliteRunRepository(db, sources);
+    const run = kind === "weave" ? new SqliteRunOperations(db, sources).admitWeave("user", { subjectId: "legacy-root", triggerId: "legacy-trigger" })
+      : new RunService({ repository: runs, dispatcher: { submit: async () => {}, observe: async () => "running" }, ...sources }).admit("user", "evolve", { parentId: "legacy-root", text: "legacy contribution" }).run;
+    const claim = runs.claim(run.id), bindings = new SqliteAgentBindings(db);
+    const legacy: AgentBinding = { sessionId: run.sessionId, serviceUrl: "http://127.0.0.1:44991", location: { directory: agent.directory },
+      model: { ...agent.model, variant: "legacy-variant" }, permissions: [{ action: "read", resource: "/legacy/*", effect: "deny" }, { action: "*", resource: "*", effect: "deny" }], protocolVersion: 1 };
+    // Frozen test-owned predecessor bytes: never regenerate historical inputs using today's renderer.
+    const input = JSON.stringify({ version: 1, kind: "job", instructions: ["LEGACY: no native tools; use application capabilities only"],
+      context: { job: { kind, ...(kind === "evolve" ? { contributionId: run.inputThoughtId } : { subjectId: "legacy-root" }) } } });
+    new SqliteRunProtocolRepository(db).prepare(claim, { promptId: run.promptId, input });
+    const adapter = new OpenCodeAdapter(client, bindings, bindings.assertActive.bind(bindings));
+    await adapter.ensureSession(claim, legacy);
+    await expect(adapter.submit(claim, legacy, { promptId: run.promptId, input })).rejects.toThrow(AgentUncertainError);
+    expect(runs.get(run.id)?.status).toBe("uncertain");
+    const saved = db.query("SELECT * FROM agent_bindings WHERE run_id=?").get(run.id);
+    expect(saved).not.toBeNull();
+    db.close(); db = new Database(path); migrate(db);
+    worker = new ConfiguredRunWorker({ db, ...sources, config: { ...agent, directory: "/tmp/opencode/new-config-directory", model: { providerID: "new-provider", id: "new-model" } },
+      resolve: async () => ({ url: legacy.serviceUrl }), client: () => client });
+    const reopened = new SqliteRunRepository(db, sources);
+    for (let i = 0; i < 12 && reopened.get(run.id)?.status !== "completed"; i++) await worker.tick(run.id);
+    expect(reopened.get(run.id)?.status).toBe("completed");
+    expect(db.query("SELECT * FROM agent_bindings WHERE run_id=?").get(run.id)).toEqual(saved);
+    expect(new SqliteAgentBindings(db).get(run.id)).toEqual(legacy);
+    expect(new SqliteRunProtocolRepository(db).steps(run.id).map(step => ({ promptId: step.promptId, input: step.input }))).toEqual([{ promptId: run.promptId, input }]);
+    expect(client.prompts).toEqual([{ sessionID: legacy.sessionId, id: run.promptId, text: input }]);
+    expect(client.models).toEqual([legacy.model]);
+    expect(client.sessions.get(legacy.sessionId)?.permissions).toEqual(legacy.permissions);
+  } finally { if (worker) { worker.pause(); await worker.drain(); } db.close(); }
+}));
+
 test("configured but unreachable export remains durable without a fabricated report", async () => fixture(async dir => {
   const path = join(dir, "unreachable-export.sqlite"); seedExport(path);
   const client = new Client(); client.unavailable = true; const timer = controlled(client);
@@ -426,6 +475,8 @@ test("configured runtime drives scoped weave and Evolve, exposes honest user sta
     const ids = view.confirmedThoughtIds;
     if (!Array.isArray(ids) || typeof ids[0] !== "string") throw new Error("Expected issued development");
     expect((await call(daemon, `/thoughts/${ids[0]}`)).data).toMatchObject({ parentId: contributionId, author: "ai", text: "fixture development" });
+    const evolveSession = [...client.sessions.values()].find(session => session.metadata.runId === runId);
+    expect(evolveSession?.permissions).toEqual([{ action: "*", resource: "*", effect: "allow" }]);
     expect((await call(daemon, `/runs/${runId}?scope=history`)).status).toBe(400);
     expect((await call(daemon, `/thoughts/${root}/evolve`, "POST", { text: "bad", id: "model-owned" })).status).toBe(400);
     const pending = await call(daemon, `/thoughts/${root}/evolve`, "POST", { text: "stop me" });

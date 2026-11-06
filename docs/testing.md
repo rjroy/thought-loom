@@ -309,6 +309,14 @@ Adapter tests also exercise the maintained public SDK against owned loopback HTT
 
 The worker core has a manual polling seam for controlled tests. It reuses durable steps, bindings, capability results and canonical replies. A tick is an execution boundary, not a model effort quota. Local pause is distinct from user Stop: it fences callbacks without undoing saved work or initiating cancellation. `agent-runtime` exercises configured scheduling, Evolve/status/Stop HTTP routes, role restrictions and unavailable-service behavior through an owned daemon with injected service/client dependencies.
 
+For role-based native tool permissions and history handling, run:
+
+```sh
+bun --no-env-file test tests/opencode-adapter.test.ts tests/import-authority.test.ts tests/agent-runtime.test.ts tests/agentic-search-runtime.test.ts
+```
+
+These controlled cases check new Weaver/Evolve allow bindings, restricted-kind binding guards, unchanged saved deny policies across reopen, and SDK-shaped tool history through the installed client and an owned HTTP fixture. They distinguish settled tool activity and the final application reply from intermediate text, unfinished tools, foreign input and unknown content; restricted-role and Search cleanup controls remain denied. This establishes permission selection, projection and application handling, not actual shell/filesystem/MCP execution. The separate opt-in native fixture below does not currently force tool execution; do not treat its ordinary assistant replies as proof of that behavior.
+
 Search tests exercise actual FTS5 and spellfix1 using test-owned records. Retained interrupted fallback replies remain searchable through their associated input without becoming completed developments. Efficiency checks observe graph-snapshot and vocabulary-rebuild boundaries rather than asserting machine-dependent timing. `search-contract` covers filter combinations and option counts, creation-date sorting, response metadata, modest query correction, and strict authenticated HTTP search. These checks do not establish browser behavior or final relevance tuning.
 
 ## Opt-in native OpenCode acceptance
@@ -329,7 +337,7 @@ Acceptance exercises the actual daemon, maintained SDK and native service: weavi
 
 The fixture records application/native/provider receipts and checks owned listeners, process group and observed descendants during cleanup. SIGINT/SIGTERM and normal completion share idempotent cleanup with bounded actions; failures are recorded without skipping later cleanup actions. Pure lifecycle tests exercise interruption using owned Bun subprocesses, not OpenCode. SIGKILL cannot be caught, and cleanup cannot guarantee absence of unknown detached descendants. Forced large history-page boundaries and universal model variants are not exercised by this fixture; separate controlled pagination and effort-mapping tests cover those contracts.
 
-This validates the owned setup, not personal-service configuration, arbitrary plugins, future releases or model quality. Native deny rules are defense in depth, not a universal sandbox. Omitting either explicit selector fails the dedicated command actionably rather than silently falling back to a shared service or installing packages.
+This validates the owned setup, not personal-service configuration, arbitrary plugins, future releases or model quality. Restricted-role native deny rules are defense in depth, not a universal sandbox; Weaver/Evolve native execution is permissive. Omitting either explicit selector fails the dedicated command actionably rather than silently falling back to a shared service or installing packages.
 
 ## Isolated walkthrough
 

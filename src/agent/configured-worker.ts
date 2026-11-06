@@ -80,7 +80,8 @@ export class ConfiguredRunWorker implements SupervisedWorker {
       const config = dependencies.config;
       const variant = config.effort[effort];
       return normalizeBinding({sessionId:run.sessionId,serviceUrl:service.url,location:{directory:config.directory},
-        model:{...config.model,...(variant === null ? {} : {variant})},permissions:[{action:"*",resource:"*",effect:"deny"}],protocolVersion:1});
+        model:{...config.model,...(variant === null ? {} : {variant})},
+        permissions:[{action:"*",resource:"*",effect:run.kind === "weave" || run.kind === "evolve" ? "allow" : "deny"}],protocolVersion:1});
     },native:bindings => {
       let adapter: OpenCodeAdapter | undefined;
       const owned = async (binding: AgentBinding): Promise<OpenCodeAdapter> => {

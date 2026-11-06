@@ -1,4 +1,5 @@
 import { createLogger, type Logger } from "../logging";
+import type { SessionMessageAssistantTool } from "@opencode/client";
 import { RunFenceError, type Claim } from "../domain/run";
 import { protocolJson } from "../domain/run-protocol";
 import { AgentBindingError, normalizeBinding, sameBinding, sameModel, type AgentBinding, type ModelRef } from "./binding";
@@ -15,9 +16,17 @@ export { AgentUncertainError, AgentUnavailableError } from "./errors";
 export { createPublicClient } from "./opencode-client";
 export { requireAgentConfig, resolveAgentService } from "./service";
 export interface PersistedPrompt { readonly promptId: string; readonly input: string }
+/** Enclosing assistant identity associates the call; arguments, results, metadata and raw errors stay native-private. */
+export interface NativeTool {
+  readonly id: string;
+  readonly name: string;
+  readonly status: SessionMessageAssistantTool["state"]["status"];
+  readonly time: Readonly<SessionMessageAssistantTool["time"]>;
+  readonly executed?: boolean;
+}
 export type NativeMessage =
   | { readonly id: string; readonly type: "user"; readonly time: { readonly created: number }; readonly text: string; readonly unsafe?: boolean }
-  | { readonly id: string; readonly type: "assistant"; readonly time: { readonly created: number; readonly completed?: number }; readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly finish?: string; readonly error?: boolean; readonly unsafe?: boolean }
+  | { readonly id: string; readonly type: "assistant"; readonly time: { readonly created: number; readonly completed?: number }; readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly tools?: readonly NativeTool[]; readonly finish?: string; readonly error?: boolean; readonly unsafe?: boolean }
   | { readonly id: string; readonly type: "idle"; readonly time: { readonly created: number }; readonly outcome: string; readonly error?: boolean }
   | { readonly id: string; readonly type: "other"; readonly nativeType: string; readonly time: { readonly created: number } };
 export interface NativeSession {
@@ -187,7 +196,7 @@ export class OpenCodeAdapter {
       const current = known.at(-1);
       if (snapshot !== undefined && (!current || current.promptId !== prompt.promptId || current.input !== prompt.input || new Set(known.map(input => input.promptId)).size !== known.length)) throw new RunFenceError("Native history witness does not match the current persisted prompt");
       const messages = await this.history(binding,input => this.call(claim,"message.list",() => this.client.history(input),prompt));
-      authorizeSubmissionHistory(known,messages);
+      authorizeSubmissionHistory(known,messages,binding);
       const inbox = await this.call(claim,"inbox.list",() => this.client.inbox({sessionID:binding.sessionId}),prompt);
       if (inbox.some(item => item.id !== prompt.promptId || item.sessionID !== binding.sessionId || item.payload.text !== prompt.input)) throw new AgentBindingError("Unexpected native pending input");
       if (inbox.length || Object.hasOwn(await this.call(claim,"session.active",() => this.client.active(),prompt),binding.sessionId)) throw new AgentUncertainError("Existing native work must be observed before submission");
@@ -230,7 +239,7 @@ export class OpenCodeAdapter {
       this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),current,failed));
       this.assertActive(claim,current);
       if (this.observationOutages.delete(binding.sessionId)) this.logger.info("[agent] observation service recovered", { runId: claim.runId });
-      const observed = correlateHistory(binding.sessionId,prompts,messages,inbox,active);
+      const observed = correlateHistory(binding.sessionId,prompts,messages,inbox,active,binding);
       this.assertActive(claim,current,observed.state);
       return observed;
     } catch (error) {

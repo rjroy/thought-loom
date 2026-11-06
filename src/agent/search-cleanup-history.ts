@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchTerminalCertificate } from "./search-cleanup-contract";
-import { AgentBindingError } from "./binding";
+import { AgentBindingError, assertBindingPermissions } from "./binding";
 import type { InboxItem, NativeMessage } from "./opencode-adapter";
+import { hasUntrackedNativeContext } from "./history";
 
 export interface SearchHistoryFacts {
   readonly admissions: readonly SearchAdmissionFact[];
@@ -16,6 +17,7 @@ export const searchInputHash = (input: string): string => createHash("sha256").u
 /** Inspect IDs/hashes and terminal boundaries only. Never interpret or retain assistant prose. */
 export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: readonly NativeMessage[], inbox: readonly InboxItem[],
   active: Readonly<Record<string,unknown>>): SearchHistoryFacts {
+  assertBindingPermissions("search",identity.binding);
   const authorized = identity.manifest.steps.filter(step => step.authorization === "authorized-uncertain");
   const known = new Map(authorized.map(step => [step.promptId,step]));
   const seen = new Set<string>(), inboxIds = new Set<string>();
@@ -41,7 +43,7 @@ export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: re
   };
   for (const message of messages) {
     if (typeof message.id !== "string" || !message.id.trim() || !Number.isFinite(message.time.created) || seen.has(message.id) ||
-      message.type === "other" || ((message.type === "user" || message.type === "assistant") && message.unsafe)) conflict();
+      hasUntrackedNativeContext(message)) conflict();
     seen.add(message.id);
     if (message.type === "user") {
       finish();

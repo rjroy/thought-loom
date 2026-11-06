@@ -82,13 +82,13 @@ function knowledge(db: Database): unknown {
     .map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all());
 }
 
-test("owned decoded facade drives an ordinary configured worker as a positive control", async () => fixture(async (db, store, worker, client, id) => {
+test("owned decoded facade drives a new Weaver with unattended native permissions", async () => fixture(async (db, store, worker, client, id) => {
   store.saveThought({ id: "subject", text: "fixture thought", title: null, titleAuthor: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
   const run = new SqliteRunOperations(db, { id, now, logger }).admitWeave("user", { subjectId: "subject", triggerId: "fixture-trigger" });
   await drive(worker, db, run.id);
   expect(status(db, run.id)).toBe("completed");
   expect(client.prompts).toHaveLength(1);
-  expect([...client.sessions.values()][0]?.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
+  expect([...client.sessions.values()][0]?.permissions).toEqual([{ action: "*", resource: "*", effect: "allow" }]);
 }, () => ({ version: 1, kind: "complete", reply: "fixture complete" })));
 
 test("search clarification and follow-up use fresh owned native contexts and never write library knowledge", async () => fixture(async (db, store, worker, client, id) => {
