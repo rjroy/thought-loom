@@ -11,7 +11,7 @@ import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceErro
 import type { WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
 import { SqliteSharedResponses } from "./shared-response";
-import { SqliteStore } from "./sqlite";
+import { SqliteKnowledgeWriter } from "./knowledge-write";
 import { insertRun, readRun } from "./run-record";
 import { immediate } from "./transaction";
 import { requireSearchExecutionOwner, searchExecutionContextValid } from "./search-run-authority";
@@ -85,7 +85,7 @@ export class SqliteRunAggregate {
   }
   protected rejection(): RejectionService { return new RejectionService(new SqliteRejectionRepository(this.db,this.logger)); }
   protected creation(sources: { readonly id: () => string; readonly now: () => string }): CreationService {
-    const store = new SqliteStore(this.db,undefined,this.logger);
+    const store = new SqliteKnowledgeWriter(this.db,this.logger);
     return new CreationService({ rejection: this.rejection(), ...sources, writes: {
       createThought: thought => store.saveThought(thought), createConnection: connection => store.saveConnection(connection),
     } });

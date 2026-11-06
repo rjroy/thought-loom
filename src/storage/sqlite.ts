@@ -6,14 +6,12 @@ import type { ResponseRecord } from "../domain/response";
 import { SqliteSharedResponses } from "./shared-response";
 import { migrateRunSchema } from "./run-schema";
 import { nonEmpty } from "../domain/validation";
-import { captureWeaveIntent } from "../domain/weave-scheduling";
-import { admitWeave, type WeaveSources } from "./weave-admission";
+import type { WeaveSources } from "./weave-admission";
 import { migrateImportFoundation } from "./import-migration";
 import { migrateSearchFoundation } from "./search-migration";
 import { migrateExecutionOwners } from "./execution-owner-schema";
 import { migrateSearchCleanup } from "./search-cleanup-migration";
 import { immediate } from "./transaction";
-import { ValidationError } from "../domain/validation";
 import { randomUUID } from "node:crypto";
 import { SearchSessionService, type SearchSessionSources, type SearchSessions } from "../domain/agentic-search";
 import { SqliteSearchSessions } from "./search-sessions";
@@ -23,6 +21,7 @@ import type { SearchInvestigation } from "../domain/investigative-retrieval";
 import { SqliteSearchInvestigation } from "./investigative-retrieval";
 import { SqliteSearchRepository } from "./search";
 import type { SqliteSearchRetention } from "./search-retention";
+import { SqliteKnowledgeWriter } from "./knowledge-write";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -217,7 +216,7 @@ export class SqliteStore {
   constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
 
   searchSessions(sources: SearchSessionSources, retention?: SqliteSearchRetention): SearchSessions {
-    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger,retention), { ...sources, logger: sources.logger ?? this.logger });
+    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger,retention,sources), { ...sources, logger: sources.logger ?? this.logger });
   }
 
   /** Internal AI-normal candidate retrieval; not a full-read witness. */
@@ -231,22 +230,7 @@ export class SqliteStore {
   }
 
   saveThought(input: Thought): void {
-    boundary(this.logger, "save thought", () => {
-      const thought = createThought(input);
-      if (thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
-      this.db.transaction(() => {
-        // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
-        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",
-          [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
-        this.db.run("INSERT INTO thought_titles (thought_id, title, title_author) VALUES (?, ?, ?)",
-          [thought.id, thought.title, thought.title === null ? null : thought.titleAuthor ?? thought.author]);
-        const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");
-        thought.sourceIds.forEach((id, index) => insert.run(thought.id, index, id));
-        this.db.run("INSERT INTO thought_source_seals (thought_id) VALUES (?)", [thought.id]);
-        const intent = captureWeaveIntent(thought);
-        if (this.scheduling && intent) admitWeave(this.db,this.scheduling,intent);
-      }).immediate();
-    });
+    new SqliteKnowledgeWriter(this.db,this.logger,this.scheduling).saveThought(input);
   }
 
   getThought(id: string): Thought | null {
@@ -261,15 +245,7 @@ export class SqliteStore {
   }
 
   saveConnection(input: Connection): void {
-    boundary(this.logger, "save connection", () => {
-      const connection = createConnection(input);
-      this.db.transaction(() => {
-        this.db.run("INSERT INTO connections (id, from_id, to_id, category, proposed_by, explanation) VALUES (?, ?, ?, ?, ?, ?)",
-          [connection.id, connection.fromId, connection.toId, connection.category, connection.proposedBy, connection.explanation]);
-        const insert = this.db.query("INSERT INTO connection_sources (connection_id, position, source_id) VALUES (?, ?, ?)");
-        connection.sourceIds.forEach((id, index) => insert.run(connection.id, index, id));
-      })();
-    });
+    new SqliteKnowledgeWriter(this.db,this.logger,this.scheduling).saveConnection(input);
   }
 
   getConnection(id: string): Connection | null {

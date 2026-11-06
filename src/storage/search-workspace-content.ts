@@ -100,10 +100,10 @@ export function readSearchDiscoveries(db: Database, sessionId: string, after: nu
   return { value: { items: Object.freeze(items), hasMore: rows.length > limit }, dependencies };
 }
 export function readSearchThoughtPreview(db: Database, thoughtId: string): SearchOfferedContent<{ readonly thought: Thought }> {
-  const row = db.query(`SELECT t.id,t.text,m.title,m.title_author AS titleAuthor,t.author,t.kind,t.created_at AS createdAt,t.origin,
-    CASE WHEN NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.parent_id) THEN t.parent_id END AS parentId
-    FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id
-    WHERE t.id=CAST(? AS TEXT) AND ${searchEligibilitySql("'thought'", "t.id")}`).get(text(thoughtId));
+  const row = db.query(`SELECT thought.id,thought.text,m.title,m.title_author AS titleAuthor,thought.author,thought.kind,thought.created_at AS createdAt,thought.origin,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=thought.parent_id) THEN thought.parent_id END AS parentId
+    FROM thoughts thought JOIN thought_titles m ON m.thought_id=thought.id
+    WHERE thought.id=CAST(? AS TEXT) AND ${searchEligibilitySql("'thought'", "thought.id")}`).get(text(thoughtId));
   if (!row) throw new SearchNotFoundError("search-thought-not-found");
   const sources = db.query(`SELECT s.source_id AS id FROM thought_sources s WHERE s.thought_id=CAST(? AS TEXT)
     AND ${searchEligibilitySql("'thought'", "s.source_id")} ORDER BY s.position`).all(text(thoughtId)) as { id: string }[];

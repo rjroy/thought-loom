@@ -15,6 +15,7 @@ import type { AgentConfig } from "./agent-config";
 import type { PublicClient, ResolvedAgentService } from "../agent/opencode-adapter";
 import { createPublicClient, resolveAgentService } from "../agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../agent/configured-worker";
+import { RunWorker } from "../agent/worker";
 import { RunSupervisor } from "../agent/supervisor";
 import { LocalMarkdownImportDriver } from "../agent/import-driver";
 import { AgentService } from "../domain/agent";
@@ -24,6 +25,8 @@ import { SqliteImportInspection } from "../storage/import-inspection";
 import { ConfigError } from "./config-error";
 import { createLogger, type Logger, type LogSink } from "../logging";
 import { ExecutionOwnerHeldError, ExecutionOwnerLease } from "../storage/execution-owner";
+import { SearchClockReceipts } from "./search-clock-receipts";
+import type { SearchClockDependencies } from "../domain/search-time";
 
 /** Optional test-owned transport and technical timer seams; default runtime uses the maintained SDK. */
 export interface RuntimeDependencies {
@@ -52,9 +55,10 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let server: ReturnType<typeof Bun.serve> | undefined;
   let supervisor: RunSupervisor | undefined;
   let imports: LocalMarkdownImportDriver | undefined;
-  let worker: ConfiguredRunWorker | undefined;
+  let worker: ConfiguredRunWorker | RunWorker | undefined;
   let executionOwner: ExecutionOwnerLease | undefined;
   let failureLogger: Logger | undefined;
+  let searchClockReceipts: SearchClockReceipts | undefined;
   let acceptingRequests = true;
   const requestFlights = new Set<Promise<Response>>();
   async function close(force: boolean): Promise<boolean> {
@@ -79,6 +83,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     } catch { failed = true; }
     // A stop error does not skip the real handler/lane joins. Any still-open listener is sealed from application work.
     if (!drained) return true;
+    searchClockReceipts?.clear();
     try { db?.close(); } catch { return true; }
     try { executionOwner?.release(); } catch { failed = true; }
     return failed;
@@ -98,6 +103,17 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       // Public SDK schemas require these prefixes. Existing persisted identities are never rewritten.
       sessionId: () => `ses_${randomUUID()}`, promptId: () => `msg_${randomUUID()}` };
     const store = new SqliteStore(db, scheduling);
+    // Receipt lookup is invoked only at a later execution boundary, after this root has wired the session service.
+    const searchClock: SearchClockDependencies = { latestObservation: owner => searchClockReceipts?.latest(owner) ?? null };
+    const configuredWorker = valid.agent ? new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,searchClock,
+      resolve:dependencies.resolveAgentService ?? resolveAgentService,client:dependencies.createPublicClient ?? createPublicClient}) : undefined;
+    // The same lane owner explicitly has no native producer when unconfigured; do not invent a model or transport.
+    worker = configuredWorker ?? new RunWorker({db,...scheduling,executionOwner});
+    const retention = worker.searchRetention();
+    if (!retention) throw new Error("Runtime search retention ownership is unavailable");
+    const searchSessions = store.searchSessions(scheduling,retention);
+    searchClockReceipts = new SearchClockReceipts(searchSessions,scheduling.now);
+    const receipts = searchClockReceipts;
     const rejection = new RejectionService(new SqliteRejectionRepository(db,diagnostics));
     const creation = new CreationService({ rejection, id: randomUUID, now: () => new Date().toISOString(), writes: {
       createThought: thought => store.saveThought(thought), createConnection: connection => store.saveConnection(connection),
@@ -123,13 +139,12 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
         if (polls.size===0) { const cancel=cancelPolling; cancelPolling=undefined; cancel?.(); }
       };
     };
-    if (valid.agent) {
-      worker = new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,
-        resolve:dependencies.resolveAgentService ?? resolveAgentService,client:dependencies.createPublicClient ?? createPublicClient});
-      supervisor = new RunSupervisor({db,worker,logger:diagnostics,startTimer});
-      imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:worker.importWorker});
+    if (configuredWorker) {
+      supervisor = new RunSupervisor({db,worker:configuredWorker,logger:diagnostics,startTimer});
+      imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:configuredWorker.importWorker});
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
-    const app = createApp({ rejection, creation, titles, search, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
+    const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
+      notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576} });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: request => {
       if (!acceptingRequests) return new Response("Daemon stopping",{ status: 503 });

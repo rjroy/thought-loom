@@ -35,17 +35,17 @@ export class RunSupervisor {
 
   start(): void {
     if (this.stopped || this.cancelTimer) return;
-    this.unsubscribeCleanup ??= this.dependencies.worker.onSearchCleanupAvailable?.(() => this.notifyCleanup());
+    this.unsubscribeCleanup ??= this.dependencies.worker.onSearchCleanupAvailable?.(() => this.notifyWork());
     this.cancelTimer = this.dependencies.startTimer(() => {
       void this.poll().catch(() => this.logger.error("[supervisor] scheduled poll failed"));
     });
   }
 
-  private notifyCleanup(): void {
+  notifyWork(): void {
     if (this.stopped || this.wake) return;
     // One coalesced wake, not one SDK job per deleted run. Do not reset an in-progress high-water walk.
     this.wake = Promise.resolve().then(() => this.poll()).catch(() => {
-      this.logger.warning("[supervisor] cleanup notification deferred");
+      this.logger.warning("[supervisor] work notification deferred");
     }).finally(() => { this.wake = undefined; });
   }
   private candidates(source: Source, limit: number): readonly {id:string;position:number}[] {

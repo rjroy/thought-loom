@@ -52,6 +52,13 @@ export class SqliteSearchComposers {
       VALUES (CAST(? AS TEXT),CAST(? AS TEXT),'active',?)`, [text(composerId), text(sessionId), at]);
     return this.view(this.row(sessionId, composerId));
   }
+  discard(sessionId: string, composerId: string): void {
+    this.requireTransaction();
+    const row = this.db.query(`SELECT state FROM search_composer_contexts WHERE id=CAST(? AS TEXT) AND session_id=CAST(? AS TEXT)`)
+      .get(text(composerId),text(sessionId)) as { state: string } | null;
+    if (!row) throw new SearchNotFoundError("search-composer-not-found");
+    if (row.state === "active") this.db.run("UPDATE search_composer_contexts SET state='discarded' WHERE id=CAST(? AS TEXT)",[text(composerId)]);
+  }
   offerMessage(sessionId: string, composerId: string, messageId: string): SearchComposerOutcome<SearchMessageOffer> {
     return this.offer(sessionId, composerId, () => readSearchMessage(this.db, sessionId, messageId));
   }

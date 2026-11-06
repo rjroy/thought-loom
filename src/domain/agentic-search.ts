@@ -4,6 +4,8 @@ import type { Logger } from "../logging";
 import { createLogger } from "../logging";
 import { protocolJson } from "./run-protocol";
 import { record, ValidationError } from "./validation";
+import { AgentNotConfiguredError } from "./agent";
+import type { SearchClockOwner } from "./search-time";
 import type { ContextRef, RunStatus } from "./run";
 import { SearchWorkspaceService, type SearchDiscoveryView, type SearchThoughtPreview, type SearchWorkspace,
   type SearchWorkspacePage, type SearchWorkspaceQuery } from "./agentic-search-workspace";
@@ -28,6 +30,7 @@ export interface SearchSessionRecord extends Omit<SearchSessionView, "title"> {
   readonly deletedAt: string | null;
 }
 export interface SearchSessionCreation { readonly session: SearchSessionView; readonly replayed: boolean }
+export interface SearchSessionMetadata { readonly session: SearchSessionView; readonly activeRun: SearchRunView | null; readonly eligibilityRevision: number }
 export interface SearchSessionSources { readonly id: () => string; readonly now: () => string; readonly logger?: Logger }
 export interface SearchRequestClock { readonly at: string; readonly timeZone: string }
 export interface SearchTurnRequest {
@@ -112,6 +115,7 @@ export interface SearchSessionTransaction {
    */
   purge(sessionId: string, at: string): void;
   openComposer(sessionId: string, composerId: string, at: string): SearchComposerView;
+  discardComposer(sessionId: string, composerId: string): void;
   offerMessage(sessionId: string, composerId: string, messageId: string): SearchComposerOutcome<SearchMessageOffer>;
   messages(sessionId: string, query: SearchWorkspaceQuery): SearchComposerOutcome<SearchWorkspacePage<SearchMessageView>>;
   discoveries(sessionId: string, query: SearchWorkspaceQuery): SearchComposerOutcome<SearchWorkspacePage<SearchDiscoveryView>>;
@@ -119,11 +123,15 @@ export interface SearchSessionTransaction {
   refreshComposer(sessionId: string, composerId: string): SearchComposerOutcome<SearchComposerView>;
   turnByKey(sessionId: string, requestKey: string): SearchRetainedTurn | null;
   hasActiveTurn(sessionId: string): boolean;
+  metadataControl(sessionId: string): { readonly activeRun: SearchRunView | null; readonly eligibilityRevision: number };
+  searchRun(runId: string): SearchRunView | null;
+  stopSearchRun(runId: string): SearchRunView | null;
+  clockOwner(sessionId: string | null, runId: string | null): SearchClockOwner | null;
   prepareAdmission(sessionId: string, request: SearchTurnRequest): SearchComposerOutcome<SearchPreparedAdmission>;
   admitTurn(admission: SearchTurnAdmission): SearchTurnControlView;
   removeDiscovery(sessionId: string, entryId: string, at: () => string): boolean;
 }
-export type SearchSessionOperation = "create" | "list" | "get" | "rename" | "history" | "delete"
+export type SearchSessionOperation = "create" | "list" | "get" | "metadata" | "rename" | "history" | "delete" | "discardComposer" | "searchRun" | "stopSearchRun" | "clockOwner"
   | "openComposer" | "offerMessage" | "admitTurn" | "turnByKey" | "removeDiscovery"
   | "messages" | "discoveries" | "previewThought" | "refreshComposer";
 export interface SearchSessionRepository {
@@ -133,14 +141,21 @@ export interface SearchSessions extends SearchWorkspace {
   create(actor: Actor, requestKey: string, payload: unknown): SearchSessionCreation;
   list(actor: Actor, request?: unknown): SearchCatalogPage;
   get(actor: Actor, sessionId: string): SearchSessionView | null;
+  metadata(actor: Actor, sessionId: string): SearchSessionMetadata | null;
   rename(actor: Actor, sessionId: string, expectedRevision: number, payload: unknown): SearchSessionView;
   history(actor: Actor, sessionId: string, request?: unknown): SearchSessionHistory;
   delete(actor: Actor, sessionId: string): void;
   openComposer(actor: Actor, sessionId: string): SearchComposerView;
+  discardComposer(actor: Actor, sessionId: string, composerId: string): void;
   offerMessage(actor: Actor, sessionId: string, composerId: string, messageId: string): SearchMessageOffer;
   admitTurn(actor: Actor, sessionId: string, requestKey: string, input: unknown): SearchTurnControlView;
+  admitTurnWithPolicy(actor: Actor, sessionId: string, requestKey: string, input: unknown, configured: boolean): { readonly control: SearchTurnControlView; readonly replayed: boolean };
+  searchRun(actor: Actor, runId: string): SearchRunView | null;
+  stopSearchRun(actor: Actor, runId: string): SearchRunView | null;
+  clockOwner(actor: Actor, selector: { readonly sessionId: string } | { readonly runId: string }): SearchClockOwner | null;
   turnByKey(actor: Actor, sessionId: string, requestKey: string): SearchTurnControlView | null;
   removeDiscovery(actor: Actor, sessionId: string, entryId: string): void;
+  removeDiscoveryWithRevision(actor: Actor, sessionId: string, entryId: string): number;
 }
 
 export function searchRequestKey(value: unknown): string {
@@ -252,7 +267,7 @@ export class SearchSessionService implements SearchSessions {
     this.logger.info(`[search sessions] ${operation} attempt`, context);
     try { return action(); }
     catch (error) {
-      const reason = error instanceof SearchConflictError ? error.code : error instanceof SearchNotFoundError ? "search-session-not-found"
+      const reason = error instanceof SearchConflictError ? error.code : error instanceof SearchNotFoundError ? "search-session-not-found" : error instanceof AgentNotConfiguredError ? "agents-not-configured"
         : error instanceof ValidationError ? "invalid-search-request" : "search-persistence-failed";
       this.logger.warning(`[search sessions] ${operation} failed`, { ...context, reason });
       throw error;
@@ -289,6 +304,16 @@ export class SearchSessionService implements SearchSessions {
     return this.repository.transaction("get", tx => {
       const row = tx.get(sessionId);
       return row && row.deletedAt === null ? searchSessionView(row) : null;
+    });
+  }
+  metadata(actor: Actor, sessionId: string): SearchSessionMetadata | null {
+    requireSearchUser(actor); searchString(sessionId, "sessionId");
+    return this.repository.transaction("metadata", tx => {
+      const row = tx.get(sessionId);
+      if (!row || row.deletedAt !== null) return null;
+      const control = tx.metadataControl(sessionId);
+      return Object.freeze({ session: searchSessionView(row), activeRun: control.activeRun,
+        eligibilityRevision: searchRevision(control.eligibilityRevision) });
     });
   }
   rename(actor: Actor, sessionId: string, expectedRevision: number, payload: unknown): SearchSessionView {
@@ -336,6 +361,13 @@ export class SearchSessionService implements SearchSessions {
     this.logger.info("[search sessions] blank composer opened", { sessionId, composerId: result.composerId });
     return result;
   }
+  discardComposer(actor: Actor, sessionId: string, composerId: string): void {
+    requireSearchUser(actor); searchString(sessionId, "sessionId"); searchString(composerId, "composerId");
+    this.repository.transaction("discardComposer", tx => {
+      requireSession(tx,sessionId); tx.discardComposer(sessionId,composerId);
+    });
+    this.logger.info("[search sessions] composer discard requested", { sessionId, composerId });
+  }
   offerMessage(actor: Actor, sessionId: string, composerId: string, messageId: string): SearchMessageOffer {
     requireSearchUser(actor); searchString(sessionId, "sessionId"); searchString(composerId, "composerId"); searchString(messageId, "messageId");
     const outcome = this.repository.transaction("offerMessage", tx => {
@@ -361,6 +393,9 @@ export class SearchSessionService implements SearchSessions {
     return this.workspace.refreshComposer(actor, sessionId, composerId);
   }
   admitTurn(actor: Actor, sessionId: string, requestKey: string, input: unknown): SearchTurnControlView {
+    return this.admitTurnWithPolicy(actor,sessionId,requestKey,input,true).control;
+  }
+  admitTurnWithPolicy(actor: Actor, sessionId: string, requestKey: string, input: unknown, configured: boolean): { readonly control: SearchTurnControlView; readonly replayed: boolean } {
     requireSearchUser(actor); searchString(sessionId, "sessionId"); searchRequestKey(requestKey);
     const request = searchTurnRequest(input);
     const outcome = this.command("admitTurn", { sessionId }, () => this.repository.transaction("admitTurn", tx => {
@@ -372,6 +407,7 @@ export class SearchSessionService implements SearchSessions {
       }
       if (tx.hasActiveTurn(sessionId)) throw new SearchConflictError("turn-active");
       validateSearchRequestClock(request.requestClock);
+      if (!configured) throw new AgentNotConfiguredError();
       const prepared = tx.prepareAdmission(sessionId, request);
       if (!prepared.valid) return prepared;
       const admittedAt = searchRecordTime(this.sources.now());
@@ -386,7 +422,21 @@ export class SearchSessionService implements SearchSessions {
     }
     if (outcome.replayed) this.logger.verbose("[search sessions] turn replayed", { sessionId, runId: outcome.value.run.id });
     else this.logger.info("[search sessions] turn admitted", { sessionId, runId: outcome.value.run.id });
-    return outcome.value;
+    return { control: outcome.value, replayed: outcome.replayed };
+  }
+  searchRun(actor: Actor, runId: string): SearchRunView | null {
+    requireSearchUser(actor); searchString(runId,"runId");
+    return this.repository.transaction("searchRun",tx => tx.searchRun(runId));
+  }
+  stopSearchRun(actor: Actor, runId: string): SearchRunView | null {
+    requireSearchUser(actor); searchString(runId,"runId");
+    return this.repository.transaction("stopSearchRun",tx => tx.stopSearchRun(runId));
+  }
+  clockOwner(actor: Actor, selector: { readonly sessionId: string } | { readonly runId: string }): SearchClockOwner | null {
+    requireSearchUser(actor);
+    const sessionId = "sessionId" in selector ? searchString(selector.sessionId,"sessionId") : null;
+    const runId = "runId" in selector ? searchString(selector.runId,"runId") : null;
+    return this.repository.transaction("clockOwner",tx => tx.clockOwner(sessionId,runId));
   }
   turnByKey(actor: Actor, sessionId: string, requestKey: string): SearchTurnControlView | null {
     requireSearchUser(actor); searchString(sessionId, "sessionId"); searchRequestKey(requestKey);
@@ -397,12 +447,17 @@ export class SearchSessionService implements SearchSessions {
     });
   }
   removeDiscovery(actor: Actor, sessionId: string, entryId: string): void {
+    this.removeDiscoveryWithRevision(actor,sessionId,entryId);
+  }
+  removeDiscoveryWithRevision(actor: Actor, sessionId: string, entryId: string): number {
     requireSearchUser(actor); searchString(sessionId, "sessionId"); searchString(entryId, "entryId");
-    const changed = this.command("removeDiscovery", { sessionId }, () => this.repository.transaction("removeDiscovery", tx => {
+    const result = this.command("removeDiscovery", { sessionId }, () => this.repository.transaction("removeDiscovery", tx => {
       requireSession(tx, sessionId);
-      return tx.removeDiscovery(sessionId, entryId, () => searchRecordTime(this.sources.now()));
+      const changed = tx.removeDiscovery(sessionId, entryId, () => searchRecordTime(this.sources.now()));
+      return { changed, revision: requireSession(tx,sessionId).revision };
     }));
-    if (changed) this.logger.info("[search sessions] discovery removed", { sessionId, entryId });
+    if (result.changed) this.logger.info("[search sessions] discovery removed", { sessionId, entryId });
     else this.logger.verbose("[search sessions] discovery removal replayed", { sessionId, entryId });
+    return result.revision;
   }
 }

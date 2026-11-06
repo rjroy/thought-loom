@@ -12,6 +12,9 @@ import { SqliteSearchTurns } from "./search-turns";
 import { touchSearchSession } from "./search-session-activity";
 import { SqliteSearchWorkspace } from "./search-workspace";
 import { SqliteSearchRetention } from "./search-retention";
+import { SqliteRunRepository } from "./run";
+import type { SearchSessionSources } from "../domain/agentic-search";
+import { AgentNotConfiguredError } from "../domain/agent";
 
 const columns = "id,create_request_key AS createRequestKey,title,created_at AS createdAt,last_activity_at AS lastActivityAt,revision,deleted_at AS deletedAt";
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -19,7 +22,8 @@ interface CatalogRow extends SearchSessionRecord { readonly sequence: number }
 
 /** Owns only session transactions; it does not inherit ordinary-run or knowledge-write authority. */
 export class SqliteSearchSessions implements SearchSessionRepository {
-  constructor(private readonly db: Database, private readonly logger: Logger = createLogger(), private readonly retention?: SqliteSearchRetention) {
+  constructor(private readonly db: Database, private readonly logger: Logger = createLogger(), private readonly retention?: SqliteSearchRetention,
+    private readonly sources?: SearchSessionSources) {
     if (retention !== undefined) {
       if (!(retention instanceof SqliteSearchRetention)) throw new SearchStorageError("search-retention-requires-controller");
       retention.assertFor(db);
@@ -55,6 +59,7 @@ export class SqliteSearchSessions implements SearchSessionRepository {
           else purgeLocalSearchSession(this.db, id, at);
         },
         openComposer: (id, composerId, at) => composers.open(id, composerId, at),
+        discardComposer: (id, composerId) => composers.discard(id,composerId),
         offerMessage: (id, composerId, messageId) => composers.offerMessage(id, composerId, messageId),
         messages: (id, query) => workspace.messages(id, query),
         discoveries: (id, query) => workspace.discoveries(id, query),
@@ -62,6 +67,22 @@ export class SqliteSearchSessions implements SearchSessionRepository {
         refreshComposer: (id, composerId) => composers.refresh(id, composerId),
         turnByKey: (id, key) => turns.byKey(id, key),
         hasActiveTurn: id => turns.hasActive(id),
+        metadataControl: id => {
+          const row = this.db.query("SELECT eligibility FROM search_revisions WHERE id=1").get() as { eligibility: number } | null;
+          if (!row) throw new SearchStorageError("search-revisions-unavailable");
+          return { activeRun: turns.activeControl(id), eligibilityRevision: searchRevision(row.eligibility) };
+        },
+        searchRun: id => turns.controlByRun(id),
+        clockOwner: (sessionId,runId) => turns.clockOwner(sessionId,runId),
+        stopSearchRun: id => {
+          const before = turns.controlByRun(id);
+          if (!before) return null;
+          if (!this.sources) throw new SearchStorageError("search-run-sources-unavailable");
+          new SqliteRunRepository(this.db,this.sources).stop(id);
+          const after = turns.controlByRun(id);
+          if (!after) throw new SearchStorageError("search-run-control-unavailable");
+          return after;
+        },
         prepareAdmission: (id, request) => composers.prepareAdmission(id, request),
         admitTurn: admission => { this.requireCatalogCapacity(); return turns.admit(admission); },
         removeDiscovery: (id, entryId, now) => {
@@ -81,7 +102,7 @@ export class SqliteSearchSessions implements SearchSessionRepository {
     } catch (error) {
       this.logger.verbose(`[search session storage] ${operation} failed`);
       if (error instanceof SearchConflictError || error instanceof SearchForbiddenError || error instanceof SearchNotFoundError ||
-          error instanceof SearchStorageError || error instanceof ValidationError) throw error;
+          error instanceof SearchStorageError || error instanceof ValidationError || error instanceof AgentNotConfiguredError) throw error;
       // SQL errors can contain statement details. They are neither logs nor consumer-facing error messages.
       throw new SearchStorageError("search-persistence-failed", { cause: error });
     }

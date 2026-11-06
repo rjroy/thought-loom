@@ -4,6 +4,7 @@ import { SearchStorageError, searchRevision, searchSessionView, searchTurnReques
   type SearchTurnControlView, type SearchTurnRequest } from "../domain/agentic-search";
 import { protocolJson } from "../domain/run-protocol";
 import { oneOf, record } from "../domain/validation";
+import type { SearchClockOwner } from "../domain/search-time";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 interface TurnRow {
@@ -11,12 +12,50 @@ interface TurnRow {
   readonly userMessageId: string; readonly assistantMessageId: string | null; readonly status: string;
   readonly cancellation: string; readonly outcomeReason: string | null;
 }
+type RunRow = Pick<TurnRow, "runId" | "userMessageId" | "assistantMessageId" | "status" | "cancellation" | "outcomeReason">;
+function runView(sessionId: string, row: RunRow): SearchRunView {
+  return Object.freeze({ id: row.runId, kind: "search", searchSessionId: sessionId,
+    status: oneOf(row.status, "search run status", ["queued", "submitting", "running", "uncertain", "completed", "interrupted", "failed"]),
+    userMessageId: row.userMessageId, assistantMessageId: row.assistantMessageId,
+    cancellation: oneOf(row.cancellation, "search cancellation", ["none", "pending", "settled"]),
+    outcomeReason: row.outcomeReason === null ? null : oneOf(row.outcomeReason, "search outcome", ["stopped", "context-invalidated", "failed"]) });
+}
 
 /** Admission receipts and ordered persistence only, not a worker or a native binding factory. */
 export class SqliteSearchTurns {
   constructor(private readonly db: Database) {}
   hasActive(sessionId: string): boolean {
     return this.db.query("SELECT 1 FROM search_turns WHERE session_id=CAST(? AS TEXT) AND open_slot=1").get(text(sessionId)) !== null;
+  }
+  clockOwner(sessionId: string | null, runId: string | null): SearchClockOwner | null {
+    const row = this.db.query(`SELECT r.id AS runId,r.generation,t.session_id AS searchSessionId,r.session_id AS nativeSessionId
+      FROM search_turns t JOIN search_sessions s ON s.id=t.session_id AND s.deleted_at IS NULL
+      JOIN runs r ON r.id=t.run_id AND r.kind='search' AND r.status IN ('queued','submitting','running','uncertain')
+      WHERE t.open_slot=1 AND r.cancellation_state='none' AND (? IS NULL OR t.session_id=CAST(? AS TEXT))
+        AND (? IS NULL OR r.id=CAST(? AS TEXT))`).get(sessionId,sessionId,runId,runId) as SearchClockOwner | null;
+    return row ? Object.freeze({...row,generation:searchRevision(row.generation)}) : null;
+  }
+  controlByRun(runId: string): SearchRunView | null {
+    const row = this.db.query(`SELECT t.session_id AS sessionId,t.run_id AS runId,u.id AS userMessageId,a.id AS assistantMessageId,
+      r.status,r.cancellation_state AS cancellation,t.outcome_reason AS outcomeReason
+      FROM search_turns t JOIN search_sessions s ON s.id=t.session_id AND s.deleted_at IS NULL
+      JOIN runs r ON r.id=t.run_id AND r.kind='search'
+      JOIN search_messages u ON u.run_id=t.run_id AND u.role='user'
+      LEFT JOIN search_messages a ON a.run_id=t.run_id AND a.role='assistant'
+      WHERE t.run_id=CAST(? AS TEXT)`).get(text(runId)) as (RunRow & { sessionId: string }) | null;
+    if (!row && this.db.query(`SELECT 1 FROM search_turns t JOIN search_sessions s ON s.id=t.session_id AND s.deleted_at IS NULL
+      WHERE t.run_id=CAST(? AS TEXT)`).get(text(runId))) throw new SearchStorageError("search-run-control-unavailable");
+    return row ? runView(row.sessionId,row) : null;
+  }
+  activeControl(sessionId: string): SearchRunView | null {
+    const row = this.db.query(`SELECT t.run_id AS runId,u.id AS userMessageId,a.id AS assistantMessageId,
+      r.status,r.cancellation_state AS cancellation,t.outcome_reason AS outcomeReason
+      FROM search_turns t JOIN runs r ON r.id=t.run_id AND r.kind='search'
+      JOIN search_messages u ON u.run_id=t.run_id AND u.role='user'
+      LEFT JOIN search_messages a ON a.run_id=t.run_id AND a.role='assistant'
+      WHERE t.session_id=CAST(? AS TEXT) AND t.open_slot=1`).get(text(sessionId)) as RunRow | null;
+    if (!row && this.hasActive(sessionId)) throw new SearchStorageError("search-turn-message-unavailable");
+    return row ? runView(sessionId,row) : null;
   }
   byKey(sessionId: string, requestKey: string): SearchRetainedTurn | null {
     const row = this.db.query(`SELECT t.run_id AS runId,t.admitted_at AS admittedAt,t.effort,t.intent_json AS intentJson,
@@ -43,11 +82,7 @@ export class SqliteSearchTurns {
       .get(text(sessionId)) as SearchSessionRecord | null;
     if (!session) throw new SearchStorageError("search-turn-session-unavailable");
     const receipt = Object.freeze({ searchSessionId: sessionId, runId: row.runId, userMessageId: row.userMessageId, admittedAt: row.admittedAt });
-    const run: SearchRunView = Object.freeze({ id: row.runId, kind: "search", searchSessionId: sessionId,
-      status: oneOf(row.status, "search run status", ["queued", "submitting", "running", "uncertain", "completed", "interrupted", "failed"]),
-      userMessageId: row.userMessageId, assistantMessageId: row.assistantMessageId,
-      cancellation: oneOf(row.cancellation, "search cancellation", ["none", "pending", "settled"]),
-      outcomeReason: row.outcomeReason === null ? null : oneOf(row.outcomeReason, "search outcome", ["stopped", "context-invalidated", "failed"]) });
+    const run = runView(sessionId,row);
     return { request, control: Object.freeze({ receipt, run, session: searchSessionView(session) }) };
   }
   admit(admission: SearchTurnAdmission): SearchTurnControlView {

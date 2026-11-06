@@ -90,6 +90,18 @@ test("weave alone renders discovery guidance alongside the shared evidence fence
   for (const other of [evolve, exported]) expect(other.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
 });
 
+test("worker without native configuration leaves an unbound queued run untouched", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unconfigured" });
+  const worker = new RunWorker({ db: f.db, id: f.id, now });
+  const snapshot = () => ["runs", "run_steps", "agent_bindings", "run_context"].map(table => f.db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all());
+  const before = snapshot();
+  try {
+    await worker.tick(run.id); await worker.tick(run.id);
+    expect(snapshot()).toEqual(before);
+    expect(f.runs.get(run.id)).toEqual(expect.objectContaining({ status: "queued", generation: 0 }));
+  } finally { worker.pause(); await worker.drain(); }
+}));
+
 test("weave can search and read a candidate then connect it to the preloaded subject without rereading it", async () => fixture(async f => {
   f.store.saveThought({ id: "candidate", text: "zircon candidate", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "discovery" });

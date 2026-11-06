@@ -30,15 +30,21 @@ export interface WorkerNative {
   /** Cancellation-only sealed metadata; isolated ordinary fixtures need not implement this port. */
   cancelSearch?(identity: SearchCleanupIdentity, authorize: () => void): Promise<SearchCleanupObservation>;
 }
-export interface WorkerDependencies extends RunSources {
+interface WorkerOwnershipDependencies extends RunSources {
   readonly db: Database;
+  readonly searchClock?: SearchClockDependencies;
+  readonly executionOwner?: ExecutionOwnerLease;
+}
+export type WorkerDependencies = WorkerOwnershipDependencies & ({
   /** Bind the supplied bindings.assertActive to its receiver; it fences SQL claims/context and local pause around native calls. */
   readonly native: (bindings: SqliteAgentBindings) => WorkerNative;
   /** Select only for an unbound run; a persisted binding takes precedence on restart. */
   readonly bindingFor: (run: RunRecord) => AgentBinding | null;
-  readonly searchClock?: SearchClockDependencies;
-  readonly executionOwner?: ExecutionOwnerLease;
-}
+} | {
+  /** Configless runtime owns local retention/lifetime only: no native producer, selection or cleanup polling. */
+  readonly native?: never;
+  readonly bindingFor?: never;
+});
 
 class WorkerPaused extends RunFenceError {}
 class WorkerRetired extends RunFenceError {}
@@ -97,7 +103,7 @@ export class RunWorker {
     this.cleanup = new SqliteSearchCleanup(db,dependencies.executionOwner,this.logger);
   }
   tick(runId: string, beforePoll?: () => Promise<void>): Promise<void> {
-    if (this.paused) return Promise.resolve();
+    if (this.paused || !this.dependencies.native) return Promise.resolve();
     const existing = this.flights.get(runId);
     if (existing) return existing.cleanupTail;
     // Defer execution until the in-flight entry exists; simultaneous polls share one boundary, not two submissions.
@@ -122,7 +128,11 @@ export class RunWorker {
     if (this.paused) throw new WorkerPaused();
     this.bindings.assertActive(claim,prompt);
   }
-  private transport(): WorkerNative { return this.native ??= this.dependencies.native(this.bindings); }
+  private transport(): WorkerNative {
+    const factory = this.dependencies.native;
+    if (!factory) throw new RunFenceError("Native execution is unconfigured");
+    return this.native ??= factory(this.bindings);
+  }
   private forget(runId: string): void {
     this.owners.delete(runId); this.ensured.delete(runId);
     this.searchClock.forget(runId);
@@ -144,7 +154,7 @@ export class RunWorker {
       if (terminal(run)) { this.forget(runId); await this.cancel(run); return; }
       let binding = this.bindings.get(runId);
       if (!binding) {
-        const selected = this.dependencies.bindingFor(Object.freeze({...run}));
+        const selected = this.dependencies.bindingFor?.(Object.freeze({...run})) ?? null;
         if (selected === null) return; // No claim, preparation, client construction, or HTTP without configuration.
         binding = normalizeBinding(selected);
       }
@@ -266,7 +276,7 @@ export class RunWorker {
     } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
   }
   private async cleanupSearch(runId: string): Promise<void> {
-    if (this.paused) return;
+    if (this.paused || !this.dependencies.native) return;
     try {
       const identity = this.cleanup.prepare(runId);
       if (!identity || this.paused || !this.cleanup.drained(identity)) return;
@@ -286,7 +296,7 @@ export class RunWorker {
   }
   /** Trusted retention hook; this is not cancellation or a change to execution ownership. */
   forgetSearchClock(runId: string): void { this.searchClock.forget(runId); }
-  /** Explicit trusted injection only; a worker fixture without a deployed lease cannot authorize bound purge. */
+  /** Local ownership does not require a native port. A fixture without a deployed lease cannot authorize bound purge. */
   searchRetention(): SqliteSearchRetention | null {
     const owner = this.dependencies.executionOwner;
     if (!owner) return null;
