@@ -101,7 +101,7 @@ Composite primary key: `(connection_id, position)`. Thought-source sealing trigg
 
 An addendum can accompany several recorded developments without duplicating its text. A fallback retains the response when no separate development was recorded and has exactly one thought association. Update/delete triggers protect response text, identity, role and state.
 
-The HTTP API reads these records rather than accepting client-created responses. Configured Evolve execution creates them transactionally during local finalization. Response states describe retained output; run/step state and cancellation settlement are tracked separately.
+The HTTP API reads these records rather than accepting client-created responses. Evolve execution and completed Weaver outcomes create them transactionally during local finalization. A Weaver outcome associates the original subject and any issued interpretations, so it remains accessible from the original capture even when no interpretation was warranted. Its shared associations retain the existing AI rejection policy. URL attribution is ordinary interpretation text; no fetched-source snapshots, external-source table or schema migration are added. Response states describe retained output; run/step state and cancellation settlement are tracked separately.
 
 ### `response_thoughts`
 
@@ -275,7 +275,7 @@ There are no immutable-row triggers here because drafts and finalization bookkee
 
 Stop retains confirmed developments and can persist an existing draft as an interrupted response using durable associations. It does not invent an association if none can be derived safely. Final response persistence and local completion commit together. Observed native completion instead produces a reconciliation handoff with action `finalize`; it does not claim the local response is already committed. Recovery returns `{run, claim, action}` using `finalize`, `resume`, or `observe`, without replacing the stored external identities.
 
-A title-only or no-findings weave can complete without creating a conversational response. Failure retains confirmed knowledge changes and eligible interrupted drafts, fences later callbacks, and keeps pending remote cancellation settlement available.
+A title-only or no-findings weave still retains its completed outcome as a response associated with the subject; it need not create an interpretation. Failure retains confirmed knowledge changes and eligible interrupted drafts, fences later callbacks, and keeps pending remote cancellation settlement available.
 
 ### Durable weave scheduling
 

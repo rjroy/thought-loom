@@ -28,7 +28,7 @@ Exact scheduling, affected scope, and recovery from operational failures remain 
 5. Record warranted meaningful connections with correctly directed endpoints, a concrete explanation and supporting references to fully read thoughts, using the initial categories **supports**, **contradicts**, **extends**, and **related**. Store discovered connections separately from the single-parent evolution tree.
 6. Generate a concise, clearly AI-authored title for untitled notes. Capture must not require the client or user to supply one; use the first-five-word display fallback until a title is available. Store the title as separate metadata, never a rewrite of the original thought text or ancestry. The user may edit or clear the title, and clearing invites regeneration. Only fill a title that is still absent when the result is saved; a late result must not overwrite a user-supplied title. Rejected notes remain excluded from all weaver work, including title generation.
 
-Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings.
+Finding no useful connection is a valid outcome. Do not invent links, create an interpretation for every capture, or meet a quota of findings. A URL-only capture does invite a source-grounded summary; contextual links follow the captured intent instead. See [URL-aware weaving](url-weaving.md) for individual sibling summaries, inline attribution, source-access failures and the no-snapshot agreement.
 
 These are instructions to a probabilistic model, not a guarantee of discovery or semantic correctness. Scoped reads and full-read witnesses enforce evidence access, not the quality of an explanation.
 
@@ -40,7 +40,7 @@ The conversational agent can make relevant knowledge changes during interaction.
 
 ## Trust and visibility
 
-Show simple processing state where useful: pending, working, finished, or failed. Successful capture remains successful even if weaving fails. Retry must not silently duplicate the same changes.
+Show simple processing state where useful: pending, working, finished, or failed. Successful capture remains successful even if weaving fails. Retry must not silently duplicate the same changes. Retain a concise completed Weaver outcome as a Full reply on the original capture, including useful partial-result or source-access limitations. A retained outcome does not require creating an interpretation when there is no useful finding.
 
 Preserve attribution, sources, and evolution history. All thoughts, including AI interpretations, are immutable; further thinking creates new material rather than overwriting old material. Rejection and restoration belong only to the user. For the weaver, rejected notes and connections are effectively nonexistent: do not retrieve them, include them as context, or reason from them. An active descendant does not make a rejected ancestor available again. These rules also apply to the evolution agent and the read-only Agentic export agent.
 

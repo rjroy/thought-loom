@@ -69,6 +69,8 @@ All accept the read scopes above and return `200` JSON:
 
 Each per-thought relationship route requires the requested thought to be visible under the same read scope; a missing or hidden thought returns `404`. A visible thought with no visible related records returns an empty array. These reads use existing response, connection, and evolution relationships; they do not traverse discovered connections as evolution ancestry. Child and connection inspection records include the `rejected` field described above. Shared response associations follow the same visibility policy as `/responses/:id`, including the stricter AI rule.
 
+Completed weaving retains its final outcome through these response routes, associated with the original capture and any issued interpretations. This includes no-findings outcomes and source-access limitations; a failed URL does not create a fake interpretation. Shared-response AI visibility still requires all associated thoughts to be eligible. URL summaries are ordinary searchable interpretation thoughts with inline source links, not a new response or source-record type. Capture requests remain unchanged.
+
 ## Agentic search sessions
 
 All routes below are user-only; AI credentials receive `403`. Only fresh turn admission requires agent configuration. All responses, including authentication failures, are `Cache-Control: private, no-store`. The metadata routes expose no conversation text or composer context. The [conversational search web client](server-startup.md#conversational-search) uses fixed Next.js server boundaries; the browser never calls the daemon directly. See [`search-session-routes.ts`](../src/daemon/search-session-routes.ts) and the [isolated walkthrough](testing.md#isolated-agentic-search-walkthrough).

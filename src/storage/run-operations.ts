@@ -5,11 +5,13 @@ import { protocolJson } from "../domain/run-protocol";
 import { CreationNotFoundError } from "../domain/creation";
 import { createThought } from "../domain/thought";
 import { createConnection } from "../domain/connection";
+import { createSharedResponse } from "../domain/shared-response";
 import { TitleConflictError, TitleNotFoundError, TitleService } from "../domain/title";
 import { record } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteTitleRepository } from "./title";
 import { admitWeave } from "./weave-admission";
+import { SqliteSharedResponses } from "./shared-response";
 
 /** Typed writes share the original run aggregate, transaction, receipt table, and issued ordering. */
 export class SqliteRunOperations extends SqliteRunAggregate implements RunOperations {
@@ -88,10 +90,18 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
   completeWeave(claim: Claim, promptId: string): void {
     this.guarded("complete weave",claim,run => {
       if (run.kind !== "weave") throw new RunForbiddenError();
-      if (!this.readWeaveIntent(run.id)) throw new RunConflictError("Legacy weave subject is unknown");
+      const intent = this.readWeaveIntent(run.id);
+      if (!intent) throw new RunConflictError("Legacy weave subject is unknown");
       if (run.promptId !== promptId) throw new RunFenceError("Prompt is no longer current");
       const step = this.currentStep(run.id);
       if (step.state !== "completed" || step.envelope?.kind !== "complete") throw new RunConflictError("Weave requires an explicit completed final envelope");
+      // Associate the subject and every issued thought: a rejected summary must not
+      // expose an outcome that may describe it to AI through another association.
+      const issued = this.issued(run.id);
+      const response = createSharedResponse({ id: this.sources.id(), text: step.envelope.reply, state: "complete",
+        role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
+      new SqliteSharedResponses(this.db,this.logger).save(response);
+      this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
       this.db.run("UPDATE runs SET status='completed',generation=generation+1 WHERE id=?",[run.id]);
     });
   }

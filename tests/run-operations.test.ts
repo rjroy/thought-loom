@@ -142,14 +142,14 @@ describe("typed operations on durable run aggregate", () => {
     expect(ops.stepReceipt(run.id, run.promptId)).toBeNull();
   }));
 
-  test("weave may complete without reply and guarded failure retains confirmed work", () => fixture(({ db, service, runs, steps, ops, store, rejection }) => {
+  test("no-findings weave retains its outcome and guarded failure retains confirmed work", () => fixture(({ db, service, runs, steps, ops, store, rejection }) => {
     const empty = ops.admitWeave("user", { ...intent, triggerId: "empty-pass" });
     const emptyClaim = service.claim(empty.id);
     steps.prepare(emptyClaim, { promptId: empty.promptId, input: "context" });
     steps.completeStep(emptyClaim, empty.promptId, { version: 1, kind: "complete", reply: "No findings" });
     ops.completeWeave(emptyClaim, empty.promptId);
     expect(runs.get(empty.id)?.status).toBe("completed");
-    expect(runs.reply(empty.id)).toBeNull();
+    expect(runs.reply(empty.id)).toMatchObject({ text: "No findings", state: "complete", thoughtIds: ["subject"] });
     const filled = ops.admitWeave("user", { ...intent, triggerId: "filled-pass" });
     const claim = service.claim(filled.id);
     const interpretation: StepOperation = { type: "interpretation", text: "confirmed work", sourceIds: [] };
@@ -162,7 +162,7 @@ describe("typed operations on durable run aggregate", () => {
     expect(store.getThought(result.thought.id)).toEqual(result.thought);
     expect(ops.stepReceipt(filled.id, filled.promptId)).toEqual({ operation: interpretation, result });
     expect(() => ops.executeStep(claim, filled.promptId, interpretation)).toThrow(RunFenceError);
-    expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 1 });
     const guarded = ops.admitWeave("user", { ...intent, triggerId: "guarded-pass" });
     const guardedClaim = service.claim(guarded.id);
     expect(service.context(guardedClaim, { kind: "thought", id: "subject" })).not.toBeNull();
@@ -172,7 +172,7 @@ describe("typed operations on durable run aggregate", () => {
     expect(store.getThought(result.thought.id)).toEqual(result.thought);
   }));
 
-  test("title-only weave completes without fabricating a thought or canonical response", () => fixture(({ db, service, runs, steps, ops, title, store }) => {
+  test("title-only weave retains an outcome without fabricating a thought", () => fixture(({ db, service, runs, steps, ops, title, store }) => {
     title.setUser("user", "subject", null);
     const run = ops.admitWeave("user", intent);
     const claim = service.claim(run.id);
@@ -186,9 +186,9 @@ describe("typed operations on durable run aggregate", () => {
     steps.completeStep(claim, next.promptId, { version: 1, kind: "complete", reply: "No further findings" });
     ops.completeWeave(claim, next.promptId);
     expect(runs.get(run.id)?.status).toBe("completed");
-    expect(runs.reply(run.id)).toBeNull();
+    expect(runs.reply(run.id)).toMatchObject({ text: "No further findings", state: "complete", thoughtIds: ["subject"] });
     expect(db.query("SELECT COUNT(*) AS n FROM run_issued_thoughts WHERE run_id=?").get(run.id)).toEqual({ n: 0 });
-    expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 1 });
   }));
 
   test("malformed model output cannot become fallback; an explicit final Evolve reply uses the input once", () => fixture(({ service, runs, steps, store }) => {
