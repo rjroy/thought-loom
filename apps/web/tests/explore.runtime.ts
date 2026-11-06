@@ -94,7 +94,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   const ai = page.getByRole("group", { name: "Authorship" }).getByRole("checkbox", { name: /^ai(?:\s|$)/i });
   const user = page.getByRole("checkbox", { name: /\byou\b|\buser\b/i });
   const developing = page.getByRole("checkbox", { name: /developing/i });
-  const original = page.getByRole("checkbox", { name: /original/i });
+  const original = page.getByRole("checkbox", { name: /original captures/i });
   const showRejected = page.getByRole("checkbox", { name: /show rejected/i });
   const sort = page.getByRole("combobox", { name: /sort/i });
   const searchCalls = () => daemon.attempts.filter(call => call.path.startsWith("/search?"));
@@ -107,6 +107,41 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   await expect(importedCard).toBeVisible();
   await expect(importedCard.getByText("Imported source", { exact: true }).first()).toBeVisible();
   await expect(importedCard.getByText("AI", { exact: true })).toHaveCount(0);
+  await openFilters();
+  const authors = page.getByRole("group", { name: "Authorship" });
+  const materials = page.getByRole("group", { name: "Kind of material" });
+  const sourceAuthor = authors.getByRole("checkbox", { name: /imported source/i });
+  const importedKind = materials.getByRole("checkbox", { name: /imported source/i });
+  await expect(sourceAuthor).toHaveAccessibleName(/1\s*$/);
+  await expect(importedKind).toHaveAccessibleName(/1\s*$/);
+  for (const name of [/you/i, /^ai\b/i]) await expect(authors.getByRole("checkbox", { name })).toBeVisible();
+  for (const name of [/original captures/i, /contributions/i, /ai interpretations/i, /developing ideas/i]) {
+    await expect(materials.getByRole("checkbox", { name })).toBeVisible();
+  }
+  await sourceAuthor.check();
+  await importedKind.check();
+  await expect.poll(() => searchCalls().some(call => {
+    const params = new URL(call.path, options.origin).searchParams;
+    return params.get("q") === "source-owned" && params.getAll("author").includes("source") && params.getAll("kind").includes("imported-original");
+  })).toBe(true);
+  const importedBookmark = new URL(page.url());
+  assert.deepEqual(importedBookmark.searchParams.getAll("author"), ["source"]);
+  assert.deepEqual(importedBookmark.searchParams.getAll("kind"), ["imported-original"]);
+  const browserForImported = page.context().browser();
+  const importedViewport = page.viewportSize();
+  assert.ok(browserForImported && importedViewport, "imported bookmark requires an owned browser and viewport");
+  const importedContext = await browserForImported.newContext({ viewport: importedViewport });
+  try {
+    const fresh = await importedContext.newPage();
+    await fresh.goto(importedBookmark.toString(), { waitUntil: "networkidle" });
+    if (options.narrow) await fresh.getByRole("button", { name: /^filters/i }).click();
+    await expect(fresh.getByRole("group", { name: "Authorship" }).getByRole("checkbox", { name: /imported source/i })).toBeChecked();
+    await expect(fresh.getByRole("group", { name: "Kind of material" }).getByRole("checkbox", { name: /imported source/i })).toBeChecked();
+    await expect(fresh.locator("article").filter({ hasText: "Owned imported search result" })).toBeVisible();
+  } finally { await importedContext.close(); }
+  await page.getByRole("button", { name: /clear filters/i }).click();
+  await expect(importedCard).toBeVisible();
+  await closeFilters();
   const afterImported = searchCalls().length;
   await field.fill("owned");
   daemon.setMode("hold");

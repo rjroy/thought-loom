@@ -18,12 +18,14 @@ import styles from "./explore.module.css";
 const authorOptions = [
   { value: "user", label: "You" },
   { value: "ai", label: "AI" },
+  { value: "source", label: "Imported source" },
 ] as const;
 const kindOptions = [
   { value: "captured-original", label: "Original captures", singular: "Original capture" },
   { value: "user-contribution", label: "Contributions", singular: "Contribution" },
   { value: "ai-interpretation", label: "AI interpretations", singular: "Interpretation" },
   { value: "developing-idea", label: "Developing ideas", singular: "Developing idea" },
+  { value: "imported-original", label: "Imported source", singular: "Imported source" },
 ] as const;
 
 function emptyState(): ExploreState {

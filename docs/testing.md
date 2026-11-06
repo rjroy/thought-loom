@@ -175,6 +175,8 @@ The Export companion exercises independent methods, contextual normal-scope root
 
 The Idea metadata check requires About to share the existing desktop action row while allowing narrow wrapping. It exercises the disclosure's expanded state, keyboard activation and retained focus, then checks the existing metadata inside that disclosure rather than matching repeated source IDs elsewhere on the page. Opening About must not alter the selected thought or add a metadata-fetch operation. Resting-state checks require Edit title, Full reply, About and More actions to remain native buttons with underlined text using the existing link-color token, distinct from focal thought text.
 
+For a focused Explore browser check, run `THOUGHTLOOM_TEST_EXPLORE=1 bun --no-env-file run web:test:runtime`. It includes imported-source authorship and material filters, their counts, query forwarding and bookmark restoration, using test-owned search results. This focused mode does not replace the complete runtime check.
+
 ### Conversational search client checks
 
 `bun --no-env-file test tests/web-agentic-search-controller.test.ts` uses injected client, key and clock sources to check workspace isolation, occurrence removal/rediscovery, loaded-page refresh and non-UTC/DST clock formatting. It does not contact a daemon or model. Keep fixtures independent of the current library and model configuration.

@@ -263,6 +263,19 @@ async function main(): Promise<void> {
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
+    if (process.env.THOUGHTLOOM_TEST_EXPLORE === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try {
+            await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
+            await checkExploreBrowser(page, fixtureSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
+          } finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     const agenticCase = process.env.THOUGHTLOOM_TEST_AGENTIC_CASE;
     if (agenticCase === "routes") {
       await checkAgenticSearchRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
