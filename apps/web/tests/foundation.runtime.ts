@@ -14,6 +14,7 @@ import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.r
 import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
+import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -48,9 +49,17 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/export/runs/[id]/route.ts", "apps/web/src/app/api/export/thoughts/[id]/route.ts", "apps/web/src/server/export.ts",
     "apps/web/src/features/export/types.ts", "apps/web/src/features/export/request.ts", "apps/web/src/features/export/sources.ts",
     "apps/web/src/components/export-markdown.ts",
+    "apps/web/src/app/import/page.tsx", "apps/web/src/components/capture-provider.tsx", "apps/web/src/components/capture.module.css",
+    "apps/web/src/components/import-view.tsx", "apps/web/src/components/import-provider.tsx", "apps/web/src/components/import-inspection.tsx", "apps/web/src/components/import.module.css",
+    "apps/web/src/features/import/types.ts", "apps/web/src/features/import/request.ts",
     "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
+    "apps/web/src/server/import.ts",
+    "apps/web/src/app/api/imports/markdown/route.ts", "apps/web/src/app/api/imports/markdown/[id]/route.ts",
+    "apps/web/src/app/api/imports/markdown/[id]/files/route.ts", "apps/web/src/app/api/imports/markdown/[id]/files/[fileId]/route.ts", "apps/web/src/app/api/imports/markdown/[id]/seal/route.ts",
+    "apps/web/src/app/api/imports/namespaces/route.ts", "apps/web/src/app/api/imports/runs/[id]/route.ts", "apps/web/src/app/api/imports/runs/[id]/stop/route.ts",
+    "apps/web/src/app/api/imports/sources/route.ts", "apps/web/src/app/api/imports/sources/[id]/route.ts", "apps/web/src/app/api/imports/sources/[id]/parts/route.ts", "apps/web/src/app/api/imports/sources/[id]/raw/route.ts",
   ];
   const fixture = resolve(temp, "workspace");
   for (const input of inputs) {
@@ -208,8 +217,10 @@ async function main(): Promise<void> {
   const fixtureIdea = ideaDaemon(token);
   const fixtureEvolve = evolveDaemon(token);
   const fixtureExport = exportDaemon(token);
+  const fixtureImport = importDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
+    if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
+    else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
     else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
@@ -225,7 +236,7 @@ async function main(): Promise<void> {
   const origin = `http://127.0.0.1:${port}`;
   const daemonOrigin = `http://127.0.0.1:${(daemon.address() as AddressInfo).port}`;
   const secrets = [token, daemonOrigin];
-  const env: NodeJS.ProcessEnv = { NODE_ENV: "production", PATH: process.env.PATH, HOME: temp, TMPDIR: temp, NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_WEB_ORIGIN: origin, THOUGHTLOOM_DAEMON_URL: daemonOrigin, THOUGHTLOOM_USER_TOKEN: token };
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "production", PATH: process.env.PATH, HOME: temp, TMPDIR: temp, NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_WEB_ORIGIN: origin, THOUGHTLOOM_DAEMON_URL: daemonOrigin, THOUGHTLOOM_USER_TOKEN: token, THOUGHTLOOM_IMPORT_MAX_BYTES: String(12 * 1024 * 1024) };
     await runChecked(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "build"], env, "Next build", 120_000);
     await assertStaticClean(resolve(fixtureWeb, ".next/static"), secrets);
     server = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "start", "--hostname", "127.0.0.1", "--port", String(port)], env);
@@ -255,6 +266,9 @@ async function main(): Promise<void> {
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
     await checkEvolveRoute({ origin, host, probe, daemon: fixtureEvolve });
     await checkExportRoute({ origin, host, probe, daemon: fixtureExport });
+    // The focused mode permits independently observing the browser regression
+    // while the large-upload regression remains RED; normal runs check both.
+    if (process.env.THOUGHTLOOM_TEST_IMPORT_CASE !== "uncertain-stop") await checkLargeImportRoute(origin, fixtureImport);
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
@@ -288,6 +302,9 @@ async function main(): Promise<void> {
           await page.waitForURL("**/capture");
           await noContextBack();
           assert.equal(await page.getByRole("heading", { name: "Capture" }).count(), 1);
+          await checkImportEntry(page, { origin });
+          await checkImportBrowser(page, fixtureImport, { origin });
+          await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
           await checkCaptureBrowser(page, fixtureDaemon);
           await page.getByRole("link", { name: "Explore", exact: true }).click();
           await page.waitForURL("**/explore");

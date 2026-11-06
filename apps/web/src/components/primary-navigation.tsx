@@ -14,7 +14,7 @@ export function PrimaryNavigation() {
   return (
     <nav className="primary-navigation" aria-label="Main navigation">
       {destinations.map(({ href, label }) => {
-        const current = pathname === href || pathname.startsWith(`${href}/`);
+        const current = pathname === href || pathname.startsWith(`${href}/`) || (href === "/capture" && pathname === "/import");
         return (
           <Link key={href} href={href} className="navigation-link" aria-current={current ? "page" : undefined}>
             {label}

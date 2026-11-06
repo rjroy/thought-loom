@@ -288,21 +288,27 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await settleKnowledge(dbPath, pulse);
     assert.deepEqual(knowledge(dbPath), beforeExport, "exports must not mutate knowledge tables");
 
-    // Import admission belongs to this server-side fixture, never the browser.
+    // Exercise the real browser → Next → owned daemon import boundary.
     const importedText = `Indigo imported shared thinking ${viewport.width}`;
     const request = async (path: string, init: RequestInit = {}) => fetch(new URL(path, running.url), {
       ...init, headers: { authorization: `Bearer ${user}`, ...init.headers }, signal: AbortSignal.timeout(3000),
     });
-    const batchResponse = await request("/imports/markdown", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "owned-batch" }, body: "{}" });
-    assert.equal(batchResponse.status, 201);
+    await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
+    await page.getByRole("link", { name: /^import$/i }).or(page.getByRole("button", { name: /^import$/i })).click();
+    await expect(page.getByRole("heading", { name: "Import Markdown" })).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({ name: "owned.md", mimeType: "text/markdown", buffer: Buffer.from(importedText) });
+    const batchReceived = page.waitForResponse(response => new URL(response.url()).pathname === "/api/imports/markdown" && response.request().method() === "POST", { timeout: 10000 });
+    const fileReceived = page.waitForResponse(response => /^\/api\/imports\/markdown\/[^/]+\/files$/.test(new URL(response.url()).pathname) && response.request().method() === "POST", { timeout: 10000 });
+    const sealed = page.waitForResponse(response => /^\/api\/imports\/markdown\/[^/]+\/seal$/.test(new URL(response.url()).pathname) && response.request().method() === "POST", { timeout: 10000 });
+    await page.getByRole("button", { name: /^import 1 file$/i }).click();
+    const batchResponse = await batchReceived;
+    assert.equal(batchResponse.status(), 201);
     const batchId = string(record(record(await batchResponse.json()).import).id);
-    const form = new FormData(); form.set("metadata", JSON.stringify({ relativePath: "owned.md" }));
-    form.set("file", new Blob([importedText], { type: "text/markdown" }), "owned.md");
-    const upload = await request(`/imports/markdown/${batchId}/files`, { method: "POST", headers: { "idempotency-key": "owned-file" }, body: form });
-    assert.equal(upload.status, 202);
+    const upload = await fileReceived;
+    assert.equal(upload.status(), 202);
     const fileId = string(record(record(await upload.json()).file).id);
-    const seal = await request(`/imports/markdown/${batchId}/seal`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    assert.equal(seal.status, 200);
+    assert.equal((await sealed).status(), 200);
+    await expect(page).toHaveURL(new RegExp(`/import\\?batchId=${batchId}`));
     let imported: Record<string, unknown> = {};
     await until("Markdown import", async () => {
       const result = await daemonCall(running, `/imports/markdown/${batchId}/files/${fileId}`);
@@ -312,6 +318,12 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     }, pulse);
     assert.deepEqual(imported.segmentation, { method: "ai", reason: null }); assert.equal(imported.thoughtCount, 1);
     await settleKnowledge(dbPath, pulse);
+    await page.getByRole("button", { name: "Check report" }).click();
+    const importedRow = page.locator("li").filter({ hasText: "owned.md" });
+    await expect(importedRow.getByText("Imported", { exact: true })).toBeVisible();
+    await importedRow.getByRole("button", { name: "Inspect source" }).click();
+    const inspection = page.getByRole("dialog", { name: "Inspect original" });
+    await expect(inspection.getByText(importedText, { exact: true })).toBeVisible();
     const documentId = string(imported.documentId);
     const parts = record((await daemonCall(running, `/import-sources/${documentId}/parts?scope=history`)).value).items;
     assert.ok(Array.isArray(parts)); const thoughtParts = parts.map(record).filter(part => part.kind === "thought");
@@ -322,6 +334,10 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     const importedThought = record((await daemonCall(running, `/thoughts/${importedId}?scope=normal`)).value);
     assert.equal(importedThought.author, "source"); assert.equal(importedThought.kind, "imported-original");
     assert.equal(importedThought.text, importedText); assert.equal(importedThought.parentId, null); assert.deepEqual(importedThought.sourceIds, []);
+    await expect(inspection.getByRole("link", { name: "Open idea" })).toHaveAttribute("href", `/ideas/${encodeURIComponent(importedId)}`);
+    await inspection.getByRole("link", { name: "Open idea" }).click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(importedId)}`);
+    await expect(page.getByText(importedText, { exact: true }).first()).toBeVisible();
     const raw = await request(`/import-sources/${documentId}/raw?scope=history`);
     assert.equal(raw.status, 200); assert.deepEqual(Buffer.from(await raw.arrayBuffer()), Buffer.from(importedText));
     const denied = await fetch(new URL(`/import-sources/${documentId}/raw?scope=history`, running.url), { headers: { authorization: `Bearer ${ai}` }, signal: AbortSignal.timeout(3000) });

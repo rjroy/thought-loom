@@ -33,7 +33,9 @@ describe("fixed-purpose capture server handler", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.method).toBe("POST");
       expect(calls[0]?.path).toBe("/thoughts");
-      expect(JSON.parse(calls[0]?.body ?? "null")).toEqual(input);
+      const body = calls[0]?.body;
+      if (typeof body !== "string") throw new Error("Capture must send a JSON body");
+      expect(JSON.parse(body)).toEqual(input);
       expect(response.status).toBe(201);
       const result = await response.json();
       expect(result).toEqual(receipt);
@@ -46,7 +48,9 @@ describe("fixed-purpose capture server handler", () => {
     const response = await handleCapture(request(JSON.stringify({ text: "original", title: "" })), { callDaemon: async command => { calls.push(command); return json(daemonReceipt); } });
     expect(response.status).toBe(201);
     expect(calls).toHaveLength(1);
-    expect([{ text: "original" }, { text: "original", title: "" }]).toContainEqual(JSON.parse(calls[0]?.body ?? "null"));
+    const body = calls[0]?.body;
+    if (typeof body !== "string") throw new Error("Capture must send a JSON body");
+    expect([{ text: "original" }, { text: "original", title: "" }]).toContainEqual(JSON.parse(body));
   });
 
   for (const status of [400, 401, 403]) {

@@ -41,4 +41,4 @@ Rich-text editing, attachments, folders, background folder watching, or a conver
 
 ## Separate import entry
 
-An **Import** button to the right of the Capture page heading is the agreed entry into a separate [Markdown import flow](markdown-import.md). Keep it outside the thought/title form so it cannot be mistaken for part of the thought. This replaces the earlier below-textarea placement. Its daemon API is implemented, but the button and flow still require a designer-led comp-led design pass before client implementation. Import must not complicate or become a prerequisite for quick text capture.
+An **Import** action to the right of the Capture page heading opens a separate [Markdown import flow](markdown-import.md). Keep it outside the thought/title form so it cannot be mistaken for part of the thought. This replaces the earlier below-textarea placement. The user selected the Import Workspace composition and approved this heading-row entry through the designer-led comp-led pass. Import must not complicate or become a prerequisite for quick text capture.
