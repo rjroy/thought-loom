@@ -66,4 +66,4 @@ If nothing matches, say so plainly and allow another query. Do not fabricate con
 
 ## Still to decide
 
-Final relevance ranking and tie-breakers, and any further connection-eligibility rules beyond the recorded-context and rejection boundaries above. An explicitly separate agentic search mode is not required for 1.0; Agentic export is a different, approved workflow.
+Final relevance ranking and tie-breakers, and any further connection-eligibility rules beyond the recorded-context and rejection boundaries above. [Conversational agentic search](agentic-search.md) is now being designed as a separate planned workflow, not a silent change to ordinary Explore. Agentic export remains a different, approved workflow.
