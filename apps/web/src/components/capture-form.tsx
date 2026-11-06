@@ -1,23 +1,31 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { submitCapture, type CaptureResult, type CaptureSnapshot } from "../features/capture/submission";
-
-type CaptureState =
-  | { kind: "editing" }
-  | { kind: "saving"; snapshot: CaptureSnapshot }
-  | CaptureResult;
+import { submitCapture, type CaptureSnapshot } from "../features/capture/submission";
+import { useCaptureMemory, type CaptureState } from "./capture-provider";
+import styles from "./capture.module.css";
 
 export function CaptureForm() {
-  const [text, setText] = useState("");
-  const [title, setTitle] = useState("");
-  const [state, setState] = useState<CaptureState>({ kind: "editing" });
-  const [validation, setValidation] = useState<string | null>(null);
+  const memory = useCaptureMemory(), router = useRouter();
+  const initial = useRef(memory.current);
+  const [text, setText] = useState(initial.current?.text ?? "");
+  const [title, setTitle] = useState(initial.current?.title ?? "");
+  const [state, setState] = useState<CaptureState>(initial.current?.state ?? { kind: "editing" });
+  const [validation, setValidation] = useState<string | null>(initial.current?.validation ?? null);
   const inFlight = useRef(false);
   const thoughtField = useRef<HTMLTextAreaElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const focusNewDraft = useRef(false);
+
+  useEffect(() => { memory.current = null; }, [memory]);
+
+  function openImport() {
+    if (inFlight.current) return;
+    memory.current = { text, title, state, validation };
+    router.push("/import");
+  }
 
   useEffect(() => {
     if (state.kind === "saving" && thoughtField.current) {
@@ -71,6 +79,14 @@ export function CaptureForm() {
   const snapshot = state.kind === "saving" || state.kind === "uncertain" ? state.snapshot : undefined;
 
   return (
+    <>
+    <header className={`workspace-intro capture-heading ${styles.heading}`}>
+      <div className={styles.headingRow}>
+        <h1 id="capture-heading">Capture</h1>
+        <button className={styles.importAction} type="button" disabled={pending} onClick={openImport}>Import</button>
+      </div>
+      <p>Write or paste a thought.</p>
+    </header>
     <div className="capture-content">
       <div className={`capture-status capture-status--${state.kind}`} role="status" aria-atomic="true">
         {state.kind === "saving" && (
@@ -180,5 +196,6 @@ export function CaptureForm() {
         </form>
       )}
     </div>
+    </>
   );
 }

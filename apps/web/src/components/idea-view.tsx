@@ -20,10 +20,10 @@ type PreviewState = { phase: "loading" | "error"; stale: boolean }
 
 const materials = {
   "captured-original": "Original capture", "user-contribution": "Contribution",
-  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea",
+  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source",
 };
 const titleOf = (thought: IdeaThought) => thought.title ?? thought.text.trim().split(/\s+/).slice(0, 5).join(" ");
-const actor = (value: "user" | "ai") => value === "user" ? "You" : "AI";
+const actor = (value: "user" | "ai" | "source") => value === "user" ? "You" : value === "ai" ? "AI" : "Imported source";
 function dateOf(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat("en", {

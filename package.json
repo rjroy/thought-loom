@@ -21,10 +21,14 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
+    "@types/mdast": "4.0.4",
     "typescript": "7.0.2"
   },
   "dependencies": {
     "@opencode/client": "2.2.5",
-    "hono": "4.13.16"
+    "hono": "4.13.16",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0"
   }
 }

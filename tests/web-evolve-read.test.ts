@@ -11,6 +11,11 @@ const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise
 const request = (query = "") => new Request(`http://127.0.0.1:3000/api/evolve/thoughts/issued-1/responses/reply-1${query}`);
 
 describe("normal Evolve selected thought client", () => {
+  test("reads a source-authored imported original", async () => {
+    const imported = { ...thought, author: "source", kind: "imported-original", origin: "markdown-import", parentId: null } as const;
+    const result = await readEvolveThought("issued-1", { fetch: fakeFetch(async () => json(imported)) });
+    expect(result).toEqual({ kind: "found", value: imported });
+  });
   test("uses the fixed thought route and returns canonical matching data", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const result = await readEvolveThought("issued-1", { fetch: fakeFetch(async (input, init) => { calls.push({ url: String(input), init }); return json(thought); }) });

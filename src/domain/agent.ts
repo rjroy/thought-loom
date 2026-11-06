@@ -1,22 +1,27 @@
 import type { Actor } from "./rejection";
-import { RunConflictError, RunForbiddenError, RunNotFoundError, type RunKind, type RunStatus } from "./run";
+import { RunConflictError, RunForbiddenError, RunNotFoundError, type OrdinaryRunKind, type RunStatus } from "./run";
 import type { Thought } from "./thought";
 import { nonEmpty } from "./validation";
 import { exportIntent, type ExportIntent, type ExportReport } from "./agentic-export";
 
 /** User observation of durable local work, never native identities, machine envelopes, or raw run storage. */
-export interface AgentRunView {
+export interface OrdinaryAgentRunView {
   readonly id: string;
-  readonly kind: RunKind;
+  readonly kind: OrdinaryRunKind;
   readonly status: RunStatus;
   readonly confirmedThoughtIds: readonly string[];
   readonly responseId: string | null;
 }
-export interface EvolveAdmission { readonly contribution: Thought; readonly run: AgentRunView }
-export interface AgenticExportAdmission { readonly run: AgentRunView }
+export interface ImportRunView {
+  readonly id: string; readonly kind: "import"; readonly status: RunStatus;
+  readonly importId: string; readonly fileId: string;
+}
+export type AgentRunView = OrdinaryAgentRunView | ImportRunView;
+export interface EvolveAdmission { readonly contribution: Thought; readonly run: OrdinaryAgentRunView }
+export interface AgenticExportAdmission { readonly run: OrdinaryAgentRunView }
 export interface AgentRunRepository {
   admitEvolve(parentId: string, text: string): EvolveAdmission;
-  admitExport(intent: ExportIntent): AgentRunView;
+  admitExport(intent: ExportIntent): OrdinaryAgentRunView;
   report(id: string): ExportReport | null;
   status(id: string): AgentRunView | null;
   stop(id: string): AgentRunView;

@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConfigError, parseConfig, type DaemonConfig } from "../src/daemon/config";
+import { ConfigError, parseConfig, validateConfig, type DaemonConfig } from "../src/daemon/config";
 import { startDaemon, type DaemonEvent, type RunningDaemon } from "../src/daemon/runtime";
 
 const userToken = "user-0123456789-0123456789-abcdef";
@@ -125,6 +125,29 @@ describe("daemon configuration", () => {
     expect(parseConfig(env)).toEqual({ ...config(env.THOUGHTLOOM_DB_PATH, 3001), logLevel: "info" });
     expect(parseConfig({ ...env, THOUGHTLOOM_PORT: "0" }).port).toBe(0);
     expect(parseConfig({ ...env, THOUGHTLOOM_PORT: "65535" }).port).toBe(65535);
+  });
+
+  test("import byte limit omits an unset override and preserves an explicit override", () => {
+    expect(parseConfig(env).importMaxBytes).toBeUndefined();
+    expect(validateConfig(config(env.THOUGHTLOOM_DB_PATH)).importMaxBytes).toBeUndefined();
+    expect(parseConfig({ ...env, THOUGHTLOOM_IMPORT_MAX_BYTES: "37" }).importMaxBytes).toBe(37);
+    expect(validateConfig({ ...config(env.THOUGHTLOOM_DB_PATH), importMaxBytes: 37 }).importMaxBytes).toBe(37);
+  });
+
+  test("import byte limit rejects invalid environment and typed values with a safe diagnostic", () => {
+    const diagnostic = "THOUGHTLOOM_IMPORT_MAX_BYTES must be a positive safe integer";
+    const invalid = ["-1", "0", "1.5", "NaN", "9007199254740992", "private-value-marker"];
+    for (const value of invalid) {
+      expect(() => parseConfig({ ...env, THOUGHTLOOM_IMPORT_MAX_BYTES: value })).toThrow(diagnostic);
+      try { parseConfig({ ...env, THOUGHTLOOM_IMPORT_MAX_BYTES: value }); }
+      catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        expect((error as ConfigError).message).toBe(diagnostic);
+      }
+    }
+    for (const value of [-1, 0, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => validateConfig({ ...config(env.THOUGHTLOOM_DB_PATH), importMaxBytes: value })).toThrow(diagnostic);
+    }
   });
 
   test.each(invalidConfigs)("rejects invalid config with safe field diagnostic", ({ changes, fields }) => {

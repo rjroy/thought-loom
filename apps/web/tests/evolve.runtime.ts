@@ -7,6 +7,7 @@ type Attempt = { method: string; path: string; authorization: string | undefined
 type Run = { id: string; kind: "evolve"; status: Status; confirmedThoughtIds: string[]; responseId: string | null; contributionId: string; parentId: string };
 const start = { id: "evolve-start", text: "Owned starting thought", title: "Starting thought", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
 const earlier = { ...start, id: "evolve-earlier", text: "Owned earlier thought", title: "Earlier thought" };
+const imported = { ...start, id: "evolve-imported", text: "Owned imported starting thought", title: "Imported starting thought", author: "source", kind: "imported-original", origin: "markdown-import" };
 
 export function evolveDaemon(token: string) {
   const attempts: Attempt[] = [], runs = new Map<string, Run>();
@@ -14,7 +15,7 @@ export function evolveDaemon(token: string) {
   const rejected = new Set<string>();
   const fallbackStates = new Map<string, "complete" | "interrupted">();
   let admission: "normal" | "unknown" = "normal", stopFailure = false, resolutionFailure = false, failedResolutionReads = 0, next = 0;
-  const reset = () => { runs.clear(); thoughts.clear(); rejected.clear(); fallbackStates.clear(); thoughts.set(start.id, start); thoughts.set(earlier.id, earlier); admission = "normal"; stopFailure = false; resolutionFailure = false; failedResolutionReads = 0; next = 0; };
+  const reset = () => { runs.clear(); thoughts.clear(); rejected.clear(); fallbackStates.clear(); thoughts.set(start.id, start); thoughts.set(earlier.id, earlier); thoughts.set(imported.id, imported); admission = "normal"; stopFailure = false; resolutionFailure = false; failedResolutionReads = 0; next = 0; };
   reset();
   const publicRun = (run: Run) => ({ id: run.id, kind: run.kind, status: run.status, confirmedThoughtIds: run.confirmedThoughtIds, responseId: run.responseId });
   return {
@@ -120,6 +121,11 @@ export async function checkEvolveBrowser(page: Page, daemon: Fixture, options: {
     await page.goBack();
     await expect(page).toHaveURL(/\/evolve\?thoughtId=evolve-start/);
   };
+  await page.goto(`${options.origin}/evolve?thoughtId=evolve-imported`, { waitUntil: "networkidle" });
+  await startingText(imported.text);
+  const importedContext = page.locator("#evolve-starting-context");
+  await expect(importedContext.getByText("Imported source", { exact: true }).first()).toBeVisible();
+  await expect(importedContext.getByText("AI", { exact: true })).toHaveCount(0);
   await page.goto(`${options.origin}/evolve`, { waitUntil: "networkidle" });
   await expect(page.getByRole("banner").getByRole("link", { name: /(?:back|return).*(?:results|explore)/i })).toHaveAttribute("href", "/explore");
   const before = daemon.attempts.length;

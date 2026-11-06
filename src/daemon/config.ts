@@ -9,6 +9,7 @@ export interface DaemonConfig {
   readonly credentials: { readonly user: string; readonly ai: string };
   readonly agent?: AgentConfig | null;
   readonly logLevel?: LogLevel;
+  readonly importMaxBytes?: number;
 }
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
@@ -17,12 +18,15 @@ const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
 export function parseConfig(env: Readonly<Record<string, string | undefined>>): DaemonConfig {
   const rawPort = env.THOUGHTLOOM_PORT;
   if (rawPort !== undefined && !/^\d+$/.test(rawPort)) throw new ConfigError(portDiagnostic);
+  const rawImportMax = env.THOUGHTLOOM_IMPORT_MAX_BYTES;
+  if (rawImportMax !== undefined && !/^\d+$/.test(rawImportMax)) throw new ConfigError("THOUGHTLOOM_IMPORT_MAX_BYTES must be a positive safe integer");
   const agent = parseAgentConfig(env);
   const config = {
     port: rawPort === undefined ? 3001 : Number(rawPort),
     dbPath: env.THOUGHTLOOM_DB_PATH,
     credentials: { user: env.THOUGHTLOOM_USER_TOKEN, ai: env.THOUGHTLOOM_AI_TOKEN },
     logLevel: env.THOUGHTLOOM_LOG_LEVEL,
+    ...(rawImportMax === undefined ? {} : {importMaxBytes:Number(rawImportMax)}),
     ...(agent === null ? {} : {agent}),
   };
   return validateConfig(config);
@@ -53,5 +57,7 @@ export function validateConfig(input: unknown): DaemonConfig {
   const rawLevel = "logLevel" in input ? input.logLevel : undefined;
   const level = rawLevel === undefined ? "info" : typeof rawLevel === "string" ? rawLevel.trim().toLowerCase() : "";
   if (level !== "error" && level !== "warning" && level !== "info" && level !== "verbose") throw new ConfigError("THOUGHTLOOM_LOG_LEVEL must be error, warning, info or verbose");
-  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(agent === null ? {} : {agent}) };
+  const importMaxBytes = "importMaxBytes" in input ? input.importMaxBytes : undefined;
+  if (importMaxBytes !== undefined && (typeof importMaxBytes !== "number" || !Number.isSafeInteger(importMaxBytes) || importMaxBytes < 1)) throw new ConfigError("THOUGHTLOOM_IMPORT_MAX_BYTES must be a positive safe integer");
+  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(importMaxBytes === undefined ? {} : {importMaxBytes}), ...(agent === null ? {} : {agent}) };
 }

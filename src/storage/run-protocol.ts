@@ -1,6 +1,6 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
+import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
 import { parseEnvelope, protocolJson, type CancellationState, type NextStep, type ProtocolEnvelope, type RunProtocolRepository, type RunStep } from "../domain/run-protocol";
 import { nonEmpty } from "../domain/validation";
 import { isStepOperationCapability } from "../domain/run-operations";
@@ -11,7 +11,7 @@ import { SqliteRunAggregate } from "./run-aggregate";
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
   constructor(db: Database, logger: Logger = createLogger()) { super(db,logger); }
   steps(runId: string): readonly RunStep[] {
-    return this.transaction("read steps",runId,() => { this.require(runId); return this.readSteps(runId); });
+    return this.transaction("read steps",runId,() => { requireOrdinaryRun(this.require(runId)); return this.readSteps(runId); });
   }
   private current(run: RunRecord, promptId: string): RunStep {
     if (run.promptId !== promptId) throw new RunFenceError("Prompt is no longer current");
@@ -103,7 +103,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
   settleCancellation(runId: string): void {
     this.transaction("settle cancellation",runId,() => {
       const run = this.require(runId);
-      if (run.status !== "interrupted" && run.status !== "failed") throw new RunFenceError("Only fenced runs have native cancellation to settle");
+      if (run.status !== "interrupted" && run.status !== "failed" && !(run.kind === "import" && run.status === "completed")) throw new RunFenceError("Only fenced runs have native cancellation to settle");
       const state = this.cancellation(runId);
       if (state === "settled") return;
       if (state !== "pending") throw new RunConflictError("No pending native cancellation");

@@ -3,7 +3,7 @@ import { CreationNotFoundError } from "../domain/creation";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import { createThought } from "../domain/thought";
 import { nonEmpty, record, references } from "../domain/validation";
-import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Admission, type Claim, type ContextRef, type ContextValue, type NativeState, type Operation, type OperationResult, type Receipt, type ReplyDraft, type RunRecord, type RunRepository, type RunSources, type RunStatus } from "../domain/run";
+import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Admission, type Claim, type ContextRef, type ContextValue, type NativeState, type Operation, type OperationResult, type Receipt, type ReplyDraft, type RunRecord, type RunRepository, type RunSources, type RunStatus } from "../domain/run";
 import { SqliteSharedResponses } from "./shared-response";
 import { migrate } from "./sqlite";
 import { SqliteRunAggregate } from "./run-aggregate";
@@ -18,6 +18,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   admit(admission: Admission): void {
     this.transaction("admit", admission.run.id, () => {
       const { run, contribution } = admission;
+      requireOrdinaryRun(run);
       if (run.status !== "queued" || run.generation !== 0 || run.nativeState !== "unknown" ||
           (run.kind === "evolve") !== (contribution !== null) || run.inputThoughtId !== (contribution?.id ?? null)) throw new RunConflictError();
       for (const value of [run.id,run.sessionId,run.promptId,run.createdAt]) nonEmpty(value,"run identity");
@@ -34,6 +35,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   claim(id: string): Claim {
     const outcome = this.transaction("claim", id, () => {
       const run = this.require(id);
+      requireOrdinaryRun(run);
       this.active({ runId: id, generation: run.generation });
       if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run); return null; }
       const generation = run.generation + 1;
@@ -57,6 +59,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   }); }
   expose(claim: Claim, ref: ContextRef): ContextValue | null { return this.transaction("expose", claim.runId, () => {
     const run = this.require(claim.runId);
+    requireOrdinaryRun(run);
     if (run.status === "interrupted" && run.generation !== claim.generation) return null;
     this.active(claim);
     const visible = this.visibility();
@@ -78,7 +81,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   receipt(runId: string, operationId: string): Receipt | null { return this.receiptRead(runId,operationId); }
   commit(claim: Claim, input: Operation): OperationResult {
     return this.guarded("commit", claim, (run,visible) => {
-      if (run.kind === "export") throw new RunForbiddenError();
+      if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       if (input.type !== "development") throw new RunForbiddenError();
       const operation: Operation = { id: nonEmpty(input.id,"id"), type: "development", parentId: nonEmpty(input.parentId,"parentId"), text: nonEmpty(input.text,"text"), sourceIds: references(input.sourceIds,"sourceIds") };
       if (run.kind === "evolve" && operation.parentId !== run.inputThoughtId) throw new RunConflictError("Development parent must be the admitted contribution");
@@ -102,7 +105,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   }
   recordPartial(claim: Claim, draft: ReplyDraft): void {
     this.guarded("partial", claim, (run,visible) => {
-      if (run.kind === "export") throw new RunForbiddenError();
+      if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       const checked = createSharedResponse({ ...draft, state: "interrupted" });
       this.checkAssociations(run,checked,visible);
       this.db.run("INSERT INTO run_replies (run_id,draft_json) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=excluded.draft_json", [claim.runId,JSON.stringify({ id: checked.id,text: checked.text,role: checked.role,thoughtIds: checked.thoughtIds })]);
@@ -114,7 +117,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   }
   finish(claim: Claim, response: SharedResponse): void {
     this.guarded("finish", claim, (run,visible) => {
-      if (run.kind === "export") throw new RunForbiddenError();
+      if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       const value = createSharedResponse(response);
       this.checkAssociations(run,value,visible);
       new SqliteSharedResponses(this.db,this.logger).save(value);

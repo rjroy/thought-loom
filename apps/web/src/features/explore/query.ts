@@ -1,5 +1,5 @@
-export type SearchAuthor = "user" | "ai";
-export type SearchMaterialKind = "captured-original" | "user-contribution" | "ai-interpretation" | "developing-idea";
+export type SearchAuthor = "user" | "ai" | "source";
+export type SearchMaterialKind = "captured-original" | "user-contribution" | "ai-interpretation" | "developing-idea" | "imported-original";
 export interface SearchQuery {
   readonly q: string;
   readonly author: readonly SearchAuthor[];
@@ -10,8 +10,8 @@ export interface SearchQuery {
   readonly scope: "normal" | "show-rejected";
 }
 export type DatePreset = "anytime" | "last-7-days" | "last-30-days" | "this-year";
-const authors = ["user", "ai"] as const;
-const kinds = ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"] as const;
+const authors = ["user", "ai", "source"] as const;
+const kinds = ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"] as const;
 const sorts = ["relevance", "newest", "oldest"] as const;
 const scopes = ["normal", "show-rejected"] as const;
 function includes<T extends string>(values: readonly T[], value: string): value is T { return values.some(item => item === value); }

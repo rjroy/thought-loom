@@ -4,7 +4,8 @@ import type { WebConfig } from "./config";
 export interface DaemonRequest {
   readonly path: string;
   readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  readonly body?: string;
+  readonly body?: string | FormData;
+  readonly idempotencyKey?: string;
 }
 
 export interface DaemonDependencies {
@@ -23,7 +24,11 @@ export async function requestDaemon(config: WebConfig, request: DaemonRequest, d
   }
   if (!config.userToken || !/^[\x21-\x7e]+$/.test(config.userToken)) throw new Error("Valid user token is required");
   const headers = new Headers({ authorization: `Bearer ${config.userToken}` });
-  if (request.body !== undefined) headers.set("content-type", "application/json");
+  if (typeof request.body === "string") headers.set("content-type", "application/json");
+  if (request.idempotencyKey !== undefined) {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(request.idempotencyKey)) throw new Error("Invalid idempotency key");
+    headers.set("idempotency-key", request.idempotencyKey);
+  }
   deps.logger.verbose("Daemon request started", { method: request.method });
   try {
     const response = await deps.fetch(`${config.daemonOrigin}${request.path}`, {

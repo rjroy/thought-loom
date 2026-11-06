@@ -24,6 +24,23 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+The focused `bun --no-env-file test tests/markdown-import-parser.test.ts` checks the pure Markdown import parser's UTF-8 byte coverage, opaque frontmatter, complete blocks and dependency-safe grouping, strict selection envelope, and structural fallback. Test-owned wrappers around the real parser also check one AST pass across preparation and partitioning. Genuine preparations are deeply frozen and registered privately to their parser instance; partitioning rechecks source-byte fingerprints and coverage without reparsing. Cloned, forged, cross-instance, or byte-mismatched preparations are rejected. These tests make no import, daemon, or provider calls. Import workers use this parser.
+
+For a manual HTTP walkthrough, start an **owned test daemon** with a temporary database, test-only credentials and no agent configuration, then set `DAEMON` to its loopback URL and `USER_TOKEN` to its test user token. Use a test-owned UTF-8 Markdown file, not a personal vault. The following uses curl without converting file bytes; copy the returned batch and file IDs into `BATCH` and `FILE`:
+
+```sh
+curl -sS -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' -H 'Idempotency-Key: test-batch-1' -d '{}' "$DAEMON/imports/markdown"
+curl -sS -H "Authorization: Bearer $USER_TOKEN" -H 'Idempotency-Key: test-file-1' -F 'metadata={"relativePath":"fixture.md"}' -F 'file=@fixture.md;type=text/markdown' "$DAEMON/imports/markdown/$BATCH/files"
+curl -sS -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/imports/markdown/$BATCH/files/$FILE"
+curl -sS -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' -d '{}' "$DAEMON/imports/markdown/$BATCH/seal"
+```
+
+Poll until the file is terminal; an imported result supplies `documentId`. Inspect `/import-sources/DOCUMENT_ID/parts?scope=history` or download `/import-sources/DOCUMENT_ID/raw?scope=history` with the same test credential, replacing the placeholder with that ID. Compare the downloaded file bytes with the original fixture. Stop the owned daemon and remove its temporary database and fixture afterward. See the [API contract](daemon-api.md#markdown-import-and-source-inspection) for replay, errors and bounds; this walkthrough does not exercise a provider.
+
+For an explicit Linux-only parser resource probe, run `bun --no-env-file scripts/markdown-import-perf.ts` in an isolated source copy with frozen dependencies. The first JSON line identifies the three parser source files, package manifest and lockfile by SHA-256 and reports the Bun version. An optional `--revision-label LABEL` records a caller-supplied label; it does not establish that a working tree is clean. Each deterministic generated input runs in a fresh subprocess; the parent samples `/proc` RSS, stops a probe above 512 MiB or 10 seconds, and reports byte length, input and output hashes, reconstruction, elapsed time and sampled peak RSS. These are sampled validation stops, not OS resource limits or product input limits; sampling may miss transient peaks. The parent kills its active owned child on SIGINT, SIGTERM or normal error cleanup (SIGKILL cannot be handled). `--extended` adds larger probes; use it only after the baseline is safe. This probe is not part of the ordinary test suite and needs no daemon, provider or personal input.
+
+The harness is outside the root TypeScript include. Check it explicitly in the isolated copy with `bun --no-env-file node_modules/typescript/bin/tsc --ignoreConfig --noEmit --skipLibCheck --module preserve --moduleResolution bundler --target esnext --types bun scripts/markdown-import-perf.ts`.
+
 ### Web foundation checks
 
 ```sh
@@ -35,6 +52,10 @@ bun --no-env-file run web:test:integration
 ```
 
 `web:test` runs the controlled `tests/web-*.test.ts` unit checks, also included in the ordinary Bun suite. The production runtime harness is a separate opt-in: it builds and starts an owned loopback Next.js server, then uses the installed Playwright package and `/usr/bin/chromium`. It checks trusted Host/mutation Origin handling, generated browser assets and output for test-owned credential sentinels, and the shared shell's navigation, focus, local font, and overflow at desktop/narrow widths. It does not contact the operator daemon or a model provider, and does not install a browser automatically.
+
+`bun --no-env-file test tests/web-import-boundary.test.ts` checks the Next import boundary with controlled upstream responses: exact multipart bytes and idempotency keys, bounded uploads, trusted mutations, server-only credentials, report identity and shape validation, and uncertain outcomes without automatic replay. An isolated child fixture invokes the actual Next route exports, including import-run classification before Stop. These checks establish forwarding and response handling, not Next router behavior, browser interaction, or real-daemon deduplication.
+
+The import runtime companion exercises the Capture entry and retained draft, selection without upload, local Not sent files, exact upload bytes and keys, uncertain admission without automatic reupload, paginated report checks, mixed file outcomes, known-run Stop, report reopening and deliberate original inspection. Controlled client-helper tests separately cover request and response validation. Both source-copy harnesses include the import providers, components, styles and fixed server routes; keep their allowlists current when runtime inputs change.
 
 The runtime harness copies an explicit allowlist of current working-tree application/configuration files into an owned temporary workspace, installs the frozen root lock there with lifecycle scripts disabled, and builds and starts there with test-owned configuration. Dependencies resolve inside that workspace, not through links to the working tree. Generated `next-env.d.ts` and `.next` files are created by the fixture build, not copied or required from an earlier working-tree build. It excludes personal `.env` files and databases; do not remove personal configuration to run the checks. Update the source allowlist when adding runtime inputs so the fixture continues to represent the application. Bun's environment-file flag does not disable Next.js's independent application environment loading.
 
@@ -65,6 +86,8 @@ The Idea metadata check requires About to share the existing desktop action row 
 `web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.
 
 Unlike the per-screen fake-daemon runtime, this walkthrough connects the browser and production Next server to a real owned Hono daemon backed by temporary SQLite and injected deterministic fake-agent callbacks. Desktop and narrow paths follow the same Capture-created identity through Explore, Idea, Evolve and both exports, including the actual persisted AI interpretation, its parent/provenance, title changes, rejection/restoration and mounted known-run return. Non-export work settles by explicit state predicates before knowledge-table snapshots, and the intended Evolve follow-up weave must publicly complete rather than merely reach any terminal status. Fake interpretations cite their own job's fully read subject. Run/report bookkeeping may change without implying a knowledge mutation. Held fake responses are released before daemon drain, and cleanup attempts all owned resources even if an earlier release fails.
+
+A separate imported-record path selects and uploads test-owned Markdown in the browser through the Next import workspace, then opens its report, retained original and imported Idea against the real owned daemon. The fixture supplies strict fake-SDK segmentation using the submitted manifest. It checks exact source bytes, imported attribution, user-only original access and completed weaving, then follows that actual imported record through filtered Explore, Idea, Evolve, Simple export and an Agentic report with a source citation. Browser requests go through Next.js, never directly to the daemon. Both desktop and narrow viewports exercise this path.
 
 This proves controlled shared-record continuity, not real provider behavior, cross-reload workspace persistence, physical-device usability or screen-reader certification. Keep the detailed per-screen tests for recovery, focus, safe Markdown and request boundaries rather than duplicating every edge case in this walkthrough. Neither browser command starts or changes the operator OpenCode service.
 
@@ -99,6 +122,27 @@ This proves controlled shared-record continuity, not real provider behavior, cro
 
 Names in the last column refer to `tests/<name>.test.ts`. Some files contain integration checks as well as small unit cases; choose the boundary needed for the change, not just the filename.
 
+The import-attribution/storage-foundation slice can be checked without a parser, browser, provider or operator service:
+
+```sh
+bun --no-env-file test tests/domain.test.ts tests/search-contract.test.ts tests/sqlite.test.ts tests/capability-migration.test.ts tests/markdown-import-foundation.test.ts
+bun --no-env-file run typecheck
+```
+
+Build spellfix first for `search-contract` as described above. These checks cover exact imported thought text and later title attribution, unchanged user/AI combinations, source/imported-original filter/count shapes, fresh import membership/seal FK declarations, and populated predecessor preservation/reopen. The dedicated foundation fixtures also exercise direct-SQL seal and mapping guards, deferred-commit failure and rollback, reservation interleaving across two connections, bounded write-lock contention, rejection-safe inspection, and finalization rollback at 11 injected points including the last weave admission. Migration fixtures inject failures during staging and after destructive rebuild work has begun. These establish controlled transaction behavior, not simultaneous independent-worker execution or a large-database performance benchmark. The storage fixtures use test-owned parser manifests/ranges; the separate parser tests exercise the implemented Markdown preparation and selection functions. Neither suite establishes import-native terminal correlation or HTTP upload behavior.
+
+The separate no-agent daemon integration check is:
+
+```sh
+bun --no-env-file test tests/markdown-import-runtime.test.ts tests/markdown-import-foundation.test.ts tests/opencode-adapter.test.ts tests/import-authority.test.ts tests/supervisor-runtime.test.ts
+```
+
+`markdown-import-runtime` admits controlled source bytes through internal storage and starts an owned Hono/SQLite daemon. Unconfigured cases cover structural finalization, duplicate waiters, bounded local progress, metadata-only inputs, restart from a saved partition, pause, Stop and corrupt staging. The configured case injects an in-memory native facade and checks one restricted owned prompt, standard variant, validated AI grouping, exact private preparation, source preservation and atomic weave admission. It uses no HTTP import admission, provider or operator service. `opencode-adapter` separately tests import-only terminal classification, full history, exact output and fencing; `import-authority` exercises persisted SQLite observation authority and its negative cases. These tests do not yet establish the full configured fallback/restart/race/cancellation matrix or large-vault scheduler performance. Source-copy harnesses that start the real daemon must include `src/agent/import-driver.ts`, `src/agent/import-worker.ts`, `src/storage/import-authority.ts`, `src/storage/markdown-import.ts` and the parser facade/implementation/contract; the shared-record bootstrap explicitly enumerates these inputs. The fake-daemon browser foundation does not import the Hono runtime and needs no such expansion.
+
+Run `bun --no-env-file test tests/markdown-import-worker-preparation.test.ts` for deterministic worker parse-count checks. An injected paired `MarkdownParser` wraps the real AST parser, while real SQLite and an in-memory native facade exercise preparation, observation and partitioning. Valid/failed/invalid terminal paths and unchanged pre-dispatch retries keep one AST pass; restarting a submitted job or evicting its preparation causes no parse during pending observations and one restoration only at terminal selection. Durable-choice recovery uses zero AST/native calls, and Stop prevents cached source publication. The four-entry preparation cache is separate from fixed-size per-live-claim verification metadata; neither retains source buffers or AST/native graphs. These are exact call-count and authority tests, not flaky RSS thresholds or an exhaustive cache-invalidation/race proof. Repeat the explicit resource probe separately when assessing process memory.
+
+Exact-text fixtures must compare submitted wording, stored BLOB bytes and returned thought/search/projection text, including a segment beginning with U+FEFF after a leading separator. Equality between pre/post-migration database reads alone can hide a character lost during an earlier write. Thought writers bind UTF-8 bytes and cast to TEXT to avoid Bun's consumption of a leading U+FEFF in a string parameter.
+
 For example, title changes can be checked with:
 
 ```sh
@@ -130,7 +174,7 @@ The suite covers these distinctions:
 - Lost acknowledgements recover the existing external identity. Native completion is durable evidence for finalization, not proof that the local output has already committed. Replayed operations do not create another development.
 - Stop, stale ownership and rejected context fence later work. Submission authorization is checked as well as later writes, and a late successful acknowledgement cannot revive a stopped run. Drafts do not override the durable order of saved developments.
 
-Deterministic agent tests supply controlled model proposals and replies. They establish conditional title filling, scoped capabilities, saved developments and run behavior, not semantic model quality or live-provider availability. Other command/API tests still simulate AI-authored calls directly.
+Deterministic agent tests supply controlled model proposals and replies. They check the rendered weave discovery instructions and establish conditional title filling, scoped capabilities, full-read evidence, saved developments and run behavior, not that a model will discover connections, semantic model quality or live-provider availability. Other command/API tests still simulate AI-authored calls directly.
 
 Run-kernel tests use a controlled `NativeDispatcher`, not the real OpenCode client. They establish domain/storage recovery and fencing, not native service compatibility. Claim generation is not an expiry-based lease or a model effort quota.
 

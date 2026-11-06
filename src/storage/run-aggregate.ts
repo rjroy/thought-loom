@@ -7,12 +7,13 @@ import { CreationService } from "../domain/creation";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import { parseEnvelope, type RunStep } from "../domain/run-protocol";
 import { record } from "../domain/validation";
-import { RunConflictError, RunFenceError, RunNotFoundError, type Claim, type ContextRef, type ContextValue, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
+import { requireOrdinaryRun, RunConflictError, RunFenceError, RunNotFoundError, type Claim, type ContextRef, type ContextValue, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
 import { SqliteSharedResponses } from "./shared-response";
 import { SqliteStore } from "./sqlite";
 import { insertRun, readRun } from "./run-record";
+import { immediate } from "./transaction";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = (ref: ContextRef) => ContextValue | null;
@@ -42,7 +43,7 @@ export class SqliteRunAggregate {
   constructor(protected readonly db: Database, protected readonly logger: Logger = createLogger()) {}
   protected transaction<T>(operation: string, runId: string, action: () => T): T {
     this.logger.verbose(`[run storage] ${operation} attempt`, { runId });
-    try { const result = this.db.transaction(action).immediate(); this.logger.verbose(`[run storage] ${operation} succeeded`, { runId }); return result; }
+    try { const result = immediate(this.db,action); this.logger.verbose(`[run storage] ${operation} succeeded`, { runId }); return result; }
     catch (error) { this.logger.verbose(`[run storage] ${operation} failed`, { runId }); throw error; }
   }
   protected loadRun(id: string): RunRecord | null {
@@ -59,6 +60,7 @@ export class SqliteRunAggregate {
   protected guarded<T>(operation: string, claim: Claim, action: (run: RunRecord, visible: Visible) => T): T {
     const outcome = this.transaction(operation, claim.runId, () => {
       const run = this.active(claim);
+      requireOrdinaryRun(run);
       const visible = this.visibility();
       if (!this.contextValid(run,visible)) {
         this.finalInterrupt(run);
@@ -139,6 +141,12 @@ export class SqliteRunAggregate {
     if (response.thoughtIds.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
   }
   protected finalInterrupt(run: RunRecord): void {
+    if (run.kind === "import") {
+      this.db.run("UPDATE markdown_import_files SET outcome='interrupted',reason_code='interrupted' WHERE run_id=? AND outcome IS NULL",[run.id]);
+      this.db.run("DELETE FROM markdown_import_payloads WHERE file_id IN (SELECT id FROM markdown_import_files WHERE run_id=? AND outcome IS NOT NULL)",[run.id]);
+      this.db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);
+      return;
+    }
     const row = this.db.query("SELECT draft_json AS draft, response_id AS responseId FROM run_replies WHERE run_id=?").get(run.id) as { draft: string | null; responseId: string | null } | null;
     const associations = this.associations(run);
     if (row?.draft && !row.responseId && associations) {

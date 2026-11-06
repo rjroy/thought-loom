@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, resolveAgentService, type AgentBinding, type AgentBindings, type InboxItem, type NativeMessage, type NativeSession, type PublicClient } from "../src/agent/opencode-adapter";
+import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, resolveAgentService, type AgentBinding, type AgentBindings, type ImportTerminalEvidence, type InboxItem, type NativeMessage, type NativeSession, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunFenceError, RunService, type Claim, type NativeDispatcher } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteRunRepository } from "../src/storage/run";
@@ -22,6 +23,17 @@ class MemoryBindings implements AgentBindings {
     this.value = value;
   }
   get(_runId: string): AgentBinding | null { return this.value; }
+}
+
+// Test-owned authority models the persisted run kind, owning file and submission intent.
+// The real adapter must obtain this authority from storage, never from observeImport's caller.
+class ImportBindings extends MemoryBindings {
+  authorized = true;
+  submitted = true;
+  ownedPrompts: readonly PersistedPrompt[] = [prompt];
+  assertImportOwnership(actual: Claim, prompts: readonly PersistedPrompt[]): void {
+    if (!this.authorized || !this.submitted || actual.runId !== claim.runId || actual.generation !== claim.generation || JSON.stringify(prompts) !== JSON.stringify(this.ownedPrompts)) throw new RunFenceError("Import ownership or submission intent missing");
+  }
 }
 
 // Shapes mirror the SDK-decoded /session, /inbox and /message receipts, not fake wire envelopes.
@@ -63,6 +75,153 @@ class FakeClient implements PublicClient {
 const userMessage = (id: string, text: string, created: number): NativeMessage => ({ id, type: "user", time: { created }, text });
 const assistantMessage = (id: string, text: string, created: number): NativeMessage => ({ id, type: "assistant", time: { created, completed: created + 1 }, content: [{ type: "text", text }], finish: "stop" });
 const idle = (id: string, created: number): NativeMessage => ({ id, type: "idle", time: { created }, outcome: "succeeded" });
+
+describe("import-only native terminal observations", () => {
+  async function fixture() {
+    const client = new FakeClient();
+    const bindings = new ImportBindings();
+    let active = true;
+    const adapter = new OpenCodeAdapter(client, bindings, () => { if (!active) throw new RunFenceError(); });
+    await adapter.ensureSession(claim, binding);
+    const observe = adapter.observeImport.bind(adapter);
+    return { client, bindings, adapter, observe, stop: () => { active = false; } };
+  }
+  const user = userMessage(prompt.promptId, prompt.input, 1);
+  const setHistory = (client: FakeClient, data: readonly NativeMessage[]) => client.pages.set("first", { data, cursor: {} });
+  const unsuccessful = (outcome: string): NativeMessage => ({ id: "idle", type: "idle", time: { created: 4 }, outcome });
+  const hash = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+  function evidence(output: string, changes: Partial<ImportTerminalEvidence> = {}): ImportTerminalEvidence {
+    return { sessionId: binding.sessionId, promptId: prompt.promptId, inputSha256: hash(prompt.input), userMessageId: prompt.promptId,
+      assistantMessageId: "assistant", idleMessageId: "idle", idleOutcome: "succeeded", completedAt: 3, finish: "stop",
+      assistantError: false, idleError: false, outputByteLength: Buffer.byteLength(output, "utf8"), outputSha256: hash(output), ...changes };
+  }
+
+  test("failed or interrupted idle is terminal failure with or without safe assistant output", async () => {
+    const { client, observe } = await fixture();
+    for (const outcome of ["failed", "interrupted"] as const) for (const assistant of [[], [assistantMessage("assistant", "partial", 2)]]) {
+      setHistory(client, [user, ...assistant, unsuccessful(outcome)]);
+      const present = assistant.length > 0;
+      expect(await observe(claim, binding, [prompt])).toEqual({ state: "terminal-failure", evidence: evidence(present ? "partial" : "", { idleOutcome: outcome, ...(present ? {} : { assistantMessageId: null, completedAt: null, finish: null }) }) });
+    }
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("explicit assistant or idle error overrides a succeeded idle", async () => {
+    const { client, observe } = await fixture();
+    const assistant = assistantMessage("assistant", "partial", 2);
+    if (assistant.type !== "assistant") throw new Error("Expected assistant fixture");
+    for (const [message, terminal, changes] of [
+      [{ ...assistant, error: true }, idle("idle", 4), { assistantError: true }],
+      [{ ...assistant, finish: "error" }, idle("idle", 4), { finish: "error" }],
+      [assistant, { id: "idle", type: "idle", time: { created: 4 }, outcome: "succeeded", error: true }, { idleError: true }],
+    ] satisfies readonly (readonly [NativeMessage, NativeMessage, Partial<ImportTerminalEvidence>])[]) {
+      setHistory(client, [user, message, terminal]);
+      expect(await observe(claim, binding, [prompt])).toEqual({ state: "terminal-failure", evidence: evidence("partial", changes) });
+    }
+  });
+
+  test("completed native output is exact, including empty, whitespace and non-stop output", async () => {
+    const { client, observe } = await fixture();
+    for (const output of ["", " \n ", "café 🧵\n漢字"]) {
+      setHistory(client, [user, assistantMessage("assistant", output, 2), idle("idle", 4)]);
+      expect(await observe(claim, binding, [prompt])).toEqual({ state: "terminal-completion", output, evidence: evidence(output) });
+    }
+    const message = assistantMessage("assistant", "truncated", 2);
+    if (message.type !== "assistant") throw new Error("Expected assistant fixture");
+    setHistory(client, [user, { ...message, finish: "length" }, idle("idle", 4)]);
+    expect(await observe(claim, binding, [prompt])).toEqual({ state: "terminal-completion", output: "truncated", evidence: evidence("truncated", { finish: "length" }) });
+  });
+
+  test("incomplete or ambiguous native evidence never produces a terminal result", async () => {
+    const { client, observe } = await fixture();
+    const incomplete: NativeMessage = { id: "assistant", type: "assistant", time: { created: 2 }, content: [], finish: "stop" };
+    for (const data of [[], [user], [user, incomplete, idle("idle", 4)], [user, assistantMessage("assistant", "x", 2), unsuccessful("future-outcome")], [user, assistantMessage("assistant", "x", 2), idle("idle", 4), idle("extra", 5)]]) {
+      setHistory(client, data);
+      expect(await observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    }
+    client.pages.set("first", { data: [user], cursor: { next: "repeat" } });
+    client.pages.set("repeat", { data: [], cursor: { next: "repeat" } });
+    expect(await observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    client.history = async () => { throw new Error("lost acknowledgement"); };
+    expect(await observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("queued and active work is not settled by a terminal-looking history", async () => {
+    const { client, observe } = await fixture();
+    setHistory(client, [user, unsuccessful("failed")]);
+    client.queued = [{ id: prompt.promptId, sessionID: binding.sessionId, type: "user", payload: { text: prompt.input }, delivery: "queue", time: { created: 1 } }];
+    expect(await observe(claim, binding, [prompt])).toEqual({ state: "pending" });
+    client.queued = [];
+    client.activeState = { [binding.sessionId]: {} };
+    expect(await observe(claim, binding, [prompt])).toEqual({ state: "running" });
+  });
+
+  test("full pagination correlates only the current prompt and rejects foreign or unsafe context", async () => {
+    const { client, bindings, observe } = await fixture();
+    bindings.ownedPrompts = [prompt, other];
+    client.pages.set("first", { data: [user, unsuccessful("failed")], cursor: { next: "next" } });
+    client.pages.set("next", { data: [userMessage(other.promptId, other.input, 5)], cursor: {} });
+    expect(await observe(claim, binding, [prompt, other])).toEqual({ state: "uncertain" });
+    client.pages.set("next", { data: [userMessage(other.promptId, other.input, 5), unsuccessful("failed")], cursor: {} });
+    // Message IDs must be unique across pages.
+    expect(await observe(claim, binding, [prompt, other])).toEqual({ state: "uncertain" });
+    client.pages.set("next", { data: [userMessage(other.promptId, other.input, 5), { id: "idle-current", type: "idle", time: { created: 6 }, outcome: "failed" }], cursor: {} });
+    expect(await observe(claim, binding, [prompt, other])).toMatchObject({ state: "terminal-failure" });
+    expect(client.calls.filter(call => call.method === "history").some(call => JSON.stringify(call.input).includes('"cursor":"next"'))).toBe(true);
+    bindings.ownedPrompts = [prompt];
+    for (const data of [[userMessage(prompt.promptId, "altered", 1), unsuccessful("failed")], [user, userMessage("foreign", "foreign", 2), unsuccessful("failed")], [{ ...user, unsafe: true }, unsuccessful("failed")]]) {
+      setHistory(client, data);
+      expect(await observe(claim, binding, [prompt])).toEqual({ state: "quarantined" });
+    }
+  });
+
+  test("persisted import ownership, submission intent and claim fencing cannot be bypassed", async () => {
+    const { client, bindings, observe, stop } = await fixture();
+    setHistory(client, [user, unsuccessful("failed")]);
+    bindings.authorized = false;
+    await expect(observe(claim, binding, [prompt])).rejects.toThrow(RunFenceError);
+    bindings.authorized = true;
+    bindings.submitted = false;
+    await expect(observe(claim, binding, [prompt])).rejects.toThrow(RunFenceError);
+    bindings.submitted = true;
+    stop();
+    await expect(observe(claim, binding, [prompt])).rejects.toThrow(RunFenceError);
+  });
+
+  test("session drift and Stop during a native read cannot yield terminal evidence", async () => {
+    const first = await fixture();
+    setHistory(first.client, [user, unsuccessful("failed")]);
+    const originalGet = first.client.sessionGet.bind(first.client);
+    let reads = 0;
+    first.client.sessionGet = async input => {
+      const session = await originalGet(input);
+      reads++;
+      return reads === 2 ? { ...session, metadata: { owner: "foreign" } } : session;
+    };
+    expect(await first.observe(claim, binding, [prompt])).toEqual({ state: "quarantined" });
+    expect(reads).toBe(2);
+
+    const second = await fixture();
+    second.client.history = async () => {
+      second.stop();
+      return { data: [user, unsuccessful("failed")], cursor: {} };
+    };
+    await expect(second.observe(claim, binding, [prompt])).rejects.toThrow(RunFenceError);
+  });
+
+  test("ordinary observation retains uncertain behavior for failure, errors and empty output", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    const message = assistantMessage("assistant", "x", 2);
+    if (message.type !== "assistant") throw new Error("Expected assistant fixture");
+    for (const data of [[user, unsuccessful("failed")], [user, { ...message, error: true }, idle("idle", 4)], [user, assistantMessage("assistant", "", 2), idle("idle", 4)]]) {
+      setHistory(client, data);
+      expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    }
+  });
+});
 
 async function withPersistedSecondStep(action: (value: { client: FakeClient; adapter: OpenCodeAdapter; claim: Claim; binding: AgentBinding; first: { promptId: string; input: string }; next: { promptId: string; input: string }; runs: SqliteRunRepository }) => Promise<void>) {
   const dir = mkdtempSync(join("/tmp/opencode", "owned-adapter-history-"));

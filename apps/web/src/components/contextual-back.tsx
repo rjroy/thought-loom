@@ -40,7 +40,7 @@ export function ContextualBack() {
   const [dismissed, setDismissed] = useState(false);
   if (!context) throw new Error("Contextual navigation requires its mounted provider.");
   const entry = context.entry;
-  const contextualRoute = pathname.startsWith("/ideas/") || pathname === "/evolve" || pathname === "/export";
+  const contextualRoute = pathname.startsWith("/ideas/") || pathname === "/evolve" || pathname === "/export" || pathname === "/import";
   if (!contextualRoute || !entry || entry.pathname !== pathname) return null;
   return <span className="contextual-back" data-dismissed={dismissed}
     onPointerEnter={() => setDismissed(false)} onFocus={() => setDismissed(false)}

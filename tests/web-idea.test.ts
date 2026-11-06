@@ -4,6 +4,7 @@ import { commandIdea, readIdea } from "../apps/web/src/features/idea/request";
 import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaThought, SharedResponse } from "../apps/web/src/features/idea/types";
 import { handleIdeaCommand, handleIdeaRead } from "../apps/web/src/server/idea";
 import type { DaemonRequest } from "../apps/web/src/server/daemon";
+import { connection as validConnection, thought as validThought } from "../apps/web/src/features/idea/validation";
 
 const root = { id: "root-1", text: "immutable original thought", title: "Title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "parent-1", sourceIds: ["source-1", "missing-source"] } satisfies IdeaThought;
 const parent = { ...root, id: "parent-1", text: "parent text", parentId: "hidden-parent", sourceIds: [] };
@@ -295,6 +296,15 @@ describe("fixed Idea commands", () => {
 });
 
 describe("Idea client request outcomes", () => {
+  test("decodes imported source thoughts without extending title or connection attribution", async () => {
+    const imported = { ...root, author: "source", kind: "imported-original", origin: "markdown-import", parentId: null, sourceIds: [] } as const;
+    expect(validThought(imported)).toBe(true);
+    expect(validThought({ ...imported, titleAuthor: "source" })).toBe(false);
+    expect(validConnection({ ...edge, proposedBy: "source" })).toBe(false);
+    const value = { thought: imported, parent: null, children: [], sources: [], connections: [], responses: [], focusedResponse: null };
+    const result = await readIdea("root-1", { scope: "normal", part: "view" }, { fetch: fakeFetch(async () => json(value)) });
+    expect(result).toEqual({ kind: "view", value });
+  });
   const command: IdeaCommand = { action: "reject-branch", thoughtId: "root-1", preview };
   test("view decoding retains direct context and rejects a missing or malformed projection", async () => {
     const value = { thought: root, parent: { id: "parent-1", thought: parent }, children: [child], sources: [{ id: "source-1", thought: source }, { id: "missing-source", thought: null }], connections: [{ connection: edge, thought: source }], responses: [reply], focusedResponse: reply };

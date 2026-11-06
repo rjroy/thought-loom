@@ -14,7 +14,7 @@ const titleOf = (thought: IdeaThought) => thought.title ?? thought.text.trim().s
 const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
 const kinds = {
   "captured-original": "Original capture", "user-contribution": "Contribution",
-  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea",
+  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source",
 };
 
 export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
@@ -186,7 +186,7 @@ function Exchange({ value, latest, workspace }: {
 }
 
 function Byline({ thought }: { thought: IdeaThought }) {
-  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : styles.ai}>{thought.author === "user" ? "You" : "AI"}</span> · {kinds[thought.kind]}</p>;
+  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : styles.ai}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · {kinds[thought.kind]}</p>;
 }
 
 function Development({ thought, unconfirmed = false }: { thought: IdeaThought; unconfirmed?: boolean }) {

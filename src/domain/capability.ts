@@ -1,6 +1,6 @@
 import { RunConflictError, RunForbiddenError, type Claim, type ContextRef } from "./run";
 import { parseStepOperation, type StepOperation, type StepOperationResult } from "./run-operations";
-import { createThought, type Thought } from "./thought";
+import { createThought, type Thought, type ThoughtAuthor } from "./thought";
 import { createConnection, type Connection } from "./connection";
 import { createSharedResponse, type SharedResponse } from "./shared-response";
 import { protocolJson } from "./run-protocol";
@@ -20,7 +20,7 @@ export interface Candidate {
   readonly id: string;
   readonly thoughtId: string;
   readonly title: string;
-  readonly author: "user" | "ai";
+  readonly author: ThoughtAuthor;
   readonly snippet: string;
 }
 export type ReadCapabilityResult =
@@ -92,7 +92,7 @@ export function readCapabilityResult(request: ReadCapabilityRequest, input: unkn
         fields(candidate,["kind","id","thoughtId","title","author","snippet"]);
         if (typeof candidate.snippet !== "string") throw new RunConflictError();
         return { kind: oneOf(candidate.kind,"kind",["thought","response"]), id: nonEmpty(candidate.id,"id"), thoughtId: nonEmpty(candidate.thoughtId,"thoughtId"),
-          title: nonEmpty(candidate.title,"title"), author: oneOf(candidate.author,"author",["user","ai"]), snippet: candidate.snippet };
+          title: nonEmpty(candidate.title,"title"), author: oneOf(candidate.author,"author",["user","ai","source"]), snippet: candidate.snippet };
       });
       return { type: "search", candidates };
     }

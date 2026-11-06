@@ -41,7 +41,7 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
   }
   executeStep(claim: Claim, promptId: string, input: StepOperation): StepOperationResult {
     const result = this.guarded("execute step",claim,(run,visible) => {
-      if (run.kind === "export") throw new RunForbiddenError();
+      if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       const operation = parseStepOperation(input);
       const step = this.readStep(run.id,promptId);
       if (!step || !["completed","processed"].includes(step.state) ||

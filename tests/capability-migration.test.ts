@@ -39,6 +39,113 @@ const predecessor = `
   INSERT INTO run_context VALUES ('run','thought','subject'),('run','thought','issued'),('run','response','reply');
 `;
 
+// Frozen artifacts that depend on the predecessor's thought/run closure.
+function seedClosure(db: Database): void {
+  db.exec(predecessor);
+  db.exec(`
+    CREATE TABLE agent_bindings (run_id TEXT PRIMARY KEY NOT NULL REFERENCES runs(id),session_id TEXT UNIQUE NOT NULL,service_url TEXT NOT NULL,directory TEXT NOT NULL,model_json TEXT NOT NULL,permissions_json TEXT NOT NULL,protocol_version INTEGER NOT NULL);
+    CREATE TABLE export_intents (run_id TEXT PRIMARY KEY NOT NULL REFERENCES runs(id),request TEXT NOT NULL,effort TEXT NOT NULL);
+    CREATE TABLE export_reports (run_id TEXT PRIMARY KEY NOT NULL REFERENCES export_intents(run_id),prompt_id TEXT NOT NULL,markdown TEXT NOT NULL,sources_json TEXT NOT NULL);
+    INSERT INTO runs VALUES ('export','export','completed','export-session','export-prompt','2032',2,NULL,NULL,NULL,'none');
+    INSERT INTO agent_bindings VALUES ('run','session','https://fixture.invalid','/owned','{"model":"test"}','["read"]',1);
+    INSERT INTO export_intents VALUES ('export','exact request','standard');
+    INSERT INTO export_reports VALUES ('export','export-prompt','Report café\r\nline','[{"id":"issued"}]');
+    INSERT INTO run_steps VALUES ('run',0,'prompt-0','journal café\r\nline','processed','completed','{"kind":"request"}','{"type":"thought"}');
+    INSERT INTO run_steps VALUES ('export',0,'export-prompt','export input','completed','completed','{"kind":"report"}',NULL);
+    INSERT INTO run_operation_receipts VALUES ('run','prompt-0','{"text":"café"}','issued','{"text":"result"}','step');
+    INSERT INTO run_issued_thoughts VALUES ('run','prompt-0','issued',0);
+  `);
+}
+
+function closureSnapshot(db: Database): unknown {
+  return [
+    db.query("SELECT rowid,id,hex(CAST(text AS BLOB)) AS text,author,kind,created_at,origin,parent_id FROM thoughts ORDER BY rowid").all(),
+    ...["thought_titles", "responses", "response_thoughts", "response_seals", "runs", "run_steps", "run_operation_receipts", "run_issued_thoughts", "agent_bindings", "export_intents", "export_reports"].map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()),
+    db.query("SELECT rowid,run_id,kind,ref_id FROM run_context ORDER BY rowid").all(),
+    db.query("SELECT hex(CAST(markdown AS BLOB)) AS markdown,hex(CAST(sources_json AS BLOB)) AS sources FROM export_reports ORDER BY rowid").all(),
+    db.query("SELECT hex(CAST(input AS BLOB)) AS input,hex(CAST(envelope_json AS BLOB)) AS envelope,hex(CAST(result_json AS BLOB)) AS result FROM run_steps ORDER BY rowid").all(),
+  ];
+}
+
+test("populated predecessor closure and native journal bytes survive failure, retry and repeated reopen", () => {
+  const dir = mkdtempSync(join("/tmp/opencode", "closure-predecessor-"));
+  const path = join(dir, "owned.sqlite"), db = new Database(path);
+  try {
+    seedClosure(db);
+    const before = closureSnapshot(db);
+    const schema = db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all();
+    // Force failure inside closure staging after earlier migration work has begun.
+    db.exec("CREATE TEMP TABLE import_migration_0 (sentinel TEXT)");
+    expect(() => migrate(db)).toThrow(/import_migration_0|already exists/i);
+    expect(db.inTransaction).toBe(false);
+    expect(db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all()).toEqual(schema);
+    expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.exec("DROP TABLE temp.import_migration_0");
+    migrate(db);
+    expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    migrate(db);
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); migrate(reopened);
+      expect(closureSnapshot(reopened)).toEqual(before);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("failure after destructive closure rebuild and copied runs restores predecessor schema and data", () => {
+  const dir = mkdtempSync(join("/tmp/opencode", "closure-after-copy-"));
+  const path = join(dir, "owned.sqlite"), db = new Database(path);
+  try {
+    seedClosure(db);
+    db.exec("CREATE TRIGGER predecessor_thought_immutable BEFORE UPDATE ON thoughts BEGIN SELECT RAISE(ABORT,'predecessor immutable'); END");
+    const before = closureSnapshot(db);
+    const schema = db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all();
+    const tables = ["thoughts", "thought_titles", "responses", "response_thoughts", "response_seals", "runs", "run_steps", "run_context", "run_operation_receipts", "run_issued_thoughts", "agent_bindings", "export_intents", "export_reports"];
+    const foreignKeys = () => tables.map(table => db.query(`PRAGMA foreign_key_list(${table})`).all());
+    const originalForeignKeys = foreignKeys();
+    let injected = false;
+    // Intercept only this connection, after SQLite executes the real run-row copy.
+    const failingDb = new Proxy(db, {
+      get(target, property) {
+        if (property === "exec") return (sql: string) => {
+          const result = target.exec(sql);
+          if (/^INSERT INTO "runs"\s/i.test(sql) && sql.includes("__preserved_rowid")) {
+            injected = true;
+            expect(target.query("SELECT count(*) AS n FROM runs").get()).toEqual({ n: 2 });
+            expect(target.query("PRAGMA table_info(thoughts)").all()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "import_document_id" })]));
+            throw new Error("injected after run copy");
+          }
+          return result;
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    expect(() => migrate(failingDb)).toThrow("injected after run copy");
+    expect(injected).toBe(true);
+    expect(db.inTransaction).toBe(false);
+    expect(db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all()).toEqual(schema);
+    expect(foreignKeys()).toEqual(originalForeignKeys);
+    expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(() => db.run("UPDATE thoughts SET text='changed' WHERE id='subject'")).toThrow(/predecessor immutable/);
+    migrate(db);
+    expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); migrate(reopened);
+      expect(closureSnapshot(reopened)).toEqual(before);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(reopened.query("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='predecessor_thought_immutable'").get()).toEqual({ sql: "CREATE TRIGGER predecessor_thought_immutable BEFORE UPDATE ON thoughts BEGIN SELECT RAISE(ABORT,'predecessor immutable'); END" });
+      expect(() => reopened.run("UPDATE thoughts SET text='changed' WHERE id='subject'")).toThrow(/immutable/);
+    } finally { reopened.close(); }
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("populated predecessor steps and exposure witnesses survive core migration and reopen", () => {
   const dir = mkdtempSync(join("/tmp/opencode", "capability-predecessor-"));
   const path = join(dir, "owned.sqlite");
@@ -89,6 +196,16 @@ test("populated predecessor steps and exposure witnesses survive core migration 
       reopened.run("UPDATE run_steps SET result_json=? WHERE prompt_id='prompt-1'", [JSON.stringify({ type: "thought", thought: null })]);
       reopened.exec("ROLLBACK TO staged_result; RELEASE staged_result");
       expect(protocol.steps("run")).toEqual(expectedSteps);
+      // Existing rows have no import membership; the new membership is guarded by a seal FK.
+      expect(reopened.query("PRAGMA table_info(thoughts)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "import_document_id", notnull: 0 }),
+      ]));
+      expect(reopened.query("PRAGMA foreign_key_list(thoughts)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ from: "import_document_id", table: "import_document_seals", to: "document_id" }),
+      ]));
+      expect(reopened.query("SELECT id,import_document_id FROM thoughts ORDER BY id").all()).toEqual([
+        { id: "issued", import_document_id: null }, { id: "subject", import_document_id: null },
+      ]);
     } finally { reopened.close(); }
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });

@@ -8,6 +8,7 @@ const thought = { id: "idea-root", text: original, title: "Owned original title"
 const source = { ...thought, id: "idea-source", text: "Owned supporting source", title: "Owned source", parentId: null, sourceIds: [] };
 const parent = { ...thought, id: "idea-parent", text: "Owned rejected ancestor", title: "Owned parent", parentId: null, sourceIds: [] };
 const plain = { ...thought, id: "idea-plain", text: "Owned plain idea with no reply", title: "Plain idea", parentId: null, sourceIds: [] };
+const imported = { ...plain, id: "idea-imported", text: "Owned imported idea", title: "Imported idea", author: "source", kind: "imported-original", origin: "markdown-import" };
 const child = { ...thought, id: "idea-child", text: "Owned direct interpretation", title: "Owned interpretation", titleAuthor: null, author: "ai", kind: "ai-interpretation", parentId: "idea-root", sourceIds: ["idea-root", "idea-hidden"] };
 const grandchild = { ...child, id: "idea-grandchild", text: "Owned grandchild not direct context", title: "Owned grandchild", parentId: "idea-child", sourceIds: [] };
 const edge = { id: "idea-edge", fromId: "idea-root", toId: "idea-source", category: "supports", proposedBy: "ai", explanation: "Owned directed connection rationale", sourceIds: [] };
@@ -47,6 +48,7 @@ export function ideaDaemon(token: string) {
         }
         if (url.pathname === "/thoughts/idea-root") { if (rootRejected && !inspection) { res.writeHead(404).end(); return; } send({ ...thought, title, titleAuthor: title === null ? null : "user", ...(inspection ? { rejected: rootRejected } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-plain") { send({ ...plain, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-imported") { send({ ...imported, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/thought-1") { send({ ...plain, id: "thought-1", text: "Owned matching thought for contextual navigation", title: "Owned development", author: "ai", kind: "developing-idea" }); return; }
         if (/^\/thoughts\/thought-1\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
         if (url.pathname === "/thoughts/idea-source") { send({ ...source, ...(inspection ? { rejected: false } : {}) }); return; }
@@ -106,6 +108,10 @@ export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: 
 
 export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { origin: string; narrow: boolean }): Promise<void> {
   daemon.reset();
+  await page.goto(`${options.origin}/ideas/idea-imported`, { waitUntil: "networkidle" });
+  await expect(page.getByText(imported.text, { exact: true })).toBeVisible();
+  await expect(page.locator("main").getByText("Imported source", { exact: true }).first()).toBeVisible();
+  await expect(page.locator("main").getByText("AI", { exact: true })).toHaveCount(0);
   const menu = page.getByRole("button", { name: "More actions" });
   const openMenu = async () => { if (await menu.getAttribute("aria-expanded") !== "true") await menu.click(); };
   const navigation = await page.goto(`${options.origin}/ideas/idea-plain`, { waitUntil: "networkidle" });

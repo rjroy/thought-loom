@@ -224,8 +224,8 @@ export function ExploreView() {
   const selectedCount = query.author.length + query.kind.length
     + (query.from || query.to ? 1 : 0) + (query.scope === "show-rejected" ? 1 : 0);
   const selectionSummary = [
-    ...authorOptions.filter(option => query.author.includes(option.value)).map(option => option.label),
-    ...kindOptions.filter(option => query.kind.includes(option.value)).map(option => option.label),
+    ...query.author.map(value => value === "source" ? "Imported source" : authorOptions.find(option => option.value === value)?.label ?? value),
+    ...query.kind.map(value => value === "imported-original" ? "Imported source" : kindOptions.find(option => option.value === value)?.label ?? value),
     ...(query.from || query.to ? [view.dateChoice === "custom" ? "Custom dates" : "Date filter"] : []),
     ...(query.scope === "show-rejected" ? ["Show rejected"] : []),
   ].join(" · ");
@@ -421,7 +421,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
   rejected: boolean | null | undefined;
   onToggle: () => void;
 }) {
-  const classification = kindOptions.find(option => option.value === result.materialKind)!.singular;
+  const classification = result.materialKind === "imported-original" ? "Imported source" : kindOptions.find(option => option.value === result.materialKind)!.singular;
   const date = createdDate(result.createdAt);
   const context = result.context?.thought;
 
@@ -430,7 +430,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
       <div className={styles.cardBody}>
         <div className={styles.byline}>
           <span className={result.author === "user" ? styles.user : styles.ai}>
-            {result.author === "user" ? "You" : "AI"}
+            {result.author === "user" ? "You" : result.author === "ai" ? "AI" : "Imported source"}
           </span>
           <span>{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
           {result.kind === "thought" && inspectRejection && (

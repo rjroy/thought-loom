@@ -77,7 +77,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
               {workspace.rootState === "loading" ? <p role="status">Loading starting idea…</p> : workspace.root ? <div className={styles.root}>
                 <strong>{workspace.root.title || "Untitled thought"}</strong>
                 <p>{workspace.root.text}</p>
-                <span>{workspace.root.author === "user" ? "You" : "AI"} · {workspace.root.kind.replaceAll("-", " ")}</span>
+                <span>{workspace.root.author === "user" ? "You" : workspace.root.author === "ai" ? "AI" : "Imported source"} · {workspace.root.kind.replaceAll("-", " ")}</span>
               </div> : <p className={styles.warning}>Starting idea unavailable in this view. Simple export needs an available starting thought.</p>}
             </div>
             <div className={styles.field}>

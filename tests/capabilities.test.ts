@@ -120,6 +120,14 @@ describe("run-scoped capabilities and durable witnesses", () => {
     expect(value.db.query("SELECT COUNT(*) AS n FROM connections").get()).toEqual({ n: 1 });
   }));
 
+  test("rejected candidate cannot be found or read for discovery", () => fixture(value => {
+    value.rejection.rejectThought("user", "candidate");
+    const run = start(value);
+    expect(run.invoke(search)).toEqual({ type: "search", candidates: [] });
+    expect(run.invoke(read("candidate"))).toEqual({ type: "thought", thought: null });
+    expect(value.dispatcher.fullReadWitnesses(run.run.id)).not.toContainEqual({ kind: "thought", id: "candidate" });
+  }));
+
   test("full response exposure tracks every association and fences cached delivery after rejection", () => fixture(value => {
     const run = start(value);
     const request: CapabilityRequest = { capability: "readResponse", arguments: { id: "shared" } };
@@ -152,6 +160,7 @@ describe("run-scoped capabilities and durable witnesses", () => {
     const result = run.dispatch(request);
     expect(result.type).toBe("connection-read");
     expect(value.runs.contextRefs(run.run.id)).toEqual(expect.arrayContaining([{ kind: "connection", id: "existing-link" }, { kind: "thought", id: "subject" }, { kind: "thought", id: "candidate" }]));
+    expect(value.dispatcher.fullReadWitnesses(run.run.id)).not.toContainEqual({ kind: "thought", id: "candidate" });
     const reopened = new Database(value.db.filename);
     try {
       migrate(reopened);

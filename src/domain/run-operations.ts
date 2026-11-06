@@ -19,7 +19,7 @@ export interface WeaveIntent { readonly subjectId: string; readonly triggerId: s
 
 /** Shared authority for trusted operations and model dispatch; neither can choose another run's subject or contribution. */
 export function stepOperationScope(run: RunRecord, intent: WeaveIntent | null, operation: StepOperation): { readonly subjectId: string | null; readonly refs: readonly string[] } {
-  if (run.kind === "export") throw new RunForbiddenError();
+  if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
   if (run.kind === "weave" && !intent) throw new RunConflictError("Legacy weave subject is unknown");
   const subjectId = intent?.subjectId ?? null;
   if (operation.type === "development" && (run.kind !== "evolve" || operation.parentId !== run.inputThoughtId)) throw new RunConflictError("Development parent must be the admitted contribution");

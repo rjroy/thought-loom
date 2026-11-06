@@ -9,6 +9,8 @@ import { SimpleExportNotFoundError, type SimpleExportService } from "../domain/s
 import { createLogger, type Logger } from "../logging";
 import { AgentNotConfiguredError, type AgentService } from "../domain/agent";
 import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError } from "../domain/run";
+import { ImportConflictError, ImportForbiddenError, ImportNotFoundError, ImportPreservationError, type ImportInspectionRepository, type MarkdownImportRepository } from "../domain/markdown-import";
+import { createMarkdownImportRoutes, ImportHttpError } from "./markdown-import-routes";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -27,11 +29,12 @@ export interface AppOptions {
   readonly simpleExport?: SimpleExportService;
   readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
+  readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
 }
 
 type AppEnv = { Variables: { actor: Actor } };
 type ApiContext = Context<AppEnv>;
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 500 | 503;
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 500 | 503;
 
 class ApiError extends Error {
   constructor(readonly status: ErrorStatus) { super(); }
@@ -81,6 +84,10 @@ function safePath(path: string): string {
   if (path === "/search") return "/search";
   if (path === "/exports/simple") return "/exports/simple";
   if (path === "/exports/agentic") return "/exports/agentic";
+  if (path === "/import-namespaces") return "/import-namespaces";
+  if (parts[1] === "imports" && parts[2] === "markdown") return "/imports/markdown" + (parts.length > 3 ? "/:id" : "") + (parts[4] === "files" ? "/files" + (parts.length > 5 ? "/:fileId" : "") : parts[4] === "seal" ? "/seal" : "");
+  if (parts[1] === "import-sources") return "/import-sources" + (parts.length > 2 ? "/:id" : "") + (["parts","raw"].includes(parts[3] ?? "") ? "/" + parts[3] : "");
+  if (parts[1] === "thoughts" && parts.length === 4 && parts[3] === "import-source") return "/thoughts/:id/import-source";
   if (parts.length === 4 && parts[1] === "exports" && parts[2] === "agentic") return "/exports/agentic/:id";
   if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
@@ -97,18 +104,26 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   }
   const app = new Hono<AppEnv>();
   app.onError((error, c) => {
-    const status: ErrorStatus = error instanceof ApiError ? error.status :
+    const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError ? error.status :
       error instanceof AgentNotConfiguredError ? 503 :
-      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError ? 409 :
-      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError ? 403 :
-      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError ? 404 :
+      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError ? 409 :
+      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError || error instanceof ImportForbiddenError ? 403 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError ? 404 :
+      error instanceof ImportPreservationError && error.message.startsWith("Unsupported source") ? 422 :
       error instanceof ValidationError ? 400 : 500;
     if (status === 500) diagnostics.error("[daemon] request failed", { method: c.req.method, path: safePath(new URL(c.req.url).pathname) });
+    if (error instanceof ImportHttpError) return c.json({error:status===403 ? "Forbidden" : status===404 ? "Not found" : status===503 ? "Service unavailable" : "Bad request",code:error.code},status);
+    if (error instanceof ImportConflictError) return c.json({error:"Conflict",code:error.message === "import-sealed" ? "import-sealed" : "idempotency-conflict"},status);
+    if (error instanceof ImportPreservationError && status===422) return c.json({error:"Unsupported source",code:error.message === "Unsupported source content" ? "unsupported-source-content" : "unsupported-source-encoding"},status);
+    const path=safePath(new URL(c.req.url).pathname);
+    if ((path.startsWith("/imports/markdown") || path.startsWith("/import-sources") || path==="/import-namespaces" || path==="/thoughts/:id/import-source") && (status===400 || status===500)) return c.json({error:status===400 ? "Bad request" : "Internal server error",code:status===400 ? "invalid-import-request" : "import-admission-failed"},status);
     return c.json({ error: status === 500 ? "Internal server error" :
-      ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict", 503: "Agents are not configured; set THOUGHTLOOM_AGENT_CONFIG" } as const)[status] }, status);
+      ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict", 413: "Payload too large", 415:"Unsupported media type", 422:"Unsupported source", 503: "Agents are not configured; set THOUGHTLOOM_AGENT_CONFIG" } as const)[status] }, status);
   });
+
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
+    if (event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
@@ -121,6 +136,8 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     }
   });
 
+  if (options.imports) app.route("/",createMarkdownImportRoutes(options.imports.commands,options.imports.inspection,options.imports.maxBytes));
+
   if (options.search) {
     const search = options.search;
     app.get("/search", c => {
@@ -128,8 +145,8 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
       const readScope = scope(c, ["q", "author", "kind", "from", "to", "sort"]);
       for (const key of ["q", "from", "to", "sort"]) if (params.getAll(key).length > 1) throw new ApiError(400);
       const q = nonEmpty(params.get("q"), "q");
-      const authors = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai"]));
-      const kinds = params.getAll("kind").map(value => oneOf(value, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea"]));
+      const authors = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai", "source"]));
+      const kinds = params.getAll("kind").map(value => oneOf(value, "kind", ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"]));
       const sortValue = params.get("sort");
       const sort = sortValue === null ? undefined : oneOf(sortValue, "sort", ["relevance", "newest", "oldest"]);
       return c.json(search.query(readScope, q, { authors, kinds, from: params.get("from") ?? undefined, to: params.get("to") ?? undefined, sort }));

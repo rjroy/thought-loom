@@ -37,4 +37,8 @@ The user does not have to wait for the weaver before continuing. Most captures a
 
 ## Not required
 
-Rich-text editing, attachments, folders, automatic import, or a conversation before saving. These can be discussed separately; they are not prerequisites for this view.
+Rich-text editing, attachments, folders, background folder watching, or a conversation before saving. These are not prerequisites for this view.
+
+## Separate import entry
+
+An **Import** action to the right of the Capture page heading opens a separate [Markdown import flow](markdown-import.md). Keep it outside the thought/title form so it cannot be mistaken for part of the thought. This replaces the earlier below-textarea placement. The user selected the Import Workspace composition and approved this heading-row entry through the designer-led comp-led pass. Import must not complicate or become a prerequisite for quick text capture.

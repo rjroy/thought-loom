@@ -1,6 +1,6 @@
 import { ForbiddenActorError, scopeActiveConnection, scopeActiveThought, type ReadScope } from "./rejection";
 import { nonEmpty, ValidationError } from "./validation";
-import type { Author, MaterialKind, Thought } from "./thought";
+import type { ThoughtAuthor, MaterialKind, Thought } from "./thought";
 import type { Connection } from "./connection";
 
 /** A response hit points to its latest eligible associated thought. */
@@ -16,7 +16,7 @@ export interface SearchRepository {
   query(scope: ReadScope, query: string, options: SearchOptions): SearchPage;
 }
 export interface SearchOptions {
-  readonly authors?: readonly Author[];
+  readonly authors?: readonly ThoughtAuthor[];
   readonly kinds?: readonly MaterialKind[];
   readonly from?: string;
   readonly to?: string;
@@ -24,7 +24,7 @@ export interface SearchOptions {
 }
 export interface SearchResult extends SearchHit {
   readonly title: string;
-  readonly author: Author;
+  readonly author: ThoughtAuthor;
   readonly materialKind: MaterialKind;
   readonly createdAt: string;
   readonly snippet: string;
@@ -58,7 +58,7 @@ export function searchContexts(scope: ReadScope, targets: readonly { id: string;
 }
 export interface SearchPage {
   readonly results: readonly SearchResult[];
-  readonly counts: { readonly authors: Readonly<Record<Author, number>>; readonly kinds: Readonly<Record<MaterialKind, number>> };
+  readonly counts: { readonly authors: Readonly<Record<ThoughtAuthor, number>>; readonly kinds: Readonly<Record<MaterialKind, number>> };
 }
 
 /** Retrieval and vocabulary must be scoped before publication. */
@@ -67,8 +67,8 @@ export class SearchService {
   query(scope: ReadScope, query: string, options: SearchOptions = {}): SearchPage {
     this.validate(scope);
     nonEmpty(query, "query");
-    if (options.authors && (!Array.isArray(options.authors) || options.authors.some(value => value !== "user" && value !== "ai"))) throw new ValidationError("Invalid author");
-    if (options.kinds && (!Array.isArray(options.kinds) || options.kinds.some(value => !["captured-original", "user-contribution", "ai-interpretation", "developing-idea"].includes(value)))) throw new ValidationError("Invalid kind");
+    if (options.authors && (!Array.isArray(options.authors) || options.authors.some(value => value !== "user" && value !== "ai" && value !== "source"))) throw new ValidationError("Invalid author");
+    if (options.kinds && (!Array.isArray(options.kinds) || options.kinds.some(value => !["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"].includes(value)))) throw new ValidationError("Invalid kind");
     if (options.sort !== undefined && !["relevance", "newest", "oldest"].includes(options.sort)) throw new ValidationError("Invalid sort");
     const from = options.from === undefined ? undefined : searchDate(options.from, false);
     const to = options.to === undefined ? undefined : searchDate(options.to, true);

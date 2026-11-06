@@ -27,6 +27,39 @@ describe("thought data boundary", () => {
     }
   });
 
+  const imported = {
+    ...input,
+    text: "  Café 漢字\r\n  second line  \r\n",
+    author: "source", kind: "imported-original", origin: "markdown-import",
+    parentId: null, sourceIds: [],
+  } as const;
+
+  test("retains imported source wording and provenance exactly", () => {
+    expect(createThought(imported)).toEqual(imported);
+  });
+
+  test("allows a later user or AI title on imported wording", () => {
+    for (const titleAuthor of ["user", "ai"] as const) {
+      const titled = { ...imported, title: "A later title", titleAuthor };
+      expect(createThought(titled)).toEqual(titled);
+    }
+  });
+
+  test.each([
+    ["source with a non-import kind", { kind: "captured-original" }],
+    ["user with an import kind", { author: "user" }],
+    ["AI with an import kind", { author: "ai" }],
+    ["a different origin", { origin: "journal" }],
+    ["an evolution parent", { parentId: "parent" }],
+    ["supporting sources", { sourceIds: ["support"] }],
+  ])("rejects imported source with %s", (_description, bad) => {
+    expect(() => createThought({ ...imported, ...bad })).toThrow(ValidationError);
+  });
+
+  test("does not allow source as a title author", () => {
+    expect(() => createThought({ ...input, title: "Title", titleAuthor: "source" })).toThrow(ValidationError);
+  });
+
   test("constructed thoughts retain their supporting references independently of input mutation", () => {
     const sourceIds = ["source"];
     const thought = createThought({ ...input, sourceIds });
@@ -55,5 +88,8 @@ describe("connection data boundary", () => {
     for (const bad of [{ category: "similar" }, { fromId: "" }, { toId: null }]) {
       expect(() => createConnection({ ...connection, ...bad })).toThrow(ValidationError);
     }
+  });
+  test("does not allow source as a connection proposer", () => {
+    expect(() => createConnection({ ...connection, proposedBy: "source" })).toThrow(ValidationError);
   });
 });
