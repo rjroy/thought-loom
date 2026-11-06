@@ -77,7 +77,7 @@ Run `bd prime` for current workflow help. Use `bd` for all durable task tracking
 - Label actionable open work `agentic` when scope is executable, or `escalate` when a user decision is needed. An `escalate` issue is not implementation authorization. Keep parent routing consistent with the next required action.
 - Use a dedicated branch for an agreed sequence of Beads issues. After each issue is completed and verified, close it and create a local checkpoint commit referencing its ID, including only relevant changes. Respect explicit instructions not to commit; unrelated work stays untouched.
 - Outside authorized checkpoints, commit only with clear authority. Pushing, merging, and Dolt remote sync require separate authorization; do not treat `bd prime` session-close examples as that permission.
-- Beads' local Dolt database is authoritative. `.beads/issues.jsonl` is a passive export, not the source of truth or sync protocol. After tracker changes, refresh the export with `bd export -o .beads/issues.jsonl` and verify it against `bd` before handoff.
+- Beads' local Dolt database is authoritative. Do not generate `.beads/issues.jsonl` exports unless explicitly requested; use `bd` to inspect and verify tracker changes.
 
 ## Protect local work and secrets
 

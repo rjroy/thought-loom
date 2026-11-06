@@ -3,17 +3,20 @@ import { Database, SQLiteError, type SQLQueryBindings } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type InboxItem, type NativeMessage, type NativeSession, type PublicClient } from "../src/agent/opencode-adapter";
+import { AgentBindingError, AgentUncertainError, OpenCodeAdapter, type AgentBinding, type InboxItem, type NativeMessage, type NativeSession, type PublicClient } from "../src/agent/opencode-adapter";
+import { normalizeBinding } from "../src/agent/binding";
 import { AgentSessionMissingError } from "../src/agent/errors";
 import { importBusy, MarkdownImportWorker } from "../src/agent/import-worker";
 import { partitionMarkdown, prepareMarkdown } from "../src/domain/markdown-import";
 import { RunFenceError, RunService, type NativeDispatcher } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
+import { SqliteAgenticExports } from "../src/storage/agentic-export";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
 import { SqliteMarkdownImports } from "../src/storage/markdown-import";
 import { SqliteRunRepository } from "../src/storage/run";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
-import { migrate } from "../src/storage/sqlite";
+import { SqliteRunOperations } from "../src/storage/run-operations";
+import { migrate, SqliteStore } from "../src/storage/sqlite";
 
 const quiet = { verbose: () => {}, info: () => {}, warning: () => {}, error: () => {} };
 const binding: AgentBinding = { sessionId: "fixture-session", serviceUrl: "http://127.0.0.1:44999", location: { directory: "/owned" }, model: { providerID: "fixture", id: "fixture" }, permissions: [{ action: "*", resource: "*", effect: "deny" }], protocolVersion: 1 };
@@ -67,6 +70,44 @@ function prepared(imports: SqliteMarkdownImports, text = "Owned café source") {
   if (input.input === null) throw new Error("Expected prepared input");
   return { bytes, batch, file, claim, parsed, prompt: { promptId: input.promptId, input: input.input } };
 }
+
+test("native-tool bindings allow Weaver/Evolve but storage refuses allow for Search, export and import", async () => owned(async ({ db, imports, bindings, runs, sources }) => {
+  // The positive control must succeed first: global rejection of every allow binding is not a restricted-kind guard.
+  const allowed = normalizeBinding({ ...binding, permissions: [{ action: "*", resource: "*", effect: "allow" }] });
+  expect(allowed.permissions).toEqual([{ action: "*", resource: "*", effect: "allow" }]);
+  const store = new SqliteStore(db);
+  store.saveThought({ id: "policy-root", text: "test-owned policy context", title: null, author: "user", kind: "captured-original", createdAt: sources.now(), origin: "fixture", parentId: null, sourceIds: [] });
+  const service = new RunService({ repository: runs, dispatcher: { submit: async () => {}, observe: async () => "running" }, ...sources });
+  const weave = new SqliteRunOperations(db, sources).admitWeave("user", { subjectId: "policy-root", triggerId: "policy-trigger" });
+  const evolve = service.admit("user", "evolve", { parentId: "policy-root", text: "test-owned contribution" }).run;
+  for (const run of [weave, evolve]) {
+    const actual = { ...allowed, sessionId: run.sessionId };
+    bindings.bind(run.id, actual, service.claim(run.id));
+    expect(bindings.get(run.id)).toEqual(actual);
+  }
+  const sessions = store.searchSessions(sources), session = sessions.create("user", "policy-session", {}).session;
+  const composer = sessions.openComposer("user", session.id);
+  const search = sessions.admitTurn("user", session.id, "policy-turn", { text: "find existing thinking", startingThoughtIds: [],
+    requestClock: { at: sources.now(), timeZone: "UTC" }, composerId: composer.composerId, contextToken: composer.contextToken }).run;
+  const exported = new SqliteAgenticExports(db, sources).admit("user", { request: "test-owned report request" });
+  for (const runId of [search.id, exported.id]) {
+    const run = runs.get(runId);
+    if (!run) throw new Error("Expected owned restricted run");
+    const claim = service.claim(run.id);
+    expect(() => bindings.bind(run.id, { ...allowed, sessionId: run.sessionId }, claim)).toThrow(AgentBindingError);
+    expect(bindings.get(run.id)).toBeNull();
+    const denied = { ...binding, sessionId: run.sessionId };
+    bindings.bind(run.id, denied, claim);
+    expect(bindings.get(run.id)).toEqual(denied);
+  }
+  const item = prepared(imports), run = runs.get(item.claim.runId);
+  if (!run) throw new Error("Expected owned import run");
+  expect(() => bindings.bindImport(item.claim, { ...allowed, sessionId: run.sessionId })).toThrow(AgentBindingError);
+  expect(bindings.get(run.id)).toBeNull();
+  const denied = { ...binding, sessionId: run.sessionId };
+  bindings.bindImport(item.claim, denied);
+  expect(bindings.get(run.id)).toEqual(denied);
+}));
 
 function fakeClient(runId: string, nativeBinding: AgentBinding, messages: readonly NativeMessage[]): PublicClient {
   const session: NativeSession = { id: nativeBinding.sessionId, location: nativeBinding.location, model: nativeBinding.model, permissions: nativeBinding.permissions, metadata: { owner: "thoughtloom", runId, protocolVersion: "1" } };

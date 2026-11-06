@@ -23,6 +23,16 @@ OpenCode **2.2.2** is an allowed integration baseline; targeting a newer release
 
 Reuse the prior [2.2.2 integration validation](../work/research/opencode-2.2.2-validation.md) and [restricted-generation research](../work/research/opencode-2.2.2-restricted-generation.md) as starting evidence. Their pinned versions and exact-version discovery examples describe historical fixtures, not production version gates. Revalidate relevant behavior with a focused compatibility smoke when integrating or changing versions; do not repeat broad research or alter the operator's service merely to reproduce the baseline.
 
+### Agent tool-access policy
+
+Weaver and Evolve may use the operator-configured OpenCode native tools and MCPs, including shell and filesystem access, with fully permissive unattended execution. Thoughtloom does not maintain a per-tool allowlist. This trusts the operator environment and its configured tools, including future additions, with relevant thought context and any external side effects.
+
+Agentic Search, Agentic Export and import segmentation remain restricted to their application capabilities, without native or MCP tool access. Imported thoughts should enter the Weaver process after persistence; that handoff is separate from segmentation and does not broaden segmentation permissions.
+
+Thoughtloom's application capabilities must retain scoped reads, rejection filtering and authorized writes. Permissive native access is not a sandbox: a tool that can reach underlying files or databases can bypass those application boundaries. Stop cannot undo external effects, and session permissions do not sandbox service-level plugins or override operator hard policies.
+
+Existing sessions retain their saved permission bindings rather than gaining access implicitly on restart. A future discussion will explore System One/Jev-like decision models for tighter contextual permissions; that is not part of the initial permissive policy.
+
 ## Client and daemon boundary
 
 The browser client must never access the daemon directly. Browser requests that need daemon functionality go through the Next.js server, which communicates with the daemon.

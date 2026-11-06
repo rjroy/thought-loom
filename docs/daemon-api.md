@@ -252,7 +252,7 @@ Native completion is not local completion: a response may still need validation 
 
 ### Stop: `POST /runs/:id/stop`
 
-Body: `{}`. Returns the same run-status shape after local authority is fenced, without waiting for native cancellation to settle. Confirmed saved thoughts remain saved; Stop does not reject or undo them. Pending native cancellation is reconciled separately. A safely identified unfinished reply can remain interrupted; raw machine JSON is not published as partial prose.
+Body: `{}`. Returns the same run-status shape after local authority is fenced, without waiting for native cancellation to settle. Confirmed saved thoughts remain saved; Stop does not reject or undo them. Pending native cancellation is reconciled separately. A safely identified unfinished reply can remain interrupted; raw machine JSON is not published as partial prose. Weaver/Evolve native tools run in a trusted operator environment; Stop cannot undo their external side effects. See the [tool-access policy](server-startup.md#agent-configuration).
 
 ```sh
 bun run api --role user POST '/thoughts/<thought-id>/evolve' '{"text":"What if we explore the opposite?"}'

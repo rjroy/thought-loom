@@ -2,9 +2,9 @@ import { createLogger, type Logger } from "../logging";
 import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/opencode-adapter";
-import { AgentBindingError, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
+import { AgentBindingError, allowsNativeTools, assertBindingPermissions, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
-import { requireExecutionRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
+import { requireExecutionRun, RunFenceError, type Claim, type RunKind, type RunRecord } from "../domain/run";
 import { protocolJson, ProtocolValidationError } from "../domain/run-protocol";
 import { ImportPreservationError } from "../domain/markdown-import-contract";
 import { ValidationError } from "../domain/validation";
@@ -30,6 +30,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       const run = this.loadRun(runId);
       if (!run) throw new AgentBindingError("Run does not exist for agent binding");
       requireExecutionRun(run);
+      assertBindingPermissions(run.kind,binding);
       if (run.kind === "search") this.executionOwner?.assertRegistered(this.db);
       if (run.kind === "search" && binding.sessionId !== run.sessionId) throw new AgentBindingError("Search binding must use its allocated native identity");
       if (claim !== undefined && claim.runId !== runId) throw new RunFenceError();
@@ -45,17 +46,22 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       this.db.run(`INSERT INTO agent_bindings (run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version,execution_owner_id)
         VALUES (?,?,?,?,?,?,?,?)`,[runId,binding.sessionId,binding.serviceUrl,binding.location.directory,protocolJson(binding.model),protocolJson(binding.permissions),binding.protocolVersion,
           run.kind === "search" ? this.executionOwner?.id ?? null : null]);
+      this.logger.info("[agent] native binding applied in transaction",{runId,kind:run.kind,nativeTools:allowsNativeTools(binding)});
       return true;
     });
     if (!valid) throw new RunFenceError();
   }
   get(runId: string): AgentBinding | null {
-    const row = this.db.query(`SELECT session_id AS sessionId,service_url AS serviceUrl,directory,model_json AS model,
-      permissions_json AS permissions,protocol_version AS protocolVersion FROM agent_bindings WHERE run_id=?`).get(runId) as {
-      sessionId:string; serviceUrl:string; directory:string; model:string; permissions:string; protocolVersion:number;
+    const row = this.db.query(`SELECT b.session_id AS sessionId,b.service_url AS serviceUrl,b.directory,b.model_json AS model,
+      b.permissions_json AS permissions,b.protocol_version AS protocolVersion,r.kind
+      FROM agent_bindings b JOIN runs r ON r.id=b.run_id WHERE b.run_id=?`).get(runId) as {
+      sessionId:string; serviceUrl:string; directory:string; model:string; permissions:string; protocolVersion:number; kind:RunKind;
     } | null;
-    return row === null ? null : normalizeBinding({sessionId:row.sessionId,serviceUrl:row.serviceUrl,location:{directory:row.directory},
+    if (row === null) return null;
+    const binding = normalizeBinding({sessionId:row.sessionId,serviceUrl:row.serviceUrl,location:{directory:row.directory},
       model:JSON.parse(row.model),permissions:JSON.parse(row.permissions),protocolVersion:row.protocolVersion});
+    assertBindingPermissions(row.kind,binding);
+    return binding;
   }
   private importStep(claim: Claim): {readonly run:RunRecord;readonly step:ImportOwnedStep} {
     const run=this.active(claim);
@@ -84,6 +90,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
     const binding=normalizeBinding(input);
     this.transaction("bind import agent",claim.runId,() => {
       const {run,step}=this.importStep(claim);
+      assertBindingPermissions(run.kind,binding);
       const saved=this.get(run.id);
       if (saved) {
         if (!sameBinding(saved,binding)) throw new AgentBindingError("Agent binding is immutable");
