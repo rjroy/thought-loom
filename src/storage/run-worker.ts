@@ -9,26 +9,36 @@ import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteRunOperations } from "./run-operations";
 import { SqliteRunRepository } from "./run";
 import { SqliteAgenticExports } from "./agentic-export";
+import { initialSearchContext } from "./search-initial-context";
+import { SqliteSearchPublication } from "./search-publication";
+import { SqliteSearchPromptClock } from "./search-prompt-clock";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
-  constructor(db: Database, private readonly sources: RunSources) { super(db,sources.logger); }
+  constructor(db: Database, private readonly sources: RunSources,
+    private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
-    return this.guarded("prepare worker context",claim,run => {
+    const prepared = this.guardedExecution("prepare worker context",claim,run => {
       const step = this.currentStep(run.id);
-      if (step.input !== null) return step;
+      if (step.input !== null) return { step, clock: null };
       if (step.position !== 0 || step.state !== "prepared" || run.status !== "queued" || run.nativeState !== "unknown") {
         throw new RunConflictError("Unknown legacy input cannot be reconstructed");
       }
-      const context = this.initialContext(run);
+      const clock = run.kind === "search" ? this.searchClock.prepare(run,step,step.promptId) : null;
+      if (clock && clock.context === null) throw new RunConflictError("Initial search clock attachment required");
+      const search = clock?.context ? initialSearchContext(this.db,run,clock.context) : null;
+      const context = search?.context ?? this.initialContext(run);
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
       const input = nonEmpty(render(context),"initial input");
+      if (search) for (const ref of search.dependencies) this.track(run.id,ref);
       for (const thought of context.thoughts) this.trackThought(run.id,thought);
       for (const connection of context.connections) this.trackConnection(run.id,connection);
       for (const response of context.responses) this.trackResponse(run.id,response);
       this.db.run("UPDATE run_steps SET input=? WHERE run_id=? AND prompt_id=?",[input,run.id,step.promptId]);
-      return { ...step, input };
+      return { step: { ...step, input }, clock };
     });
+    prepared.clock?.committed();
+    return prepared.step;
   }
   private initialContext(run: RunRecord): InitialRunContext {
     requireOrdinaryRun(run);
@@ -67,7 +77,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
   }
   /** Failed transport is not submission evidence. Only a previously committed intent makes this observation-only. */
   submissionFailed(claim: Claim, promptId: string): void {
-    this.guarded("worker submission failure",claim,run => {
+    this.guardedExecution("worker submission failure",claim,run => {
       if (run.promptId !== promptId) throw new RunFenceError();
       const step = this.currentStep(run.id);
       if (step.input === null) throw new RunConflictError("Exact prompt input was not retained");
@@ -81,6 +91,11 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     });
   }
   finish(claim: Claim, promptId: string): void {
+    // Publication owns its own commit-after-fence transaction; an outer transaction must not roll that fence back.
+    if (this.require(claim.runId).kind === "search") {
+      new SqliteSearchPublication(this.db,this.sources).finalizeReply(claim,promptId);
+      return;
+    }
     this.guarded("finish worker reply",claim,run => {
       if (run.promptId !== promptId) throw new RunFenceError();
       if (run.kind === "export") { new SqliteAgenticExports(this.db,this.sources).finalize(claim,promptId); return; }
@@ -98,6 +113,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
   settleUnsubmitted(runId: string): boolean {
     return this.transaction("settle unsubmitted worker",runId,() => {
       const run = this.require(runId);
+      if (run.kind === "search") return false; // Search settlement needs its later joined-flight and admission proof.
       if (!["interrupted","failed"].includes(run.status)) return false;
       const cancellation = this.db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(runId) as {state:CancellationState};
       if (cancellation.state === "settled") return true;

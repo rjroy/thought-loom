@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { SearchConflictError, SearchStorageError } from "../domain/agentic-search";
 
-/** Local-only foundation. A binding/setup flight or possible dispatch needs the later owned drain/cleanup integration. */
+/** Default local-only path. A binding/setup flight or possible dispatch requires the explicit retention controller. */
 export function purgeLocalSearchSession(db: Database, sessionId: string, at: string): void {
   if (!db.inTransaction) throw new SearchStorageError("search-purge-requires-transaction");
   const id = new TextEncoder().encode(sessionId);
@@ -25,6 +25,15 @@ export function purgeLocalSearchSession(db: Database, sessionId: string, at: str
   const changed = db.run(`UPDATE search_sessions SET title=NULL,deleted_at=?,last_activity_at=?,revision=revision+1
     WHERE id=CAST(? AS TEXT) AND deleted_at IS NULL`, [at, at, id]);
   if (changed.changes !== 1) throw new SearchStorageError("search-purge-owner-unavailable");
+  purgeSearchSessionContent(db,sessionId);
+}
+
+/** Shared physical erase order only. The caller must first establish its supported retention proof and tombstone. */
+export function purgeSearchSessionContent(db: Database, sessionId: string): void {
+  if (!db.inTransaction) throw new SearchStorageError("search-purge-requires-transaction");
+  const id = new TextEncoder().encode(sessionId);
+  const owned = "SELECT run_id FROM search_turns WHERE session_id=CAST(? AS TEXT)";
+  if (!db.query("SELECT 1 FROM search_sessions WHERE id=CAST(? AS TEXT) AND deleted_at IS NOT NULL").get(id)) throw new SearchStorageError("search-purge-owner-unavailable");
   db.run("DELETE FROM search_content_dependencies WHERE session_id=CAST(? AS TEXT)", [id]);
   db.run(`DELETE FROM search_composer_dependencies WHERE composer_id IN
     (SELECT id FROM search_composer_contexts WHERE session_id=CAST(? AS TEXT))`, [id]);

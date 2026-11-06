@@ -3,6 +3,10 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { migrate } from "../src/storage/sqlite";
+import { readSearchCleanupSnapshot } from "../src/storage/search-cleanup-snapshot";
+import { SqliteRunRepository } from "../src/storage/run";
+
+const bindingProjection = "SELECT rowid,run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version FROM agent_bindings ORDER BY rowid";
 
 // Build the immediate predecessor with the existing bootstrap and import migrations,
 // intercepting only the search foundation during fixture setup. The migration under
@@ -99,7 +103,7 @@ test("legacy knowledge and execution survive migration and repeated file reopen"
       INSERT INTO thoughts(rowid,id,text,author,kind,created_at,origin,parent_id) VALUES (17,'root','fixture café','user','captured-original','2030','capture',NULL),(23,'child','child','ai','ai-interpretation','2031','weave','root');
       INSERT INTO runs(rowid,id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id,cancellation_state) VALUES (41,'old-run','weave','uncertain','old-native','old-prompt','2030',3,NULL,'root','trigger','pending');`);
     migrate(db);
-    db.exec(`INSERT INTO agent_bindings VALUES ('old-run','old-native','https://fixture.invalid','/owned','{"model":"fixture"}','[]',1);
+    db.exec(`INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES ('old-run','old-native','https://fixture.invalid','/owned','{"model":"fixture"}','[]',1);
       INSERT INTO import_namespaces VALUES ('fixture-namespace','fixture','Fixture','2030');
       INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation) VALUES ('import-run','import','queued','import-native','import-prompt','2032',0);
       INSERT INTO markdown_imports(id,request_key,namespace_id,created_at) VALUES ('batch','batch-key','fixture-namespace','2032');
@@ -107,7 +111,8 @@ test("legacy knowledge and execution survive migration and repeated file reopen"
         VALUES ('file','batch','fixture-namespace',0,'file-key','fixture.md',zeroblob(32),3,'2032','import-run');
       INSERT INTO markdown_import_payloads VALUES ('file',x'616263');`);
     const retained = ["agent_bindings", "run_steps", "markdown_imports", "markdown_import_files", "markdown_import_payloads"]
-      .map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all());
+      .map(table => db.query(table === "agent_bindings" ? bindingProjection : `SELECT rowid,* FROM ${table} ORDER BY rowid`).all());
+    expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     const expectedThoughts = db.query("SELECT rowid,id,text,author,kind,created_at,origin,parent_id FROM thoughts ORDER BY rowid").all();
     const expectedRun = db.query("SELECT rowid,* FROM runs WHERE id='old-run'").get();
     expect(expectedThoughts).toEqual([
@@ -122,7 +127,8 @@ test("legacy knowledge and execution survive migration and repeated file reopen"
       expect(reopened.query("SELECT rowid,id,text,author,kind,created_at,origin,parent_id FROM thoughts ORDER BY rowid").all()).toEqual(expectedThoughts);
       expect(reopened.query("SELECT rowid,* FROM runs WHERE id='old-run'").get()).toEqual(expectedRun);
       expect(["agent_bindings", "run_steps", "markdown_imports", "markdown_import_files", "markdown_import_payloads"]
-        .map(table => reopened.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all())).toEqual(retained);
+        .map(table => reopened.query(table === "agent_bindings" ? bindingProjection : `SELECT rowid,* FROM ${table} ORDER BY rowid`).all())).toEqual(retained);
+      expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
       expect(() => reopened.run("UPDATE thoughts SET text='changed' WHERE id='root'")).toThrow();
       expect(() => reopened.run("DELETE FROM runs WHERE id='old-run'")).toThrow();
@@ -149,7 +155,7 @@ test("first search upgrade preserves populated import-era closure, and rolls bac
         (41,'weave','weave','uncertain','native','prompt','2030',2),
         (42,'import','import','queued','import-native','import-prompt','2030',0);
       UPDATE run_steps SET input='exact input' WHERE run_id='weave';
-      INSERT INTO agent_bindings VALUES ('weave','native','https://fixture.invalid','/owned','{}','[]',1);
+      INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES ('weave','native','https://fixture.invalid','/owned','{}','[]',1);
       INSERT INTO run_context VALUES ('weave','thought','root',1);
       INSERT INTO run_operation_receipts VALUES ('weave','prompt','{"fixture":1}','child','{"fixture":2}','step');
       INSERT INTO run_issued_thoughts VALUES ('weave','prompt','child',0);
@@ -168,8 +174,9 @@ test("first search upgrade preserves populated import-era closure, and rolls bac
       INSERT INTO import_document_parts VALUES ('doc',0,'thought',0,3,'source',0);
       INSERT INTO import_document_seals VALUES ('doc'); COMMIT;`);
     const tables = ["thoughts", "thought_titles", "thought_source_seals", "rejected_thoughts", "responses", "response_thoughts", "response_seals", "runs", "agent_bindings", "run_context", "run_operation_receipts", "run_issued_thoughts", "import_documents", "import_locations", "import_document_parts", "import_document_seals", "markdown_imports", "markdown_import_files", "markdown_import_payloads"];
-    const snapshot = () => [...tables.map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()), db.query("SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps ORDER BY rowid").all()];
+    const snapshot = () => [...tables.map(table => db.query(table === "agent_bindings" ? bindingProjection : `SELECT rowid,* FROM ${table} ORDER BY rowid`).all()), db.query("SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps ORDER BY rowid").all()];
     const before = snapshot();
+    expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     const schema = db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all();
     const fks = tables.map(table => db.query(`PRAGMA foreign_key_list(${table})`).all());
     let injected = false;
@@ -190,6 +197,7 @@ test("first search upgrade preserves populated import-era closure, and rolls bac
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrate(db);
     expect(snapshot()).toEqual(before);
+    expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
     expect(tables.map(table => db.query(`PRAGMA foreign_key_list(${table})`).all())).toEqual(fks);
     const replaced = ["runs_immutable_delete", "run_steps_immutable_delete", "run_context_immutable_delete", "agent_bindings_immutable_delete", "run_receipts_immutable_delete", "run_issued_immutable_delete"];
@@ -285,7 +293,7 @@ test("only a tombstoned search session permits its owned execution purge", () =>
   try {
     insertTurn(db, "search-run");
     db.exec(`INSERT INTO run_context VALUES ('search-run','thought','source',0),('weave-run','thought','source',0);
-      INSERT INTO agent_bindings VALUES ('search-run','search-native','https://fixture.invalid','/owned','{}','[]',1),('weave-run','weave-native','https://fixture.invalid','/owned','{}','[]',1);
+      INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES ('search-run','search-native','https://fixture.invalid','/owned','{}','[]',1),('weave-run','weave-native','https://fixture.invalid','/owned','{}','[]',1);
       INSERT INTO thoughts(id,text,author,kind,created_at,origin) VALUES ('thought','text','user','captured-original','2030','capture');
       INSERT INTO run_operation_receipts VALUES ('weave-run','weave-prompt','{}','thought','{}','step');
       INSERT INTO run_issued_thoughts VALUES ('weave-run','weave-prompt','thought',0);
@@ -360,18 +368,23 @@ test("cleanup records require the tombstoned owning search turn and matching pro
   const db = guardFixture();
   try {
     insertTurn(db, "search-run");
-    const insert = (run: string, session: string, prompt: string) => db.run(`INSERT INTO search_native_cleanup
-      (run_id,session_id,binding_json,last_prompt_id,submit_owner,drain_state,admission_state,state)
-      VALUES (?,?,'{}',?,'owner','waiting','never-submitted','pending')`, [run, session, prompt]);
-    expect(() => insert("search-run", "session", "search-prompt")).toThrow();
+    db.run(`INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version)
+      VALUES ('search-run','search-native','https://fixture.invalid','/owned','{"providerID":"fixture","id":"model"}','[{"action":"*","resource":"*","effect":"deny"}]',1)`);
+    expect(() => db.transaction(() => readSearchCleanupSnapshot(db,"search-run"))()).toThrow();
+    new SqliteRunRepository(db, { id: () => "unused", now: () => "2030-01-01T00:00:00.000Z" }).stop("search-run");
     db.exec(`INSERT INTO search_sessions(id,create_request_key,title,created_at,last_activity_at) VALUES ('other','other-key','Other','2030','2030');
       UPDATE search_sessions SET title=NULL,deleted_at='2031' WHERE id='session';
       UPDATE search_sessions SET title=NULL,deleted_at='2031' WHERE id='other';`);
+    const snap = db.transaction(() => readSearchCleanupSnapshot(db,"search-run"))();
+    const insert = (run: string, session: string, prompt: string) => db.run(`INSERT INTO search_native_cleanup
+      (run_id,session_id,binding_json,last_prompt_id,submit_owner,drain_state,admission_state,prompt_sha256,evidence_json,state,prompt_manifest_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [run,session,snap.bindingJson,prompt,snap.submitOwner,snap.drainState,snap.admissionState,snap.promptSha256,snap.evidenceJson,snap.state,snap.promptManifestJson]);
     expect(() => insert("weave-run", "session", "weave-prompt")).toThrow();
     expect(() => insert("search-run", "other", "search-prompt")).toThrow();
     expect(() => insert("search-run", "session", "weave-prompt")).toThrow();
     insert("search-run", "session", "search-prompt");
     expect(() => db.run("DELETE FROM search_native_cleanup WHERE run_id='search-run'")).toThrow();
+    db.run("DELETE FROM agent_bindings WHERE run_id='search-run'");
     db.run("DELETE FROM run_steps WHERE run_id='search-run'");
     db.run("DELETE FROM runs WHERE id='search-run'");
     expect(db.query("SELECT run_id,session_id FROM search_native_cleanup").get()).toEqual({ run_id: "search-run", session_id: "session" });

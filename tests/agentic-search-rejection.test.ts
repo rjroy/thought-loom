@@ -43,7 +43,7 @@ function active(db: Database, sessions: SearchSessions, key: string, ref: Contex
   expect(db.query("SELECT ref_kind,ref_id FROM search_composer_dependencies WHERE composer_id=?").all(composer.composerId)).toEqual([{ ref_kind: ref.kind, ref_id: ref.id }]);
   const row = db.query("SELECT session_id FROM runs WHERE id=?").get(turn.run.id) as { session_id: string };
   if (mode === "bound") {
-    db.run("INSERT INTO agent_bindings VALUES (?,?,'https://fixture.invalid','/owned','{}','[]',1)", [turn.run.id, row.session_id]);
+    db.run("INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES (?,?,'https://fixture.invalid','/owned','{}','[]',1)", [turn.run.id, row.session_id]);
     db.run("UPDATE runs SET status='running' WHERE id=?", [turn.run.id]);
   }
   if (mode === "uncertain") {

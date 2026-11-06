@@ -8,6 +8,20 @@ export interface SearchClockSample {
   readonly clock: SearchRequestClock;
   readonly daemonObservedAt: string;
 }
+/** Trusted preparation dependency, never model/tool-selected clock or session authority. */
+export interface SearchClockOwner {
+  readonly runId: string;
+  readonly generation: number;
+  readonly searchSessionId: string;
+  readonly nativeSessionId: string;
+}
+export interface SearchClientClockObservation extends SearchClockSample { readonly searchSessionId: string }
+export interface SearchClockDependencies {
+  /** Milliseconds from one process-local monotonic source; defaults to performance.now(). */
+  readonly monotonicNow?: () => number;
+  /** Synchronous validated receipt-store lookup. No HTTP/provider work may run under the preparation transaction. */
+  readonly latestObservation?: (owner: SearchClockOwner) => SearchClientClockObservation | null;
+}
 export interface SearchClockSelection {
   readonly boundary: "model-input" | "observation";
   readonly freshNative: boolean;
@@ -58,12 +72,18 @@ function exact(input: unknown, keys: readonly string[]): Record<string, unknown>
   } catch { throw new ValidationError("Invalid search time fields"); }
 }
 
-function sample(input: unknown): SearchClockSample {
+export function readSearchClockSample(input: unknown): SearchClockSample {
   const data = exact(input, ["clock", "daemonObservedAt"]);
   const clock = exact(data.clock, ["at", "timeZone"]);
   const validated = Object.freeze({ at: searchString(clock.at, "client time"), timeZone: searchString(clock.timeZone, "time zone") });
   validateSearchRequestClock(validated);
   return Object.freeze({ clock: validated, daemonObservedAt: searchRecordTime(data.daemonObservedAt) });
+}
+
+export function readSearchClientClockObservation(input: unknown): SearchClientClockObservation {
+  const data = exact(input,["searchSessionId","clock","daemonObservedAt"]);
+  return Object.freeze({ searchSessionId: searchString(data.searchSessionId,"clock session"),
+    ...readSearchClockSample({ clock: data.clock, daemonObservedAt: data.daemonObservedAt }) });
 }
 
 /** Only a caller's existing model-input boundary can attach a clock; this does not schedule work. */
@@ -72,8 +92,8 @@ export function selectSearchClockContext(input: SearchClockSelection): SearchClo
   if ((data.boundary !== "model-input" && data.boundary !== "observation") || typeof data.freshNative !== "boolean" ||
       (data.preparedInput !== null && typeof data.preparedInput !== "string") || typeof data.backwardClockDiscontinuity !== "boolean" ||
       (data.elapsedSinceLastMs !== null && (typeof data.elapsedSinceLastMs !== "number" || !Number.isFinite(data.elapsedSinceLastMs) || data.elapsedSinceLastMs < 0))) throw new ValidationError("Invalid clock selection");
-  const requestAnchor = sample(data.requestAnchor), retained = sample(data.retainedSample);
-  const latest = data.latestSample === null ? null : sample(data.latestSample);
+  const requestAnchor = readSearchClockSample(data.requestAnchor), retained = readSearchClockSample(data.retainedSample);
+  const latest = data.latestSample === null ? null : readSearchClockSample(data.latestSample);
   const daemonNow = searchRecordTime(data.daemonNow);
   if (data.preparedInput !== null) return { kind: "reuse", input: data.preparedInput as string };
   if (data.boundary === "observation") return { kind: "none" };
@@ -88,13 +108,29 @@ export function selectSearchClockContext(input: SearchClockSelection): SearchClo
   } } };
 }
 
+/** Validate only retained structured clock metadata, never native history or arbitrary prompt prose. */
+export function readSearchClockContext(input: unknown): SearchClockContext {
+  const data = exact(input,["requestAnchor","observedNow"]);
+  const observed = exact(data.observedNow,["clock","daemonObservedAt","daemonNow","ageMs","source","clientMinusDaemonMs","offsetBasis","backwardClockDiscontinuity"]);
+  if ((observed.source !== "latest" && observed.source !== "last-reported") || typeof observed.backwardClockDiscontinuity !== "boolean") {
+    throw new ValidationError("Invalid retained search clock context");
+  }
+  const reported = readSearchClockSample({ clock: observed.clock, daemonObservedAt: observed.daemonObservedAt });
+  const selected = selectSearchClockContext({ boundary: "model-input", freshNative: true, preparedInput: null,
+    requestAnchor: readSearchClockSample(data.requestAnchor), latestSample: observed.source === "latest" ? reported : null,
+    retainedSample: reported, daemonNow: searchRecordTime(observed.daemonNow), elapsedSinceLastMs: null,
+    backwardClockDiscontinuity: observed.backwardClockDiscontinuity });
+  if (selected.kind !== "attach" || protocolJson(selected.context) !== protocolJson(input)) throw new ValidationError("Invalid retained search clock context");
+  return selected.context;
+}
+
 /** The trusted caller selects an eligible same-session anchor; the model supplies only interpretation and endpoints. */
 export function normalizeSearchTimeRange(input: SearchTimeRangeRequest, trustedAnchor: SearchClockSample): SearchTimeRangeReceipt {
   const data = exact(input, ["intentTurnPosition", "interpretation", "from", "until", "timeZone"]);
   const intentTurnPosition = searchRevision(data.intentTurnPosition);
   const interpretation = searchString(data.interpretation, "interpretation");
   const from = searchString(data.from, "from"), until = searchString(data.until, "until"), timeZone = searchString(data.timeZone, "time zone");
-  const requestAnchor = sample(trustedAnchor);
+  const requestAnchor = readSearchClockSample(trustedAnchor);
   validateSearchRequestClock({ at: from, timeZone });
   validateSearchRequestClock({ at: until, timeZone });
   const fromMs = Date.parse(from), untilMs = Date.parse(until);

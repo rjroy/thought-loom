@@ -7,13 +7,15 @@ import { CreationService } from "../domain/creation";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import { parseEnvelope, type RunStep } from "../domain/run-protocol";
 import { record } from "../domain/validation";
-import { requireOrdinaryRun, RunConflictError, RunFenceError, RunNotFoundError, type Claim, type ContextRef, type ContextValue, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
+import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type ContextRef, type ContextValue, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
 import { SqliteSharedResponses } from "./shared-response";
 import { SqliteStore } from "./sqlite";
 import { insertRun, readRun } from "./run-record";
 import { immediate } from "./transaction";
+import { requireSearchExecutionOwner, searchExecutionContextValid } from "./search-run-authority";
+import { searchRevision } from "../domain/search-session-guards";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = (ref: ContextRef) => ContextValue | null;
@@ -54,16 +56,23 @@ export class SqliteRunAggregate {
     const run = this.require(claim.runId);
     if (run.generation !== claim.generation || !["queued","submitting","running","uncertain"].includes(run.status)) throw new RunFenceError();
     if (run.kind === "evolve" && run.inputThoughtId === null) throw new RunFenceError("Legacy evolve input identity unavailable; cannot resume safely");
+    if (run.kind === "search") requireSearchExecutionOwner(this.db,run);
     return run;
   }
   /** Persist the interruption before throwing: throwing inside the transaction would undo the fence. */
   protected guarded<T>(operation: string, claim: Claim, action: (run: RunRecord, visible: Visible) => T): T {
+    return this.guard(operation,claim,requireOrdinaryRun,action);
+  }
+  protected guardedExecution<T>(operation: string, claim: Claim, action: (run: RunRecord, visible: Visible) => T): T {
+    return this.guard(operation,claim,requireExecutionRun,action);
+  }
+  private guard<T>(operation: string, claim: Claim, authority: (run: RunRecord) => void, action: (run: RunRecord, visible: Visible) => T): T {
     const outcome = this.transaction(operation, claim.runId, () => {
       const run = this.active(claim);
-      requireOrdinaryRun(run);
+      authority(run);
       const visible = this.visibility();
       if (!this.contextValid(run,visible)) {
-        this.finalInterrupt(run);
+        this.finalInterrupt(run,"context-invalidated");
         return { valid: false } as const;
       }
       return { valid: true, value: action(run,visible) } as const;
@@ -82,7 +91,8 @@ export class SqliteRunAggregate {
     } });
   }
   protected transitionNative(claim: Claim, status: RunStatus, nativeState?: NativeState, promptId?: string): void {
-    const transition = this.guarded("status",claim,run => {
+    const transition = this.guardedExecution("status",claim,run => {
+      if (run.kind === "search" && status === "submitting") throw new RunForbiddenError("Search submission requires its durable owner authorization");
       if (promptId !== undefined && promptId !== run.promptId) throw new RunFenceError("Native callback belongs to an earlier prompt");
       const allowed: Partial<Record<RunStatus, readonly RunStatus[]>> = {queued:["submitting"],submitting:["running","uncertain"],running:["running","uncertain"],uncertain:["running","uncertain"]};
       if (!allowed[run.status]?.includes(status)) throw new RunConflictError();
@@ -140,7 +150,13 @@ export class SqliteRunAggregate {
         response.thoughtIds.some((id,index) => id !== expected.thoughtIds[index])) throw new RunConflictError("Reply must link this run's results in issued order");
     if (response.thoughtIds.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
   }
-  protected finalInterrupt(run: RunRecord): void {
+  protected finalInterrupt(run: RunRecord, reason: "stopped" | "context-invalidated" | "failed" = "stopped"): void {
+    if (run.kind === "search") {
+      searchRevision(run.generation + 1);
+      this.db.run("UPDATE search_turns SET outcome_reason=? WHERE run_id=? AND outcome_reason IS NULL",[reason,run.id]);
+      this.db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);
+      return;
+    }
     if (run.kind === "import") {
       this.db.run("UPDATE markdown_import_files SET outcome='interrupted',reason_code='interrupted' WHERE run_id=? AND outcome IS NULL",[run.id]);
       this.db.run("DELETE FROM markdown_import_payloads WHERE file_id IN (SELECT id FROM markdown_import_files WHERE run_id=? AND outcome IS NOT NULL)",[run.id]);
@@ -181,13 +197,20 @@ export class SqliteRunAggregate {
     return this.db.query("SELECT kind,ref_id AS id FROM run_context WHERE run_id=? ORDER BY rowid").all(runId) as ContextRef[];
   }
   protected contextValid(run: RunRecord, visible: Visible): boolean {
+    if (run.kind === "search") return searchExecutionContextValid(this.db,run.id);
     const subject = this.readWeaveIntent(run.id)?.subjectId;
     const thoughtIds = [...this.issued(run.id), ...(run.inputThoughtId === null ? [] : [run.inputThoughtId]), ...(subject === undefined ? [] : [subject])];
     return thoughtIds.every(id => visible({kind:"thought",id}) !== null) && this.contextRefs(run.id).every(ref => visible(ref) !== null);
   }
   protected track(id: string, ref: ContextRef, fullRead = false): void {
-    this.db.run(`INSERT INTO run_context (run_id,kind,ref_id,full_read) VALUES (?,?,?,?)
-      ON CONFLICT(run_id,kind,ref_id) DO UPDATE SET full_read=MAX(run_context.full_read,excluded.full_read)`, [id,ref.kind,ref.id,fullRead ? 1 : 0]);
+    // The retained-search INSERT guard deliberately rejects duplicate insertion, even an UPSERT's pre-update path.
+    const existing = this.db.query("SELECT full_read AS fullRead FROM run_context WHERE run_id=? AND kind=? AND ref_id=?")
+      .get(id,ref.kind,ref.id) as { fullRead: number } | null;
+    if (existing) {
+      if (fullRead && existing.fullRead === 0) this.db.run("UPDATE run_context SET full_read=1 WHERE run_id=? AND kind=? AND ref_id=?",[id,ref.kind,ref.id]);
+      return;
+    }
+    this.db.run("INSERT INTO run_context (run_id,kind,ref_id,full_read) VALUES (?,?,?,?)", [id,ref.kind,ref.id,fullRead ? 1 : 0]);
   }
   /** IDs in full DTOs are exposures, not evidence that the referenced texts have been read. */
   protected trackThought(runId: string, thought: Thought): void {

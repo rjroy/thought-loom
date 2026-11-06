@@ -1,17 +1,23 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
+import { requireExecutionRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
 import { parseEnvelope, protocolJson, type CancellationState, type NextStep, type ProtocolEnvelope, type RunProtocolRepository, type RunStep } from "../domain/run-protocol";
 import { nonEmpty } from "../domain/validation";
 import { isStepOperationCapability } from "../domain/run-operations";
 import { isReadCapability } from "../domain/capability";
 import { SqliteRunAggregate } from "./run-aggregate";
+import { isSearchOnlyCapability, parseSearchCapabilityRequest, searchCapabilityResultInput } from "../domain/search-capability";
+import { readSearchCapabilityResult } from "../domain/search-capability-result";
+import { searchString } from "../domain/search-session-guards";
+import { confirmSearchResult } from "./search-capability-result";
+import { requireCurrentSearchPublication, requireSearchFullReads, searchPublicationOwner } from "./search-publication-guard";
+import { retainedSearchSuccessorClock, type SqliteSearchPromptClock } from "./search-prompt-clock";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
-  constructor(db: Database, logger: Logger = createLogger()) { super(db,logger); }
+  constructor(db: Database, logger: Logger = createLogger(), private readonly searchClock?: SqliteSearchPromptClock) { super(db,logger); }
   steps(runId: string): readonly RunStep[] {
-    return this.transaction("read steps",runId,() => { requireOrdinaryRun(this.require(runId)); return this.readSteps(runId); });
+    return this.transaction("read steps",runId,() => { requireExecutionRun(this.require(runId)); return this.readSteps(runId); });
   }
   private current(run: RunRecord, promptId: string): RunStep {
     if (run.promptId !== promptId) throw new RunFenceError("Prompt is no longer current");
@@ -45,9 +51,15 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     this.logger.verbose("[run storage] prompt state committed", { runId: claim.runId, promptId, state, generation: claim.generation });
   }
   completeStep(claim: Claim, promptId: string, envelope: ProtocolEnvelope): void {
-    const kind = this.guarded("complete prompt",claim,run => {
+    const kind = this.guardedExecution("complete prompt",claim,run => {
       const step = this.current(run,promptId);
       const value = parseEnvelope(protocolJson(envelope));
+      if (run.kind === "search") {
+        if (value.kind === "request") parseSearchCapabilityRequest(value.request);
+        else if (value.kind !== "search-reply") throw new RunForbiddenError("Search envelope authority required");
+      } else if (value.kind === "search-reply" || (value.kind === "request" && isSearchOnlyCapability(value.request.capability))) {
+        throw new RunForbiddenError("Search run authority required");
+      }
       if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) throw new RunForbiddenError("Final envelope does not match the run kind");
       const encoded = protocolJson(value);
       if (step.envelope !== null) {
@@ -85,15 +97,49 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       }
       this.current(run,promptId);
       if (step.state !== "completed" || step.envelope?.kind !== "request") throw new RunConflictError("Only a completed capability request can advance");
-      if (this.db.query("SELECT 1 FROM run_steps WHERE prompt_id=?").get(nextPromptId)) throw new RunConflictError("Prompt identity already issued");
-      this.db.run("UPDATE run_steps SET state='processed',result_json=? WHERE run_id=? AND prompt_id=?",[resultJson,run.id,promptId]);
-      this.db.run("INSERT INTO run_steps (run_id,position,prompt_id,input,state,native_state) VALUES (?,?,?,?,'prepared','unknown')",
-        [run.id,step.position+1,nextPromptId,nextInput]);
-      this.db.run("UPDATE runs SET status='queued' WHERE id=?",[run.id]);
-      return { runId: run.id, position: step.position+1, promptId: nextPromptId, input: nextInput, state: "prepared", envelope: null, result: null };
+      return this.appendSuccessor(run,step,resultJson,{promptId:nextPromptId,input:nextInput});
     });
     this.logger.verbose("[run storage] prompt successor confirmed", { runId: claim.runId, from: promptId, to: successor.promptId, position: successor.position, generation: claim.generation });
     return successor;
+  }
+  /** Search cannot supply result or next-input bytes: derive them from its confirmed, fenced step journal. */
+  advanceSearch(claim: Claim, promptId: string, nextPromptId: () => string): RunStep {
+    const prepared = this.guardedExecution("advance search prompt",claim,run => {
+      if (run.kind !== "search") throw new RunForbiddenError("Search run authority required");
+      const owner = searchPublicationOwner(this.db,claim,promptId), step = this.readStep(run.id,promptId);
+      if (!step || step.envelope?.kind !== "request" || step.result === null) throw new RunConflictError("Confirmed search capability result required");
+      const request = parseSearchCapabilityRequest(step.envelope.request), result = readSearchCapabilityResult(request,step.result);
+      confirmSearchResult(this.db,run.id,result);
+      if (request.capability === "addDiscovery") requireSearchFullReads(this.db,owner,[request.arguments.thoughtId,...request.arguments.evidenceThoughtIds]);
+      const resultJson = protocolJson(result);
+      if (protocolJson(step.result) !== resultJson) throw new RunConflictError("Retained search result differs from its canonical form");
+      if (step.state === "processed") {
+        const row = this.db.query("SELECT prompt_id AS promptId FROM run_steps WHERE run_id=? AND position=?").get(run.id,step.position+1) as {promptId:string} | null;
+        const existing = row ? this.readStep(run.id,row.promptId) : null;
+        if (!existing || existing.input !== searchCapabilityResultInput(request,result,retainedSearchSuccessorClock(this.db,run,existing))) {
+          throw new RunConflictError("Search successor differs from its confirmed result");
+        }
+        return { step: existing, clock: null };
+      }
+      requireCurrentSearchPublication(owner);
+      if (!this.searchClock) throw new RunConflictError("Search successor clock preparation is required");
+      const identity = searchString(nextPromptId(),"prompt ID");
+      if (!identity.startsWith("msg_")) throw new RunConflictError("Search prompt requires its native message prefix");
+      const clock = this.searchClock.prepare(run,step,identity), input = searchCapabilityResultInput(request,result,clock.context ?? undefined);
+      return { step: this.appendSuccessor(run,step,resultJson,{promptId:identity,input}), clock };
+    });
+    prepared.clock?.committed();
+    const successor = prepared.step;
+    this.logger.verbose("[run storage] search prompt successor confirmed",{runId:claim.runId,from:promptId,to:successor.promptId,position:successor.position,generation:claim.generation});
+    return successor;
+  }
+  private appendSuccessor(run: RunRecord, step: RunStep, resultJson: string, next: NextStep): RunStep {
+    if (this.db.query("SELECT 1 FROM run_steps WHERE prompt_id=?").get(next.promptId)) throw new RunConflictError("Prompt identity already issued");
+    this.db.run("UPDATE run_steps SET state='processed',result_json=? WHERE run_id=? AND prompt_id=?",[resultJson,run.id,step.promptId]);
+    this.db.run("INSERT INTO run_steps (run_id,position,prompt_id,input,state,native_state) VALUES (?,?,?,?,'prepared','unknown')",
+      [run.id,step.position+1,next.promptId,next.input]);
+    this.db.run("UPDATE runs SET status='queued' WHERE id=?",[run.id]);
+    return { runId: run.id, position: step.position+1, promptId: next.promptId, input: next.input, state: "prepared", envelope: null, result: null };
   }
   cancellation(runId: string): CancellationState {
     this.require(runId);
@@ -103,6 +149,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
   settleCancellation(runId: string): void {
     this.transaction("settle cancellation",runId,() => {
       const run = this.require(runId);
+      if (run.kind === "search") throw new RunForbiddenError("Search cancellation requires owned drain evidence");
       if (run.status !== "interrupted" && run.status !== "failed" && !(run.kind === "import" && run.status === "completed")) throw new RunFenceError("Only fenced runs have native cancellation to settle");
       const state = this.cancellation(runId);
       if (state === "settled") return;

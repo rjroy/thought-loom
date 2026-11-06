@@ -39,7 +39,7 @@ function fixture(action: (db: Database, publisher: Publication, removal: Removal
     const runId = turn.receipt.runId;
     const run = db.query("SELECT prompt_id,session_id FROM runs WHERE id=?").get(runId) as { prompt_id: string; session_id: string };
     db.run("UPDATE runs SET status='running',generation=1 WHERE id=?", [runId]);
-    if (options.bound !== false) db.run("INSERT INTO agent_bindings VALUES (?,?, 'https://fixture.invalid','/owned','{}','[]',1)", [runId, run.session_id]);
+    if (options.bound !== false) db.run("INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES (?,?, 'https://fixture.invalid','/owned','{}','[]',1)", [runId, run.session_id]);
     for (const [ref, full] of [["target", 1], ["evidence", 0], ["uncited", 0]] as const) {
       db.run("INSERT INTO run_context(run_id,kind,ref_id,full_read) VALUES (?,'thought',?,?)", [runId, ref, full]);
     }

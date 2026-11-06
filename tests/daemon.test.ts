@@ -223,13 +223,16 @@ describe("real HTTP and SQLite daemon", () => {
       const events: DaemonEvent[] = [];
       const secret = "sensitive listener failure detail";
       let ownedDb: Database | undefined;
+      let ownedLease: Database | undefined;
       let ownedServer: ReturnType<typeof Bun.serve> | undefined;
       let restoreStop: (() => void) | undefined;
       try {
-        const daemon = await startDaemon(config(join(dir, "db.sqlite")), event => events.push(event));
-        ownedDb = execSpy.mock.contexts.find(value => value instanceof Database);
+        const dbPath = join(dir, "db.sqlite");
+        const daemon = await startDaemon(config(dbPath), event => events.push(event));
+        ownedDb = execSpy.mock.contexts.find((value): value is Database => value instanceof Database && value.filename === dbPath);
+        ownedLease = execSpy.mock.contexts.find((value): value is Database => value instanceof Database && value.filename === `${dbPath}.execution-owner.sqlite`);
         const result = serveSpy.mock.results[0];
-        if (!ownedDb || !result || result.type !== "return") throw new Error("Could not capture daemon-owned resources");
+        if (!ownedDb || !ownedLease || !result || result.type !== "return") throw new Error("Could not capture daemon-owned resources");
         ownedServer = result.value;
         const realStop = ownedServer.stop.bind(ownedServer);
         const stopSpy = spyOn(ownedServer, "stop");
@@ -242,6 +245,8 @@ describe("real HTTP and SQLite daemon", () => {
         expect(first).toBeInstanceOf(Error);
         expect(second).toBeInstanceOf(Error);
         expect(closeSpy.mock.contexts.filter(value => value === ownedDb)).toHaveLength(1);
+        expect(closeSpy.mock.contexts.filter(value => value === ownedLease)).toHaveLength(1);
+        expect(closeSpy.mock.contexts.indexOf(ownedDb)).toBeLessThan(closeSpy.mock.contexts.indexOf(ownedLease));
         expect(stopSpy).toHaveBeenCalledTimes(1);
         expect(String(first)).not.toContain(secret);
         expect(String(second)).not.toContain(secret);
@@ -251,11 +256,16 @@ describe("real HTTP and SQLite daemon", () => {
         restoreStop?.();
         const result = serveSpy.mock.results[0];
         if (!ownedServer && result?.type === "return") ownedServer = result.value;
-        ownedDb ??= execSpy.mock.contexts.find(value => value instanceof Database);
+        const dbPath = join(dir, "db.sqlite");
+        ownedDb ??= execSpy.mock.contexts.find((value): value is Database => value instanceof Database && value.filename === dbPath);
+        ownedLease ??= execSpy.mock.contexts.find((value): value is Database => value instanceof Database && value.filename === `${dbPath}.execution-owner.sqlite`);
         try {
           if (ownedServer) await bounded(ownedServer.stop(true), 3000, "captured listener cleanup");
         } finally {
-          try { if (ownedDb && !closeSpy.mock.contexts.some(value => value === ownedDb)) ownedDb.close(); }
+          try {
+            if (ownedDb && !closeSpy.mock.contexts.some(value => value === ownedDb)) ownedDb.close();
+            if (ownedLease && !closeSpy.mock.contexts.some(value => value === ownedLease)) ownedLease.close();
+          }
           finally { closeSpy.mockRestore(); execSpy.mockRestore(); serveSpy.mockRestore(); }
         }
       }

@@ -18,6 +18,7 @@ export class SqliteAgentRuns implements AgentRunRepository {
   private read(id: string): AgentRunView | null {
     const run = this.runs.get(id);
     if (!run) return null;
+    if (run.kind === "search") return null; // Search-specific public status/Stop DTOs belong to their later route scope.
     if (run.kind === "import") {
       const file=this.db.query("SELECT id AS fileId,import_id AS importId FROM markdown_import_files WHERE run_id=?").get(id) as {fileId:string;importId:string}|null;
       if (!file) throw new RunConflictError("Import run owner is unavailable");
@@ -48,6 +49,7 @@ export class SqliteAgentRuns implements AgentRunRepository {
   status(id: string): AgentRunView | null { return this.db.transaction(() => this.read(id))(); }
   stop(id: string): AgentRunView {
     return this.db.transaction(() => {
+      if (!this.read(id)) throw new RunNotFoundError();
       this.runs.stop(id);
       const run = this.read(id);
       if (!run) throw new RunNotFoundError();

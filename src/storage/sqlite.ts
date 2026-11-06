@@ -10,6 +10,8 @@ import { captureWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave, type WeaveSources } from "./weave-admission";
 import { migrateImportFoundation } from "./import-migration";
 import { migrateSearchFoundation } from "./search-migration";
+import { migrateExecutionOwners } from "./execution-owner-schema";
+import { migrateSearchCleanup } from "./search-cleanup-migration";
 import { immediate } from "./transaction";
 import { ValidationError } from "../domain/validation";
 import { randomUUID } from "node:crypto";
@@ -20,6 +22,7 @@ import { SqliteSearchPublication } from "./search-publication";
 import type { SearchInvestigation } from "../domain/investigative-retrieval";
 import { SqliteSearchInvestigation } from "./investigative-retrieval";
 import { SqliteSearchRepository } from "./search";
+import type { SqliteSearchRetention } from "./search-retention";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -187,6 +190,8 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       migrateRunSchema(db);
       migrateImportFoundation(db);
       migrateSearchFoundation(db);
+      migrateExecutionOwners(db);
+      migrateSearchCleanup(db);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
@@ -211,8 +216,8 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
 export class SqliteStore {
   constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
 
-  searchSessions(sources: SearchSessionSources): SearchSessions {
-    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger), { ...sources, logger: sources.logger ?? this.logger });
+  searchSessions(sources: SearchSessionSources, retention?: SqliteSearchRetention): SearchSessions {
+    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger,retention), { ...sources, logger: sources.logger ?? this.logger });
   }
 
   /** Internal AI-normal candidate retrieval; not a full-read witness. */

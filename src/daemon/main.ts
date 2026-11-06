@@ -1,5 +1,6 @@
 import { ConfigError, parseConfig } from "./config";
 import { startDaemon } from "./runtime";
+import { ExecutionOwnerHeldError, executionOwnerHeldDiagnostic } from "../storage/execution-owner";
 
 if (import.meta.main) {
   try {
@@ -22,7 +23,7 @@ if (import.meta.main) {
     process.on("SIGTERM", shutdown);
   } catch (error) {
     console.error(JSON.stringify({ operation: "start", phase: "outcome", success: false,
-      message: error instanceof ConfigError ? error.message : "Daemon startup failed" }));
+      message: error instanceof ConfigError ? error.message : error instanceof ExecutionOwnerHeldError ? executionOwnerHeldDiagnostic : "Daemon startup failed" }));
     process.exitCode = 1;
   }
 }

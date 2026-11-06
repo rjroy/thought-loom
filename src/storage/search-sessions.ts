@@ -11,6 +11,7 @@ import { SqliteSearchComposers } from "./search-composer";
 import { SqliteSearchTurns } from "./search-turns";
 import { touchSearchSession } from "./search-session-activity";
 import { SqliteSearchWorkspace } from "./search-workspace";
+import { SqliteSearchRetention } from "./search-retention";
 
 const columns = "id,create_request_key AS createRequestKey,title,created_at AS createdAt,last_activity_at AS lastActivityAt,revision,deleted_at AS deletedAt";
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -18,10 +19,17 @@ interface CatalogRow extends SearchSessionRecord { readonly sequence: number }
 
 /** Owns only session transactions; it does not inherit ordinary-run or knowledge-write authority. */
 export class SqliteSearchSessions implements SearchSessionRepository {
-  constructor(private readonly db: Database, private readonly logger: Logger = createLogger()) {}
+  constructor(private readonly db: Database, private readonly logger: Logger = createLogger(), private readonly retention?: SqliteSearchRetention) {
+    if (retention !== undefined) {
+      if (!(retention instanceof SqliteSearchRetention)) throw new SearchStorageError("search-retention-requires-controller");
+      retention.assertFor(db);
+    }
+  }
   transaction<T>(operation: SearchSessionOperation, action: (tx: SearchSessionTransaction) => T): T {
     this.logger.verbose(`[search session storage] ${operation} attempt`);
     try {
+      if (operation === "delete" && this.retention && this.db.inTransaction) throw new SearchStorageError("search-retention-requires-root-transaction");
+      let retired: readonly string[] | undefined;
       const composers = new SqliteSearchComposers(this.db), turns = new SqliteSearchTurns(this.db);
       const workspace = new SqliteSearchWorkspace(this.db, composers);
       const result = immediate(this.db, () => action({
@@ -41,7 +49,11 @@ export class SqliteSearchSessions implements SearchSessionRepository {
           this.bumpCatalog();
         },
         history: (id, query) => readSearchHistory(this.db, id, query),
-        purge: (id, at) => { this.requireCatalogCapacity(); purgeLocalSearchSession(this.db, id, at); },
+        purge: (id, at) => {
+          this.requireCatalogCapacity();
+          if (this.retention) retired = this.retention.purgeInTransaction(id,at);
+          else purgeLocalSearchSession(this.db, id, at);
+        },
         openComposer: (id, composerId, at) => composers.open(id, composerId, at),
         offerMessage: (id, composerId, messageId) => composers.offerMessage(id, composerId, messageId),
         messages: (id, query) => workspace.messages(id, query),
@@ -63,6 +75,7 @@ export class SqliteSearchSessions implements SearchSessionRepository {
           return true;
         },
       }));
+      if (retired) this.retention?.afterCommit(retired);
       this.logger.verbose(`[search session storage] ${operation} succeeded`);
       return result;
     } catch (error) {

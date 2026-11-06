@@ -107,7 +107,9 @@ export interface SearchSessionTransaction {
   insert(session: SearchSessionRecord): void;
   rename(id: string, expectedRevision: number, title: string, at: string): void;
   history(sessionId: string, query: SearchHistoryQueries): SearchHistoryContent;
-  /** Must reject unproved native ownership/drain before changing or purging any local row. */
+  /** Without a trusted retention controller, reject native-owned work before changing any row.
+   * An explicit controller may instead seal non-content cleanup and purge atomically, without waiting for native settlement.
+   */
   purge(sessionId: string, at: string): void;
   openComposer(sessionId: string, composerId: string, at: string): SearchComposerView;
   offerMessage(sessionId: string, composerId: string, messageId: string): SearchComposerOutcome<SearchMessageOffer>;

@@ -103,29 +103,11 @@ export function createSearchSchema(db: Database): void {
       catalog INTEGER NOT NULL CHECK (catalog >= 0)
     );
     INSERT OR IGNORE INTO search_revisions(id,eligibility,retrieval,catalog) VALUES (1,0,0,0);
-    -- This deliberately has no FK to runs: content purge removes the run but retains cleanup identity.
-    CREATE TABLE IF NOT EXISTS search_native_cleanup (
-      run_id TEXT PRIMARY KEY NOT NULL,
-      session_id TEXT NOT NULL REFERENCES search_sessions(id),
-      binding_json TEXT NOT NULL CHECK (json_valid(binding_json)),
-      last_prompt_id TEXT NOT NULL,
-      submit_owner TEXT NOT NULL,
-      drain_state TEXT NOT NULL CHECK (drain_state IN ('waiting','drained','unknown-after-restart')),
-      admission_state TEXT NOT NULL CHECK (admission_state IN ('never-submitted','uncertain','admitted','terminal')),
-      prompt_sha256 BLOB,
-      evidence_json TEXT CHECK (evidence_json IS NULL OR json_valid(evidence_json)),
-      state TEXT NOT NULL CHECK (state IN ('pending','settled','ownership-conflict')),
-      CHECK (prompt_sha256 IS NULL OR (typeof(prompt_sha256)='blob' AND length(prompt_sha256)=32)),
-      CHECK (admission_state='never-submitted' OR prompt_sha256 IS NOT NULL),
-      CHECK (admission_state!='terminal' OR evidence_json IS NOT NULL),
-      CHECK (state!='settled' OR (drain_state='drained' AND admission_state IN ('never-submitted','terminal')))
-    );
     ${sessionGuards()}
     ${contentGuards()}
     ${composerGuards()}
     ${revisionGuards()}
     ${executionGuards()}
-    ${cleanupGuards()}
   `);
 }
 
@@ -361,26 +343,5 @@ function executionGuards(): string {
     CREATE TRIGGER IF NOT EXISTS search_no_library_reply_update BEFORE UPDATE ON run_replies
     WHEN EXISTS (SELECT 1 FROM runs WHERE id IN (OLD.run_id,NEW.run_id) AND kind='search')
     BEGIN SELECT RAISE(ABORT,'search cannot retain library replies'); END;
-  `;
-}
-
-function cleanupGuards(): string {
-  return `
-    ${immutableFields("search_native_cleanup", "run_id,session_id,binding_json,last_prompt_id,submit_owner,prompt_sha256")}
-    ${noReplace("search_native_cleanup", "run_id=NEW.run_id")}
-    CREATE TRIGGER IF NOT EXISTS search_native_cleanup_owner BEFORE INSERT ON search_native_cleanup
-    WHEN NOT EXISTS (SELECT 1 FROM search_turns t WHERE t.run_id=NEW.run_id AND t.session_id=NEW.session_id AND ${purgeRun("t.run_id")})
-      OR NOT EXISTS (SELECT 1 FROM run_steps WHERE run_id=NEW.run_id AND prompt_id=NEW.last_prompt_id)
-    BEGIN SELECT RAISE(ABORT,'search cleanup requires its retained tombstoned search owner'); END;
-    CREATE TRIGGER IF NOT EXISTS search_native_cleanup_transition BEFORE UPDATE ON search_native_cleanup
-    WHEN OLD.state='settled' OR (OLD.drain_state='drained' AND NEW.drain_state!='drained')
-      OR (OLD.drain_state='unknown-after-restart' AND NEW.drain_state='waiting')
-      OR CASE NEW.admission_state WHEN 'never-submitted' THEN 0 WHEN 'uncertain' THEN 1 WHEN 'admitted' THEN 2 ELSE 3 END
-        < CASE OLD.admission_state WHEN 'never-submitted' THEN 0 WHEN 'uncertain' THEN 1 WHEN 'admitted' THEN 2 ELSE 3 END
-      OR (OLD.admission_state='terminal' AND NEW.evidence_json IS NOT OLD.evidence_json)
-    BEGIN SELECT RAISE(ABORT,'search cleanup evidence cannot regress'); END;
-    CREATE TRIGGER IF NOT EXISTS search_native_cleanup_settled_delete BEFORE DELETE ON search_native_cleanup
-    WHEN OLD.state!='settled'
-    BEGIN SELECT RAISE(ABORT,'unsettled search cleanup must be retained'); END;
   `;
 }

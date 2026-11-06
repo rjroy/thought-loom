@@ -1,27 +1,40 @@
 import { createLogger, type Logger } from "../logging";
+import { randomUUID } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/opencode-adapter";
 import { AgentBindingError, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
-import { requireOrdinaryRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
+import { requireExecutionRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
 import { protocolJson, ProtocolValidationError } from "../domain/run-protocol";
 import { ImportPreservationError } from "../domain/markdown-import-contract";
 import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
+import { ExecutionOwnerLease } from "./execution-owner";
+
+// Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
+const processSubmitOwner = randomUUID();
 
 /** Binding belongs to the existing run aggregate and uses authoritative core migration. */
 export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBindings {
-  constructor(db: Database, logger: Logger = createLogger()) { super(db,logger); }
+  constructor(db: Database, logger: Logger = createLogger(), private readonly executionOwner?: ExecutionOwnerLease) {
+    super(db,logger);
+    if (executionOwner !== undefined) {
+      if (!(executionOwner instanceof ExecutionOwnerLease)) throw new RunFenceError("A runtime lease capability is required");
+      executionOwner.assertRegistered(db);
+    }
+  }
   bind(runId: string, input: AgentBinding, claim?: Claim): void {
     const binding = normalizeBinding(input);
     const valid = this.transaction("bind agent",runId,() => {
       const run = this.loadRun(runId);
       if (!run) throw new AgentBindingError("Run does not exist for agent binding");
-      requireOrdinaryRun(run);
+      requireExecutionRun(run);
+      if (run.kind === "search") this.executionOwner?.assertRegistered(this.db);
+      if (run.kind === "search" && binding.sessionId !== run.sessionId) throw new AgentBindingError("Search binding must use its allocated native identity");
       if (claim !== undefined && claim.runId !== runId) throw new RunFenceError();
       this.active(claim ?? {runId,generation:run.generation});
-      if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run); return false; }
+      if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run,"context-invalidated"); return false; }
       const saved = this.get(runId);
       if (saved) {
         if (!sameBinding(saved,binding)) throw new AgentBindingError("Agent binding is immutable");
@@ -29,8 +42,9 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       }
       const step = this.currentStep(runId);
       if (run.status !== "queued" || step.position !== 0 || step.state !== "prepared" || run.nativeState !== "unknown") throw new AgentBindingError("Cannot infer a new binding for an already submitted run");
-      this.db.run(`INSERT INTO agent_bindings (run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version)
-        VALUES (?,?,?,?,?,?,?)`,[runId,binding.sessionId,binding.serviceUrl,binding.location.directory,protocolJson(binding.model),protocolJson(binding.permissions),binding.protocolVersion]);
+      this.db.run(`INSERT INTO agent_bindings (run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version,execution_owner_id)
+        VALUES (?,?,?,?,?,?,?,?)`,[runId,binding.sessionId,binding.serviceUrl,binding.location.directory,protocolJson(binding.model),protocolJson(binding.permissions),binding.protocolVersion,
+          run.kind === "search" ? this.executionOwner?.id ?? null : null]);
       return true;
     });
     if (!valid) throw new RunFenceError();
@@ -136,12 +150,17 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
   }
   /** Adapter callback: short transaction checks ownership/context and supplies immutable ordered inputs when requested. */
   assertActive(claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase): readonly PersistedPrompt[] | void {
-    return this.guarded("authorize native call",claim,run => {
+    return this.guardedExecution("authorize native call",claim,run => {
+      if (run.kind === "search") this.executionOwner?.assertRegistered(this.db);
       if (prompt !== undefined) {
         const step = this.currentStep(run.id);
         if (step.promptId !== prompt.promptId || step.input !== prompt.input) throw new RunFenceError("Native call does not match the current persisted prompt");
       }
-      if (phase === "quarantined") { this.finalInterrupt(run); return; }
+      if (phase === "quarantined") {
+        this.finalInterrupt(run,run.kind === "search" ? "failed" : "stopped");
+        if (run.kind === "search") this.db.run("UPDATE runs SET status='failed' WHERE id=?",[run.id]);
+        return;
+      }
       if (phase === undefined) return;
       if (!prompt) throw new RunFenceError("Prompt identity is required for a native transition");
       if (phase === "history") {
@@ -152,7 +171,13 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
         }));
       } else if (phase === "submit") {
         if (run.status !== "queued" || this.currentStep(run.id).state !== "prepared") throw new AgentUncertainError("Native attempt is already recorded; observe it instead of resubmitting");
-        this.transitionNative(claim,"submitting",undefined,prompt.promptId);
+        if (run.kind === "search") {
+          if (!this.get(run.id)) throw new RunFenceError("Search submission requires its bound owner");
+          const submitOwner = this.executionOwner?.id ?? processSubmitOwner;
+          this.db.run("UPDATE run_steps SET state='submitting',submit_owner=? WHERE run_id=? AND prompt_id=?",[submitOwner,run.id,prompt.promptId]);
+          this.db.run("UPDATE runs SET status='submitting' WHERE id=?",[run.id]);
+          this.logger.info("[search execution] submission authorization applied in transaction",{runId:run.id,promptId:prompt.promptId,generation:claim.generation});
+        } else this.transitionNative(claim,"submitting",undefined,prompt.promptId);
       } else if (phase === "acknowledged") this.transitionNative(claim,"running",undefined,prompt.promptId);
       else if (phase === "running") this.transitionNative(claim,"running","running",prompt.promptId);
       else if (phase === "completed") this.transitionNative(claim,"uncertain","completed",prompt.promptId);

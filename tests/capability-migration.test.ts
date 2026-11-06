@@ -47,7 +47,7 @@ function seedClosure(db: Database): void {
     CREATE TABLE export_intents (run_id TEXT PRIMARY KEY NOT NULL REFERENCES runs(id),request TEXT NOT NULL,effort TEXT NOT NULL);
     CREATE TABLE export_reports (run_id TEXT PRIMARY KEY NOT NULL REFERENCES export_intents(run_id),prompt_id TEXT NOT NULL,markdown TEXT NOT NULL,sources_json TEXT NOT NULL);
     INSERT INTO runs VALUES ('export','export','completed','export-session','export-prompt','2032',2,NULL,NULL,NULL,'none');
-    INSERT INTO agent_bindings VALUES ('run','session','https://fixture.invalid','/owned','{"model":"test"}','["read"]',1);
+    INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES ('run','session','https://fixture.invalid','/owned','{"model":"test"}','["read"]',1);
     INSERT INTO export_intents VALUES ('export','exact request','standard');
     INSERT INTO export_reports VALUES ('export','export-prompt','Report café\r\nline','[{"id":"issued"}]');
     INSERT INTO run_steps VALUES ('run',0,'prompt-0','journal café\r\nline','processed','completed','{"kind":"request"}','{"type":"thought"}');
@@ -60,7 +60,9 @@ function seedClosure(db: Database): void {
 function closureSnapshot(db: Database): unknown {
   return [
     db.query("SELECT rowid,id,hex(CAST(text AS BLOB)) AS text,author,kind,created_at,origin,parent_id FROM thoughts ORDER BY rowid").all(),
-    ...["thought_titles", "responses", "response_thoughts", "response_seals", "runs", "run_operation_receipts", "run_issued_thoughts", "agent_bindings", "export_intents", "export_reports"].map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()),
+    ...["thought_titles", "responses", "response_thoughts", "response_seals", "runs", "run_operation_receipts", "run_issued_thoughts", "agent_bindings", "export_intents", "export_reports"].map(table => db.query(table === "agent_bindings"
+      ? "SELECT rowid,run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version FROM agent_bindings ORDER BY rowid"
+      : `SELECT rowid,* FROM ${table} ORDER BY rowid`).all()),
     db.query("SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps ORDER BY rowid").all(),
     db.query("SELECT rowid,run_id,kind,ref_id FROM run_context ORDER BY rowid").all(),
     db.query("SELECT hex(CAST(markdown AS BLOB)) AS markdown,hex(CAST(sources_json AS BLOB)) AS sources FROM export_reports ORDER BY rowid").all(),
@@ -85,6 +87,7 @@ test("populated predecessor closure and native journal bytes survive failure, re
     db.exec("DROP TABLE temp.import_migration_0");
     migrate(db);
     expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrate(db);
@@ -92,6 +95,7 @@ test("populated predecessor closure and native journal bytes survive failure, re
     try {
       migrate(reopened); migrate(reopened);
       expect(closureSnapshot(reopened)).toEqual(before);
+      expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
       expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally { reopened.close(); }
@@ -137,12 +141,14 @@ test("failure after destructive closure rebuild and copied runs restores predece
     expect(() => db.run("UPDATE thoughts SET text='changed' WHERE id='subject'")).toThrow(/predecessor immutable/);
     migrate(db);
     expect(closureSnapshot(db)).toEqual(before);
+    expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     const reopened = new Database(path);
     try {
       migrate(reopened); migrate(reopened);
       expect(closureSnapshot(reopened)).toEqual(before);
+      expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
       expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
       expect(reopened.query("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='predecessor_thought_immutable'").get()).toEqual({ sql: "CREATE TRIGGER predecessor_thought_immutable BEFORE UPDATE ON thoughts BEGIN SELECT RAISE(ABORT,'predecessor immutable'); END" });

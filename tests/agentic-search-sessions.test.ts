@@ -123,7 +123,7 @@ test.each(["bound", "possibly-submitted"] as const)("delete refuses %s execution
   const session = sessions.create("user", `key-${scenario}`, {}).session;
   db.run("INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation) VALUES ('run','search','queued','native','prompt','2030',0)");
   db.run("INSERT INTO search_turns(run_id,session_id,position,request_key,admitted_at,effort,context_mode,intent_json) VALUES ('run',?,0,'turn-key','2030','standard','continue',?)", [session.id, JSON.stringify({ version: 1, startingThoughtIds: [], requestClock: { at: "2030-01-01T00:00:00Z", timeZone: "UTC" }, daemonObservedAt: clock.now, contextMode: "continue", composerId: "composer", contextToken: "token", verifiedContext: { sessionId: session.id, composerId: "composer", composerRevision: 0, eligibilityRevision: 0 } })]);
-  if (scenario === "bound") db.run("INSERT INTO agent_bindings VALUES ('run','native','https://fixture.invalid','/owned','{}','[]',1)");
+  if (scenario === "bound") db.run("INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES ('run','native','https://fixture.invalid','/owned','{}','[]',1)");
   else db.run("UPDATE run_steps SET input='prepared input',state='submitting' WHERE run_id='run'");
   const tables = ["search_sessions", "search_revisions", "search_turns", "runs", "run_steps", "agent_bindings", "search_native_cleanup"];
   const snapshot = () => tables.map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all());
