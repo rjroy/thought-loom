@@ -127,7 +127,9 @@ The global keyboard ring is a 3px solid focus outline, separated by 5px. Header 
 
 Reading surfaces, details and dialogs use gently rounded 12px corners. Most Capture/Explore/Idea/Evolve controls use 8px; compact fields and Export controls use 6px. Badges use 4px. Borders are 1px. These are deliberate local variants in current CSS, not a single shared button component API.
 
-Search, back and disclosure icons are simple SVG geometry, with a consistent thin stroke where authored. Native details markers remain native. No illustrations, graphs, avatars or decorative artwork are shipped as part of these screens.
+Search, back and disclosure icons are simple SVG geometry, with a consistent thin stroke where authored. Native details markers remain native. The only approved decorative-art exception is the exact cream/gold lantern and sprout pair in `public/glyphs/`, copied byte-identical from the [approved SVG source packet](../../.impeccable/candidates/glyphs/production/corrected/README.md). The sprout's separated gold leaf is explicitly accepted; do not redraw or reconnect it.
+
+Each glyph occupies a 24px square with an 8px heading gap and no extra row. The lantern precedes **Find your recorded thinking** only in Explore's unvalidated initial state; it is absent during query validation, invalid links, loading, results, no results and read errors. The sprout precedes the existing **Capture** heading across its states, with Import still at the right. Both are noninteractive images with empty alternatives and `aria-hidden`, not controls, status, authorship or confirmation. Heading names, keyboard targets, form spacing and the full existing palette remain unchanged. No decorative glyphs are authorized in the header/navigation, results, relationships, Idea, Evolve, Export, Import or feedback. Illustrations, graphs, avatars and other decorative art remain excluded.
 
 ## Components
 

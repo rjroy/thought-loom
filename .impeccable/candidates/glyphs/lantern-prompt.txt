@@ -1,0 +1,15 @@
+The user explicitly approved the description and authorized ONE actual generated lantern pilot: "Cream cut-paper lantern with a pale-gold flame, transparent background, simple enough for 24px display."
+
+Generate exactly one actual reusable 2D lantern artwork using the normal image-generation output mechanism. This is a candidate for visual approval, not approved runtime art. Do not generate alternatives, a sprout, a contact sheet, a web render or an application mockup. Do not modify project files or install anything. Report the absolute native image output path, along with available generation model/tool details. Allow normal native image staging.
+
+Asset and role: Thoughtloom lantern glyph, decorative accompaniment immediately before Explore's existing initial-state heading "Find your recorded thinking". Never a control or status indicator. UI lettering remains in the application, not the image.
+
+Approved direction and authorized reference: use the supplied .lore/context/brand-imagery.webp only as inspiration for its strong cut-paper silhouettes, generous negative space, quiet warmth and deep-teal/cream/gold relationship. Do not reproduce its scene. No person, cat, landscape, surrounding branches, graph, circular nodes or starbursts.
+
+Silhouette: one front-facing compact lantern, broad cap, simple handle, two substantial side supports, sturdy base, generous open center and a single simplified flame. Flat warm-cream structure (#FEF6E1), small pale-gold flame (#FFD477). Broad, gently organic forms with slight cut-paper character, but no distressed texture or fine engraving. Preserve strong recognition and open gaps when displayed in a 24px square; also inspectable at 32px.
+
+Framing and delivery: square 1024x1024 PNG source requested, centered with 12.5% safe padding on every edge. Source/runtime file-size budget unknown; do not optimize, convert or produce runtime derivatives. Intended surrounding page ground is #031315, but DO NOT bake this background into the image.
+
+Background: real transparent pixels required around and through the lantern's open interior. No painted checkerboard, solid matte, background scenery or opaque card. Do not simulate transparency.
+
+Constraints: no lettering, labels, controls, enclosing badge, ornament, glow, gradients, shadows, animation or optical effects. Do not make flame light spill outside its flat silhouette. Cream and pale gold are the only intended opaque foreground colors, with normal antialiasing at edges. Generate actual artwork and report its native absolute path. Make only the single authorized image; do not automatically retry.

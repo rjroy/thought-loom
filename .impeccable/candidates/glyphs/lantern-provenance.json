@@ -1,0 +1,92 @@
+{
+  "asset": "lantern.png",
+  "status": "source-artwork-approved-corrected-svg-family-review-failed",
+  "recordedAt": "2026-11-06T17:30:10Z",
+  "authorization": {
+    "description": "Cream cut-paper lantern with a pale-gold flame, transparent background, simple enough for 24px display.",
+    "userAction": "Generate lantern pilot",
+    "scope": "one actual generated lantern candidate only",
+    "artworkApproved": true,
+    "silhouetteApproved": true,
+    "silhouetteApprovalQuote": "looks good",
+    "exactArtworkApprovalQuote": "But yes both are approved.",
+    "exactArtworkApprovalDate": "2026-11-06",
+    "exactArtworkApprovedSourceSha256": "78ae83089be7edeac1e1da15e16c6171a8127c3f7be57083b676c0caeadd362e",
+    "productionDerivativesAuthorized": true,
+    "productionDerivativeScope": "Clean transparency, remove unintended shading and balance optical sizes for both approved glyphs; no redesign or app integration.",
+    "productionAuthorizationContext": "User confirmed both approved after the question: Shall we clean up transparency and balance their sizes for production, keeping app integration separate?",
+    "productionRouteStatus": "Initial SVGs failed review. User authorized one correction pass; production/corrected/lantern.svg restores the main requested lantern details, but the sprout remains disconnected and the corrected family is unapproved. No further pass or integration.",
+    "correctionApproval": {"question": "Authorize one correction pass against the approved PNG silhouettes?", "selection": "Correct the SVGs (Recommended)", "description": "Restore the missing shapes and balance sizes, then inspect both again. No app integration.", "authorizedPasses": 1, "executedPasses": 1},
+    "svgAuthoringApproval": {"question": "Use Codex-authored SVG paths to recreate and clean up both approved glyphs, then review them before app integration?", "selection": "Create SVG versions", "description": "Preserve the approved shapes and colors, remove shading and transparency residue, and compare at 24px and 32px."},
+    "svgDerivativeApproved": false,
+    "integrationAuthorized": false,
+    "runtimeAccepted": false
+  },
+  "consumer": {
+    "role": "decorative accompaniment to Explore initial-state heading",
+    "heading": "Find your recorded thinking",
+    "projectedCanvasSizesPx": [24, 32],
+    "intendedGround": "#031315",
+    "fileSizeBudget": "unknown"
+  },
+  "generation": {
+    "command": "codex exec --skip-git-repo-check --image '.lore/context/brand-imagery.webp' - < '.impeccable/candidates/glyphs/lantern-prompt.txt'",
+    "hostTimeoutMs": 600000,
+    "cliVersion": "codex-cli 0.166.0",
+    "provider": "openai",
+    "runnerModel": "gpt-6-luna",
+    "reportedImageTool": "image_gen__imagegen",
+    "internalImageModel": "not exposed",
+    "internalImageToolPrompt": "not exposed; lantern-prompt.txt preserves the exact outer stdin request",
+    "sessionId": "01a1b1e8-4016-7e33-859d-50df63c78724",
+    "imageCount": 1,
+    "retryCount": 0,
+    "nativePath": "/home/rjroy/.codex/generated_images/01a1b1e8-4016-7e33-859d-50df63c78724/exec-a4e3a2c8-a0a5-439c-85df-c5b812a317a7.png",
+    "durablePath": ".impeccable/candidates/glyphs/lantern.png",
+    "sourceUnmodified": true,
+    "sourceAndCopySha256": "78ae83089be7edeac1e1da15e16c6171a8127c3f7be57083b676c0caeadd362e",
+    "outerRequestSha256": "a859da5f9596d6140855f52127992b85e012b2d8ef03391299a6e6a5849c6337",
+    "referencePath": ".lore/context/brand-imagery.webp",
+    "referenceSha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8",
+    "byteIdenticalRegenerationClaimed": false
+  },
+  "decodedSource": {
+    "format": "PNG",
+    "width": 1254,
+    "height": 1254,
+    "bytes": 455587,
+    "channels": "RGBA",
+    "bitsPerChannel": 8,
+    "colorSpace": "sRGB",
+    "reportedGamma": 0.454545,
+    "runtimeColorHandling": "not integrated or verified",
+    "totalPixels": 1572516,
+    "fullyTransparentPixels": 1173358,
+    "fullyOpaquePixels": 3186,
+    "partiallyTransparentPixels": 395972,
+    "alphaGreaterThanZeroBoundsInclusive": [33, 136, 1163, 1165],
+    "alphaGreaterThan127BoundsInclusive": [234, 151, 1010, 1129],
+    "alphaGreaterThan249BoundsInclusive": [235, 152, 1009, 1128]
+  },
+  "verification": {
+    "tool": "ImageMagick 7.1.2-34 Q16-HDRI; Python 3 standard library for decoded pixel counting",
+    "nativeAndDurableCopyDecodedAndVisuallyInspected": true,
+    "checksumsMatch": true,
+    "realAlphaVerified": true,
+    "darkAndLightCompositesVisuallyInspected": true,
+    "projected24And32PxPreviewsVisuallyInspected": true,
+    "browserOrRuntimeVerificationPerformed": false,
+    "assessment": "Recognizable at 24px, clearer at 32px; useful silhouette pilot, not fully conforming production art.",
+    "deviations": [
+      "1254x1254 delivered instead of requested 1024x1024",
+      "Principal silhouette slightly off-center vertically; roughly 10 percent bottom padding instead of requested 12.5 percent minimum",
+      "Subtle shading and non-exact palette colors instead of strictly flat fills",
+      "Low-alpha edge/interior residue; much of the solid-looking artwork has alpha 254"
+    ],
+    "inspectionOnlyPreviews": [
+      {"path": "/tmp/opencode/thoughtloom-lantern-01a1b1e8-review/dark.png", "width": 384, "height": 384, "ground": "#031315"},
+      {"path": "/tmp/opencode/thoughtloom-lantern-01a1b1e8-review/light.png", "width": 384, "height": 384, "ground": "#FEF6E1"},
+      {"path": "/tmp/opencode/thoughtloom-lantern-01a1b1e8-review/sizes.png", "width": 640, "height": 290, "content": "24px and 32px untrimmed canvas previews, plus an 8x enlarged 24px sample"}
+    ]
+  }
+}

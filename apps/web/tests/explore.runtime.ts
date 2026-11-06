@@ -83,6 +83,7 @@ export async function checkSearchRoute({ origin, host, probe, daemon }: { origin
 export async function checkExploreBrowser(page: Page, daemon: Fixture, options: { origin: string; daemonOrigin: string; token: string; narrow: boolean }): Promise<void> {
   const field = page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i });
   const search = page.getByRole("button", { name: /^search$/i });
+  const glyph = page.locator('img[src="/glyphs/lantern.svg"]');
   const openFilters = async () => {
     if (options.narrow) {
       const button = page.getByRole("button", { name: /^filters(?:\s*\(\d+\))?$/i });
@@ -101,10 +102,25 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   const before = searchCalls().length;
   await expect(field).toBeVisible({ timeout: 5000 });
   await expect(field).toHaveValue("");
+  const initialHeading = page.getByRole("heading", { name: "Find your recorded thinking", exact: true });
+  await expect(initialHeading.locator("img")).toHaveCount(1);
+  await expect(glyph).toHaveAttribute("alt", "");
+  await expect(glyph).toHaveAttribute("aria-hidden", "true");
+  await expect(glyph).toHaveCSS("width", "24px");
+  await expect(glyph).toHaveCSS("height", "24px");
+  await expect(initialHeading).toHaveCSS("column-gap", "8px");
+  await expect(initialHeading.getByRole("img")).toHaveCount(0);
+  assert.equal(await glyph.evaluate(image => image.tabIndex), -1);
+  await expect.poll(() => glyph.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
   assert.equal(searchCalls().length, before, "initial Explore must not query daemon");
+  await search.click();
+  await expect(page.getByText("Enter a few words to search.", { exact: true })).toBeVisible();
+  await expect(glyph).toHaveCount(0);
+  assert.equal(searchCalls().length, before, "blank validation must not query daemon");
   await field.fill("source-owned"); await search.click();
   const importedCard = page.locator("article").filter({ hasText: "Owned imported search result" });
   await expect(importedCard).toBeVisible();
+  await expect(glyph).toHaveCount(0);
   await expect(importedCard.getByText("Imported source", { exact: true }).first()).toBeVisible();
   await expect(importedCard.getByText("AI", { exact: true })).toHaveCount(0);
   await openFilters();
@@ -149,6 +165,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
     await search.click();
     await expect.poll(() => searchCalls().length).toBe(afterImported + 1);
     await expect(page.getByText(/searching|loading/i).first()).toBeVisible();
+    await expect(glyph).toHaveCount(0);
   } finally { daemon.release(); daemon.setMode("normal"); }
   await expect(page.getByText("Owned development").first()).toBeVisible();
   await expect(page.getByText("Context title").first()).toBeVisible();
@@ -229,6 +246,10 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
     await expect(fresh.getByLabel(/^to$/i)).toHaveValue("2032-02-29");
     await fresh.reload({ waitUntil: "networkidle" });
     await expect(fresh.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toHaveValue("owned");
+    await expect(fresh.locator('img[src="/glyphs/lantern.svg"]')).toHaveCount(0);
+    await fresh.goto(`${options.origin}/explore?sort=invalid-owned`, { waitUntil: "networkidle" });
+    await expect(fresh.getByRole("heading", { name: "Search link not valid" })).toBeVisible();
+    await expect(fresh.locator('img[src="/glyphs/lantern.svg"]')).toHaveCount(0);
     assert.deepEqual(freshLeaks, []);
   } finally { await freshContext.close(); }
   await openFilters();
@@ -243,9 +264,11 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
 
   await field.fill("empty-owned"); await search.click();
   await expect(page.getByText(/no results/i).first()).toBeVisible();
+  await expect(glyph).toHaveCount(0);
   daemon.setMode("failure");
   await field.fill("failed-owned"); await search.click();
   await expect(page.getByText(/search unavailable|could not search|unable to search|search failed/i).first()).toBeVisible();
+  await expect(glyph).toHaveCount(0);
   await expect(field).toHaveValue("failed-owned");
   daemon.setMode("normal");
   await page.getByRole("button", { name: /retry search/i }).click();

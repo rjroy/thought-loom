@@ -31,6 +31,7 @@ async function createFixture(temp: string): Promise<string> {
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
     "apps/web/package.json", "apps/web/tsconfig.json", "apps/web/next.config.ts",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
+    "apps/web/public/glyphs/lantern.svg", "apps/web/public/glyphs/sprout.svg",
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/contextual-back.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/components/agentic-search-provider.tsx", "apps/web/src/features/agentic-search/types.ts", "apps/web/src/features/agentic-search/request.ts", "apps/web/src/features/agentic-search/location.ts", "apps/web/src/features/agentic-search/controller.ts",
@@ -261,6 +262,12 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    for (const glyph of ["lantern", "sprout"]) {
+      const response = await fetch(`${origin}/glyphs/${glyph}.svg`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /image\/svg\+xml/);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(resolve(fixtureWeb, `public/glyphs/${glyph}.svg`)), "Public glyph must retain its approved source bytes");
+    }
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
     if (process.env.THOUGHTLOOM_TEST_EXPLORE === "1") {

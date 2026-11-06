@@ -1,0 +1,111 @@
+{
+  "sourceAndPromptHashes": "pass",
+  "svgContent": "pass",
+  "renderAndTransparency": "pass",
+  "compositionConnectivity": "fail",
+  "connectivityEvidence": {
+    "lantern": {
+      "expectedSignificantComponents": 2,
+      "actualSignificantComponents": 2
+    },
+    "sprout": {
+      "expectedSignificantComponents": 1,
+      "actualSignificantComponents": 2
+    }
+  },
+  "renderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "artifacts": {
+    "lantern": {
+      "sha256": "24cda858b91c39e01711cf1a8692e5aaa6d7657dc6165ab40265bfc6a9dd7329",
+      "bytes": 2106,
+      "viewBox": "0 0 1024 1024",
+      "pathCount": 6,
+      "fills": [
+        "#FEF6E1",
+        "#FEF6E1",
+        "#FEF6E1",
+        "#FEF6E1",
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "contentCheck": "pass",
+      "render": {
+        "fullyTransparentPixels": 836991,
+        "fullyOpaquePixels": 205855,
+        "antialiasedPixels": 5730,
+        "alphaGtZeroBoundsInclusive": [
+          217,
+          140,
+          804,
+          885
+        ],
+        "clearPaddingCheck": "pass",
+        "significantComponentsAtAlphaGt127MinArea64": [
+          {
+            "areaPixels": 178254,
+            "boundsInclusive": [
+              217,
+              140,
+              804,
+              885
+            ]
+          },
+          {
+            "areaPixels": 30790,
+            "boundsInclusive": [
+              419,
+              481,
+              606,
+              748
+            ]
+          }
+        ]
+      }
+    },
+    "sprout": {
+      "sha256": "585b9522651ab998079ff283af994ce12aca44792359d4dc4369ed56f997b4b1",
+      "bytes": 903,
+      "viewBox": "0 0 1024 1024",
+      "pathCount": 2,
+      "fills": [
+        "#FFD477",
+        "#FEF6E1"
+      ],
+      "contentCheck": "pass",
+      "render": {
+        "fullyTransparentPixels": 895995,
+        "fullyOpaquePixels": 149270,
+        "antialiasedPixels": 3311,
+        "alphaGtZeroBoundsInclusive": [
+          137,
+          154,
+          883,
+          871
+        ],
+        "clearPaddingCheck": "pass",
+        "significantComponentsAtAlphaGt127MinArea64": [
+          {
+            "areaPixels": 118686,
+            "boundsInclusive": [
+              392,
+              154,
+              882,
+              871
+            ]
+          },
+          {
+            "areaPixels": 32247,
+            "boundsInclusive": [
+              138,
+              342,
+              438,
+              563
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "visualApproval": "not evaluated by script; see README and designer review"
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent,
@@ -371,7 +372,7 @@ export function ExploreView() {
               {view.validation === "link" ? (
                 <><h2>Search link not valid</h2><p>Enter a query and choose your filters to search again.</p></>
               ) : view.phase === "initial" ? (
-                <><h2>Find your recorded thinking</h2><p>Enter a few words you remember, then search.</p></>
+                <><h2 className={styles.initialHeading}>{!view.validation && <Image src="/glyphs/lantern.svg" alt="" aria-hidden="true" width={24} height={24} unoptimized className={styles.headingGlyph} />}Find your recorded thinking</h2><p>Enter a few words you remember, then search.</p></>
               ) : view.phase === "loading" ? (
                 <h2>Searching…</h2>
               ) : view.phase === "error" ? (

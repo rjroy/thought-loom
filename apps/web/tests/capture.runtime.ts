@@ -68,7 +68,18 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
   const thought = page.getByRole("textbox", { name: /^thought$/i });
   const title = page.getByRole("textbox", { name: /^title(?:\s*\(optional\))?$/i });
   const save = page.getByRole("button", { name: /^save$/i });
+  const heading = page.getByRole("heading", { name: "Capture", exact: true });
+  const glyph = heading.locator("img");
   await expect(thought).toBeVisible({ timeout: 5000 });
+  await expect(glyph).toHaveAttribute("src", "/glyphs/sprout.svg");
+  await expect(glyph).toHaveAttribute("alt", "");
+  await expect(glyph).toHaveAttribute("aria-hidden", "true");
+  await expect(glyph).toHaveCSS("width", "24px");
+  await expect(glyph).toHaveCSS("height", "24px");
+  await expect(heading).toHaveCSS("column-gap", "8px");
+  await expect(heading.getByRole("img")).toHaveCount(0);
+  assert.equal(await glyph.evaluate(image => image.tabIndex), -1);
+  await expect.poll(() => glyph.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
   await expect(title).toBeVisible();
   await expect(page.getByText(/optional/i)).toBeVisible();
   await thought.fill("   ");
@@ -85,6 +96,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
     await save.dblclick({ delay: 40 });
     await waitAttempts(daemon, beforeSave + 1);
     await expect(save).toBeDisabled();
+    await expect(glyph).toBeVisible();
     await retained(page, "  exact input\nsecond line  ");
     await page.waitForTimeout(250);
     assert.equal(daemon.attempts.length, beforeSave + 1, "pending double click must not duplicate capture");
@@ -93,6 +105,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
     assert.ok(submitted.title === undefined || submitted.title === "" || submitted.title === null);
   } finally { daemon.release(); }
   await expect(page.getByText(receipt.text, { exact: true })).toBeVisible();
+  await expect(glyph).toBeVisible();
   await expect(page.getByText(receipt.title, { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /open idea/i })).toHaveAttribute("href", `/ideas/${encodeURIComponent(receipt.id)}`);
   await page.getByRole("button", { name: /capture another/i }).click();

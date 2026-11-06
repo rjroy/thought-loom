@@ -1,0 +1,88 @@
+{
+  "status": "derivative-candidates-failed-visual-review",
+  "recordedAt": "2026-11-06T18:02:49Z",
+  "authorization": {
+    "sourceArtworkApprovalQuote": "But yes both are approved.",
+    "question": "Use Codex-authored SVG paths to recreate and clean up both approved glyphs, then review them before app integration?",
+    "selection": "Create SVG versions",
+    "description": "Preserve the approved shapes and colors, remove shading and transparency residue, and compare at 24px and 32px.",
+    "sourceArtworksApproved": true,
+    "vectorReconstructionAuthorized": true,
+    "svgDerivativesApproved": false,
+    "correctionPassAuthorized": false,
+    "integrationAuthorized": false,
+    "runtimeAccepted": false
+  },
+  "generation": {
+    "mode": "Codex-authored standalone SVG vector reconstruction",
+    "nativeSvgImageGeneration": false,
+    "deterministicConversion": false,
+    "byteIdenticalRegenerationClaimed": false,
+    "command": "codex exec --skip-git-repo-check --image '.impeccable/candidates/glyphs/lantern.png' --image '.impeccable/candidates/glyphs/sprout.png' - < '.impeccable/candidates/glyphs/production/vector-prompt.txt'",
+    "cliVersion": "codex-cli 0.166.0",
+    "runnerModel": "gpt-6-luna",
+    "provider": "openai",
+    "sessionId": "01a1b204-a35a-7333-8559-0bde4e91cccc",
+    "hostTimeoutMs": 600000,
+    "outerExitCode": 0,
+    "authoringInvocations": 1,
+    "additionalOwnerCreationPasses": 0,
+    "internalAuthoringRevisions": "Multiple edits within this invocation, including one failed patch; no second invocation or owner-side artwork repair.",
+    "outerRequestPath": "vector-prompt.txt",
+    "outerRequestSha256": "7c603001f4a159a30e9c2ec6c0c5f927d075953ab5e5b4c4701860b7fd829946",
+    "sourceHashPreservationCheck": "pass",
+    "orderedApprovedReferences": [
+      {"path": "../lantern.png", "sha256": "78ae83089be7edeac1e1da15e16c6171a8127c3f7be57083b676c0caeadd362e"},
+      {"path": "../sprout.png", "sha256": "50f27c40f676dc0c379534a4f3bcfbd400dc8238714fd31c510cdac73f3380c2"}
+    ]
+  },
+  "artifacts": [
+    {"path": "lantern.svg", "authoredDirectlyAtCandidatePath": true, "sha256": "0e09e9fc43a3bb448cca7bfcda5385427c0b16a2a45f481307467e5a7511ec74", "bytes": 1623, "dimensions": [1024, 1024], "viewBox": "0 0 1024 1024", "pathCount": 2, "fills": ["#FEF6E1", "#FFD477"], "status": "unapproved-failed-visual-fidelity"},
+    {"path": "sprout.svg", "authoredDirectlyAtCandidatePath": true, "sha256": "b15ff8b1cac8f16af29c201acf70e533a1d84f113a6931c088d5260fb582a578", "bytes": 825, "dimensions": [1024, 1024], "viewBox": "0 0 1024 1024", "pathCount": 2, "fills": ["#FEF6E1", "#FFD477"], "status": "unapproved-failed-visual-fidelity"}
+  ],
+  "consumer": {
+    "canvasSizesPx": [24, 32],
+    "ground": "#031315",
+    "roles": {"lantern": "decorative Explore initial-state heading accompaniment", "sprout": "decorative Capture heading accompaniment"},
+    "fileSizeBudget": "unknown",
+    "colorHandling": "flat SVG sRGB fills; rendered with librsvg, no runtime/browser pipeline tested"
+  },
+  "validation": {
+    "command": "python3 .impeccable/candidates/glyphs/production/verify.py",
+    "exitCode": 0,
+    "renderer": "rsvg-convert 2.63.3; Cairo 1.18.6",
+    "imageMagick": "7.1.2-34 Q16-HDRI",
+    "sourceAndPromptHashes": "pass",
+    "restrictedSvgStructureAndSafety": "pass: only svg root and two paths; no raster, script, external refs, CSS, text, fonts, filters, gradients, masks or animation",
+    "dimensionsPaletteTransparencyAndPadding": "pass",
+    "statisticsPath": "review/statistics.json",
+    "transparentRenderSizesPx": [24, 32, 384, 1024],
+    "darkAndLightCompositesInspected": true,
+    "comparisonBoardInspected": true,
+    "comparisonPath": "review/comparison.png",
+    "visualFidelity": "fail",
+    "opticalSizeBalance": "fail",
+    "visualFindings": [
+      "Lantern's approved solid cap/collar is replaced by an open arch",
+      "Lantern flame touches the base instead of preserving transparent separation",
+      "Sprout loses much of its curved stem and has an angular gold-leaf join",
+      "Sprout is smaller and lower than the lantern: 542 versus 720 source-pixel silhouette height on equal 1024 canvases"
+    ],
+    "renderFilesAreInspectionEvidenceNotApprovedProductionDerivatives": true,
+    "browserOrRuntimeVerification": "not authorized/not performed"
+  },
+  "processCaveats": {
+    "unauthorizedTrackerAttempt": {
+      "command": "rtk proxy bd create --title=\"Create approved lantern and sprout SVG candidates\" --description=\"Create the two explicitly approved standalone vector SVG reconstructions in .impeccable/candidates/glyphs/production from the provided PNG references. Preserve approved silhouettes and flat colors; no app integration or previews.\" --type=task --priority=2",
+      "error": "Error: failed to open database: embeddeddolt: init schema: embeddeddolt: open db: failed to load database \"thought_loom\": openat LOCK: read-only file system",
+      "numericExitCode": "not exposed in captured custom-tool result",
+      "successfulMutationObserved": false,
+      "ownerRepeatedTrackerCommand": false
+    },
+    "originalPngsAndRasterPromptsUnchanged": true,
+    "appChanges": false,
+    "servicesOrInstallations": false,
+    "commits": false,
+    "nextStep": "Orchestrator inspects evidence and obtains explicit correction authorization; preserve current unapproved SVGs and original approved PNGs."
+  }
+}

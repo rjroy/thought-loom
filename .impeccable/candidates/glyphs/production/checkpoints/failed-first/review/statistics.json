@@ -1,0 +1,56 @@
+{
+  "sourceAndPromptHashes": "pass",
+  "svgContent": "pass",
+  "renderAndTransparency": "pass",
+  "renderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "artifacts": {
+    "lantern": {
+      "sha256": "0e09e9fc43a3bb448cca7bfcda5385427c0b16a2a45f481307467e5a7511ec74",
+      "bytes": 1623,
+      "viewBox": "0 0 1024 1024",
+      "pathCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "contentCheck": "pass",
+      "render": {
+        "fullyTransparentPixels": 859371,
+        "fullyOpaquePixels": 183011,
+        "antialiasedPixels": 6194,
+        "alphaGtZeroBoundsInclusive": [
+          184,
+          176,
+          839,
+          895
+        ],
+        "clearPaddingCheck": "pass"
+      }
+    },
+    "sprout": {
+      "sha256": "b15ff8b1cac8f16af29c201acf70e533a1d84f113a6931c088d5260fb582a578",
+      "bytes": 825,
+      "viewBox": "0 0 1024 1024",
+      "pathCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "contentCheck": "pass",
+      "render": {
+        "fullyTransparentPixels": 910667,
+        "fullyOpaquePixels": 135574,
+        "antialiasedPixels": 2335,
+        "alphaGtZeroBoundsInclusive": [
+          230,
+          311,
+          847,
+          852
+        ],
+        "clearPaddingCheck": "pass"
+      }
+    }
+  },
+  "visualApproval": "not evaluated by script; see README and designer review"
+}

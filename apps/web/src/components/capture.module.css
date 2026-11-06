@@ -1,6 +1,7 @@
 .heading { max-inline-size: none; }
 .headingRow { display: flex; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; margin-block-end: .5rem; }
-.headingRow h1 { margin: 0; }
+.headingRow h1 { display: flex; align-items: center; gap: .5rem; margin: 0; }
+.headingGlyph { flex: none; inline-size: 24px; block-size: 24px; pointer-events: none; }
 .importAction { display: inline-flex; align-items: center; justify-content: center; min-inline-size: 44px; min-block-size: 44px; padding: .375rem 0; border: 0; background: transparent; color: var(--color-link); font: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; cursor: pointer; }
 .importAction:enabled:hover { color: var(--color-text); text-decoration-thickness: 2px; }
 .importAction:enabled:active { text-decoration-thickness: 3px; }

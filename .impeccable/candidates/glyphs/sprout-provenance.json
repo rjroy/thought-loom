@@ -1,0 +1,110 @@
+{
+  "asset": "sprout.png",
+  "status": "source-artwork-approved-corrected-svg-connectivity-review-failed",
+  "recordedAt": "2026-11-06T17:51:56Z",
+  "authorization": {
+    "description": "Single gently curved stem with two broad unequal leaves, flat lightly organic cut-paper silhouette, cream #FEF6E1 and restrained pale gold #FFD477 on transparent background, readable at 24px/32px.",
+    "approvalQuestion": "Recorded the lantern direction as approved. Shall we generate the matching sprout next?",
+    "userAction": "yes",
+    "scope": "one actual generated matching sprout pilot only",
+    "descriptionApproved": true,
+    "artworkApproved": true,
+    "silhouetteApproved": true,
+    "styleApproved": true,
+    "silhouetteAndStyleApprovalQuote": "that works",
+    "exactArtworkApprovalQuote": "But yes both are approved.",
+    "exactArtworkApprovalDate": "2026-11-06",
+    "exactArtworkApprovedSourceSha256": "50f27c40f676dc0c379534a4f3bcfbd400dc8238714fd31c510cdac73f3380c2",
+    "productionDerivativesAuthorized": true,
+    "productionDerivativeScope": "Clean transparency, remove unintended shading and balance optical sizes for both approved glyphs; no redesign or app integration.",
+    "productionAuthorizationContext": "User confirmed both approved after the question: Shall we clean up transparency and balance their sizes for production, keeping app integration separate?",
+    "productionRouteStatus": "Initial SVGs failed review. User authorized one correction pass; production/corrected/sprout.svg restores a long stem and improves size, but the gold leaf is detached. Corrected candidate unapproved; no further pass or integration.",
+    "correctionApproval": {"question": "Authorize one correction pass against the approved PNG silhouettes?", "selection": "Correct the SVGs (Recommended)", "description": "Restore the missing shapes and balance sizes, then inspect both again. No app integration.", "authorizedPasses": 1, "executedPasses": 1},
+    "svgAuthoringApproval": {"question": "Use Codex-authored SVG paths to recreate and clean up both approved glyphs, then review them before app integration?", "selection": "Create SVG versions", "description": "Preserve the approved shapes and colors, remove shading and transparency residue, and compare at 24px and 32px."},
+    "svgDerivativeApproved": false,
+    "integrationAuthorized": false,
+    "runtimeAccepted": false
+  },
+  "consumer": {
+    "role": "decorative accompaniment to existing Capture heading; not a control or status",
+    "heading": "Capture",
+    "projectedCanvasSizesPx": [24, 32],
+    "intendedGround": "#031315",
+    "fileSizeBudget": "unknown"
+  },
+  "generation": {
+    "command": "codex exec --skip-git-repo-check --image '.lore/context/brand-imagery.webp' --image '.impeccable/candidates/glyphs/lantern.png' - < '.impeccable/candidates/glyphs/sprout-prompt.txt'",
+    "hostTimeoutMs": 600000,
+    "cliVersion": "codex-cli 0.166.0",
+    "provider": "openai",
+    "runnerModel": "gpt-6-luna",
+    "internalImageTool": "not exposed in outer CLI output",
+    "internalImageModel": "not exposed",
+    "internalImageToolPrompt": "not exposed; sprout-prompt.txt preserves the exact outer stdin request",
+    "sessionId": "01a1b1fc-4a05-7881-aa34-5a7f70ac3beb",
+    "imageCount": 1,
+    "retryCount": 0,
+    "nativePath": "/home/rjroy/.codex/generated_images/01a1b1fc-4a05-7881-aa34-5a7f70ac3beb/exec-d403255e-a27d-47d9-95be-19bbbd3309ef.png",
+    "durablePath": ".impeccable/candidates/glyphs/sprout.png",
+    "sourceUnmodified": true,
+    "sourceAndCopySha256": "50f27c40f676dc0c379534a4f3bcfbd400dc8238714fd31c510cdac73f3380c2",
+    "outerRequestSha256": "ef9aa9f29fac3659fe115653f42a7c7580e1939d7133cf7704ece3691156befb",
+    "orderedReferences": [
+      {"path": ".lore/context/brand-imagery.webp", "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8", "role": "cut-paper silhouette, quiet warmth and organic-growth inspiration"},
+      {"path": ".impeccable/candidates/glyphs/lantern.png", "sha256": "78ae83089be7edeac1e1da15e16c6171a8127c3f7be57083b676c0caeadd362e", "role": "silhouette-approved family reference; shading and alpha defects expressly excluded"}
+    ],
+    "byteIdenticalRegenerationClaimed": false,
+    "generatorReportedDimensions": [1024, 1024],
+    "actualDecodedDimensions": [1254, 1254]
+  },
+  "decodedSource": {
+    "format": "PNG",
+    "width": 1254,
+    "height": 1254,
+    "bytes": 298088,
+    "channels": "RGBA",
+    "bitsPerChannel": 8,
+    "colorSpace": "sRGB",
+    "reportedGamma": 0.454545,
+    "runtimeColorHandling": "not integrated or verified",
+    "totalPixels": 1572516,
+    "fullyTransparentPixels": 1333400,
+    "fullyOpaquePixels": 1225,
+    "partiallyTransparentPixels": 237891,
+    "alpha254Pixels": 201786,
+    "alphaGreaterThanZeroBoundsInclusive": [103, 133, 1201, 1124],
+    "alphaGreaterThan127BoundsInclusive": [200, 227, 1062, 1051],
+    "alphaGreaterThan249BoundsInclusive": [201, 228, 1061, 1050],
+    "sampleRgba": {
+      "0,0": [0, 0, 0, 0],
+      "500,350": [0, 0, 0, 0],
+      "800,400": [252, 241, 220, 254],
+      "350,500": [253, 209, 125, 254],
+      "550,900": [253, 242, 221, 254]
+    }
+  },
+  "verification": {
+    "tool": "ImageMagick 7.1.2-34 Q16-HDRI; Python 3 standard library for decoded pixel counting",
+    "nativeAndDurableCopyDecodedAndVisuallyInspected": true,
+    "checksumsMatch": true,
+    "realAlphaVerified": true,
+    "darkAndLightCompositesVisuallyInspected": true,
+    "projected24And32PxPreviewsVisuallyInspected": true,
+    "familyComparisonVisuallyInspected": true,
+    "lanternSourcePromptAndApprovalProvenanceUnchanged": true,
+    "browserOrRuntimeVerificationPerformed": false,
+    "assessment": "Clearly recognizable two-leaf sprout at 24px, clearer stem and leaf separation at 32px. Matching cream/gold and softly organic silhouette family, but visually lighter and shorter than the lantern at equal canvas size. Useful pilot, not fully conforming production-ready art.",
+    "deviations": [
+      "1254x1254 decoded instead of requested and generator-reported 1024x1024",
+      "Subtle shading and non-exact palette colors instead of strictly flat fills",
+      "Low-alpha edge and surrounding residue persists despite explicit exclusion; most solid-looking artwork is alpha 254, not fully opaque",
+      "Main silhouette meets 12.5 percent padding, but low-alpha residue extends into the requested clear safe padding",
+      "At equal untrimmed canvas sizes, principal sprout height is 825 source pixels versus lantern height 979; family scale is not normalized"
+    ],
+    "inspectionOnlyPreviews": [
+      {"path": "/tmp/opencode/thoughtloom-sprout-01a1b1fc-review/dark.png", "width": 384, "height": 384, "ground": "#031315"},
+      {"path": "/tmp/opencode/thoughtloom-sprout-01a1b1fc-review/light.png", "width": 384, "height": 384, "ground": "#FEF6E1"},
+      {"path": "/tmp/opencode/thoughtloom-sprout-01a1b1fc-review/family-sizes.png", "width": 800, "height": 480, "content": "lantern/sprout pairs on equal untrimmed 240px, 24px and 32px canvases, plus a 4x enlarged 24px sprout"}
+    ]
+  }
+}
