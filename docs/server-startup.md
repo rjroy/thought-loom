@@ -46,6 +46,8 @@ Export these variables in the launching shell. Next.js has its own application e
 
 For private Tailscale Serve access, set `THOUGHTLOOM_WEB_ORIGIN=https://gsai.raptor-piranha.ts.net` (using your actual HTTPS hostname), and configure Serve to proxy to the loopback web port while preserving the original Host. HTTPS and tailnet access must be controlled externally. The application has no built-in login; origin checks are not authentication. Do not enable Funnel or otherwise expose it publicly. See [production deployment](production-deployment.md) for the boundary. Use Ctrl-C to stop either web process without stopping the independently running daemon.
 
+Include the external port in `THOUGHTLOOM_WEB_ORIGIN` when the browser URL uses one (for example, `https://host.example:3002`). In development, Next automatically allows that origin's exact hostname for its dev assets; no additional hostname setting is needed. Restart the web development server after changing its configuration. This Next development allowance does not replace the application's exact Host and mutation Origin checks or apply to production access control.
+
 Next.js development incoming-request logging is disabled in `apps/web/next.config.ts`: search and bookmarked page URLs contain private query text. This does not disable application diagnostics or critical-error logging. Do not re-enable request-URL logging to debug searches; server transport diagnostics intentionally omit query strings and content.
 
 ### Capture workflow

@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+import { readWebConfig } from "./src/server/config";
+
+const webHostname = new URL(readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN }).webOrigin).hostname;
+// Next interprets asterisks as hostname patterns, not literal hostnames.
+if (webHostname.includes("*")) throw new Error("Invalid local origin");
 
 const rawImportMaxBytes = process.env.THOUGHTLOOM_IMPORT_MAX_BYTES;
 const importMaxBytes = rawImportMaxBytes === undefined ? 1048576 : Number(rawImportMaxBytes);
@@ -11,6 +16,7 @@ if ((rawImportMaxBytes !== undefined && !/^\d+$/.test(rawImportMaxBytes))
 }
 
 const config: NextConfig = {
+  allowedDevOrigins: [webHostname],
   // Search and navigation URLs can contain private user input.
   logging: { incomingRequests: false },
   experimental: {
