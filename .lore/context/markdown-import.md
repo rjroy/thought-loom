@@ -21,7 +21,7 @@ Retain the exact original document for deliberate user inspection. Agents cannot
 - After successful import, queue normal weaving for titles, interpretations and warranted conceptual connections. Later weaving failure does not undo import.
 - Retain empty or metadata-only files as source artifacts with zero thoughts and no AI processing or weaving.
 - Skip identical source bytes across the library, including other filenames, before additional AI work or duplicate thoughts. Never restore rejected thoughts as a side effect.
-- Report and skip changed contents at a known file locator, leaving its existing import untouched. A renamed and edited file at an unknown locator is treated as new; reliable rename tracking is not implemented.
+- Ordinary file selections have no reliable directory identity: their filenames are metadata, so different bytes import independently even with the same name. Report and skip changed contents only at a reliable known locator in a non-loose source namespace, leaving its existing import untouched. Reliable rename tracking is not implemented.
 - Initial thought titles are absent. Normal title generation and user edit/clear authority apply; source metadata is not copied into every thought title.
 
 ## View integration

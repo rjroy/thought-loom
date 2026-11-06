@@ -65,7 +65,7 @@ export function createImportTables(db: Database): void {
       CHECK(COALESCE(outcome IN ('failed','interrupted'),0)=(reason_code IS NOT NULL)),
       CHECK(outcome!='imported' OR run_id IS NOT NULL)
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS import_pending_locator ON markdown_import_files(namespace_id,relative_path)
+    CREATE INDEX IF NOT EXISTS import_pending_locator_lookup ON markdown_import_files(namespace_id,relative_path)
       WHERE outcome IS NULL AND waiting_on_file_id IS NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS import_pending_digest ON markdown_import_files(sha256,byte_length)
       WHERE outcome IS NULL AND waiting_on_file_id IS NULL;
@@ -98,7 +98,8 @@ export function createImportSchema(db: Database): void {
     WHEN NEW.end_byte>(SELECT byte_length FROM import_documents WHERE id=NEW.document_id)
     BEGIN SELECT RAISE(ABORT,'import part outside original bytes'); END;
     CREATE TRIGGER IF NOT EXISTS imports_seal_complete BEFORE INSERT ON import_document_seals BEGIN
-      SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM import_documents d JOIN import_locations l
+      SELECT CASE WHEN EXISTS(SELECT 1 FROM import_documents d JOIN import_namespaces n ON n.id=d.original_namespace_id
+        WHERE d.id=NEW.document_id AND n.kind!='loose-markdown') AND NOT EXISTS(SELECT 1 FROM import_documents d JOIN import_locations l
         ON l.document_id=d.id AND l.namespace_id=d.original_namespace_id AND l.relative_path=d.original_path
         WHERE d.id=NEW.document_id) THEN RAISE(ABORT,'import original locator missing') END;
       SELECT CASE WHEN EXISTS(SELECT 1 FROM import_documents d WHERE d.id=NEW.document_id AND
@@ -154,6 +155,16 @@ export function createImportSchema(db: Database): void {
       SELECT CASE WHEN NEW.position!=COALESCE((SELECT MAX(position)+1 FROM markdown_import_files WHERE import_id=NEW.import_id),0)
         THEN RAISE(ABORT,'import files must follow admission order') END;
     END;
+    CREATE TRIGGER IF NOT EXISTS imports_pending_locator_insert BEFORE INSERT ON markdown_import_files
+    WHEN NEW.outcome IS NULL AND NEW.waiting_on_file_id IS NULL
+      AND (SELECT kind FROM import_namespaces WHERE id=NEW.namespace_id)!='loose-markdown'
+      AND EXISTS(SELECT 1 FROM markdown_import_files WHERE namespace_id=NEW.namespace_id AND relative_path=NEW.relative_path AND outcome IS NULL AND waiting_on_file_id IS NULL)
+    BEGIN SELECT RAISE(ABORT,'import pending locator reserved'); END;
+    CREATE TRIGGER IF NOT EXISTS imports_pending_locator_update BEFORE UPDATE OF run_id,waiting_on_file_id,outcome ON markdown_import_files
+    WHEN NEW.outcome IS NULL AND NEW.waiting_on_file_id IS NULL
+      AND (SELECT kind FROM import_namespaces WHERE id=NEW.namespace_id)!='loose-markdown'
+      AND EXISTS(SELECT 1 FROM markdown_import_files WHERE id!=NEW.id AND namespace_id=NEW.namespace_id AND relative_path=NEW.relative_path AND outcome IS NULL AND waiting_on_file_id IS NULL)
+    BEGIN SELECT RAISE(ABORT,'import pending locator reserved'); END;
     CREATE TRIGGER IF NOT EXISTS imports_file_identity BEFORE UPDATE OF id,import_id,namespace_id,position,request_key,relative_path,sha256,byte_length,created_at ON markdown_import_files
     BEGIN SELECT RAISE(ABORT,'import file identity immutable'); END;
     CREATE TRIGGER IF NOT EXISTS imports_file_transition BEFORE UPDATE OF run_id,waiting_on_file_id,outcome,document_id,reason_code ON markdown_import_files

@@ -42,6 +42,9 @@ interface Schema { readonly name: string; readonly tbl_name: string; readonly ty
 export function migrateImportFoundation(db: Database): void {
   const columns = db.query("PRAGMA table_info(thoughts)").all() as {name:string}[];
   if (!columns.some(column => column.name === "import_document_id")) rebuildClosure(db);
+  // Replace the legacy all-namespace locator reservation and seal guard in place.
+  // Existing documents, locators, pending files and their identities remain untouched.
+  db.exec("DROP INDEX IF EXISTS import_pending_locator; DROP TRIGGER IF EXISTS imports_seal_complete");
   createImportSchema(db);
   if (db.query("PRAGMA foreign_key_check").all().length) throw new Error("Import migration foreign key integrity failure");
 }
