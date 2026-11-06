@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet">
+<path fill="#FEF6E1" d="M160 218h190v588H160c-16 0-28-13-28-28V246c0-15 12-28 28-28Z"/>
+<path fill="#FFD477" d="M386 466h145v-58l104 104-104 104v-58H386v-92Z"/>
+<path fill="#FEF6E1" d="M721 410c55-62 135-81 207-75-6 72-25 152-87 207-58 52-133 70-207 72 2-74 20-149 87-204Zm-59 140c67-11 124-41 174-91-50 51-80 108-91 175l-83-84Z" fill-rule="evenodd"/>
+</svg>

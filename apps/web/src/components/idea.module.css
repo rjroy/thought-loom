@@ -5,7 +5,9 @@
 .original { max-inline-size: 72ch; margin: 0; color: var(--color-text); font-size: 1.5rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .parent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.625rem; max-inline-size: 72ch; margin-block: 0.75rem 0; overflow-wrap: anywhere; }
 .parent > a { display: inline-flex; align-items: center; min-block-size: 2.75rem; }
-.byline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.375rem 0.625rem; margin: 0; color: var(--color-body); }
+.byline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.625rem; margin: 0; color: var(--color-body); }
+.materialLabel, .recordHeading { display: inline-flex; align-items: center; gap: 0.5rem; }
+.relationLabel { display: inline-flex; align-items: center; gap: 0.375rem; }
 .user { color: var(--brand-color-2); font-weight: 650; }
 .ai { color: var(--brand-color-13); font-weight: 650; }
 .rejected { padding-inline: 0.375rem; border: 1px solid var(--color-control-line); border-radius: 0.25rem; color: var(--brand-color-9); }

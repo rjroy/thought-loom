@@ -1,0 +1,362 @@
+{
+  "status": "both PNG artworks user approved; cleanup and integration not authorized",
+  "recordedAtUtc": "2026-11-06T20:39:19.109440+00:00",
+  "authorization": {
+    "artworkApproved": true,
+    "artworkApprovalQuote": "those are good",
+    "approvedPaths": ["connection.png", "used-as-source.png"],
+    "productionCleanupAuthorized": false,
+    "integrationAuthorized": false,
+    "quote": "Neither \"discovered connection\" nor \"used as source\" look quite right. Try those again maybe as PNG",
+    "format": "actual generated PNG raster sources",
+    "scope": "one generation per asset, two assets total; same approved concepts; no additional glyphs, automatic retries, production cleanup or integration"
+  },
+  "execution": {
+    "command": "codex exec --skip-git-repo-check --image '.lore/context/brand-imagery.webp' --image '.impeccable/candidates/glyphs/content-family/revised/review/board-dark.png' --image '.impeccable/candidates/glyphs/production/corrected/review/sprout-dark.png' - < '.impeccable/candidates/glyphs/content-family/raster-relationships/prompt.txt'",
+    "hostTimeoutMs": 600000,
+    "exitCode": 0,
+    "sessionId": "01a1b292-7e9f-7440-81b6-dcd959dff85c",
+    "cliVersion": "codex-cli 0.166.0",
+    "runner": "gpt-6-luna",
+    "provider": "openai",
+    "workerReportedImageTool": "image_gen__imagegen",
+    "internalImageModel": "not exposed",
+    "internalImagePrompts": "not exposed; prompt.txt preserves exact outer stdin request",
+    "imageToolCalls": 2,
+    "retryCount": 0,
+    "visibleWorkerShellCommands": [],
+    "visibleWorkerTrackerCommands": []
+  },
+  "prompt": {
+    "path": "prompt.txt",
+    "sha256": "e49422e5f1b4639a3f4bf767a1b8fc9d573364fb1a3f835189452f19535d0113"
+  },
+  "orderedReferences": [
+    {
+      "path": ".lore/context/brand-imagery.webp",
+      "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8"
+    },
+    {
+      "path": ".impeccable/candidates/glyphs/content-family/revised/review/board-dark.png",
+      "sha256": "21438c8bfdaaa1c6d6b080e743b0e3455ba414c939a76e0c8f445a3991eff720"
+    },
+    {
+      "path": ".impeccable/candidates/glyphs/production/corrected/review/sprout-dark.png",
+      "sha256": "66af18a84e426676fd47c5efd3976a327e4fd744ae4d0664ab3410716fd0c7b4"
+    }
+  ],
+  "consumer": {
+    "role": "relationship companions to visible text; not material kinds or actions",
+    "projectedSizesPx": [
+      16,
+      20,
+      24
+    ],
+    "intendedGround": "#031315",
+    "palette": [
+      "#FEF6E1",
+      "#FFD477"
+    ],
+    "requestedSourceDimensions": [
+      1024,
+      1024
+    ],
+    "minimumClearPaddingFraction": 0.125,
+    "sourceRuntimeByteBudget": "unknown",
+    "newDaemonClassification": false
+  },
+  "nativePathRecovery": {
+    "workerReturnedVirtualPrefix": "/generated_images/01a1b292-7e9f-7440-81b6-dcd959dff85c/",
+    "directReadResult": "File not found; /generated_images folder does not exist on host",
+    "actualHostPrefix": "/home/rjroy/.codex/generated_images/01a1b292-7e9f-7440-81b6-dcd959dff85c/",
+    "retriedGeneration": false,
+    "originalsRetained": true
+  },
+  "artifacts": {
+    "connection": {
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b292-7e9f-7440-81b6-dcd959dff85c/exec-dd7d1ec0-f381-467a-b674-7c0279807b7b.png",
+      "candidate": "connection.png",
+      "sha256": "84eb7314de1c95008eb9455cf24336f3284462dd4b4c766ebe51ffd6552df147",
+      "nativeCopyHashMatch": true,
+      "bytes": 354362,
+      "format": "PNG",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "colorspace": "sRGB",
+      "fullyTransparentPixels": 1309087,
+      "fullyOpaquePixels": 1563,
+      "partiallyTransparentPixels": 261866,
+      "alpha1Through16Pixels": 27437,
+      "alphaGreaterThanZeroBoundsInclusive": [
+        0,
+        79,
+        1197,
+        1165
+      ],
+      "alphaGreaterThan127BoundsInclusive": [
+        246,
+        271,
+        998,
+        1015
+      ],
+      "alphaGreaterThan249BoundsInclusive": [
+        247,
+        272,
+        997,
+        1013
+      ],
+      "minimumFullyClearPaddingFraction": 0.0,
+      "padding12point5Percent": "fail",
+      "requested1024Square": "fail",
+      "nearOpaqueUniqueRgbCount": 1690,
+      "nearOpaqueExactPalettePixelFraction": 0.0,
+      "topNearOpaqueRgbCounts": [
+        {
+          "rgb": [
+            252,
+            237,
+            212
+          ],
+          "count": 16913
+        },
+        {
+          "rgb": [
+            252,
+            200,
+            101
+          ],
+          "count": 15009
+        },
+        {
+          "rgb": [
+            252,
+            238,
+            212
+          ],
+          "count": 14610
+        },
+        {
+          "rgb": [
+            251,
+            237,
+            212
+          ],
+          "count": 12240
+        },
+        {
+          "rgb": [
+            251,
+            237,
+            211
+          ],
+          "count": 11642
+        },
+        {
+          "rgb": [
+            252,
+            200,
+            102
+          ],
+          "count": 10230
+        }
+      ],
+      "flatExactPalette": "fail"
+    },
+    "used-as-source": {
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b292-7e9f-7440-81b6-dcd959dff85c/exec-97937005-477a-4ccf-9d38-2794c057984d.png",
+      "candidate": "used-as-source.png",
+      "sha256": "6fa474193e0521da8e45917e7e567fee60aaea0398e4e7350c544160c1aecaac",
+      "nativeCopyHashMatch": true,
+      "bytes": 274635,
+      "format": "PNG",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "colorspace": "sRGB",
+      "fullyTransparentPixels": 1336194,
+      "fullyOpaquePixels": 1678,
+      "partiallyTransparentPixels": 234644,
+      "alpha1Through16Pixels": 11101,
+      "alphaGreaterThanZeroBoundsInclusive": [
+        87,
+        168,
+        1199,
+        980
+      ],
+      "alphaGreaterThan127BoundsInclusive": [
+        149,
+        455,
+        1106,
+        844
+      ],
+      "alphaGreaterThan249BoundsInclusive": [
+        149,
+        456,
+        1105,
+        843
+      ],
+      "minimumFullyClearPaddingFraction": 0.0430622009569378,
+      "padding12point5Percent": "fail",
+      "requested1024Square": "fail",
+      "nearOpaqueUniqueRgbCount": 745,
+      "nearOpaqueExactPalettePixelFraction": 3.1986839700237614e-05,
+      "topNearOpaqueRgbCounts": [
+        {
+          "rgb": [
+            253,
+            243,
+            222
+          ],
+          "count": 46381
+        },
+        {
+          "rgb": [
+            252,
+            242,
+            221
+          ],
+          "count": 23994
+        },
+        {
+          "rgb": [
+            252,
+            243,
+            222
+          ],
+          "count": 17044
+        },
+        {
+          "rgb": [
+            253,
+            243,
+            221
+          ],
+          "count": 16083
+        },
+        {
+          "rgb": [
+            252,
+            242,
+            222
+          ],
+          "count": 15820
+        },
+        {
+          "rgb": [
+            253,
+            242,
+            221
+          ],
+          "count": 14322
+        }
+      ],
+      "flatExactPalette": "fail"
+    }
+  },
+  "preservation": {
+    "manifest": "preserved-before.json",
+    "sha256": "e9fbfb2028c63596f84e61b003519ba58f6be189beabc5a777129560c15da27b",
+    "fingerprintsVerified": 213,
+    "allUnchanged": true,
+    "scope": "prior source artwork, prior preview evidence, brand reference, runtime SVG glyphs, passive tracker export"
+  },
+  "verification": {
+    "command": "python3 -B .impeccable/candidates/glyphs/content-family/raster-relationships/verify.py",
+    "exitCode": 2,
+    "report": "review/statistics.json",
+    "decodeAndRealAlpha": "pass",
+    "nativeCopyIdentity": "pass",
+    "briefFailures": {
+      "connection": [
+        "requested1024Square",
+        "padding12point5Percent",
+        "flatExactPalette"
+      ],
+      "used-as-source": [
+        "requested1024Square",
+        "padding12point5Percent",
+        "flatExactPalette"
+      ]
+    },
+    "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+    "svgFamilyRenderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+    "scriptSha256": "cd276a238874bc573ba00952b0f9be367797e3982bf81a15d2df31dc8233bebe"
+  },
+  "visualReview": {
+    "openedNativeImages": true,
+    "openedBoards": [
+      "review/board-dark.png",
+      "review/board-light.png",
+      "review/family-comparison.png"
+    ],
+    "openedMagnifiedActual16Px": [
+      "review/connection-16-magnified.png",
+      "review/used-as-source-16-magnified.png"
+    ],
+    "connection": "Silhouette much clearer, conventional two-color interlocking chain; recognizable at16. Gold stronger than family, subtle shading and alpha residue prevent production claim.",
+    "used-as-source": "Plain page/short arrow/full leaf much clearer enlarged; at16 components are tiny and visible label is essential. At20/24 more legible. Main form itself slightly breaches right safe margin; shading and residue remain.",
+    "recommendation": "Present both exact compositions for user review, with technical cleanup separately authorized if accepted. No silent repair, retry, vectorization or integration."
+  },
+  "colorSpace": "Decoded source sRGB; no runtime color handling verification",
+  "previewStatus": "Inspection evidence only, not approved production derivatives",
+  "reproducibility": "Inspection reproducible from preserved sources using verify.py; generative raster authorship is not claimed byte-identically reproducible",
+  "reviewEvidenceSha256": {
+    "review/board-dark.png": "d2eab1975dcac44850faa87a407f24e891d30805a2b51bb08bdbce31eef9f8e1",
+    "review/board-light.png": "547acee0e1a41809c1f7cac9a1fc7e5c28bdd40f2434b7d5e20383ef12817f58",
+    "review/connection-16-magnified.png": "b36cb83f80dd0e03ea84d8f272e87dabd3a3d52508cd2b75bad73499bdf1b53d",
+    "review/connection-16.png": "386b841d70acd1220567f013403829f240bfa2a9390e9619cc0e77b1f7941d15",
+    "review/connection-20.png": "9444e492e48a01510dec9dc8a9a6f99714d1acd89b51136f581e34542ec3235f",
+    "review/connection-24.png": "d5dafe5e4704134e2b01d06e6d63140bf89f93dc2167a7925cd28f0ce1e30fe8",
+    "review/connection-320.png": "470372aac993100014bd820b75340bbee7717153bc67e73713ba5d60b3383431",
+    "review/connection-dark.png": "bce6b37d103aa91100c0ad577724a657bca1d629f4fb261c4d5295d4e82391bc",
+    "review/connection-light.png": "833ea79d7071995ae6d651b68e69ae7c3dc05562ae337ac7b4d84337a9335317",
+    "review/family-ai-interpretation-16.png": "8f87dc980dba3f24c35990fac7c417595b003b4bedfd4fe768dccceb5c24746b",
+    "review/family-ai-interpretation-160.png": "230420b6dfa7cad56a766b0579133a80b126560dbc7bfdb36af1f1d096fdb229",
+    "review/family-ai-interpretation-20.png": "217702b6cb96a6a33f4e36af8d11638790006bbf5bdc22a8df0b4cdbb7e27877",
+    "review/family-ai-interpretation-24.png": "82bc5aa34b0b11163235f99451f49d7d9657b9ae05985e0ac26cd34d8ef5fbec",
+    "review/family-captured-original-16.png": "f0dde8583376bcc0d4322f246c4e8da42286064848ef41dd6d1cd1f252d5d91c",
+    "review/family-captured-original-160.png": "d6cb951b6c7b91c91eb3ee7565596b4f8a4b661b6313760fa3ae2e2e8e23b78a",
+    "review/family-captured-original-20.png": "35a4c84c71e816aff76142a5118ef870ae4e216c8b88eeed33682830de29dd51",
+    "review/family-captured-original-24.png": "e922e9b8393951d051ce2bb102739ea553ae2d6cd2a89793539f5f7cab4ad2d5",
+    "review/family-comparison.png": "fe8f57c747c423ebd9eacbb38e966e8490f5ffa805ea80e3ef8f11e9b728e928",
+    "review/family-connection-16.png": "b95641c4dfc23721f3057bb54c83280df098e5152134a75f7c896a082658fe74",
+    "review/family-connection-160.png": "5ac2e5d5f82eda22dfba71b4647aac0904ea78026fdb1414bb7bcf2b738ec84f",
+    "review/family-connection-20.png": "b2ebaf72fd9f6186a054335833ab7e90e039cd63badc2545bbf1781f827d3491",
+    "review/family-connection-24.png": "9284dcad091d22907c33495b37accbc4bff5014b08a800bd5e00195ece51011b",
+    "review/family-developing-idea-16.png": "6e81710bdbaf5cbd569656dc0c5e25f5d8c132e935ae39a02abc27e71f605fe6",
+    "review/family-developing-idea-160.png": "4394ec6e4642da127fa73939fa0e9b7ce4b66ac577cb791215ec3d9c1023b6be",
+    "review/family-developing-idea-20.png": "86c59ca1b7b2bb76426fe7eee36cdc8457b351d3de18cc02def7c8d02dc6b8d9",
+    "review/family-developing-idea-24.png": "47e539277f9ffed65688ae88b758914f2eb0e1f121f7497033db18f835b7cec3",
+    "review/family-evolution-16.png": "964bb124d536a5b2621de10dc315c922f3d0dbd644eca0112feb51403b48fd6e",
+    "review/family-evolution-160.png": "320901505480ac1375735bb81d0eefdbf7563a6b1808de66ae43727d318d6298",
+    "review/family-evolution-20.png": "e47850a0b8ac58cb4625a30e5d23658b032af2636fc8cbe2ec24b1af841456ff",
+    "review/family-evolution-24.png": "6ce5d241ece9e6cb9e0eeb873233eb2c9a0bdd739a025071ebbcf73ccb0c10a8",
+    "review/family-full-reply-16.png": "64b9ecd9d6568a7bc5a98b3411277b5d21e705d23d27065ec1634595954ec9b9",
+    "review/family-full-reply-160.png": "f5c87655bad6ef01b64d350c671101171e987904cf55ec63b532a8f2a2c0a8a2",
+    "review/family-full-reply-20.png": "bc290f7d5b44acca77f00d667ab1cb7b6a77125bef7c3a8d2b8811e02ec53939",
+    "review/family-full-reply-24.png": "a09895168d90a254fe09400b00aeb8a841a6758b5ba7bd7080973440cd4dced9",
+    "review/family-imported-original-16.png": "5559129be250ba69668440f5487b9d61e01d652365e3ca78cefb76c1e3625626",
+    "review/family-imported-original-160.png": "ded254efe81d70a9bcf5afb9dd8619d722355c134d9c726f969b4543bd40d5f9",
+    "review/family-imported-original-20.png": "ac9e3ec8d232f829456e8ae5af33de57dd50727cff7b04cfb65f9f3d5ed294c0",
+    "review/family-imported-original-24.png": "262794c9b98b348cd7566e6e41320496817e500d2c9aaeb4de26b83047fc9634",
+    "review/family-used-as-source-16.png": "cab15ca71d537a54553a0b9cd40d1b7882731bdaa3951e90291967ab81d4a367",
+    "review/family-used-as-source-160.png": "c127e8039c7ff808d15eb96bf67594c500102aa93f3dc7d97fa4d056c2dc121a",
+    "review/family-used-as-source-20.png": "d4b8c2cad313a5235103083ff7d21981a6c9c417ee03723ec3e160d5b46fdcbc",
+    "review/family-used-as-source-24.png": "e54b3a5885c9e6bdf5a7ad632bdd3f846d019de30c20dea5fa1640cca0d0e05c",
+    "review/family-user-contribution-16.png": "ed258fd52b3ed64cd927a93bf215fce9f82a37d1f73065abab127ca81689638b",
+    "review/family-user-contribution-160.png": "98b3cd93061727a1313686187dda10199affb6df957a34db38c1d8f5e0c213aa",
+    "review/family-user-contribution-20.png": "c01c898d1ed2b16264c0e370c8192336180ad808402f4a2cf6f012d7d9007fdc",
+    "review/family-user-contribution-24.png": "ac2e9dda7ab02f74e9540d0d1cec2ec46d67d148c08ec0968ece424b1a949149",
+    "review/statistics.json": "e1a68cfb0a414b8b6f2187b5794f02c450b9de468cf0455d059ea90e55d678f3",
+    "review/used-as-source-16-magnified.png": "7e229bf065935e7c3d8d2dda09e0fb1ee62cb4a58c83bdfe9d985ebc28bd5dbe",
+    "review/used-as-source-16.png": "e76be32229ae11da0ec20fd6b4b39c25b5d8463f4931e830eb4233f94787b1a6",
+    "review/used-as-source-20.png": "e4f14d83553cf10bb977ce66df9cd65eaf0a98b5ee71919c5c0e8df59ee6da93",
+    "review/used-as-source-24.png": "13bcdc0176fca2f2357cedcf6c19510e94c318552bc1833ab00566427a0b45ab",
+    "review/used-as-source-320.png": "02f3bffb15634ad40da318c389cd3fb624af58c5eb548350823374d81ab7aedd",
+    "review/used-as-source-dark.png": "b3f9df98d3c5eae8b1177c93c25ecf8c3e6d33f5756f1e48ae4acdfda5ebab62",
+    "review/used-as-source-light.png": "ca5fd82db822f559ee78477d0239f4847d5a1a81b3666521f47771b686168b7b"
+  }
+}

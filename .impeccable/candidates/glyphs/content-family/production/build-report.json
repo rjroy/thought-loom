@@ -1,0 +1,141 @@
+{
+  "status": "production derivative candidates; user approval and app integration pending",
+  "reproducibility": "two complete independent passes from original packaged sources, all nine output byte strings identical",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "recipeSha256": "abeb848ed8b730962922ca0b073cf6924460d84ccf9b7742bb6fc8c5c0054431",
+  "artifacts": {
+    "captured-original.svg": {
+      "source": "../revised/captured-original.svg",
+      "sourceSha256": "171f35874111014e31e63beeb313a861874959cc25608f65d1de76bfd397f980",
+      "sourceBytes": 527,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/captured-original.svg",
+      "outputSha256": "171f35874111014e31e63beeb313a861874959cc25608f65d1de76bfd397f980",
+      "outputBytes": 527
+    },
+    "user-contribution.svg": {
+      "source": "../revised/user-contribution.svg",
+      "sourceSha256": "5494ffc3d5576d6f4365c3fcdf63c880451c1966ff3bceb0a4c4f8d0463a0625",
+      "sourceBytes": 371,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/user-contribution.svg",
+      "outputSha256": "5494ffc3d5576d6f4365c3fcdf63c880451c1966ff3bceb0a4c4f8d0463a0625",
+      "outputBytes": 371
+    },
+    "ai-interpretation.svg": {
+      "source": "../ai-interpretation.svg",
+      "sourceSha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "sourceBytes": 398,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/ai-interpretation.svg",
+      "outputSha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "outputBytes": 398
+    },
+    "developing-idea.svg": {
+      "source": "../developing-idea.svg",
+      "sourceSha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "sourceBytes": 644,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/developing-idea.svg",
+      "outputSha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "outputBytes": 644
+    },
+    "imported-original.svg": {
+      "source": "../imported-original.svg",
+      "sourceSha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "sourceBytes": 322,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/imported-original.svg",
+      "outputSha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "outputBytes": 322
+    },
+    "full-reply.svg": {
+      "source": "../full-reply.svg",
+      "sourceSha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "sourceBytes": 653,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/full-reply.svg",
+      "outputSha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "outputBytes": 653
+    },
+    "evolution.svg": {
+      "source": "../revised/evolution.svg",
+      "sourceSha256": "0b820e6ca44f4f1f3ef7c8eb2417688894bd0da037cdea680c8f326764bf2029",
+      "sourceBytes": 567,
+      "operation": "byte-identical SVG copy; no framing or path edits",
+      "output": "runtime/evolution.svg",
+      "outputSha256": "0b820e6ca44f4f1f3ef7c8eb2417688894bd0da037cdea680c8f326764bf2029",
+      "outputBytes": 567
+    },
+    "connection.png": {
+      "source": "../raster-relationships/connection.png",
+      "sourceSha256": "84eb7314de1c95008eb9455cf24336f3284462dd4b4c766ebe51ffd6552df147",
+      "sourceBytes": 354362,
+      "operation": "alpha cleanup, transparent-space trim, uniform aspect-preserving framing; shading preserved",
+      "sourceDimensions": [
+        1254,
+        1254
+      ],
+      "cleanup": {
+        "minimumComponentArea": 7863,
+        "allComponentAreasDescending": [
+          233250
+        ],
+        "retainedComponentAreasDescending": [
+          233250
+        ],
+        "retainedComponentCount": 1,
+        "substantialCorePixelsPreserved": 233250,
+        "changedAlphaPixelCount": 252479,
+        "retainedRgbUnchangedBeforeResampling": true
+      },
+      "outputDimensions": [
+        1024,
+        1024
+      ],
+      "resampling": "Lanczos",
+      "contentBoxMaxPx": 760,
+      "transparentBorderBeforeResamplingPx": 4,
+      "output": "runtime/connection.png",
+      "outputSha256": "353e1f6dcf4fca66c7ed97b23d8c275844db38de92f01f28977ad9e7a1beeb03",
+      "outputBytes": 288419
+    },
+    "used-as-source.png": {
+      "source": "../raster-relationships/used-as-source.png",
+      "sourceSha256": "6fa474193e0521da8e45917e7e567fee60aaea0398e4e7350c544160c1aecaac",
+      "sourceBytes": 274635,
+      "operation": "alpha cleanup, transparent-space trim, uniform aspect-preserving framing; shading preserved",
+      "sourceDimensions": [
+        1254,
+        1254
+      ],
+      "cleanup": {
+        "minimumComponentArea": 7863,
+        "allComponentAreasDescending": [
+          113430,
+          82584,
+          26912
+        ],
+        "retainedComponentAreasDescending": [
+          113430,
+          82584,
+          26912
+        ],
+        "retainedComponentCount": 3,
+        "substantialCorePixelsPreserved": 222926,
+        "changedAlphaPixelCount": 227436,
+        "retainedRgbUnchangedBeforeResampling": true
+      },
+      "outputDimensions": [
+        1024,
+        1024
+      ],
+      "resampling": "Lanczos",
+      "contentBoxMaxPx": 760,
+      "transparentBorderBeforeResamplingPx": 4,
+      "output": "runtime/used-as-source.png",
+      "outputSha256": "efcb4b56b1d01be116af74b128207cd1272d2c2cf2fc7043dad9ef5e7906c1ad",
+      "outputBytes": 149227
+    }
+  }
+}

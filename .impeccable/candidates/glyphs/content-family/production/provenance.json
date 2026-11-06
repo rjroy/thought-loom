@@ -1,0 +1,319 @@
+{
+  "status": "all nine exact production derivatives approved; Idea/Explore/Evolve integration independently verified, reviewed and user accepted in-app",
+  "recordedAtUtc": "2026-11-06T20:57:33.361324+00:00",
+  "authorization": {
+    "question": "All nine artwork selections are approved. Shall we prepare the runtime-ready assets next, including cleaning the two PNGs\u2019 transparency, while keeping app integration separate?",
+    "answer": "yes",
+    "allNineExactSourceSelectionsApproved": true,
+    "productionPreparationAuthorized": true,
+    "rasterAlphaCleanupAuthorized": true,
+    "freshGenerationAuthorized": false,
+    "redesignOrVectorizationAuthorized": false,
+    "derivativeApproval": true,
+    "derivativeApprovalQuote": "go",
+    "derivativeApprovalIdentity": "all nine selection output paths and outputSha256 values recorded below, unchanged",
+    "appIntegrationAuthorized": true,
+    "integrationApprovalQuestion": "Production assets approved. Shall I now integrate all nine across Idea, Explore and Evolve at the agreed placements?",
+    "integrationApprovalQuote": "yes approved you can integrate",
+    "integrationScope": "five actual material-kind cues, separate Full reply record role and three relationship marks;20px list cues,24px focal Idea,16px relationships; keep visible labels, authorship and direction; copy exact approved outputs, never rejected relationship SVGs",
+    "integrationState": "implemented after independent behavior-specific RED; author and independent focused desktop/narrow production checks passed; independent correctness and engineering-quality reviews completed",
+    "integrationReviewRecord": "../integration-review/receipt.json",
+    "runtimeAcceptance": true,
+    "runtimeAcceptanceQuestion": "Do these in-app placements work for you?",
+    "runtimeAcceptanceQuote": "yup",
+    "runtimeAcceptanceScope": "nine-glyph Idea/Explore/Evolve integration after runtime previews"
+  },
+  "selection": {
+    "captured-original.svg": {
+      "approvedSource": "../revised/captured-original.svg",
+      "approvedSourceSha256": "171f35874111014e31e63beeb313a861874959cc25608f65d1de76bfd397f980",
+      "sourceBytes": 527,
+      "output": "runtime/captured-original.svg",
+      "outputSha256": "171f35874111014e31e63beeb313a861874959cc25608f65d1de76bfd397f980",
+      "outputBytes": 527,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "user-contribution.svg": {
+      "approvedSource": "../revised/user-contribution.svg",
+      "approvedSourceSha256": "5494ffc3d5576d6f4365c3fcdf63c880451c1966ff3bceb0a4c4f8d0463a0625",
+      "sourceBytes": 371,
+      "output": "runtime/user-contribution.svg",
+      "outputSha256": "5494ffc3d5576d6f4365c3fcdf63c880451c1966ff3bceb0a4c4f8d0463a0625",
+      "outputBytes": 371,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "ai-interpretation.svg": {
+      "approvedSource": "../ai-interpretation.svg",
+      "approvedSourceSha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "sourceBytes": 398,
+      "output": "runtime/ai-interpretation.svg",
+      "outputSha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "outputBytes": 398,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "developing-idea.svg": {
+      "approvedSource": "../developing-idea.svg",
+      "approvedSourceSha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "sourceBytes": 644,
+      "output": "runtime/developing-idea.svg",
+      "outputSha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "outputBytes": 644,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "imported-original.svg": {
+      "approvedSource": "../imported-original.svg",
+      "approvedSourceSha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "sourceBytes": 322,
+      "output": "runtime/imported-original.svg",
+      "outputSha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "outputBytes": 322,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "full-reply.svg": {
+      "approvedSource": "../full-reply.svg",
+      "approvedSourceSha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "sourceBytes": 653,
+      "output": "runtime/full-reply.svg",
+      "outputSha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "outputBytes": 653,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "evolution.svg": {
+      "approvedSource": "../revised/evolution.svg",
+      "approvedSourceSha256": "0b820e6ca44f4f1f3ef7c8eb2417688894bd0da037cdea680c8f326764bf2029",
+      "sourceBytes": 567,
+      "output": "runtime/evolution.svg",
+      "outputSha256": "0b820e6ca44f4f1f3ef7c8eb2417688894bd0da037cdea680c8f326764bf2029",
+      "outputBytes": 567,
+      "operation": "byte-identical SVG copy; no framing or path edits"
+    },
+    "connection.png": {
+      "approvedSource": "../raster-relationships/connection.png",
+      "approvedSourceSha256": "84eb7314de1c95008eb9455cf24336f3284462dd4b4c766ebe51ffd6552df147",
+      "sourceBytes": 354362,
+      "output": "runtime/connection.png",
+      "outputSha256": "353e1f6dcf4fca66c7ed97b23d8c275844db38de92f01f28977ad9e7a1beeb03",
+      "outputBytes": 288419,
+      "operation": "alpha cleanup, transparent-space trim, uniform aspect-preserving framing; shading preserved"
+    },
+    "used-as-source.png": {
+      "approvedSource": "../raster-relationships/used-as-source.png",
+      "approvedSourceSha256": "6fa474193e0521da8e45917e7e567fee60aaea0398e4e7350c544160c1aecaac",
+      "sourceBytes": 274635,
+      "output": "runtime/used-as-source.png",
+      "outputSha256": "efcb4b56b1d01be116af74b128207cd1272d2c2cf2fc7043dad9ef5e7906c1ad",
+      "outputBytes": 149227,
+      "operation": "alpha cleanup, transparent-space trim, uniform aspect-preserving framing; shading preserved"
+    }
+  },
+  "excluded": "All prior relationship SVGs, including revised/connection.svg and revised/used-as-source.svg; neither is promoted.",
+  "approvalHistory": {
+    "fourOriginalKeepers": "Developing idea, Imported source, Interpretation, Full reply selected unchanged by user",
+    "threeRepairedSvgs": {
+      "question": "Are the revised Original Capture, Contribution and Evolution glyphs approved too?",
+      "answer": "yes",
+      "record": "../revised/provenance.json"
+    },
+    "twoRasterRelationships": {
+      "answer": "those are good",
+      "record": "../raster-relationships/provenance.json"
+    },
+    "historicalFindings": "Prior source failure findings retained; approval does not erase them. This is latest production authorization, superseding earlier cleanup-not-yet-authorized statuses."
+  },
+  "recipe": {
+    "path": "build.py",
+    "sha256": "abeb848ed8b730962922ca0b073cf6924460d84ccf9b7742bb6fc8c5c0054431",
+    "report": "build-report.json",
+    "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+    "alphaCoreThreshold": 128,
+    "connectivity": 8,
+    "componentAreaFraction": 0.005,
+    "computedAreaThresholdPx": 7863,
+    "antialiasEnvelopeNativePx": 1,
+    "nearOpaqueStabilizationThreshold": 250,
+    "opaqueAlphaOutput": 255,
+    "retainedSourceRgbBeforeResampling": "byte-identical, including approved shading",
+    "uniformFraming": {
+      "transparentCropBorderNativePx": 4,
+      "maxContentBoxPx": 760,
+      "outputCanvasPx": [
+        1024,
+        1024
+      ],
+      "gravity": "center",
+      "filter": "Lanczos"
+    },
+    "pngEncoding": "RGBA8 PNG32, metadata stripped, date/time excluded, lossless compression level9",
+    "svgEncoding": "byte-identical copy; no geometry or framing changes",
+    "reproducibility": "two complete independent passes from original packaged sources, all nine output byte strings identical"
+  },
+  "validation": {
+    "commands": [
+      {
+        "command": "python3 -B -m unittest discover -s .impeccable/candidates/glyphs/content-family/production -p 'test_build.py' -v",
+        "exitCode": 0,
+        "result": "5 controlled synthetic tests passed"
+      },
+      {
+        "command": "python3 -B .impeccable/candidates/glyphs/content-family/production/build.py",
+        "exitCode": 0,
+        "result": "9 outputs identical across two complete passes from original packaged inputs"
+      },
+      {
+        "command": "python3 -B .impeccable/candidates/glyphs/content-family/production/verify.py",
+        "exitCode": 0,
+        "result": "safety, identity, actual alpha, padding, source preservation and review renders pass"
+      }
+    ],
+    "statistics": "review/statistics.json",
+    "preservationManifest": "preserved-before.json",
+    "preservedFingerprintsVerified": 268,
+    "svgSafety": "restricted direct vector paths/shapes; no active content, embedded rasters, external references, fonts/text, styles, filters, gradients or animation",
+    "rasterDecode": "1024x1024 sRGB RGBA with actual transparent, opaque and antialiased pixels",
+    "padding": "minimum128 fully clear pixels on every side, all9 pass",
+    "topology": "chain remains1 connected foreground,3 interior negative spaces; page-arrow-leaf remains3 components",
+    "componentReports": "review/*-components.txt",
+    "renderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+    "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org"
+  },
+  "visualReview": {
+    "opened": [
+      "review/family-dark.png",
+      "review/family-light.png",
+      "review/raster-before-after-dark.png",
+      "review/raster-before-after-light.png",
+      "runtime/connection.png",
+      "runtime/used-as-source.png"
+    ],
+    "projectedSizesPx": [
+      16,
+      20,
+      24
+    ],
+    "familyReference": "accepted lantern and sprout rendered directly from unchanged approved SVGs; runtime glyphs unchanged",
+    "verdict": "Prepared candidates preserve approved shapes and shading, remove free-floating alpha debris, retain joins and negative spaces, and fit the intended family. Recommend user derivative review before separate integration.",
+    "caveats": [
+      "Used as source remains label-dependent at16px;20/24px clearer.",
+      "Approved PNG shading/nonexact palette intentionally retained, not silently restyled.",
+      "Minor source edge-color variation retained; no visible debris at intended sizes.",
+      "PNG full-resolution files are288419 and149227 bytes; hard byte/device budgets unknown, no browser performance claim.",
+      "Light ground is transparency inspection only, not an approved light theme."
+    ]
+  },
+  "consumer": {
+    "listMaterialAndRecordRolePx": 20,
+    "focusedIdeaPx": 24,
+    "relationshipPx": 16,
+    "visibleAccessibleLabels": "retained in future UI; no label baked into assets",
+    "intendedGround": "#031315",
+    "svgPalette": [
+      "#FEF6E1",
+      "#FFD477"
+    ],
+    "pngPalette": "approved source colors and shading retained",
+    "colorSpace": "sRGB",
+    "runtimeBrowserColorHandling": "not assessed",
+    "deviceDprAndByteBudgets": "unknown"
+  },
+  "scope": "Only production candidates, recipe/tests, provenance, evidence and narrow parentREADME update. No app edits, sources overwritten, new generation, tools installed, services, tracker commands or commits.",
+  "scriptAndReportSha256": {
+    "build.py": "abeb848ed8b730962922ca0b073cf6924460d84ccf9b7742bb6fc8c5c0054431",
+    "test_build.py": "e18cb49bdc3fc3279fd5520afdae40f3833f7b3a906ae340d1b20749dafd71ec",
+    "verify.py": "a247b9b651b756f0d589e1c7f69fbaf2c72a5939c5bd7e2f8f7c5e5430053f22",
+    "build-report.json": "9a335c52bc7e310856acfc2c4f1e3f4ae06b9e2740a8e07f7b210c41084e43b5",
+    "preserved-before.json": "69c45707a2be434ab37b931531d67086f4291ad5b64171b260945486ba4ddc17"
+  },
+  "validationDependencySha256": {
+    ".impeccable/candidates/glyphs/content-family/verify.py": "80aa6655bc616867248d8107953159d4fe448f5ca74f77e32106fcdb9198f2c3",
+    ".impeccable/candidates/glyphs/content-family/revised/verify.py": "2307a5f51c42eee968386799ce2c605bda1f92621bc58038e7a180e821ec99c7",
+    ".impeccable/brand/fonts/SourceSans3-VariableFont_wght.ttf": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c"
+  },
+  "reviewEvidenceSha256": {
+    "review/ai-interpretation-1024.png": "0a6171d977abacb1affaa0a8bce99c20ae80f84b6cb812f1c8a22c74b61f2a71",
+    "review/ai-interpretation-16.png": "8f87dc980dba3f24c35990fac7c417595b003b4bedfd4fe768dccceb5c24746b",
+    "review/ai-interpretation-160.png": "230420b6dfa7cad56a766b0579133a80b126560dbc7bfdb36af1f1d096fdb229",
+    "review/ai-interpretation-20.png": "217702b6cb96a6a33f4e36af8d11638790006bbf5bdc22a8df0b4cdbb7e27877",
+    "review/ai-interpretation-24.png": "82bc5aa34b0b11163235f99451f49d7d9657b9ae05985e0ac26cd34d8ef5fbec",
+    "review/ai-interpretation-dark.png": "6302d47c5842ab4d2841cad42fa359751c96d48cbd10f3967390645b35a3733a",
+    "review/ai-interpretation-light.png": "0dd67ee758fc8ff58c86f8b352ffdeaeeba81a3b9698be78e917b0507a49e280",
+    "review/captured-original-1024.png": "7ab7c81e5785f5c1ca3f2dd3fa6236f050bdbcefcdc20374bf573031ec204dbc",
+    "review/captured-original-16.png": "f0dde8583376bcc0d4322f246c4e8da42286064848ef41dd6d1cd1f252d5d91c",
+    "review/captured-original-160.png": "d6cb951b6c7b91c91eb3ee7565596b4f8a4b661b6313760fa3ae2e2e8e23b78a",
+    "review/captured-original-20.png": "35a4c84c71e816aff76142a5118ef870ae4e216c8b88eeed33682830de29dd51",
+    "review/captured-original-24.png": "e922e9b8393951d051ce2bb102739ea553ae2d6cd2a89793539f5f7cab4ad2d5",
+    "review/captured-original-dark.png": "b655f85ed4980d2d8ddb11139c8edf3f066cf017e249e4d2ae0454e353db70b5",
+    "review/captured-original-light.png": "88abea6d6189608c2df3961c3ace4e6fb43f23f15e8c74e8e323e17b36124e1b",
+    "review/connection-16.png": "a93fbe9c628ed5cfacf20cc7117c9388684c8357e70cc975fb0e894742ceaf05",
+    "review/connection-160.png": "08cd02a861eb61b19b4ebd36f1738f49562eaffa24419a530357a64f220458bc",
+    "review/connection-20.png": "d6d63adc07162130346aacbfb7ac4575080211bc06f77071655477d56851c8f9",
+    "review/connection-24.png": "565b78dd56493ded1b42cbec2c2f99163fb93953486f65f7f251e90099a09146",
+    "review/connection-candidate-256.png": "85d25291435e71e44b4af541269937e6396ac9c9cbe434a5afd82477a3594f3f",
+    "review/connection-candidate-components.txt": "eacac08e745db785ec910785603146e1e03f6d6e2490e2459df99c9650d4c583",
+    "review/connection-dark.png": "e3eab4cb6c13c56b68ec9c29a767cb707a8e5edf6504e2a8f31353044b275851",
+    "review/connection-light.png": "625423d395883606d09729ca48fae06d2585e0d9b6b039e281ddda00abc12b78",
+    "review/connection-source-256.png": "a75e770cd5344afdb1fc52a13cb169587a5a3c532d3260d7fc0b10c65dcbdc34",
+    "review/connection-source-components.txt": "45ac6e124fcc8905ff84249fa4f5f1db166eefb625225c842c2f2858df218231",
+    "review/developing-idea-1024.png": "cce66dfb9e5a2b1a32c1868187ce847b4d118e1d4baabb33463aed827d3d5d0f",
+    "review/developing-idea-16.png": "6e81710bdbaf5cbd569656dc0c5e25f5d8c132e935ae39a02abc27e71f605fe6",
+    "review/developing-idea-160.png": "4394ec6e4642da127fa73939fa0e9b7ce4b66ac577cb791215ec3d9c1023b6be",
+    "review/developing-idea-20.png": "86c59ca1b7b2bb76426fe7eee36cdc8457b351d3de18cc02def7c8d02dc6b8d9",
+    "review/developing-idea-24.png": "47e539277f9ffed65688ae88b758914f2eb0e1f121f7497033db18f835b7cec3",
+    "review/developing-idea-dark.png": "78baf9aae3924c51c334a00d3c1a07fe4c55434067fbcc88ef919d50734616f7",
+    "review/developing-idea-light.png": "ae6dc4da413c5889c6ad4e70905736f8c76360a720eaef4c08f8281cfbade949",
+    "review/evolution-1024.png": "0d1f0d4774c875483b8300b689b4cdae75261772cf6703d1dc5b50daccc60846",
+    "review/evolution-16.png": "964bb124d536a5b2621de10dc315c922f3d0dbd644eca0112feb51403b48fd6e",
+    "review/evolution-160.png": "320901505480ac1375735bb81d0eefdbf7563a6b1808de66ae43727d318d6298",
+    "review/evolution-20.png": "e47850a0b8ac58cb4625a30e5d23658b032af2636fc8cbe2ec24b1af841456ff",
+    "review/evolution-24.png": "6ce5d241ece9e6cb9e0eeb873233eb2c9a0bdd739a025071ebbcf73ccb0c10a8",
+    "review/evolution-dark.png": "ef6641453aa67197aab20158d15c7d13963124b609334d96d32f823ee7d400b2",
+    "review/evolution-light.png": "e310dc485e678e10c15e59cfd1958a7ad63ede69ddd6d8a25dc27c977f56e957",
+    "review/family-dark.png": "1433ffadd6a9fd9d0f25caf41b9db06a26d38f5ed493ebe1c2106289da456ad6",
+    "review/family-light.png": "4204cb9d6f5b6dcfea07c2d07e023357572f319b460ee2175a005da15ddc875b",
+    "review/full-reply-1024.png": "8286b2f95d3e9efbf32ddd55a862b6c150c17d68c78e0a1ae0614075be1d5e7d",
+    "review/full-reply-16.png": "64b9ecd9d6568a7bc5a98b3411277b5d21e705d23d27065ec1634595954ec9b9",
+    "review/full-reply-160.png": "f5c87655bad6ef01b64d350c671101171e987904cf55ec63b532a8f2a2c0a8a2",
+    "review/full-reply-20.png": "bc290f7d5b44acca77f00d667ab1cb7b6a77125bef7c3a8d2b8811e02ec53939",
+    "review/full-reply-24.png": "a09895168d90a254fe09400b00aeb8a841a6758b5ba7bd7080973440cd4dced9",
+    "review/full-reply-dark.png": "df56b382bd7206240e002d9d23cdb76712c169f93cbe7a45baab829ac03f8c53",
+    "review/full-reply-light.png": "47a11e092648f01919ffa127997263e9e41d55a2f7a6c48e15d9ac961963b1f5",
+    "review/imported-original-1024.png": "e7a7910a57d19f871d9aaa4abad19d3ef88af627e90ba98bf95452a26d23fcc8",
+    "review/imported-original-16.png": "5559129be250ba69668440f5487b9d61e01d652365e3ca78cefb76c1e3625626",
+    "review/imported-original-160.png": "ded254efe81d70a9bcf5afb9dd8619d722355c134d9c726f969b4543bd40d5f9",
+    "review/imported-original-20.png": "ac9e3ec8d232f829456e8ae5af33de57dd50727cff7b04cfb65f9f3d5ed294c0",
+    "review/imported-original-24.png": "262794c9b98b348cd7566e6e41320496817e500d2c9aaeb4de26b83047fc9634",
+    "review/imported-original-dark.png": "64c4e2ddc37791a7eb0e03a13ae060fcf6a1f081da32a1dccb7a0deeb0da5e88",
+    "review/imported-original-light.png": "80bfce616d2d16a453f26cdb75ec0b5858d92c3ed278c4450aced164e1edb508",
+    "review/lantern-16.png": "bdc0b3f5abaf78846036c3596ec8e0a46bb40b1078fa2968c6a9dd068c1b44d8",
+    "review/lantern-160.png": "e6315075d4fe33c2827cfa11877ba5d7b77de73d228932f47ca2ead104c89402",
+    "review/lantern-20.png": "cf45497aec743f312cf32793aa70fd6f1ed9151a617279c77d5f7879d32f73df",
+    "review/lantern-24.png": "e7181585e48c513fce20f408f3cf2c643a2a42a45e70e32af00b0288462e8d69",
+    "review/lantern-dark.png": "b8f18b718672671ae6a3f742cc6fe54cfde2e19de8af5c8992a472bbda923632",
+    "review/lantern-light.png": "6c41bcd685a85b3872707fa405bc99664fce52a56d518cf6f62f9fc59648ae9b",
+    "review/raster-before-after-dark.png": "335df2cb57ea1ebfbb02bedf6eb28b49514c8ceada69863d20e4b46f370a0222",
+    "review/raster-before-after-light.png": "e3228ede7e26c3320a3c6a255142f0712b18e8936cced7913ff6516039b7138a",
+    "review/sprout-16.png": "3a3d447e44faf17a64162b6959c71eaf5d1cdc8bfea2e26558975a576a975b3b",
+    "review/sprout-160.png": "ed760d66c646012d657a645e24e6eabb062f4885e4aa0965af26a667b2cf1d3a",
+    "review/sprout-20.png": "12b4a3ec97b3b83dd27c040ad8a83af5e35b9f33a341957f7881031a77b3eced",
+    "review/sprout-24.png": "d4c01bd6be9244c6fd063611d9ff6f3602650b9f3fac45377f3999398984da40",
+    "review/sprout-dark.png": "742df8995560f6f96cc01ce9126765feb5fc97e75bd05026ca39375682aedeed",
+    "review/sprout-light.png": "e1f242219009a2ac899aaa10bb28b792eb6919be23d73c161f9773b53d9f7009",
+    "review/statistics.json": "51899f0cc88fbd7cc4369ab39614f5440c99a67d218b94a201ad2181000a3e45",
+    "review/used-as-source-16.png": "9d01f20427bac06a5f6ea24af8b6851b7bece8e60e43468490158a165361bedc",
+    "review/used-as-source-160.png": "b43e1e27e603144b235ccf60ccdda1bd890264181f75b916d507d4cece1dfe8c",
+    "review/used-as-source-20.png": "dc3b08d2184f549698c858afc3f9a49f4a124e709d93427859c7037898dce666",
+    "review/used-as-source-24.png": "24049daedb48fbe383d17b374f42561f3f0edc122e2f35cb92ecb918589190df",
+    "review/used-as-source-candidate-256.png": "cd6d8c26d39a823d5ab8bb90fc093287dece2a899921dee6633cbc28df8606e9",
+    "review/used-as-source-candidate-components.txt": "1f18e1838e213b18b6a4c56206d9bc3b86c0d9213d5cc49c2e3dc0fbd413a024",
+    "review/used-as-source-dark.png": "bf75578d5e8597033a2014a54a110d3bc45a2a694adb4cb05e4c08611c8486f9",
+    "review/used-as-source-light.png": "c3109f6dd0cb4c3e80ef3db3d0947f24e7c3e47ea55fc075b3ac50ee7d352bf5",
+    "review/used-as-source-source-256.png": "76672633988ca84fee9d0277efcb0fdf96794e20288fe776e87ad1b263d0375b",
+    "review/used-as-source-source-components.txt": "0ec0bb787050bd74cb3f3f2fdfbb2c81b1e41468d99866910f8194218ae2ab81",
+    "review/user-contribution-1024.png": "6404ca10896196ca12a6700c1e564eb19d49e82ab3088cd579f67de22e494b37",
+    "review/user-contribution-16.png": "ed258fd52b3ed64cd927a93bf215fce9f82a37d1f73065abab127ca81689638b",
+    "review/user-contribution-160.png": "98b3cd93061727a1313686187dda10199affb6df957a34db38c1d8f5e0c213aa",
+    "review/user-contribution-20.png": "c01c898d1ed2b16264c0e370c8192336180ad808402f4a2cf6f012d7d9007fdc",
+    "review/user-contribution-24.png": "ac2e9dda7ab02f74e9540d0d1cec2ec46d67d148c08ec0968ece424b1a949149",
+    "review/user-contribution-dark.png": "5a7d7918fced6b09ec3d67c7e08b81787882eef591ffe2bbcce701685ca11f7b",
+    "review/user-contribution-light.png": "8c3a80451df0c8f06cf8f122bc62add2b34974a70cd2c1ec76984a961cc4dcc4"
+  }
+}

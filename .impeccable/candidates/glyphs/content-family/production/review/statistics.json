@@ -1,0 +1,220 @@
+{
+  "preservation": "pass: 268 artwork/evidence/runtime/reference/passive tracker fingerprints",
+  "sourceApproval": "All nine exact selections approved; rejected relationship SVGs excluded",
+  "sevenSvgByteCopiesAndRestrictedSafety": "pass",
+  "rasterSourceRgbBeforeResampling": "unchanged where retained",
+  "realAlphaAndMinimum128PxPadding": "pass all nine",
+  "reproducibility": "two complete independent passes from original packaged sources, all nine output byte strings identical",
+  "artifacts": {
+    "captured-original.svg": {
+      "source": "production/runtime/captured-original.svg",
+      "sha256": "171f35874111014e31e63beeb313a861874959cc25608f65d1de76bfd397f980",
+      "bytes": 527,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 945173,
+        "fullyOpaquePixels": 100150,
+        "antialiasedPixels": 3253,
+        "nonzeroAlphaBoundsInclusive": [
+          272,
+          183,
+          729,
+          765
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "user-contribution.svg": {
+      "source": "production/runtime/user-contribution.svg",
+      "sha256": "5494ffc3d5576d6f4365c3fcdf63c880451c1966ff3bceb0a4c4f8d0463a0625",
+      "bytes": 371,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 733365,
+        "fullyOpaquePixels": 314138,
+        "antialiasedPixels": 1073,
+        "nonzeroAlphaBoundsInclusive": [
+          210,
+          174,
+          813,
+          826
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "ai-interpretation.svg": {
+      "source": "production/runtime/ai-interpretation.svg",
+      "sha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "bytes": 398,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 946269,
+        "fullyOpaquePixels": 97808,
+        "antialiasedPixels": 4499,
+        "nonzeroAlphaBoundsInclusive": [
+          164,
+          295,
+          859,
+          728
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "developing-idea.svg": {
+      "source": "production/runtime/developing-idea.svg",
+      "sha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "bytes": 644,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 850007,
+        "fullyOpaquePixels": 194456,
+        "antialiasedPixels": 4113,
+        "nonzeroAlphaBoundsInclusive": [
+          234,
+          174,
+          789,
+          886
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "imported-original.svg": {
+      "source": "production/runtime/imported-original.svg",
+      "sha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "bytes": 322,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 672924,
+        "fullyOpaquePixels": 374970,
+        "antialiasedPixels": 682,
+        "nonzeroAlphaBoundsInclusive": [
+          193,
+          174,
+          741,
+          892
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "full-reply.svg": {
+      "source": "production/runtime/full-reply.svg",
+      "sha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "bytes": 653,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 869220,
+        "fullyOpaquePixels": 177454,
+        "antialiasedPixels": 1902,
+        "nonzeroAlphaBoundsInclusive": [
+          149,
+          251,
+          849,
+          602
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "evolution.svg": {
+      "source": "production/runtime/evolution.svg",
+      "sha256": "0b820e6ca44f4f1f3ef7c8eb2417688894bd0da037cdea680c8f326764bf2029",
+      "bytes": 567,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "safetyPaletteViewBox": "pass",
+      "pixels": {
+        "fullyTransparentPixels": 860572,
+        "fullyOpaquePixels": 185090,
+        "antialiasedPixels": 2914,
+        "nonzeroAlphaBoundsInclusive": [
+          151,
+          153,
+          872,
+          823
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "connection.png": {
+      "format": "PNG",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "colorSpace": "sRGB",
+      "shading": "approved source RGB retained before uniform resampling; intentionally not palette-flattened",
+      "pixels": {
+        "fullyTransparentPixels": 811123,
+        "fullyOpaquePixels": 222648,
+        "antialiasedPixels": 14805,
+        "nonzeroAlphaBoundsInclusive": [
+          136,
+          140,
+          887,
+          883
+        ],
+        "clearPadding128px": "pass"
+      },
+      "sha256": "353e1f6dcf4fca66c7ed97b23d8c275844db38de92f01f28977ad9e7a1beeb03",
+      "bytes": 288419
+    },
+    "used-as-source.png": {
+      "format": "PNG",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "colorSpace": "sRGB",
+      "shading": "approved source RGB retained before uniform resampling; intentionally not palette-flattened",
+      "pixels": {
+        "fullyTransparentPixels": 906803,
+        "fullyOpaquePixels": 133021,
+        "antialiasedPixels": 8752,
+        "nonzeroAlphaBoundsInclusive": [
+          133,
+          356,
+          890,
+          667
+        ],
+        "clearPadding128px": "pass"
+      },
+      "sha256": "efcb4b56b1d01be116af74b128207cd1272d2c2cf2fc7043dad9ef5e7906c1ad",
+      "bytes": 149227
+    }
+  },
+  "visualReview": "Designer assessment in README; checks do not grant derivative approval or runtime acceptance",
+  "renderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org"
+}

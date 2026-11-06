@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
+import type { Locator } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 type Attempt = { path: string; authorization: string | undefined };
 const context = { id: "context-1", text: "Context owned original", title: "Context title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "capture", parentId: null, sourceIds: [] };
@@ -12,6 +14,15 @@ const responseHit = { ...base, kind: "response", id: "response-1", text: replyTe
 const rejected = { ...thought, id: "thought-2", thoughtId: "thought-2", title: "Owned rejected thought", text: "Rejected fixture thought", snippet: "Rejected fixture thought" };
 const unknown = { ...thought, id: "thought-3", thoughtId: "thought-3", title: "Inspection unknown thought", text: "Unknown inspection thought", snippet: "Unknown inspection thought" };
 const imported = { ...thought, id: "source-1", thoughtId: "source-1", title: "Owned imported search result", text: "Owned imported search text", snippet: "Owned imported search text", author: "source", materialKind: "imported-original", context: null };
+const glyphResults = [
+  { ...thought, id: "glyph-capture", thoughtId: "glyph-capture", title: "Glyph capture", author: "user", materialKind: "captured-original", context: null },
+  { ...thought, id: "glyph-contribution", thoughtId: "glyph-contribution", title: "Glyph contribution", author: "user", materialKind: "user-contribution", context: null },
+  { ...thought, id: "glyph-interpretation", thoughtId: "glyph-interpretation", title: "Glyph interpretation", materialKind: "ai-interpretation", context: null },
+  { ...thought, id: "glyph-development", thoughtId: "glyph-development", title: "Glyph development" },
+  { ...imported, id: "glyph-import", thoughtId: "glyph-import", title: "Glyph import" },
+  { ...responseHit, id: "glyph-reply", title: "Glyph reply" },
+  { ...thought, id: "glyph-incoming", thoughtId: "glyph-incoming", title: "Glyph incoming", context: { kind: "connection", thought: context, connection: { id: "glyph-edge", fromId: context.id, toId: "glyph-incoming", category: "supports", proposedBy: "ai", explanation: "Owned incoming rationale", sourceIds: [] } } },
+];
 
 export function searchDaemon(token: string) {
   const attempts: Attempt[] = [];
@@ -38,7 +49,7 @@ export function searchDaemon(token: string) {
       const q = url.searchParams.get("q") ?? "";
       const authors = url.searchParams.getAll("author"), kinds = url.searchParams.getAll("kind");
       const from = url.searchParams.get("from"), to = url.searchParams.get("to");
-      const all = q === "empty-owned" ? [] : q === "source-owned" ? [imported] : q === "newer-owned" ? [{ ...thought, title: "Newest response wins" }] : [thought, responseHit, ...(url.searchParams.get("scope") === "show-rejected" ? [rejected, unknown] : [])];
+      const all = q === "glyph-owned" ? glyphResults : q === "empty-owned" ? [] : q === "source-owned" ? [imported] : q === "newer-owned" ? [{ ...thought, title: "Newest response wins" }] : [thought, responseHit, ...(url.searchParams.get("scope") === "show-rejected" ? [rejected, unknown] : [])];
       const dated = all.filter(item => (!from || item.createdAt.slice(0, 10) >= from.slice(0, 10)) && (!to || item.createdAt.slice(0, 10) <= to.slice(0, 10)));
       const authorFiltered = dated.filter(item => !authors.length || authors.includes(item.author));
       const kindFiltered = dated.filter(item => !kinds.length || kinds.includes(item.materialKind));
@@ -50,6 +61,55 @@ export function searchDaemon(token: string) {
 }
 
 type Fixture = ReturnType<typeof searchDaemon>;
+/** Check the rendered decoration and the bytes actually delivered to the browser. */
+export async function expectGlyph(container: Locator, file: string, pixels: number): Promise<void> {
+  const image = container.locator(`img[src$="/${file}"]`);
+  await expect(image).toHaveCount(1);
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute("alt", "");
+  await expect(image).toHaveAttribute("aria-hidden", "true");
+  await expect(image).toHaveCSS("width", `${pixels}px`);
+  await expect(image).toHaveCSS("height", `${pixels}px`);
+  await expect.poll(() => image.evaluate(element => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
+  const src = await image.getAttribute("src");
+  assert.ok(src);
+  const response = await container.page().request.get(src);
+  assert.equal(response.status(), 200);
+  assert.deepEqual(await response.body(), await readFile(new URL(`../../../.impeccable/candidates/glyphs/content-family/production/runtime/${file}`, import.meta.url)));
+}
+export async function expectLeadingGlyph(container: Locator, file: string, pixels: number): Promise<void> {
+  await expectGlyph(container, file, pixels);
+  await expect(container.locator("img").first()).toHaveAttribute("src", new RegExp(`/${file.replace(".", "\\.")}$`));
+}
+
+export async function checkExploreGlyphs(page: Page, origin: string): Promise<void> {
+  await page.goto(`${origin}/explore?q=glyph-owned`, { waitUntil: "networkidle" });
+  for (const [title, label, author, file] of [
+    ["Glyph capture", "Original capture", "You", "captured-original.svg"],
+    ["Glyph contribution", "Contribution", "You", "user-contribution.svg"],
+    ["Glyph interpretation", "Interpretation", "AI", "ai-interpretation.svg"],
+    ["Glyph development", "Developing idea", "AI", "developing-idea.svg"],
+    ["Glyph import", "Imported source", "Imported source", "imported-original.svg"],
+  ] as const) {
+    const card = page.locator("article").filter({ has: page.getByRole("link", { name: title, exact: true }) });
+    await expect(card).toContainText(label);
+    await expect(card).toContainText(author);
+    await expectLeadingGlyph(card, file, 20);
+  }
+  const reply = page.locator("article").filter({ has: page.getByRole("link", { name: "Glyph reply", exact: true }) });
+  await expect(reply).toContainText("Full reply");
+  await expect(reply).toContainText("AI");
+  await expectLeadingGlyph(reply, "full-reply.svg", 20);
+  await expect(reply.locator('img[src$="/developing-idea.svg"]')).toHaveCount(0);
+  const development = page.locator("article").filter({ has: page.getByRole("link", { name: "Glyph development", exact: true }) });
+  await expect(development).toContainText("Developed from");
+  await expectGlyph(development, "evolution.svg", 16);
+  const incoming = page.locator("article").filter({ has: page.getByRole("link", { name: "Glyph incoming", exact: true }) });
+  await expect(incoming).toContainText("Supported by");
+  await expect(incoming).toContainText("Owned incoming rationale");
+  await expect(incoming).toContainText("from the context thought to this thought");
+  await expectGlyph(incoming, "connection.png", 16);
+}
 type Probe = (method: string, path: string, headers: string, body?: string) => Promise<{ status: number; headers: string; body: string }>;
 export async function checkSearchRoute({ origin, host, probe, daemon }: { origin: string; host: string; probe: Probe; daemon: Fixture }): Promise<void> {
   const before = daemon.attempts.length;

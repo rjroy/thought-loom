@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
+import { expectGlyph } from "./explore.runtime";
 
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
 const original = "Owned original idea wording, unchanged by title edits.";
@@ -79,6 +80,33 @@ export function ideaDaemon(token: string) {
 }
 
 type Fixture = ReturnType<typeof ideaDaemon>;
+export async function checkIdeaGlyphs(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset();
+  await page.goto(`${origin}/ideas/idea-imported`, { waitUntil: "networkidle" });
+  await expect(page.getByText(imported.text, { exact: true })).toBeVisible();
+  const focused = page.locator("main").locator("div").filter({ has: page.getByRole("heading", { name: "Imported idea", exact: true }) }).filter({ has: page.getByText(imported.text, { exact: true }) }).last();
+  await expect(focused).toContainText("Imported source");
+  await expectGlyph(focused, "imported-original.svg", 24);
+  await page.goto(`${origin}/ideas/idea-root?responseId=idea-reply`, { waitUntil: "networkidle" });
+  await expect(page.getByText(original, { exact: true })).toBeVisible();
+  const rootFocus = page.locator("main").locator("div").filter({ has: page.getByRole("heading", { name: "Owned original title", exact: true }) }).filter({ has: page.getByText(original, { exact: true }) }).last();
+  await expect(rootFocus).toContainText("You");
+  await expectGlyph(rootFocus, "captured-original.svg", 24);
+  const replyRegion = page.locator("#idea-reply");
+  await expect(replyRegion.getByText(reply.text, { exact: true })).toBeVisible();
+  await expect(replyRegion).toContainText("AI");
+  await expectGlyph(replyRegion, "full-reply.svg", 20);
+  const childRow = page.locator("article").filter({ has: page.getByRole("link", { name: "Owned interpretation", exact: true }) });
+  await expect(childRow).toContainText("Developed from this idea");
+  await expect(childRow).toContainText("Used as a source for this idea");
+  await expect(childRow).toContainText("Supports");
+  await expectGlyph(childRow, "ai-interpretation.svg", 20);
+  await expectGlyph(childRow, "evolution.svg", 16);
+  await expectGlyph(childRow, "used-as-source.png", 16);
+  await expectGlyph(childRow, "connection.png", 16);
+  await childRow.getByRole("button", { name: "Why connected" }).click();
+  await expect(childRow).toContainText("Recorded direction: idea-root to idea-child");
+}
 type Probe = (method: string, path: string, headers: string, body?: string) => Promise<{ status: number; headers: string; body: string }>;
 export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: string; host: string; probe: Probe; daemon: Fixture }): Promise<void> {
   daemon.reset();

@@ -1,0 +1,262 @@
+{
+  "inventory": "pass: all nine sources exist",
+  "protectedSourceAndRuntimeHashes": "pass",
+  "svgSafetyPaletteViewBox": "pass",
+  "renderTransparency": "pass",
+  "padding": "fail",
+  "renderSizesPx": [
+    16,
+    20,
+    24,
+    256,
+    1024
+  ],
+  "renderer": "rsvg-convert version 2.63.3\n\nlibraries used:\n  cairo 1.18.6\n  pango 1.58.2\n  harfbuzz 14.6.0\n  fontconfig 2.18.3",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "artifacts": {
+    "captured-original": {
+      "sourceSha256": "2b3981f0c2a8cd28d790f7c082117bf0c492f057e39581102a5ccd98031d1813",
+      "bytes": 543,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 933265,
+        "fullyOpaquePixels": 111690,
+        "antialiasedPixels": 3621,
+        "nonzeroAlphaBoundsInclusive": [
+          272,
+          183,
+          729,
+          765
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "user-contribution": {
+      "sourceSha256": "c85dbc07dc21598827622da744294dcaf46568e2a550802b67f380f129a3d166",
+      "bytes": 387,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 733365,
+        "fullyOpaquePixels": 314087,
+        "antialiasedPixels": 1124,
+        "nonzeroAlphaBoundsInclusive": [
+          210,
+          174,
+          813,
+          826
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "ai-interpretation": {
+      "sourceSha256": "08b6f9d006c912a165a84e2a44154b276b206b869c9058dbb97f3a16f8dc4faf",
+      "bytes": 398,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 946269,
+        "fullyOpaquePixels": 97808,
+        "antialiasedPixels": 4499,
+        "nonzeroAlphaBoundsInclusive": [
+          164,
+          295,
+          859,
+          728
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "developing-idea": {
+      "sourceSha256": "124c1872fe5bd9f0a3d89e7fe447bd29ba37f84a005c092c66cf643ba890d354",
+      "bytes": 644,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 3,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 850007,
+        "fullyOpaquePixels": 194456,
+        "antialiasedPixels": 4113,
+        "nonzeroAlphaBoundsInclusive": [
+          234,
+          174,
+          789,
+          886
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "imported-original": {
+      "sourceSha256": "0c8587cfc40f36a31d868d8f58685823dcfe96c46f9ec34f7df7e9f7fc346464",
+      "bytes": 322,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 672924,
+        "fullyOpaquePixels": 374970,
+        "antialiasedPixels": 682,
+        "nonzeroAlphaBoundsInclusive": [
+          193,
+          174,
+          741,
+          892
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "full-reply": {
+      "sourceSha256": "94107f8f41f58249806f092cf03bbc1c0309f0e5f51d726413d7d1698fa26ef0",
+      "bytes": 653,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 869220,
+        "fullyOpaquePixels": 177454,
+        "antialiasedPixels": 1902,
+        "nonzeroAlphaBoundsInclusive": [
+          149,
+          251,
+          849,
+          602
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "evolution": {
+      "sourceSha256": "dd83faf907859330e209248b94c8d38f0d9f6050f42de6f9a4fae53e805298e6",
+      "bytes": 489,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 860572,
+        "fullyOpaquePixels": 185090,
+        "antialiasedPixels": 2914,
+        "nonzeroAlphaBoundsInclusive": [
+          235,
+          153,
+          956,
+          823
+        ],
+        "clearPadding128px": "fail"
+      }
+    },
+    "connection": {
+      "sourceSha256": "58490a9b527734d9beda85167d359bd8d5679b23d7880709f4fb4ce0c7248d1e",
+      "bytes": 476,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 916938,
+        "fullyOpaquePixels": 128302,
+        "antialiasedPixels": 3336,
+        "nonzeroAlphaBoundsInclusive": [
+          190,
+          274,
+          833,
+          671
+        ],
+        "clearPadding128px": "pass"
+      }
+    },
+    "used-as-source": {
+      "sourceSha256": "dc9e5e053f03e764a855e0b24a77b0ac25f1090afb60ed2af875d87f9c4e00a1",
+      "bytes": 378,
+      "viewBox": "0 0 1024 1024",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "elementCount": 2,
+      "fills": [
+        "#FEF6E1",
+        "#FFD477"
+      ],
+      "safetyPaletteViewBox": "pass",
+      "render": {
+        "fullyTransparentPixels": 862403,
+        "fullyOpaquePixels": 185447,
+        "antialiasedPixels": 726,
+        "nonzeroAlphaBoundsInclusive": [
+          175,
+          202,
+          848,
+          821
+        ],
+        "clearPadding128px": "pass"
+      }
+    }
+  },
+  "visualReview": "human assessment in README; script success never implies approval"
+}

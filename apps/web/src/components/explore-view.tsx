@@ -15,6 +15,7 @@ import type { SearchResult } from "../features/explore/results";
 import { searchEntryHref, searchCatalogHref } from "../features/agentic-search/location";
 import { useExploreMemory, type ExploreState } from "./explore-provider";
 import styles from "./explore.module.css";
+import { ContentGlyph } from "./content-glyph";
 
 const authorOptions = [
   { value: "user", label: "You" },
@@ -441,7 +442,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
           <span className={result.author === "user" ? styles.user : styles.ai}>
             {result.author === "user" ? "You" : result.author === "ai" ? "AI" : "Imported source"}
           </span>
-          <span>{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
+          <span className={styles.materialLabel}><ContentGlyph kind={result.kind === "response" ? "full-reply" : result.materialKind} size={20} />{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
           {result.kind === "thought" && inspectRejection && (
             rejected === true ? <span className={styles.rejected}>Rejected</span>
               : rejected !== false ? <span className={styles.unknown}>Status unknown</span> : null
@@ -460,7 +461,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
       </div>
       {context && (
         <div className={styles.context}>
-          <strong>{relationship(result)}:</strong>{" "}
+          <strong className={styles.relationLabel}><ContentGlyph kind={result.context?.kind === "connection" ? "connection" : "evolution"} size={16} />{relationship(result)}:</strong>{" "}
           <Link href={ideaHref({ kind: "thought", id: context.id, thoughtId: context.id }, returnTo)}
             prefetch={false}>
             {context.title ?? context.text.trim().split(/\s+/).slice(0, 5).join(" ")}

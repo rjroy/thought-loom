@@ -1,0 +1,4 @@
+.glyph { display: inline-block; flex: none; object-fit: contain; pointer-events: none; vertical-align: middle; }
+.relationship { inline-size: 16px; block-size: 16px; }
+.list { inline-size: 20px; block-size: 20px; }
+.focus { inline-size: 24px; block-size: 24px; }
