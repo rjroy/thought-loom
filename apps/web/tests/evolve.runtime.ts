@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
+import { expectGlyph } from "./explore.runtime";
 
 type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
@@ -83,6 +84,30 @@ export function evolveDaemon(token: string) {
   };
 }
 type Fixture = ReturnType<typeof evolveDaemon>;
+export async function checkEvolveGlyphs(page: Page, daemon: Fixture, origin: string, narrow: boolean): Promise<void> {
+  daemon.reset();
+  await page.goto(`${origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });
+  if (narrow) await page.getByRole("button", { name: /^starting thought/i }).click();
+  const context = page.locator("#evolve-starting-context");
+  await expect(context.getByText(start.text, { exact: true })).toBeVisible();
+  await expect(context).toContainText("You");
+  await expectGlyph(context, "captured-original.svg", 20);
+  await page.getByRole("textbox", { name: "Your contribution" }).fill("Owned glyph contribution");
+  await page.getByRole("button", { name: /^send$/i }).click();
+  await expect(page.getByText("evolve-run-1", { exact: false }).first()).toBeVisible();
+  const contribution = page.getByText("Owned glyph contribution", { exact: true }).locator("..");
+  await expect(contribution).toContainText("You");
+  await expectGlyph(contribution, "user-contribution.svg", 20);
+  daemon.setStatus("evolve-run-1", "completed", { outputs: 1 });
+  const development = page.locator("article").filter({ hasText: "Owned saved development 1" });
+  await expect(development).toBeVisible({ timeout: 15000 });
+  await expect(development).toContainText("AI");
+  await expect(development).toContainText("Developing idea");
+  await expectGlyph(development, "developing-idea.svg", 20);
+  const reply = page.getByText("Owned canonical reply", { exact: true }).locator("..");
+  await expect(reply).toContainText("AI");
+  await expectGlyph(reply, "full-reply.svg", 20);
+}
 type Probe = (method: string, path: string, headers: string, body?: string) => Promise<{ status: number; headers: string; body: string }>;
 export async function checkEvolveRoute({ origin, host, probe, daemon }: { origin: string; host: string; probe: Probe; daemon: Fixture }): Promise<void> {
   daemon.reset();

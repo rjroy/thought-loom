@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent,
@@ -14,6 +15,7 @@ import type { SearchResult } from "../features/explore/results";
 import { searchEntryHref, searchCatalogHref } from "../features/agentic-search/location";
 import { useExploreMemory, type ExploreState } from "./explore-provider";
 import styles from "./explore.module.css";
+import { ContentGlyph } from "./content-glyph";
 
 const authorOptions = [
   { value: "user", label: "You" },
@@ -371,7 +373,7 @@ export function ExploreView() {
               {view.validation === "link" ? (
                 <><h2>Search link not valid</h2><p>Enter a query and choose your filters to search again.</p></>
               ) : view.phase === "initial" ? (
-                <><h2>Find your recorded thinking</h2><p>Enter a few words you remember, then search.</p></>
+                <><h2 className={styles.initialHeading}>{!view.validation && <Image src="/glyphs/lantern.svg" alt="" aria-hidden="true" width={24} height={24} unoptimized className={styles.headingGlyph} />}Find your recorded thinking</h2><p>Enter a few words you remember, then search.</p></>
               ) : view.phase === "loading" ? (
                 <h2>Searching…</h2>
               ) : view.phase === "error" ? (
@@ -440,7 +442,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
           <span className={result.author === "user" ? styles.user : styles.ai}>
             {result.author === "user" ? "You" : result.author === "ai" ? "AI" : "Imported source"}
           </span>
-          <span>{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
+          <span className={styles.materialLabel}><ContentGlyph kind={result.kind === "response" ? "full-reply" : result.materialKind} size={20} />{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
           {result.kind === "thought" && inspectRejection && (
             rejected === true ? <span className={styles.rejected}>Rejected</span>
               : rejected !== false ? <span className={styles.unknown}>Status unknown</span> : null
@@ -459,7 +461,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
       </div>
       {context && (
         <div className={styles.context}>
-          <strong>{relationship(result)}:</strong>{" "}
+          <strong className={styles.relationLabel}><ContentGlyph kind={result.context?.kind === "connection" ? "connection" : "evolution"} size={16} />{relationship(result)}:</strong>{" "}
           <Link href={ideaHref({ kind: "thought", id: context.id, thoughtId: context.id }, returnTo)}
             prefetch={false}>
             {context.title ?? context.text.trim().split(/\s+/).slice(0, 5).join(" ")}

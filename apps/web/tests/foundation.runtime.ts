@@ -10,9 +10,9 @@ import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
-import { searchDaemon, checkSearchRoute, checkExploreBrowser } from "./explore.runtime";
-import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
-import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser } from "./evolve.runtime";
+import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
+import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
+import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
 import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
@@ -31,6 +31,11 @@ async function createFixture(temp: string): Promise<string> {
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
     "apps/web/package.json", "apps/web/tsconfig.json", "apps/web/next.config.ts",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
+    "apps/web/public/glyphs/lantern.svg", "apps/web/public/glyphs/sprout.svg",
+    "apps/web/public/glyphs/captured-original.svg", "apps/web/public/glyphs/user-contribution.svg", "apps/web/public/glyphs/ai-interpretation.svg",
+    "apps/web/public/glyphs/developing-idea.svg", "apps/web/public/glyphs/imported-original.svg", "apps/web/public/glyphs/full-reply.svg",
+    "apps/web/public/glyphs/evolution.svg", "apps/web/public/glyphs/connection.png", "apps/web/public/glyphs/used-as-source.png",
+    "apps/web/src/components/content-glyph.tsx", "apps/web/src/components/content-glyph.module.css",
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/contextual-back.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
     "apps/web/src/components/agentic-search-provider.tsx", "apps/web/src/features/agentic-search/types.ts", "apps/web/src/features/agentic-search/request.ts", "apps/web/src/features/agentic-search/location.ts", "apps/web/src/features/agentic-search/controller.ts",
@@ -261,6 +266,28 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    const glyphCase = process.env.THOUGHTLOOM_TEST_GLYPH_CASE;
+    if (glyphCase) {
+      assert.ok(["explore", "idea", "evolve"].includes(glyphCase), "Unknown focused glyph case");
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport, baseURL: origin });
+          try {
+            if (glyphCase === "explore") await checkExploreGlyphs(page, origin);
+            else if (glyphCase === "idea") await checkIdeaGlyphs(page, fixtureIdea, origin);
+            else await checkEvolveGlyphs(page, fixtureEvolve, origin, viewport.width < 500);
+          } finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
+    for (const glyph of ["lantern", "sprout"]) {
+      const response = await fetch(`${origin}/glyphs/${glyph}.svg`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /image\/svg\+xml/);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(resolve(fixtureWeb, `public/glyphs/${glyph}.svg`)), "Public glyph must retain its approved source bytes");
+    }
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
     if (process.env.THOUGHTLOOM_TEST_EXPLORE === "1") {

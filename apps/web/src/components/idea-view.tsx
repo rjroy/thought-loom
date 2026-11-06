@@ -13,6 +13,7 @@ import { useIdeaNavigation, type PreviousIdea } from "./idea-navigation-provider
 import { useExploreMemory } from "./explore-provider";
 import { useEvolveStore } from "./evolve-provider";
 import { useContextualBack } from "./contextual-back";
+import { ContentGlyph } from "./content-glyph";
 
 type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
 type PreviewState = { phase: "loading" | "error"; stale: boolean }
@@ -332,7 +333,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </div>}
           <div className={styles.focus}>
             <div className={styles.thought}>
-              <Byline thought={thought} />
+              <Byline thought={thought} focal />
               <h1>{titleOf(thought)}</h1>
               <p className={styles.original}>{thought.text}</p>
             </div>
@@ -343,7 +344,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </div>
 
           {view.parent && <p className={styles.parent}>
-            <span>Developed from:</span>{" "}
+            <span className={styles.relationLabel}><ContentGlyph kind="evolution" size={16} />Developed from:</span>{" "}
             {view.parent.thought ? <>
               <Link href={thoughtHref(view.parent.id, location)} prefetch={false}>{titleOf(view.parent.thought)}</Link>
               {view.parent.thought.rejected === true && <span className={styles.rejected}>Rejected</span>}
@@ -412,7 +413,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </p>}
           <div id="idea-reply" hidden={!replyOpen} className={styles.detail}>
             {reply && <>
-              <h2>Full reply</h2>
+              <h2 className={styles.recordHeading}><ContentGlyph kind="full-reply" size={20} />Full reply</h2>
               <p className={styles.metadata}>AI · {reply.state === "interrupted" ? "Interrupted reply" : "Retained reply"} · {reply.role === "fallback" ? "Fallback" : "Addendum"}</p>
               {view.responses.length > 1 && <label className={styles.replyChoice}>Reply
                 <select value={reply.id} onChange={event => setReplyId(event.target.value)}>
@@ -473,10 +474,10 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   );
 }
 
-function Byline({ thought }: { thought: IdeaThought }) {
+function Byline({ thought, focal = false }: { thought: IdeaThought; focal?: boolean }) {
   return <p className={styles.byline}>
     <span className={thought.author === "user" ? styles.user : styles.ai}>{actor(thought.author)}</span>
-    <span>{materials[thought.kind]}</span>
+    <span className={styles.materialLabel}><ContentGlyph kind={thought.kind} size={focal ? 24 : 20} />{materials[thought.kind]}</span>
     {thought.rejected === true && <span className={styles.rejected}>Rejected</span>}
   </p>;
 }
@@ -501,8 +502,8 @@ function ContextRow({ item, location, focus, inspection, disabled, onReject, onR
           aria-label={`${expanded ? "Collapse" : "Expand"} context text for ${titleOf(thought)}`}
           onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "…"}</button></>}
       </p>}
-      {item.child && <p className={`${styles.relationship} ${styles.directRelationship}`}>Developed from this idea</p>}
-      {item.source && <p className={`${styles.relationship} ${styles.directRelationship}`}>Used as a source for this idea</p>}
+      {item.child && <p className={`${styles.relationship} ${styles.directRelationship}`}><span className={styles.relationLabel}><ContentGlyph kind="evolution" size={16} />Developed from this idea</span></p>}
+      {item.source && <p className={`${styles.relationship} ${styles.directRelationship}`}><span className={styles.relationLabel}><ContentGlyph kind="used-as-source" size={16} />Used as a source for this idea</span></p>}
       {item.connections.map(connection => <RecordedConnection key={connection.id} connection={connection}
         focus={focus} inspection={inspection} disabled={disabled}
         onReject={() => onReject(connection.id)} onRestore={() => onRestore(connection.id)} />)}
@@ -521,7 +522,7 @@ function RecordedConnection({ connection, focus, inspection, disabled, onReject,
   const [actions, setActions] = useState(false);
   return <div className={styles.recordedConnection} role="group" aria-label={`${relationship(connection, focus)} connection ${connection.id}`}>
       <div className={styles.relationship}>
-        <strong>{relationship(connection, focus)}</strong>
+        <strong className={styles.relationLabel}><ContentGlyph kind="connection" size={16} />{relationship(connection, focus)}</strong>
         <button className={styles.textButton} aria-expanded={why}
           aria-controls={`why-${connection.id}`} onClick={() => setWhy(!why)}>Why connected</button>
       </div>

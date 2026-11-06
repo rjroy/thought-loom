@@ -9,6 +9,7 @@ import {
 } from "./evolve-provider";
 import styles from "./evolve.module.css";
 import { useContextualBack } from "./contextual-back";
+import { ContentGlyph } from "./content-glyph";
 
 const titleOf = (thought: IdeaThought) => thought.title ?? thought.text.trim().split(/\s+/).slice(0, 5).join(" ");
 const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
@@ -139,7 +140,7 @@ function Exchange({ value, latest, workspace }: {
   const fallbackPoint = receipt && resolved?.reply?.role === "fallback" && resolved.reply.state === "complete";
   return <section className={styles.exchange}>
     {receipt ? <div className={styles.contribution}>
-      <p className={styles.user}>You</p><p className={styles.message}>{receipt.contribution.text}</p>
+      <Byline thought={receipt.contribution} /><p className={styles.message}>{receipt.contribution.text}</p>
     </div> : <div className={styles.warning} role="status">
       <h2>{value.admission === "pending" ? "Waiting for admission" : value.admission === "not-started" ? "Evolve was not started" : "Admission unconfirmed"}</h2>
       <p>{value.admission === "pending" ? "Waiting for confirmation. No run ID is known yet."
@@ -169,7 +170,7 @@ function Exchange({ value, latest, workspace }: {
       </div>}
     </div>}
     {resolved?.reply && <div className={styles.reply}>
-      <p className={styles.ai}>AI{resolved.reply.state === "interrupted" ? " · Interrupted reply" : ""}</p>
+      <p className={styles.byline}><span className={styles.ai}>AI{resolved.reply.state === "interrupted" ? " · Interrupted reply" : ""}</span> · <span className={styles.materialLabel}><ContentGlyph kind="full-reply" size={20} />Full reply</span></p>
       <p className={styles.message}>{resolved.reply.text}</p>
     </div>}
     {resolved?.replyUnavailable && <p className={styles.muted}>The recorded reply is unavailable in the normal view.</p>}
@@ -186,7 +187,7 @@ function Exchange({ value, latest, workspace }: {
 }
 
 function Byline({ thought }: { thought: IdeaThought }) {
-  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : styles.ai}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · {kinds[thought.kind]}</p>;
+  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : styles.ai}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · <span className={styles.materialLabel}><ContentGlyph kind={thought.kind} size={20} />{kinds[thought.kind]}</span></p>;
 }
 
 function Development({ thought, unconfirmed = false }: { thought: IdeaThought; unconfirmed?: boolean }) {

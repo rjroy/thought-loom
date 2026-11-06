@@ -5,7 +5,9 @@
 .rail h2 { margin: 0 0 1rem; color: var(--color-muted); font-size: 1rem; font-weight: 600; }
 .rail h3 { margin: 0 0 0.75rem; color: var(--color-text); font-size: 1.5rem; line-height: 1.25; overflow-wrap: anywhere; }
 .rail > a { display: inline-flex; align-items: center; min-block-size: 2.75rem; }
-.byline { margin: 0.5rem 0; color: var(--color-body); font-size: 1rem; }
+.byline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.625rem; margin: 0.5rem 0; color: var(--color-body); font-size: 1rem; }
+.byline .user, .byline .ai { margin: 0; }
+.materialLabel { display: inline-flex; align-items: center; gap: 0.5rem; vertical-align: baseline; }
 .user { margin: 0 0 0.375rem; color: var(--brand-color-2); font-weight: 650; }
 .ai { margin: 0 0 0.375rem; color: var(--brand-color-13); font-weight: 650; }
 .savedText, .message { white-space: pre-wrap; overflow-wrap: anywhere; }

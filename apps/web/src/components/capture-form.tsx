@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { submitCapture, type CaptureSnapshot } from "../features/capture/submission";
@@ -82,7 +83,7 @@ export function CaptureForm() {
     <>
     <header className={`workspace-intro capture-heading ${styles.heading}`}>
       <div className={styles.headingRow}>
-        <h1 id="capture-heading">Capture</h1>
+        <h1 id="capture-heading"><Image src="/glyphs/sprout.svg" alt="" aria-hidden="true" width={24} height={24} unoptimized className={styles.headingGlyph} />Capture</h1>
         <button className={styles.importAction} type="button" disabled={pending} onClick={openImport}>Import</button>
       </div>
       <p>Write or paste a thought.</p>
