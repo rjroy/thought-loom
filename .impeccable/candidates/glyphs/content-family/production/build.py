@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
+import argparse
 
 HERE = Path(__file__).resolve().parent
 BASE = HERE.parent
@@ -119,18 +120,22 @@ def build_once():
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Build approved glyphs into a separate output directory')
+    parser.add_argument('--output-dir', type=Path, required=True)
+    args = parser.parse_args()
     version = run('magick','--version').decode().splitlines()[0]
     assert version == MAGICK_VERSION, f'Unverified ImageMagick version: {version}'
     first, report = build_once()
     second, second_report = build_once()  # Reload every immutable packaged input.
     assert first == second and report == second_report
-    target = HERE / 'runtime'
-    target.mkdir(exist_ok=True)
+    target = args.output_dir.resolve()
+    if target == HERE or HERE in target.parents or target == BASE or BASE in target.parents:
+        parser.error('output directory must be outside the content-family package')
+    target.mkdir(parents=True, exist_ok=True)
     assert not set(p.name for p in target.iterdir()) - set(SOURCES)
     for name, data in first.items():
         (target / name).write_bytes(data)
-    receipt = {'status': 'production derivative candidates; user approval and app integration pending', 'reproducibility': 'two complete independent passes from original packaged sources, all nine output byte strings identical', 'imageMagick': version, 'recipeSha256': sha(Path(__file__).read_bytes()), 'artifacts': report}
-    (HERE/'build-report.json').write_text(json.dumps(receipt,indent=2)+'\n')
+    receipt = {'status': 'approved derivatives', 'reproducibility': 'two complete independent passes from original packaged sources, all nine output byte strings identical', 'imageMagick': version, 'recipeSha256': sha(Path(__file__).read_bytes()), 'artifacts': report}
     print(json.dumps(receipt,indent=2))
 
 

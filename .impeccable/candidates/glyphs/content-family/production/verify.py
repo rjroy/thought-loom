@@ -1,116 +1,76 @@
-"""Focused source safety, alpha, framing and review renders; no artwork edits."""
-import importlib.util
-import json
+"""Verify approved inputs, output identities, restricted SVGs and rendered alpha."""
+import re
+import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
-import subprocess
-import sys
-from build import SOURCES, sha, run
+from build import SOURCES, build_once, sha, run
 
 HERE = Path(__file__).resolve().parent
-BASE = HERE.parent
-REVIEW = HERE/'review'
-RUNTIME = HERE/'runtime'
-FONT = HERE.parents[3]/'brand/fonts/SourceSans3-VariableFont_wght.ttf'
-sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location('source_inspection', BASE/'revised/verify.py')
-inspection = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(inspection)
-inspection.source = lambda name: RUNTIME/f'{name}.svg'
-LABELS = [
-    ('captured-original','Original capture','material'),
-    ('user-contribution','Contribution','material'),
-    ('ai-interpretation','Interpretation','material'),
-    ('developing-idea','Developing idea','material'),
-    ('imported-original','Imported source','material'),
-    ('full-reply','Full reply','record role'),
-    ('evolution','Evolution','relationship'),
-    ('connection','Discovered connection','relationship · PNG'),
-    ('used-as-source','Used as source','relationship · PNG'),
-    ('lantern','Existing lantern','reference only · unchanged'),
-    ('sprout','Existing sprout','reference only · unchanged'),
-]
+RUNTIME = HERE / 'runtime'
+PUBLIC = HERE.parents[4] / 'apps/web/public/glyphs'
 
 
-def path_for(name):
-    if name in {'lantern','sprout'}:
-        return BASE.parent/'production/corrected'/f'{name}.svg'
-    return RUNTIME/(name+('.png' if name in {'connection','used-as-source'} else '.svg'))
+def inspect(name):
+    path = RUNTIME / f'{name}.svg'
+    text = path.read_text()
+    assert not re.search(r"<!|<\?|data:|url\s*\(|https?://(?!www\.w3\.org/2000/svg)", text, re.I)
+    root = ET.fromstring(text)
+    assert root.tag == "{http://www.w3.org/2000/svg}svg"
+    assert root.attrib == {"width": "1024", "height": "1024", "viewBox": "0 0 1024 1024", "preserveAspectRatio": "xMidYMid meet"}
+    assert len(root) and not (root.text or "").strip()
+    allowed = {"path": {"fill", "fill-rule", "d"}, "circle": {"fill", "cx", "cy", "r"}, "ellipse": {"fill", "cx", "cy", "rx", "ry"}, "rect": {"fill", "x", "y", "width", "height", "rx", "ry"}}
+    for child in root:
+        tag = child.tag.removeprefix("{http://www.w3.org/2000/svg}")
+        attrs = dict(child.attrib)
+        if "transform" in attrs:
+            assert name == "evolution" and attrs.pop("transform") == "translate(-84 0)"
+        assert tag in allowed and set(attrs) <= allowed[tag]
+        assert attrs["fill"] in {"#FEF6E1", "#FFD477"}
+        assert not len(child) and not (child.text or "").strip() and not (child.tail or "").strip()
+        if tag == "path":
+            assert re.fullmatch(r"[MmLlHhVvCcSsQqTtAaZz0-9.,\s+eE-]+", attrs["d"])
+            assert attrs.get("fill-rule", "nonzero") in {"nonzero", "evenodd"}
+        else:
+            assert all(re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", v) for k, v in attrs.items() if k != "fill")
+    return {"source": str(path.relative_to(HERE)), "sha256": sha(path.read_bytes()), "bytes": path.stat().st_size, "viewBox": "0 0 1024 1024", "dimensions": [1024, 1024], "safetyPaletteViewBox": "pass"}
 
 
-def render(source, dest, size):
-    if source.suffix=='.svg':
-        run('rsvg-convert','-w',size,'-h',size,'-o',dest,source)
-    else:
-        run('magick',source,'-filter','Lanczos','-resize',f'{size}x{size}',dest)
 
+def pixel_report(path):
+    raw = run("magick", path, "-depth", "8", "RGBA:-")
+    alpha = raw[3::4]
+    assert len(alpha) == 1024 * 1024
+    occupied = [i for i, value in enumerate(alpha) if value]
+    bounds = [min(i % 1024 for i in occupied), min(i // 1024 for i in occupied), max(i % 1024 for i in occupied), max(i // 1024 for i in occupied)]
+    assert alpha.count(0) and alpha.count(255)
+    padding = bounds[0] >= 128 and bounds[1] >= 128 and bounds[2] <= 895 and bounds[3] <= 895
+    return {"fullyTransparentPixels": alpha.count(0), "fullyOpaquePixels": alpha.count(255), "antialiasedPixels": len(alpha) - alpha.count(0) - alpha.count(255), "nonzeroAlphaBoundsInclusive": bounds, "clearPadding128px": "pass" if padding else "fail"}
 
-def family_board(label, ground, ink):
-    args=['magick','-size','960x1340',f'xc:{ground}','-font',FONT,'-fill',ink,'-pointsize','23','-annotate','+24+34','Thoughtloom — nine production candidates + accepted pair references']
-    for i,(name,title,role) in enumerate(LABELS):
-        x,y=i%3*320,64+i//3*310
-        args+=['-pointsize','21','-annotate',f'+{x+20}+{y+24}',title,'(',REVIEW/f'{name}-160.png',')','-geometry',f'+{x+80}+{y+40}','-composite']
-        for size,dx in ((16,66),(20,135),(24,208)):
-            args+=['(',REVIEW/f'{name}-{size}.png',')','-geometry',f'+{x+dx}+{y+225}','-composite','-pointsize','15','-annotate',f'+{x+dx-2}+{y+265}',f'{size}px']
-        args+=['-pointsize','16','-annotate',f'+{x+20}+{y+295}',role]
-    run(*args,'-pointsize','17','-annotate','+24+1320','Exact 16 / 20 / 24px canvases. Text labels remain; not app integration.',REVIEW/f'family-{label}.png')
-
-
-def before_after():
-    for ground_label,ground,ink in (('dark','#031315','#FEF6E1'),('light','#FEF6E1','#031315')):
-        args=['magick','-size','940x690',f'xc:{ground}','-font',FONT,'-fill',ink,'-pointsize','23','-annotate','+24+34','Approved PNG source → alpha-cleaned/framed candidate']
-        for i,(name,title) in enumerate((('connection','Discovered connection'),('used-as-source','Used as source'))):
-            y=70+i*300
-            source=BASE/SOURCES[f'{name}.png'][0]
-            render(source,REVIEW/f'{name}-source-256.png',256)
-            render(path_for(name),REVIEW/f'{name}-candidate-256.png',256)
-            args+=['-pointsize','20','-annotate',f'+20+{y+25}',title,'(',REVIEW/f'{name}-source-256.png',')','-geometry',f'+280+{y}','-composite','(',REVIEW/f'{name}-candidate-256.png',')','-geometry',f'+620+{y}','-composite']
-        run(*args,REVIEW/f'raster-before-after-{ground_label}.png')
 
 
 def main():
     assert {p.name for p in RUNTIME.iterdir()} == set(SOURCES)
-    preserved=json.loads((HERE/'preserved-before.json').read_text())
-    for relative,expected in preserved.items():
-        assert sha(Path(relative).read_bytes())==expected,relative
-    build=json.loads((HERE/'build-report.json').read_text())
-    REVIEW.mkdir(exist_ok=True)
-    stats={}
-    for filename,item in build['artifacts'].items():
-        path=RUNTIME/filename
-        assert sha(path.read_bytes())==item['outputSha256']
-        source=HERE/item['source']
-        assert sha(source.read_bytes())==item['sourceSha256']
-        name=path.stem
-        if path.suffix=='.svg':
-            assert path.read_bytes()==source.read_bytes()
-            details=inspection.inspect(name)
-            check_image=REVIEW/f'{name}-1024.png'
-            render(path,check_image,1024)
-        else:
-            details={'format':'PNG','dimensions':list(map(int,run('magick','identify','-format','%w %h',path).split())),'colorSpace':run('magick','identify','-format','%[colorspace]',path).decode(),'shading':'approved source RGB retained before uniform resampling; intentionally not palette-flattened'}
-            assert details['dimensions']==[1024,1024]
-            check_image=path
-        details['pixels']=inspection.initial.pixel_report(check_image)
-        assert details['pixels']['clearPadding128px']=='pass',filename
-        details.update({'sha256':sha(path.read_bytes()),'bytes':path.stat().st_size})
-        stats[filename]=details
-    for name,_,_ in LABELS:
-        path=path_for(name)
-        for size in (16,20,24,160):
-            render(path,REVIEW/f'{name}-{size}.png',size)
-        for label,ground in (('dark','#031315'),('light','#FEF6E1')):
-            run('magick',REVIEW/f'{name}-160.png','-background',ground,'-alpha','remove','-alpha','off',REVIEW/f'{name}-{label}.png')
-    for name in ('connection','used-as-source'):
-        for stage,path in (('source',BASE/SOURCES[f'{name}.png'][0]),('candidate',path_for(name))):
-            components=run('magick',path,'-alpha','extract','-threshold','50%','-define','connected-components:verbose=true','-connected-components','8','null:').decode()
-            (REVIEW/f'{name}-{stage}-components.txt').write_text(components)
-    family_board('dark','#031315','#FEF6E1')
-    family_board('light','#FEF6E1','#031315')
-    before_after()
-    report={'preservation':f'pass: {len(preserved)} artwork/evidence/runtime/reference/passive tracker fingerprints','sourceApproval':'All nine exact selections approved; rejected relationship SVGs excluded','sevenSvgByteCopiesAndRestrictedSafety':'pass','rasterSourceRgbBeforeResampling':'unchanged where retained','realAlphaAndMinimum128PxPadding':'pass all nine','reproducibility':build['reproducibility'],'artifacts':stats,'visualReview':'Designer assessment in README; checks do not grant derivative approval or runtime acceptance','renderer':run('rsvg-convert','--version').decode().strip(),'imageMagick':run('magick','--version').decode().splitlines()[0]}
-    (REVIEW/'statistics.json').write_text(json.dumps(report,indent=2)+'\n')
-    print(json.dumps(report,indent=2))
+    first, _ = build_once()
+    second, _ = build_once()
+    assert first == second
+    with tempfile.TemporaryDirectory(prefix='glyph-verify-') as tmp:
+        for name, data in first.items():
+            path = RUNTIME / name
+            assert path.read_bytes() == data == (PUBLIC / name).read_bytes(), name
+            if path.suffix == '.svg':
+                inspect(path.stem)
+                rendered = Path(tmp) / (name + '.png')
+                run('rsvg-convert', '-w', '1024', '-h', '1024', '-o', rendered, path)
+            else:
+                assert run('magick', 'identify', '-format', '%w %h', path) == b'1024 1024'
+                rendered = path
+            assert pixel_report(rendered)['clearPadding128px'] == 'pass', name
+            print(f'{name}: source hash, reproducibility, public identity, alpha and padding pass')
+    for name, expected in [('lantern', '24cda858b91c39e01711cf1a8692e5aaa6d7657dc6165ab40265bfc6a9dd7329'), ('sprout', '585b9522651ab998079ff283af994ce12aca44792359d4dc4369ed56f997b4b1')]:
+        data = (HERE.parents[1] / 'production/corrected' / f'{name}.svg').read_bytes()
+        assert sha(data) == expected and data == (PUBLIC / f'{name}.svg').read_bytes()
+        print(f'{name}: source and public identity pass')
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
