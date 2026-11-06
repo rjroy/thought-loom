@@ -8,6 +8,7 @@ export function decodeIdeaLocation(id: string, params: URLSearchParams): IdeaLoc
   const target = params.get("returnTo");
   let returnTo = "/explore", inferred: IdeaScope = "normal";
   if (target === "/explore") returnTo = target;
+  else if (target && safeSearchReturn(target)) returnTo = target;
   else if (target?.startsWith("/explore?") && !/[\\#\x00-\x1f\x7f]/.test(target)) {
     const query = decodeSearchQuery(new URLSearchParams(target.slice("/explore?".length)));
     if (query) { returnTo = target; if (query.scope === "show-rejected") inferred = "show-rejected"; }
@@ -20,3 +21,4 @@ export function ideaActionHref(id: string, action: "evolve" | "export"): string 
   return `/${action}?${new URLSearchParams({ thoughtId: id })}`;
 }
 import { decodeSearchQuery } from "../explore/query";
+import { safeSearchReturn } from "../agentic-search/location";

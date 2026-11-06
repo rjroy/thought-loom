@@ -2396,13 +2396,13 @@
   "files": [
     {
       "path": ".impeccable/README.md",
-      "bytes": 29264,
-      "sha256": "1692a274440dbd946f5eeb52ab1fa84c9e3b698b881c62242bd945cc81e7badf"
+      "bytes": 29553,
+      "sha256": "58596ca7bf37528e01f08334537655b9668fe684e8749b83db8aad287c4d2312"
     },
     {
       "path": ".impeccable/mocks/agentic-search/README.md",
-      "bytes": 13747,
-      "sha256": "062d5308a521b13b3c667e1a558fcbf58429311a17895d30c9c0d9c8a004fbef"
+      "bytes": 14187,
+      "sha256": "a0bfa69def877bb0320ffea236c43e2518aaba291c3198e448f0a023014d7ba8"
     },
     {
       "path": ".impeccable/mocks/agentic-search/focused.png",

@@ -11,6 +11,7 @@ import {
 } from "../features/explore/query";
 import { fetchSearch } from "../features/explore/request";
 import type { SearchResult } from "../features/explore/results";
+import { searchEntryHref, searchCatalogHref } from "../features/agentic-search/location";
 import { useExploreMemory, type ExploreState } from "./explore-provider";
 import styles from "./explore.module.css";
 
@@ -260,6 +261,11 @@ export function ExploreView() {
           </p>
         )}
       </form>
+
+      <div className={styles.conversationalEntry} aria-label="Conversational search">
+        <Link href={searchEntryHref} prefetch={false}>Ask your library</Link>
+        <Link href={searchCatalogHref} prefetch={false}>Saved searches</Link>
+      </div>
 
       <div className={styles.narrowTools}>
         <button className={styles.button} type="button" ref={filterButton}

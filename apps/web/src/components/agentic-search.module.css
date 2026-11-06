@@ -1,0 +1,107 @@
+.view { min-inline-size: 0; max-inline-size: 100rem; margin-inline: auto; }
+.view h1, .view h2, .view h3, .view h4 { color: var(--color-text); overflow-wrap: anywhere; }
+.view h1 { margin: 0; font-size: 2rem; line-height: 1.2; letter-spacing: -0.02em; }
+.view h2 { margin: 0 0 1rem; font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.02em; }
+.view h3 { margin: 0 0 0.375rem; font-size: 1.375rem; line-height: 1.25; }
+.view h4 { margin: 0 0 0.5rem; font-size: 1.125rem; }
+.srOnly { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.entry { max-inline-size: 75ch; margin-inline: 0; }
+.entry h1 { margin-block-end: 0.75rem; }
+.intro { max-inline-size: 65ch; margin: 0.75rem 0 1.5rem; font-size: 1.25rem; }
+.policy, .metadata { margin: 0.625rem 0; color: var(--color-muted); font-size: 1rem; overflow-wrap: anywhere; }
+.policy { max-inline-size: 70ch; margin-block-start: 1.25rem; }
+.pageHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-block-end: 0.75rem; }
+.pageHeading h2 { margin: 0; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.button, .sessionSwitcher, .discoveryToggle { display: inline-flex; align-items: center; justify-content: center; min-block-size: 2.75rem; padding: 0.5rem 1rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-ground); color: var(--color-text); font: inherit; font-weight: 600; line-height: 1.35; text-align: center; text-decoration: none; cursor: pointer; }
+.button:hover:not(:disabled), .sessionSwitcher:hover { border-color: var(--color-text); }
+.primary { border-color: var(--brand-color-3); background: var(--brand-color-3); color: var(--color-ground); font-weight: 700; }
+.primary:hover:not(:disabled) { background: var(--brand-color-11); border-color: var(--brand-color-11); }
+.button:disabled { border-color: var(--color-line); background: var(--color-line); color: var(--color-body); cursor: default; }
+.textButton { display: inline-flex; align-items: center; min-block-size: 2.75rem; padding: 0.375rem 0; border: 0; background: transparent; color: var(--color-link); font: inherit; text-align: start; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.textButton:hover:not(:disabled) { color: var(--color-text); text-decoration-thickness: 2px; }
+.textButton:disabled { color: var(--color-muted); cursor: default; }
+.dangerText { color: var(--brand-color-9); }
+.danger { border-color: var(--brand-color-9); background: var(--brand-color-9); color: var(--color-ground); font-weight: 700; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; padding-block-end: 1rem; margin-block-end: 1.25rem; border-block-end: 1px solid var(--color-line); }
+.toolbar h1 { flex: 1 1 18rem; min-inline-size: 0; font-size: 1.5rem; }
+.sessionSwitcher { justify-content: space-between; gap: 1rem; max-inline-size: 100%; background: var(--color-input); font-size: 1.375rem; text-align: start; overflow-wrap: anywhere; }
+.sessionSwitcher svg, .discoveryToggle svg { flex: none; }
+.sessionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; }
+.sessionActionsToggle { display: none; }
+.columns { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); align-items: start; gap: 1.75rem; }
+.working { min-inline-size: 0; }
+.conversation { min-inline-size: 0; }
+.messages, .discoveries, .sessionList { list-style: none; margin: 0; padding: 0; }
+.messages { display: grid; gap: 1rem; }
+.messageRow { display: grid; grid-template-columns: 3rem minmax(0, 1fr); align-items: start; gap: 0.75rem; }
+.messageRow > p { margin: 0.75rem 0 0; }
+.user, .ai, .source { font-weight: 600; }
+.user { color: var(--brand-color-2); }
+.ai { color: var(--brand-color-13); }
+.source { color: var(--brand-color-7); }
+.userMessage, .aiMessage { min-inline-size: 0; padding: 0.875rem 1rem; border-radius: 0.75rem; background: var(--color-caption); }
+.aiMessage { background: var(--color-card); }
+.message { max-inline-size: 72ch; margin: 0; color: var(--color-text); font-size: 1.25rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer { display: grid; gap: 0.5rem; margin-block-start: 1.5rem; }
+.composer label, .titleEditor label { color: var(--color-text); font-weight: 600; }
+.sendRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 0.875rem; }
+.sendRow .button { min-inline-size: 5rem; min-block-size: 3rem; }
+.composer textarea, .titleEditor input, .effort select { min-inline-size: 0; padding: 0.75rem 0.875rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-input); color: var(--color-text); caret-color: var(--brand-color-3); font: inherit; }
+.composer textarea { display: block; inline-size: 100%; min-block-size: 7rem; resize: vertical; }
+.effort { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-block-start: 0.375rem; }
+.effort select { min-block-size: 2.75rem; padding-block: 0.375rem; }
+.discoveryPane { min-inline-size: 0; padding-inline-start: 1.75rem; border-inline-start: 1px solid var(--color-line); }
+.discoveries { display: grid; gap: 0.875rem; }
+.discovery { min-inline-size: 0; padding: 1rem 1.125rem; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-card); }
+.byline { margin: 0 0 0.625rem; font-size: 1rem; }
+.rationale { margin: 0 0 0.625rem; overflow-wrap: anywhere; }
+.rationale strong { color: var(--color-text); }
+.discovery .actions { gap: 0.375rem 0.875rem; }
+.discovery .button { padding: 0.375rem 0.875rem; }
+.preview { margin-block-start: 1rem; padding-block-start: 1rem; border-block-start: 1px solid var(--color-line); }
+.preview .message { font-size: 1.125rem; }
+.discoveryToggle { display: none; }
+.runStatus { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; margin-block: 0.75rem 1.25rem; padding-block: 0.5rem; border-block-end: 1px solid var(--color-line); }
+.runStatus > p { margin: 0; }
+.runStatus > .metadata { flex-basis: 100%; }
+.warning { min-inline-size: 0; margin-block: 1rem; padding: 1rem 1.125rem; border: 1px solid var(--brand-color-3); border-radius: 0.5rem; background: var(--color-card); overflow-wrap: anywhere; }
+.warning h2 { margin-block-end: 0.75rem; font-size: 1.25rem; }
+.warning > p { margin-block: 0.5rem; }
+.warning .button { margin-block-start: 0.75rem; }
+.resume { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-block: 1.5rem; }
+.empty { margin: 0.5rem 0 1rem; color: var(--color-muted); }
+.sessionList { max-inline-size: 65rem; }
+.sessionRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1.5rem; padding-block: 1rem; border-block-end: 1px solid var(--color-line); }
+.sessionRow > div:first-child { flex: 1 1 14rem; min-inline-size: 0; }
+.sessionTitle { color: var(--color-text); font-size: 1.375rem; font-weight: 600; overflow-wrap: anywhere; }
+.sessionsSheet { margin-block-end: 1.5rem; padding: 1.25rem; border: 1px solid var(--color-control-line); border-radius: 0.75rem; background: var(--color-card); }
+.historyHeading { margin-block-end: 1.5rem; }
+.historyHeading h2 { margin-block-end: 0.5rem; }
+.historyHeading p { margin-block: 0.5rem; }
+.titleEditor { display: grid; gap: 0.5rem; max-inline-size: 40rem; margin-block: 1rem 1.5rem; }
+.titleEditor input[aria-invalid="true"] { border-color: var(--brand-color-9); }
+.dialog { inline-size: min(36rem, calc(100% - 2rem)); padding: 1.5rem; border: 1px solid var(--color-control-line); border-radius: 0.75rem; background: var(--color-ground); color: var(--color-body); }
+.dialog::backdrop { background: color-mix(in srgb, var(--color-ground) 80%, transparent); }
+.dialog h2 { color: var(--color-text); font-size: 1.5rem; margin: 0 0 0.75rem; }
+.dialog .actions { margin-block-start: 1.25rem; justify-content: flex-end; }
+@media (max-width: 48rem) {
+  .toolbar { gap: 0.75rem; }
+  .toolbar h1 { flex-basis: 100%; }
+  .sessionSwitcher { inline-size: 100%; }
+  .sessionActionsToggle { display: inline-flex; }
+  .sessionActions { display: none; flex-basis: 100%; padding-block: 0.5rem; }
+  .sessionActions[data-open="true"] { display: flex; }
+  .columns { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .discoveryPane { padding: 0; border: 0; }
+  .discoveryToggle { display: flex; justify-content: space-between; gap: 1rem; inline-size: 100%; background: var(--color-input); text-align: start; font-size: 1.25rem; }
+  .discoveryContent { display: none; padding-block-start: 0.875rem; }
+  .discoveryContent[data-open="true"] { display: block; }
+  .discoveryContent > h2 { display: none; }
+  .messageRow { grid-template-columns: 2rem minmax(0, 1fr); gap: 0.5rem; }
+  .userMessage, .aiMessage { padding: 0.75rem; }
+  .sendRow { gap: 0.75rem; }
+  .sendRow .button { min-inline-size: 4.5rem; padding-inline: 0.875rem; }
+  .discovery { padding: 1rem; }
+  .sessionsSheet { padding: 1rem; }
+}

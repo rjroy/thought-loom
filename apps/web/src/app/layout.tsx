@@ -10,6 +10,7 @@ import { ExportProvider } from "../components/export-provider";
 import { ContextualBack, ContextualBackProvider } from "../components/contextual-back";
 import { CaptureProvider } from "../components/capture-provider";
 import { ImportProvider } from "../components/import-provider";
+import { AgenticSearchProvider } from "../components/agentic-search-provider";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -41,7 +42,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
            <ExportProvider>
            <ContextualBackProvider>
            <CaptureProvider>
-           <ImportProvider>
+            <ImportProvider>
+           <AgenticSearchProvider>
           <a className="skip-link" href="#main-content">
             Skip to content
           </a>
@@ -62,6 +64,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main-content" className="workspace" tabIndex={-1}>
             {children}
           </main>
+           </AgenticSearchProvider>
            </ImportProvider>
            </CaptureProvider>
            </ContextualBackProvider>

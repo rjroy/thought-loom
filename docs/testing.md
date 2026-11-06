@@ -175,6 +175,20 @@ The Export companion exercises independent methods, contextual normal-scope root
 
 The Idea metadata check requires About to share the existing desktop action row while allowing narrow wrapping. It exercises the disclosure's expanded state, keyboard activation and retained focus, then checks the existing metadata inside that disclosure rather than matching repeated source IDs elsewhere on the page. Opening About must not alter the selected thought or add a metadata-fetch operation. Resting-state checks require Edit title, Full reply, About and More actions to remain native buttons with underlined text using the existing link-color token, distinct from focal thought text.
 
+### Conversational search client checks
+
+`bun --no-env-file test tests/web-agentic-search-controller.test.ts` uses injected client, key and clock sources to check workspace isolation, occurrence removal/rediscovery, loaded-page refresh and non-UTC/DST clock formatting. It does not contact a daemon or model. Keep fixtures independent of the current library and model configuration.
+
+The owned production runtime harness includes fixed search-session/search-run BFF checks and desktop/narrow browser companions. These cover explicit New/Resume, bookmarks without automatic writes, conversation/discovery/preview, uncertain admission with same-key Check, known-run Stop, blocked-context recovery, unavailable placeholders, title/Copy link/History/Delete, and draft/reading-position return from Idea. BFF checks include strict normal/history separation, control-only identity validation, paired clock forwarding, colon-bearing recovery keys and exact previews larger than 1 MiB. Neither control receipts nor retained request snapshots are evidence of normal conversation content.
+
+For a focused harness run, set `THOUGHTLOOM_TEST_AGENTIC_CASE` with `web:test:runtime`: `routes`, `workspace`, `turns`, `controls`, `recovery-key`, `large-preview`, `entry`, `saved`, `ui-core`, `ui-unknown`, `ui-context`, `ui-return`, `ui-actions`, `ui-unavailable`, `ui-idle-retry` or `ui-active-reading`. For example:
+
+```sh
+THOUGHTLOOM_TEST_AGENTIC_CASE=ui-core bun --no-env-file run web:test:runtime
+```
+
+These selected modes are focused checks, not replacements for the complete runtime command. Both source-copy allowlists must include the search provider, controller/request/location modules, components/styles and fixed route handlers. The generated comp PNGs are not runtime inputs. Controlled fixtures establish recovery and privacy boundaries, not retrieval quality, live OpenCode behavior or comprehensive accessibility certification.
+
 ### Shared-record browser acceptance
 
 `web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.
@@ -183,7 +197,9 @@ Unlike the per-screen fake-daemon runtime, this walkthrough connects the browser
 
 A separate imported-record path selects and uploads test-owned Markdown in the browser through the Next import workspace, then opens its report, retained original and imported Idea against the real owned daemon. The fixture supplies strict fake-SDK segmentation using the submitted manifest. It checks exact source bytes, imported attribution, user-only original access and completed weaving, then follows that actual imported record through filtered Explore, Idea, Evolve, Simple export and an Agentic report with a source citation. Browser requests go through Next.js, never directly to the daemon. Both desktop and narrow viewports exercise this path.
 
-This proves controlled shared-record continuity, not real provider behavior, cross-reload workspace persistence, physical-device usability or screen-reader certification. Keep the detailed per-screen tests for recovery, focus, safe Markdown and request boundaries rather than duplicating every edge case in this walkthrough. Neither browser command starts or changes the operator OpenCode service.
+The conversational-search path uses the real owned Hono/SQLite runtime and a deterministic decoded fake agent to find/read/discover existing thoughts. Both viewports exercise explicit New/Resume, bookmarked reload without writes, recorded conversation, eligible discovery/preview, Idea return, fixed-occurrence removal and fresh rediscovery, user-only History, and local session Delete preserving library records and another session. It does not exercise Stop or rejection during that search journey; controlled per-screen and backend tests cover their separate boundaries.
+
+This proves controlled shared-record continuity, not real provider behavior, cross-reload unsent-draft persistence, physical-device usability or screen-reader certification. Keep the detailed per-screen tests for recovery, focus, safe Markdown and request boundaries rather than duplicating every edge case in this walkthrough. Neither browser command starts or changes the operator OpenCode service.
 
 ## Test boundaries
 
