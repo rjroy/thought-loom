@@ -97,7 +97,8 @@ function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
   const stagedResults = schema !== null && /CHECK\s*\(\s*result_json\s+IS\s+NULL\s+OR\s+state\s*=\s*'processed'\s*\)/i.test(schema.sql);
   if (stagedResults) {
     // Only the old CHECK changes: a completed request may now retain its dispatched result before successor preparation.
-    // No table has an FK to run_steps; cross-table identity triggers are recreated by their schema helpers.
+    // This predecessor has no incoming step FKs; search discovery FKs are installed after this upgrade.
+    // Cross-table identity triggers are recreated by their schema helpers.
     db.exec(`DROP TRIGGER IF EXISTS runs_prepare_initial_step; DROP TRIGGER IF EXISTS run_receipts_step_identity;
       DROP TRIGGER IF EXISTS export_reports_step_identity;
       ALTER TABLE run_steps RENAME TO run_steps_legacy;`);

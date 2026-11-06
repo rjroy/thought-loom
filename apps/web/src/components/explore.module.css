@@ -10,6 +10,8 @@
 .view :is(input, select, button, a, h2) { scroll-margin-block-start: 6rem; }
 .srOnly { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .searchForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem; margin-block-end: 1.5rem; }
+.conversationalEntry { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; margin-block: -0.75rem 1.25rem; }
+.conversationalEntry a { display: inline-flex; align-items: center; min-block-size: 2.75rem; }
 .queryLabel { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
 .queryBox { position: relative; min-inline-size: 0; }
 .searchIcon { position: absolute; inset-inline-start: 1rem; inset-block-start: 1rem; inline-size: 1.5rem; block-size: 1.5rem; pointer-events: none; color: var(--color-body); }

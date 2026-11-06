@@ -4,6 +4,9 @@ import { protocolJson } from "../domain/run-protocol";
 import { AgentBindingError, normalizeBinding, sameBinding, sameModel, type AgentBinding, type ModelRef } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError, AgentUnavailableError } from "./errors";
 import { authorizeSubmissionHistory, correlateHistory, correlateImportHistory } from "./history";
+import { searchInputHash } from "./search-cleanup-history";
+import { reconcileSearchCancellation } from "./search-cancellation";
+import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
 import type { ImportTerminalEvidence } from "../domain/markdown-import-contract";
 export type { ImportTerminalEvidence } from "../domain/markdown-import-contract";
 export { AgentBindingError } from "./binding";
@@ -65,6 +68,8 @@ export interface AdapterFences {
   readonly ordinary: OrdinaryFence;
   /** Local pause gate only; it cannot replace the bindings repository's persisted import authority. */
   readonly import: (claim: Claim, prompts: readonly PersistedPrompt[]) => void;
+  /** Runtime lifetime ownership only; it grants no run, import or cancellation authority. */
+  readonly runtime?: () => void;
 }
 
 /** No service startup; all calls are fenced to an existing application claim. */
@@ -72,11 +77,13 @@ export class OpenCodeAdapter {
   private readonly observationOutages = new Set<string>();
   private readonly assertActive: OrdinaryFence;
   private readonly importFence: AdapterFences["import"];
+  private readonly runtimeFence: () => void;
   /** Production callers supply SqliteAgentBindings.assertActive bound to its receiver; tests may inject controlled fences. */
   constructor(private readonly client: PublicClient, private readonly bindings: AgentBindings,
     fences: OrdinaryFence | AdapterFences, private readonly logger: Logger = createLogger()) {
     this.assertActive=typeof fences==="function" ? fences : fences.ordinary;
     this.importFence=typeof fences==="function" ? (claim,prompts) => { fences(claim,prompts.at(-1)); } : fences.import;
+    this.runtimeFence=typeof fences==="function" ? () => {} : fences.runtime ?? (() => {});
   }
   private bound(runId: string, requested: AgentBinding): AgentBinding {
     const binding = normalizeBinding(requested);
@@ -93,23 +100,25 @@ export class OpenCodeAdapter {
     if (session.unsafe || session.location.directory !== binding.location.directory || !sameModel(binding.model,session.model) ||
         protocolJson(session.permissions) !== protocolJson(binding.permissions) || protocolJson(session.metadata) !== protocolJson(metadata)) throw new AgentBindingError("Native session does not match its owned binding");
   }
-  private async call<T>(claim: Claim, operation: string, action: () => Promise<T>, prompt?: PersistedPrompt, onTransportFailure?: () => void): Promise<T> {
-    return this.fencedCall(claim,operation,action,() => { this.assertActive(claim,prompt); },prompt,onTransportFailure);
+  private async call<T>(claim: Claim, operation: string, action: () => Promise<T>, prompt?: PersistedPrompt, onTransportFailure?: () => void,
+    onValue?: (value: T) => void): Promise<T> {
+    return this.fencedCall(claim,operation,action,() => { this.assertActive(claim,prompt); },prompt,onTransportFailure,onValue);
   }
   private async fencedCall<T>(claim: Claim, operation: string, action: () => Promise<T>, authorize: () => void,
-    prompt?: PersistedPrompt, onTransportFailure?: () => void): Promise<T> {
-    authorize();
+    prompt?: PersistedPrompt, onTransportFailure?: () => void, onValue?: (value: T) => void): Promise<T> {
+    const guard=() => { this.runtimeFence(); authorize(); };
+    guard();
     this.logger.verbose("[agent] native call attempt",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
     let value: T;
-    try { value = await action(); }
+    try { value = await action(); onValue?.(value); }
     catch (error) {
-      authorize();
+      guard();
       this.logger.verbose("[agent] native call failed",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
       if (error instanceof AgentBindingError || error instanceof AgentSessionMissingError || error instanceof RunFenceError) throw error;
       onTransportFailure?.();
       throw new AgentUncertainError("Native operation outcome is uncertain");
     }
-    authorize();
+    guard();
     this.logger.verbose("[agent] native call succeeded",{runId:claim.runId,operation,promptId:prompt?.promptId,generation:claim.generation});
     return value;
   }
@@ -166,7 +175,7 @@ export class OpenCodeAdapter {
     } while (cursor !== undefined);
     return messages;
   }
-  async submit(claim: Claim, requested: AgentBinding, input: PersistedPrompt): Promise<void> {
+  async submit(claim: Claim, requested: AgentBinding, input: PersistedPrompt, onAdmission?: (fact: SearchAdmissionFact) => void): Promise<void> {
     const prompt = this.prompt(input);
     this.assertActive(claim,prompt);
     const binding = this.bound(claim.runId,requested);
@@ -186,7 +195,12 @@ export class OpenCodeAdapter {
       // The concrete storage callback records submitting in the existing run/step transaction before dispatch.
       this.assertActive(claim,prompt,"submit");
       try {
-        const receipt = await this.call(claim,"session.prompt",() => this.client.prompt({sessionID:binding.sessionId,id:prompt.promptId,text:prompt.input}),prompt);
+        const receipt = await this.call(claim,"session.prompt",() => this.client.prompt({sessionID:binding.sessionId,id:prompt.promptId,text:prompt.input}),prompt,undefined,
+          onAdmission === undefined ? undefined : receipt => {
+            if (receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
+            // Persist only a matching sealed cleanup fact before the post-await active fence can discard this ACK.
+            onAdmission({runId:claim.runId,nativeSessionId:binding.sessionId,promptId:prompt.promptId,inputSha256:searchInputHash(prompt.input)});
+          });
         if (receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
         this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),prompt));
       } catch (error) {
@@ -347,6 +361,11 @@ export class OpenCodeAdapter {
   async cancel(runId: string, requested: AgentBinding, input: PersistedPrompt): Promise<"pending" | "settled"> {
     return this.cancelOwned(runId,requested,input,() => {});
   }
+  /** Search cancellation deliberately does not use active-run authority, retained prompt input or ordinary drift tolerance. */
+  async cancelSearch(identity: SearchCleanupIdentity, authorize: () => void): Promise<SearchCleanupObservation> {
+    return reconcileSearchCancellation(this.client,identity,() => { this.runtimeFence(); authorize(); },
+      session => this.verify(identity.runId,identity.binding,session),this.logger);
+  }
   async cancelImport(claim: Claim, requested: AgentBinding, input: PersistedPrompt): Promise<"pending" | "settled"> {
     const prompt=this.prompt(input), authority=this.bindings.assertImportCancellation;
     if (!authority) throw new RunFenceError("Persisted import cleanup authority is required");
@@ -355,10 +374,11 @@ export class OpenCodeAdapter {
     });
   }
   private async cancelOwned(runId: string, requested: AgentBinding, input: PersistedPrompt, authorize: () => void): Promise<"pending" | "settled"> {
-    authorize();
+    const guard=() => { this.runtimeFence(); authorize(); };
+    guard();
     const binding = this.bound(runId,requested);
     const prompt = this.prompt(input);
-    const read=async <T>(action:()=>Promise<T>):Promise<T> => { authorize(); try { return await action(); } finally { authorize(); } };
+    const read=async <T>(action:()=>Promise<T>):Promise<T> => { guard(); try { return await action(); } finally { guard(); } };
     this.logger.verbose("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
     try {
       // Cleanup can stop an owned but quarantined session whose model/location/rules have drifted. It cannot adopt it.

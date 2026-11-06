@@ -11,6 +11,10 @@ import { AgentNotConfiguredError, type AgentService } from "../domain/agent";
 import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError } from "../domain/run";
 import { ImportConflictError, ImportForbiddenError, ImportNotFoundError, ImportPreservationError, type ImportInspectionRepository, type MarkdownImportRepository } from "../domain/markdown-import";
 import { createMarkdownImportRoutes, ImportHttpError } from "./markdown-import-routes";
+import { createSearchSessionRoutes } from "./search-session-routes";
+import { object, SearchHttpError, type SearchEnv } from "./search-http";
+import { SearchConflictError, SearchForbiddenError, SearchNotFoundError, type SearchSessions } from "../domain/agentic-search";
+import { parseSearchClockHeaders, type SearchClockReceipts } from "./search-clock-receipts";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -26,13 +30,17 @@ export interface AppOptions {
   readonly creation: CreationService;
   readonly titles: TitleService;
   readonly search?: SearchService;
+  readonly searchSessions?: SearchSessions;
+  readonly searchAgentsConfigured?: boolean;
+  readonly notifySearchAdmission?: () => void;
+  readonly searchClockReceipts?: SearchClockReceipts;
   readonly simpleExport?: SimpleExportService;
   readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
 }
 
-type AppEnv = { Variables: { actor: Actor } };
+type AppEnv = SearchEnv;
 type ApiContext = Context<AppEnv>;
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 500 | 503;
 
@@ -82,6 +90,7 @@ function thoughtInput(data: Record<string, unknown>): ThoughtInput {
 function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
+  if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
   if (path === "/exports/agentic") return "/exports/agentic";
   if (path === "/import-namespaces") return "/import-namespaces";
@@ -104,11 +113,11 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   }
   const app = new Hono<AppEnv>();
   app.onError((error, c) => {
-    const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError ? error.status :
+    const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError || error instanceof SearchHttpError ? error.status :
       error instanceof AgentNotConfiguredError ? 503 :
-      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError ? 409 :
-      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError || error instanceof ImportForbiddenError ? 403 :
-      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError ? 404 :
+      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError || error instanceof SearchConflictError ? 409 :
+      error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError || error instanceof ImportForbiddenError || error instanceof SearchForbiddenError ? 403 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError || error instanceof SearchNotFoundError ? 404 :
       error instanceof ImportPreservationError && error.message.startsWith("Unsupported source") ? 422 :
       error instanceof ValidationError ? 400 : 500;
     if (status === 500) diagnostics.error("[daemon] request failed", { method: c.req.method, path: safePath(new URL(c.req.url).pathname) });
@@ -116,6 +125,12 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     if (error instanceof ImportConflictError) return c.json({error:"Conflict",code:error.message === "import-sealed" ? "import-sealed" : "idempotency-conflict"},status);
     if (error instanceof ImportPreservationError && status===422) return c.json({error:"Unsupported source",code:error.message === "Unsupported source content" ? "unsupported-source-content" : "unsupported-source-encoding"},status);
     const path=safePath(new URL(c.req.url).pathname);
+    if (path.startsWith("/search-sessions")) {
+      const code = error instanceof SearchHttpError ? error.code : error instanceof SearchConflictError ? error.code : error instanceof AgentNotConfiguredError ? "agents-not-configured" :
+        status === 400 ? "invalid-search-request" : status === 403 ? "forbidden" : status === 404 ? "search-session-not-found" : "search-request-failed";
+      return c.json({error: status === 400 ? "Bad request" : status === 403 ? "Forbidden" : status === 404 ? "Not found" : status === 409 ? "Conflict" : status === 413 ? "Payload too large" : status === 415 ? "Unsupported media type" : status === 503 ? "Agents are not configured" : "Internal server error",code},status);
+    }
+    if (path.startsWith("/runs/") && error instanceof SearchHttpError) return c.json({error:"Bad request",code:error.code},error.status);
     if ((path.startsWith("/imports/markdown") || path.startsWith("/import-sources") || path==="/import-namespaces" || path==="/thoughts/:id/import-source") && (status===400 || status===500)) return c.json({error:status===400 ? "Bad request" : "Internal server error",code:status===400 ? "invalid-import-request" : "import-admission-failed"},status);
     return c.json({ error: status === 500 ? "Internal server error" :
       ({ 400: "Bad request", 401: "Unauthorized", 403: "Forbidden", 404: "Not found", 409: "Conflict", 413: "Payload too large", 415:"Unsupported media type", 422:"Unsupported source", 503: "Agents are not configured; set THOUGHTLOOM_AGENT_CONFIG" } as const)[status] }, status);
@@ -123,7 +138,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
-    if (event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
+    if (event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
@@ -137,6 +152,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   });
 
   if (options.imports) app.route("/",createMarkdownImportRoutes(options.imports.commands,options.imports.inspection,options.imports.maxBytes));
+  if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
 
   if (options.search) {
     const search = options.search;
@@ -224,11 +240,29 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   });
   app.get("/runs/:id", c => {
     user(c); noQuery(c);
+    const searchRun = options.searchSessions?.searchRun("user",c.req.param("id"));
+    if (searchRun) {
+      const receipt = options.searchClockReceipts ? options.searchClockReceipts.parse(c.req.raw.headers) : parseSearchClockHeaders(c.req.raw.headers);
+      if (options.searchClockReceipts && receipt) options.searchClockReceipts.record(options.searchClockReceipts.ownerRun(searchRun.id),receipt);
+      return c.json(searchRun);
+    }
     if (!options.agents) throw new ApiError(503);
     return c.json(options.agents.status(c.get("actor"),c.req.param("id")));
   });
   app.post("/runs/:id/stop", async c => {
     user(c); noQuery(c);
+    if (options.searchSessions) {
+      // Determine the scoped owner before invoking either mutation path.
+      const searchRun = options.searchSessions.searchRun("user",c.req.param("id"));
+      if (searchRun) {
+        if (options.searchClockReceipts) options.searchClockReceipts.parse(c.req.raw.headers); else parseSearchClockHeaders(c.req.raw.headers);
+        await object(c,[]);
+        const stopped = options.searchSessions.stopSearchRun("user",c.req.param("id"));
+        if (!stopped) throw new ApiError(404);
+        options.searchClockReceipts?.forgetRun(searchRun.id);
+        return c.json(stopped);
+      }
+    }
     await body(c,[]);
     if (!options.agents) throw new ApiError(503);
     const run = options.agents.stop(c.get("actor"),c.req.param("id"));

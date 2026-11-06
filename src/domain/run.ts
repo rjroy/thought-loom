@@ -5,10 +5,14 @@ import type { Thought } from "./thought";
 import type { Connection } from "./connection";
 import type { SharedResponse } from "./shared-response";
 
-export type RunKind = "weave" | "evolve" | "export" | "import";
-export type OrdinaryRunKind = Exclude<RunKind, "import">;
+export type RunKind = "weave" | "evolve" | "export" | "import" | "search";
+export type OrdinaryRunKind = "weave" | "evolve" | "export";
 export function requireOrdinaryRun(run: RunRecord): void {
   if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") throw new RunForbiddenError("Ordinary run authority required");
+}
+/** Shared journal/native execution is not ordinary capability or knowledge-write authority. */
+export function requireExecutionRun(run: RunRecord): void {
+  if (run.kind !== "search") requireOrdinaryRun(run);
 }
 export type RunStatus = "queued" | "submitting" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 export type NativeState = "unknown" | "running" | "completed";

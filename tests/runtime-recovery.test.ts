@@ -181,7 +181,11 @@ test("daemon shutdown pauses actual SDK preflight, drains it before closing SQLi
     expect(closeSpy.mock.calls.length).toBe(closesBefore);
     service.historyRelease.release();
     await bound(stopping, "drained daemon stop"); daemon = undefined;
-    expect(closeSpy.mock.calls.length).toBe(closesBefore + 1);
+    const closed = closeSpy.mock.contexts.slice(closesBefore);
+    expect(closed).toHaveLength(2);
+    expect(closed.filter(value => value instanceof Database && value.filename === path)).toHaveLength(1);
+    expect(closed.filter(value => value instanceof Database && value.filename === `${path}.execution-owner.sqlite`)).toHaveLength(1);
+    expect(closed.map(value => value instanceof Database ? value.filename : null)).toEqual([path, `${path}.execution-owner.sqlite`]);
     expect(service.calls.filter(call => call.path.endsWith("/prompt"))).toHaveLength(0);
     expect(service.calls.filter(call => /interrupt|cancel/.test(call.path))).toHaveLength(0);
     const reopened = new Database(path, { readonly: true });

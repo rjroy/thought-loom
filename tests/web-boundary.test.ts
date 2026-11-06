@@ -12,6 +12,27 @@ const logger = (records: LogRecord[]) => createLogger("verbose", record => recor
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
 
 describe("web server configuration", () => {
+  test("Next dev allows only the configured web hostname and rejects invalid origins", async () => {
+    const load = async (webOrigin?: string) => {
+      const proc = Bun.spawn([process.execPath, "--no-env-file", "-e", 'import config from "./apps/web/next.config.ts"; console.log(JSON.stringify(config.allowedDevOrigins))'], {
+        env: { PATH: process.env.PATH, ...(webOrigin === undefined ? {} : { THOUGHTLOOM_WEB_ORIGIN: webOrigin }) },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { stdout, stderr, exitCode };
+    };
+    for (const [origin, expected] of [[undefined, "127.0.0.1"], ["https://remote.example.test:3002", "remote.example.test"], ["http://localhost:4321", "localhost"], ["http://[::1]:4321", "[::1]"]] as const) {
+      const result = await load(origin);
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual([expected]);
+    }
+    for (const origin of ["not a url", "http://remote.example.test:3002", "https://remote.example.test/path", "https://*.example.test"]) {
+      const result = await load(origin);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("Invalid local origin");
+    }
+  });
+
   test("has safe loopback defaults and does not require credentials during configuration", () => {
     const result = readWebConfig({});
     expect(result.daemonOrigin).toBe("http://127.0.0.1:3001");

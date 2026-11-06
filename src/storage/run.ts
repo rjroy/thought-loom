@@ -3,12 +3,13 @@ import { CreationNotFoundError } from "../domain/creation";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import { createThought } from "../domain/thought";
 import { nonEmpty, record, references } from "../domain/validation";
-import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Admission, type Claim, type ContextRef, type ContextValue, type NativeState, type Operation, type OperationResult, type Receipt, type ReplyDraft, type RunRecord, type RunRepository, type RunSources, type RunStatus } from "../domain/run";
+import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Admission, type Claim, type ContextRef, type ContextValue, type NativeState, type Operation, type OperationResult, type Receipt, type ReplyDraft, type RunRecord, type RunRepository, type RunSources, type RunStatus } from "../domain/run";
 import { SqliteSharedResponses } from "./shared-response";
 import { migrate } from "./sqlite";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { evolveWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave } from "./weave-admission";
+import { searchRevision } from "../domain/search-session-guards";
 
 /** Durable transaction boundary; never invokes a model or network while holding a SQLite lock. */
 export class SqliteRunRepository extends SqliteRunAggregate implements RunRepository {
@@ -35,10 +36,11 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   claim(id: string): Claim {
     const outcome = this.transaction("claim", id, () => {
       const run = this.require(id);
-      requireOrdinaryRun(run);
+      requireExecutionRun(run);
       this.active({ runId: id, generation: run.generation });
-      if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run); return null; }
+      if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run,"context-invalidated"); return null; }
       const generation = run.generation + 1;
+      if (run.kind === "search") searchRevision(generation);
       this.db.run("UPDATE runs SET generation=? WHERE id=?", [generation,id]);
       return { runId: id, generation };
     });

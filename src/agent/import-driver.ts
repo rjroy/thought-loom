@@ -73,6 +73,12 @@ export class LocalMarkdownImportDriver {
     this.logger.verbose("[import driver] local poll succeeded",{files:page.items.length});
   }
   /** Stop local callbacks before draining; never turn daemon shutdown into user Stop. */
+  async drain(): Promise<readonly PromiseSettledResult<void>[]> {
+    if (!this.paused) throw new Error("Local import drain requires pause");
+    const scan = await Promise.allSettled(this.flight ? [this.flight] : []);
+    const files = await Promise.allSettled([...this.flights.values()]);
+    return [...scan,...files];
+  }
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.paused=true;
@@ -80,8 +86,7 @@ export class LocalMarkdownImportDriver {
     this.stopping=(async () => {
       let failed=false;
       try { this.cancelTimer?.(); } catch { failed=true; }
-      try { await this.flight; } catch { failed=true; }
-      const results=await Promise.allSettled(this.flights.values());
+      const results=await this.drain();
       if (results.some(result => result.status==="rejected")) failed=true;
       if (failed) throw new Error("Local import shutdown failed");
     })();

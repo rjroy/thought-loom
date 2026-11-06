@@ -22,7 +22,7 @@ These are server-side service credentials, not user accounts. The future browser
 - Text and reference fields must satisfy domain validation. Most creation fields are assigned by commands, not supplied by clients.
 - Record read routes accept only the optional `scope` query parameter, once. Search has its own parameters below. The command routes below reject query parameters.
 - Successful creates return `201` with the created record; reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
-- Record collections are plain arrays. Search returns results and filter counts. Pagination is not implemented.
+- Ordinary record collections are plain arrays. Search returns results and filter counts; import and search-session catalogs have bounded pagination.
 
 ### Read scopes
 
@@ -68,6 +68,49 @@ All accept the read scopes above and return `200` JSON:
 | GET | `/responses/:id` | One visible retained response; otherwise `404`. |
 
 Each per-thought relationship route requires the requested thought to be visible under the same read scope; a missing or hidden thought returns `404`. A visible thought with no visible related records returns an empty array. These reads use existing response, connection, and evolution relationships; they do not traverse discovered connections as evolution ancestry. Child and connection inspection records include the `rejected` field described above. Shared response associations follow the same visibility policy as `/responses/:id`, including the stricter AI rule.
+
+## Agentic search sessions
+
+All routes below are user-only; AI credentials receive `403`. Only fresh turn admission requires agent configuration. All responses, including authentication failures, are `Cache-Control: private, no-store`. The metadata routes expose no conversation text or composer context. The [conversational search web client](server-startup.md#conversational-search) uses fixed Next.js server boundaries; the browser never calls the daemon directly. See [`search-session-routes.ts`](../src/daemon/search-session-routes.ts) and the [isolated walkthrough](testing.md#isolated-agentic-search-walkthrough).
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| POST | `/search-sessions` | JSON `{}` and required `Idempotency-Key` (1–128 ASCII letters, digits, `.`, `_`, `:`, `-`). Returns `201 {session}` or `200` for an exact live replay. Reusing a deleted key returns `409 session-deleted`. |
+| GET | `/search-sessions` | Optional singleton `limit` (1–200, default 50) and `cursor`; returns `{items,nextCursor}` ordered by last activity. |
+| GET | `/search-sessions/:id` | Returns `{session,activeRun,eligibilityRevision}` atomically. `activeRun` is the current open-slot search control DTO or null; it contains no message text or native identity. |
+| PATCH | `/search-sessions/:id` | JSON `{title}` and required `If-Match` containing the unquoted nonnegative decimal session revision; returns `{session}`. A stale revision is `409 revision-conflict`. |
+| DELETE | `/search-sessions/:id` | No body or query. Returns `204` after local purge/fence, including bound work, and for known tombstone replay; unknown ID is `404`. The owned daemon installs its retention controller with or without agent configuration. |
+
+Session metadata is `{id,title,createdAt,lastActivityAt,revision}`. Active control is `{id,kind:'search',status,searchSessionId,userMessageId,assistantMessageId,outcomeReason,cancellation}`. Catalog cursors are opaque, process-authenticated, bounded and tied to this endpoint and limit; omission of `limit` on continuation preserves its size. Restart invalidates them; ordering changes yield `409 list-changed`, requiring a fresh walk. JSON requests use `application/json` with optional UTF-8 charset, reject duplicate/unknown fields, and have a 4096-byte bound. Unknown or repeated query parameters and malformed singleton headers are rejected. Errors include `400 invalid-search-request`, `413 request-too-large`, `415 unsupported-media-type`, `401`, `403`, `404`, `409`, and sanitized `500`.
+
+Delete removes local session content and search execution inputs transactionally, preserves library records, and leaves a title-free creation-key tombstone plus any sealed non-content native-cleanup evidence. It returns without awaiting native cancellation or settlement. Without agent configuration there is no native producer or cleanup polling; unresolved metadata stays pending for a future matching configured runtime. A held local lease excludes qualified predecessor issuers, not delayed network admission. This is local logical deletion, not erasure from native/provider history, backups or SQLite free pages/WAL. The internal no-controller storage facet still refuses bound or potentially dispatched deletion with `native-cleanup-required`.
+
+### Composer and workspace reads
+
+These user-only routes share the same authentication, privacy, validation and error rules. They make no model call. See [`search-workspace-routes.ts`](../src/daemon/search-workspace-routes.ts).
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| POST | `/search-sessions/:id/composer-contexts` | JSON `{}` creates a new blank composer and returns `201 {composerId,contextToken,eligibilityRevision}`. |
+| GET | `/search-sessions/:id/composer-contexts/:composerId` | Revalidates the same composer's complete offered union and returns its current token; invalidated, consumed or discarded contexts return `409 context-changed`. |
+| DELETE | `/search-sessions/:id/composer-contexts/:composerId` | No body/query. Discards an active draft; known terminal drafts replay as `204`. Saved session content is unchanged. |
+| GET | `/search-sessions/:id/messages` or `/discoveries` | `scope=normal` (default) requires `composerId`; optional `limit` 1–200 and `cursor`. The response is `{items,nextCursor,sessionRevision,eligibilityRevision,composerId,contextToken}` after registering the entire offered page. `scope=history` forbids `composerId` and returns only `{items,nextCursor}`, including deliberate user-only history. |
+| GET | `/search-sessions/:id/composer-contexts/:composerId/thoughts/:thoughtId` | Registers eligible AI-normal preview dependencies before returning `{thought,sessionRevision,eligibilityRevision,composerId,contextToken}`; missing/invisible thought is `404`. It does not grant a model full-read witness. |
+| DELETE | `/search-sessions/:id/discoveries/:entryId` | No body/query. Returns `204` with `Search-Session-Revision` for both first removal and replay of that exact occurrence. |
+
+Normal unavailable messages have `text:null` and empty evidence; unsafe discovery rationales are redacted. Explicit history never supplies a composer token and is not a normal-read fallback. A context token represents offered coverage, not authentication. Normal cursors are bound to collection/session/limit, not to a composer: using one with another valid composer registers the returned page for that composer. History cursors are separately authenticated and bound to collection, session, history scope and limit; neither cursor type crosses scopes. Both use bounded high-water walks and process-local signatures, so restart requires a fresh walk. A `409 context-changed` cannot be repaired by silently opening a blank composer.
+
+### Turn admission and control
+
+`POST /search-sessions/:id/turns` requires an `Idempotency-Key` and JSON `{text,requestClock:{at,timeZone},composerId,contextToken,startingThoughtIds?,effort?,contextMode?}`. `requestClock.at` must be an offset-bearing timestamp consistent with its IANA zone; it is the user's intent anchor, not a daemon record timestamp. Effort is `quick`, `standard` (default) or `thorough`; context mode is `continue` (default) or `restart`. The daemon assigns all run/message/native IDs and record times. A fresh admission returns `201`, exact replay `200`; both return only `{receipt,run,session}`, never message text, token, native binding or tool output. `receipt` is `{searchSessionId,runId,userMessageId,admittedAt}`; `run` has the search control fields above.
+
+`GET /search-sessions/:id/turns/by-key/:requestKey` returns that control-only view or `404` for an absent/deleted owner. An exact replay resolves before checking current composer, active turn or configuration; changed payload under the same key is `409 idempotency-conflict`, and a new key with active work is `409 turn-active`. Fresh turns require configured agents and otherwise return `503 agents-not-configured` before admission or ID allocation. Known replay, by-key, Check and Stop work without current agent configuration. Configuration is checked, not service connectivity: an unavailable configured service leaves admitted work queued/uncertain. After admission the existing bounded supervisor is notified; no native call occurs in the handler.
+
+`GET /runs/:id` returns search control for a live owned search run. `POST /runs/:id/stop` requires JSON `{}` and returns the current search control after local fencing; user messages and confirmed discoveries remain retained. Both use `private, no-store`, are user-only, and do not dispatch or re-submit. Search run IDs from deleted sessions return `404`.
+
+Search-session requests and known search-run Check/Stop accept optional `X-Thoughtloom-Client-Time` and `X-Thoughtloom-Client-Zone` **together**. The time must be a full ISO timestamp with `Z` or numeric offset matching the IANA zone; a missing partner, ambiguous/duplicate header or invalid calendar/zone/offset gives `400 invalid-search-request`. Large valid skew is accepted. User authentication precedes validation. Direct API clients can omit both headers; turn `requestClock` remains mandatory and is the immutable original intent anchor.
+
+The daemon stamps a valid header sample with its own receipt time and keeps at most 128 transient active-run associations. It records an admitted turn's sample after commit and before waking the existing supervisor; later polls can update the in-memory sample without a SQL write or model call. Owner/session/native identity and current execution generation are checked before the configured worker can use it. New turns never inherit a prior run's sample. At a normal initial or due successor preparation boundary, the worker may attach the latest available pair; already prepared input and exact replay keep their original bytes. Stop and successful local Delete forget affected associations; eviction, restart or absence of a fresh sample falls back to the last retained report, not an invented current user clock. A reported client/daemon difference includes unknown transit delay and does not change record timestamps. The web client forwards fresh paired clock headers through Next.js while retaining the original turn `requestClock` for uncertain-admission reconciliation.
 
 ## Search: `GET /search`
 
@@ -173,7 +216,7 @@ Without [agent configuration](server-startup.md#agent-configuration), this retur
 
 Returns `200` with `{id, kind, status, confirmedThoughtIds, responseId}`; missing runs return `404`. Status is one of `queued`, `submitting`, `running`, `uncertain`, `completed`, `interrupted`, or `failed`. Confirmed thought IDs refer to saved output, not uncommitted native proposals. `responseId` is null until a canonical reply exists. No native binding, credentials, protocol envelopes or provider reasoning are returned.
 
-An import run instead returns `{id,kind:'import',status,importId,fileId}` without an unbounded thought-ID list or private segmentation input/result. Existing Evolve/Export projections are unchanged.
+An import run instead returns `{id,kind:'import',status,importId,fileId}` without an unbounded thought-ID list or private segmentation input/result. A search run returns its distinct control-only shape described above. Existing Evolve/Export projections are unchanged.
 
 ## Markdown import and source inspection
 

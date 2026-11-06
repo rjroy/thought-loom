@@ -6,12 +6,22 @@ import type { ResponseRecord } from "../domain/response";
 import { SqliteSharedResponses } from "./shared-response";
 import { migrateRunSchema } from "./run-schema";
 import { nonEmpty } from "../domain/validation";
-import { captureWeaveIntent } from "../domain/weave-scheduling";
-import { admitWeave, type WeaveSources } from "./weave-admission";
+import type { WeaveSources } from "./weave-admission";
 import { migrateImportFoundation } from "./import-migration";
+import { migrateSearchFoundation } from "./search-migration";
+import { migrateExecutionOwners } from "./execution-owner-schema";
+import { migrateSearchCleanup } from "./search-cleanup-migration";
 import { immediate } from "./transaction";
-import { ValidationError } from "../domain/validation";
 import { randomUUID } from "node:crypto";
+import { SearchSessionService, type SearchSessionSources, type SearchSessions } from "../domain/agentic-search";
+import { SqliteSearchSessions } from "./search-sessions";
+import type { SearchPublication } from "../domain/search-publication";
+import { SqliteSearchPublication } from "./search-publication";
+import type { SearchInvestigation } from "../domain/investigative-retrieval";
+import { SqliteSearchInvestigation } from "./investigative-retrieval";
+import { SqliteSearchRepository } from "./search";
+import type { SqliteSearchRetention } from "./search-retention";
+import { SqliteKnowledgeWriter } from "./knowledge-write";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -178,6 +188,21 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       `);
       migrateRunSchema(db);
       migrateImportFoundation(db);
+      migrateSearchFoundation(db);
+      migrateExecutionOwners(db);
+      migrateSearchCleanup(db);
+      if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
+        CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_update AFTER UPDATE ON thought_titles WHEN OLD.title IS NOT NEW.title OR OLD.title_author IS NOT NEW.title_author BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_delete AFTER DELETE ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_response_insert AFTER INSERT ON responses BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_association_insert AFTER INSERT ON response_thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_source_insert AFTER INSERT ON thought_sources BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_insert AFTER INSERT ON connections BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_update AFTER UPDATE ON connections WHEN OLD.id IS NOT NEW.id OR OLD.from_id IS NOT NEW.from_id OR OLD.to_id IS NOT NEW.to_id OR OLD.category IS NOT NEW.category BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_delete AFTER DELETE ON connections BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+      `);
       if (!db.query("SELECT 1 FROM import_namespaces WHERE kind='loose-markdown'").get()) {
         db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,'loose-markdown','Loose Markdown',?)",[randomUUID(),new Date().toISOString()]);
       }
@@ -190,23 +215,22 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
 export class SqliteStore {
   constructor(private readonly db: Database, private readonly scheduling?: WeaveSources, private readonly logger: Logger = scheduling?.logger ?? createLogger()) {}
 
+  searchSessions(sources: SearchSessionSources, retention?: SqliteSearchRetention): SearchSessions {
+    return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger,retention,sources), { ...sources, logger: sources.logger ?? this.logger });
+  }
+
+  /** Internal AI-normal candidate retrieval; not a full-read witness. */
+  searchInvestigation(): SearchInvestigation {
+    return new SqliteSearchInvestigation(this.db, new SqliteSearchRepository(this.db, undefined, this.logger), this.logger);
+  }
+
+  /** Trusted dispatcher integration only; never expose this facet as user/model-selected authority. */
+  searchPublication(sources: SearchSessionSources): SearchPublication {
+    return new SqliteSearchPublication(this.db, { ...sources, logger: sources.logger ?? this.logger });
+  }
+
   saveThought(input: Thought): void {
-    boundary(this.logger, "save thought", () => {
-      const thought = createThought(input);
-      if (thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
-      this.db.transaction(() => {
-        // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
-        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",
-          [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
-        this.db.run("INSERT INTO thought_titles (thought_id, title, title_author) VALUES (?, ?, ?)",
-          [thought.id, thought.title, thought.title === null ? null : thought.titleAuthor ?? thought.author]);
-        const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");
-        thought.sourceIds.forEach((id, index) => insert.run(thought.id, index, id));
-        this.db.run("INSERT INTO thought_source_seals (thought_id) VALUES (?)", [thought.id]);
-        const intent = captureWeaveIntent(thought);
-        if (this.scheduling && intent) admitWeave(this.db,this.scheduling,intent);
-      }).immediate();
-    });
+    new SqliteKnowledgeWriter(this.db,this.logger,this.scheduling).saveThought(input);
   }
 
   getThought(id: string): Thought | null {
@@ -221,15 +245,7 @@ export class SqliteStore {
   }
 
   saveConnection(input: Connection): void {
-    boundary(this.logger, "save connection", () => {
-      const connection = createConnection(input);
-      this.db.transaction(() => {
-        this.db.run("INSERT INTO connections (id, from_id, to_id, category, proposed_by, explanation) VALUES (?, ?, ?, ?, ?, ?)",
-          [connection.id, connection.fromId, connection.toId, connection.category, connection.proposedBy, connection.explanation]);
-        const insert = this.db.query("INSERT INTO connection_sources (connection_id, position, source_id) VALUES (?, ?, ?)");
-        connection.sourceIds.forEach((id, index) => insert.run(connection.id, index, id));
-      })();
-    });
+    new SqliteKnowledgeWriter(this.db,this.logger,this.scheduling).saveConnection(input);
   }
 
   getConnection(id: string): Connection | null {

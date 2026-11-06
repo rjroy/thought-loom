@@ -10,6 +10,7 @@
     "daemon": "bun run src/daemon/main.ts",
     "api": "bun run scripts/api.ts",
     "demo": "bun run scripts/demo.ts",
+    "demo:search": "bun --no-env-file test tests/agentic-search-http-walkthrough.test.ts tests/agentic-search-process-resume.test.ts",
     "build:spellfix": "bash scripts/build-spellfix.sh",
     "web:dev": "bun --no-env-file run --filter @thoughtloom/web dev",
     "web:build": "bun --no-env-file run --filter @thoughtloom/web build",

@@ -15,6 +15,7 @@ import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
+import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -32,6 +33,9 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/contextual-back.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
+    "apps/web/src/components/agentic-search-provider.tsx", "apps/web/src/features/agentic-search/types.ts", "apps/web/src/features/agentic-search/request.ts", "apps/web/src/features/agentic-search/location.ts", "apps/web/src/features/agentic-search/controller.ts",
+    "apps/web/src/components/agentic-search-view.tsx", "apps/web/src/components/agentic-search-sessions.tsx", "apps/web/src/components/agentic-search-content.tsx", "apps/web/src/components/agentic-search.module.css",
+    "apps/web/src/app/explore/ask/page.tsx", "apps/web/src/app/explore/ask/saved/page.tsx", "apps/web/src/app/explore/ask/[id]/page.tsx", "apps/web/src/app/explore/ask/[id]/history/page.tsx",
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
     "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
@@ -56,6 +60,13 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
     "apps/web/src/server/import.ts",
+    "apps/web/src/server/search-sessions.ts", "apps/web/src/server/search-session-handler.ts",
+    "apps/web/src/server/search-clock.ts", "apps/web/src/server/search-workspace.ts", "apps/web/src/server/search-workspace-handler.ts",
+    "apps/web/src/app/api/search-sessions/[id]/messages/route.ts", "apps/web/src/app/api/search-sessions/[id]/discoveries/route.ts", "apps/web/src/app/api/search-sessions/[id]/discoveries/[entryId]/route.ts",
+    "apps/web/src/app/api/search-sessions/[id]/composer-contexts/[composerId]/thoughts/[thoughtId]/route.ts", "apps/web/src/app/api/search-sessions/[id]/turns/route.ts", "apps/web/src/app/api/search-sessions/[id]/turns/by-key/[requestKey]/route.ts",
+    "apps/web/src/app/api/search-runs/[id]/route.ts", "apps/web/src/app/api/search-runs/[id]/stop/route.ts",
+    "apps/web/src/app/api/search-sessions/route.ts", "apps/web/src/app/api/search-sessions/[id]/route.ts",
+    "apps/web/src/app/api/search-sessions/[id]/composer-contexts/route.ts", "apps/web/src/app/api/search-sessions/[id]/composer-contexts/[composerId]/route.ts",
     "apps/web/src/app/api/imports/markdown/route.ts", "apps/web/src/app/api/imports/markdown/[id]/route.ts",
     "apps/web/src/app/api/imports/markdown/[id]/files/route.ts", "apps/web/src/app/api/imports/markdown/[id]/files/[fileId]/route.ts", "apps/web/src/app/api/imports/markdown/[id]/seal/route.ts",
     "apps/web/src/app/api/imports/namespaces/route.ts", "apps/web/src/app/api/imports/runs/[id]/route.ts", "apps/web/src/app/api/imports/runs/[id]/stop/route.ts",
@@ -218,8 +229,10 @@ async function main(): Promise<void> {
   const fixtureEvolve = evolveDaemon(token);
   const fixtureExport = exportDaemon(token);
   const fixtureImport = importDaemon(token);
+  const fixtureAgenticSearch = agenticSearchDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
+    if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
+    else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
     else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
@@ -250,6 +263,43 @@ async function main(): Promise<void> {
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
+    const agenticCase = process.env.THOUGHTLOOM_TEST_AGENTIC_CASE;
+    if (agenticCase === "routes") {
+      await checkAgenticSearchRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+      return;
+    }
+    if (agenticCase === "recovery-key" || agenticCase === "large-preview") {
+      if (agenticCase === "recovery-key") await checkAgenticRecoveryKey({ origin, daemon: fixtureAgenticSearch });
+      else await checkAgenticLargePreview({ origin, daemon: fixtureAgenticSearch });
+      return;
+    }
+    if (agenticCase === "workspace" || agenticCase === "turns" || agenticCase === "controls") {
+      if (agenticCase === "workspace") await checkAgenticWorkspaceRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+      else if (agenticCase === "turns") await checkAgenticTurnRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+      else await checkAgenticRunRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+      return;
+    }
+    if (agenticCase === "entry" || agenticCase === "saved" || agenticCase === "ui-core" || agenticCase === "ui-unknown" || agenticCase === "ui-context" || agenticCase === "ui-return" || agenticCase === "ui-actions" || agenticCase === "ui-unavailable" || agenticCase === "ui-idle-retry" || agenticCase === "ui-active-reading") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try {
+            if (agenticCase === "entry") await checkAgenticSearchEntry(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
+            else if (agenticCase === "saved") await checkAgenticSearchSaved(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
+            else if (agenticCase === "ui-core") await checkAgenticWorkspaceBrowser(page, fixtureAgenticSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
+            else if (agenticCase === "ui-unknown") await checkAgenticUnknownAdmission(page, fixtureAgenticSearch, { origin });
+            else if (agenticCase === "ui-context") await checkAgenticChangedContext(page, fixtureAgenticSearch, { origin });
+            else if (agenticCase === "ui-return") await checkAgenticReturnNavigation(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+            else if (agenticCase === "ui-actions") await checkAgenticSessionActions(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+            else if (agenticCase === "ui-idle-retry") await checkAgenticIdleReadRetry(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+            else if (agenticCase === "ui-active-reading") await checkAgenticActiveReadingPosition(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+            else await checkAgenticUnavailable(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+          } finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     const trusted = await probe("GET", "/explore", `Host: ${host}\r\n`);
     assert.equal(trusted.status, 200);
     assert.match(trusted.headers, /cache-control:.*(?:private|no-store)/i);
@@ -266,6 +316,12 @@ async function main(): Promise<void> {
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
     await checkEvolveRoute({ origin, host, probe, daemon: fixtureEvolve });
     await checkExportRoute({ origin, host, probe, daemon: fixtureExport });
+    await checkAgenticSearchRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+    await checkAgenticWorkspaceRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+    await checkAgenticTurnRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+    await checkAgenticRunRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
+    await checkAgenticRecoveryKey({ origin, daemon: fixtureAgenticSearch });
+    await checkAgenticLargePreview({ origin, daemon: fixtureAgenticSearch });
     // The focused mode permits independently observing the browser regression
     // while the large-upload regression remains RED; normal runs check both.
     if (process.env.THOUGHTLOOM_TEST_IMPORT_CASE !== "uncertain-stop") await checkLargeImportRoute(origin, fixtureImport);
@@ -291,6 +347,15 @@ async function main(): Promise<void> {
           await noContextBack();
           await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
           await noContextBack();
+          await checkAgenticSearchEntry(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
+          await checkAgenticSearchSaved(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
+          await checkAgenticWorkspaceBrowser(page, fixtureAgenticSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
+          await checkAgenticUnknownAdmission(page, fixtureAgenticSearch, { origin });
+          await checkAgenticChangedContext(page, fixtureAgenticSearch, { origin });
+          await checkAgenticReturnNavigation(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+          await checkAgenticSessionActions(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+          await checkAgenticUnavailable(page, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 });
+          await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
           await page.keyboard.press("Tab");
           assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Skip to content");
           await page.keyboard.press("Enter");
@@ -338,6 +403,13 @@ async function main(): Promise<void> {
           for (const secret of secrets) assert.ok(!html.includes(secret), "browser HTML contains sentinel");
           assert.deepEqual(leaks, []);
         } finally { await page.close(); }
+        // Each companion owns a fresh browser context; in particular the
+        // active-reading case installs a clock that must not affect other checks.
+        for (const check of [checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition]) {
+          const companion = await browser.newPage({ viewport });
+          try { await check(companion, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 }); }
+          finally { await companion.close(); }
+        }
       }
     } finally { await browser.close(); }
     console.log("Foundation, capture and Explore runtime checks passed");

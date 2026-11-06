@@ -1,10 +1,15 @@
 import type { Claim } from "./run";
 import { nonEmpty, record, references } from "./validation";
+import { searchString } from "./search-session-guards";
 
 export type CapabilityEnvelope = { readonly version: 1; readonly kind: "request"; readonly request: { readonly capability: string; readonly arguments: Readonly<Record<string, unknown>> } };
 export type ReplyEnvelope = { readonly version: 1; readonly kind: "complete"; readonly reply: string };
 export type ReportEnvelope = { readonly version: 1; readonly kind: "report"; readonly markdown: string; readonly sourceThoughtIds: readonly string[] };
-export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope | ReportEnvelope;
+export interface SearchReplyEnvelope {
+  readonly version: 1; readonly kind: "search-reply"; readonly reply: string;
+  readonly disposition: "awaiting-user" | "done"; readonly sourceThoughtIds: readonly string[];
+}
+export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope | ReportEnvelope | SearchReplyEnvelope;
 export type StepState = "prepared" | "submitting" | "uncertain" | "completed" | "processed";
 export interface RunStep {
   readonly runId: string;
@@ -77,6 +82,14 @@ export function parseEnvelope(input: string): ProtocolEnvelope {
     const data = record(JSON.parse(input));
     uniqueKeys(input);
     if (data.version !== 1) throw new ProtocolValidationError("Unsupported envelope version");
+    if (data.kind === "search-reply") {
+      exactKeys(data,["version","kind","reply","disposition","sourceThoughtIds"]);
+      if (data.disposition !== "awaiting-user" && data.disposition !== "done") throw new ProtocolValidationError();
+      const sourceThoughtIds = references(data.sourceThoughtIds,"sourceThoughtIds").map(id => searchString(id,"publication thought ID"));
+      if (new Set(sourceThoughtIds).size !== sourceThoughtIds.length) throw new ProtocolValidationError();
+      return Object.freeze({version:1,kind:"search-reply",reply:searchString(data.reply,"reply"),disposition:data.disposition,
+        sourceThoughtIds:Object.freeze(sourceThoughtIds)});
+    }
     if (data.kind === "report") {
       exactKeys(data,["version","kind","markdown","sourceThoughtIds"]);
       const sourceThoughtIds = references(data.sourceThoughtIds,"sourceThoughtIds");

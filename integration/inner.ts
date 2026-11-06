@@ -59,6 +59,29 @@ class FixtureClient implements PublicClient {
       return { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: 10 } };
     }
     const job = record(record(first.context).job);
+    if (job.kind === "search") {
+      const current = record(JSON.parse(input.text));
+      const capability = (name: string, args: object) => ({ version: 1, kind: "request", request: { capability: name, arguments: args } });
+      let output: object;
+      if (history.length === 1) output = capability("findThoughts", { query: "cobalt", authors: [], kinds: [], from: null, until: null, sort: "oldest", limit: 25, cursor: null });
+      else {
+        const request = record(current.request);
+        if (request.capability === "findThoughts") {
+          assert.ok(JSON.stringify(current.result).includes(this.sourceId), "owned source must be an eligible search result");
+          output = capability("readThought", { id: this.sourceId });
+        } else if (request.capability === "readThought") output = capability("addDiscovery", { thoughtId: this.sourceId, why: "Owned evidence is relevant.", evidenceThoughtIds: [] });
+        else {
+          assert.equal(request.capability, "addDiscovery");
+          output = { version: 1, kind: "search-reply", reply: "Owned search finding is ready.", disposition: "awaiting-user", sourceThoughtIds: [this.sourceId] };
+        }
+      }
+      const messages = this.messages.get(input.sessionID); assert.ok(messages);
+      const n = messages.length * 10 + 10;
+      messages.push({ id: input.id, type: "user", time: { created: n }, text: input.text },
+        { id: `assistant-${input.id}`, type: "assistant", time: { created: n + 1, completed: n + 2 }, content: [{ type: "text", text: JSON.stringify(output) }], finish: "stop" },
+        { id: `idle-${input.id}`, type: "idle", time: { created: n + 3 }, outcome: "succeeded" });
+      return { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: n } };
+    }
     if (job.kind === "evolve" && this.holdEvolve) await new Promise<void>(done => { this.releaseHeld = done; });
     const step = history.length;
     const output = job.kind === "export" ? (step === 1
@@ -137,6 +160,101 @@ async function bytes(download: Download): Promise<Buffer> {
   for await (const part of stream) parts.push(Buffer.from(part)); return Buffer.concat(parts);
 }
 
+// This is a decoded fake-agent journey over the real browser/Next/daemon boundary,
+// not a provider integration or a fabricated database publication.
+async function searchWalkthrough(page: Page, origin: string, daemon: RunningDaemon, dbPath: string, sourceId: string, content: string, narrow: boolean, pulse: () => void): Promise<void> {
+  const before = knowledge(dbPath);
+  const writes: string[] = [];
+  const observe = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/search-sessions") && request.method() !== "GET") writes.push(`${request.method()} ${url.pathname}`);
+  };
+  page.on("request", observe);
+  try {
+    await page.getByRole("link", { name: "Explore", exact: true }).click();
+    await page.getByRole("link", { name: "Ask your library", exact: true }).click();
+    assert.deepEqual(writes, [], "opening search must not create a session");
+    const created = await captureResponse(page, "/api/search-sessions", () => page.getByRole("button", { name: "New search" }).click());
+    const sessionId = string(record(created.session).id);
+    await expect(page.getByRole("textbox", { name: "Your message" })).toBeVisible();
+    const savedUrl = page.url();
+    assert.ok(new URL(savedUrl).pathname.startsWith("/explore/ask"));
+
+    const count = writes.length;
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
+    assert.equal(writes.length, count, "opening a bookmarked session must not create a composer");
+    await page.getByRole("button", { name: "Resume", exact: true }).click();
+    const field = page.getByRole("textbox", { name: "Your message" });
+    await expect(field).toBeVisible();
+
+    async function turn(text: string) {
+      await field.fill(text);
+      const admitted = await captureResponse(page, `/api/search-sessions/${sessionId}/turns`, () => page.getByRole("button", { name: "Send", exact: true }).click());
+      const runId = string(record(admitted.run).id);
+      await until("Owned search completion", async () => {
+        const response = await daemonCall(daemon, `/runs/${encodeURIComponent(runId)}`);
+        assert.equal(response.status, 200);
+        const run = record(response.value);
+        if (run.status === "failed" || run.status === "interrupted") throw new Error(`Owned search ended ${String(run.status)}`);
+        return run.status === "completed";
+      }, pulse);
+      await page.getByRole("button", { name: "Check", exact: true }).click();
+      await expect(page.getByRole("region", { name: "Conversation" }).getByText("Owned search finding is ready.").first()).toBeVisible();
+    }
+    await turn("Find the cobalt idea.");
+    if (narrow) await page.getByRole("button", { name: /discovered ideas/i }).click();
+    await expect(page.getByText("Owned evidence is relevant.")).toBeVisible();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Idea preview" })).toContainText(content);
+    await page.getByRole("link", { name: "Open idea", exact: true }).click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(sourceId)}`);
+    await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*search/i }).click();
+    await page.waitForURL(savedUrl);
+
+    const removed = page.waitForResponse(response => /\/discoveries\/[^/]+$/.test(new URL(response.url()).pathname) && response.request().method() === "DELETE");
+    await page.getByRole("button", { name: "Remove from search" }).click();
+    const removal = await removed;
+    assert.equal(removal.status(), 204);
+    assert.match(removal.headers()["search-session-revision"] ?? "", /^\d+$/);
+    const firstOccurrence = new URL(removal.url()).pathname.split("/").at(-1); assert.ok(firstOccurrence);
+    await expect(page.getByText("Owned evidence is relevant.")).toHaveCount(0);
+    await turn("Find the idea again.");
+    await expect(page.getByText("Owned evidence is relevant.")).toBeVisible();
+    const history = await daemonCall(daemon, `/search-sessions/${sessionId}/discoveries?scope=history`);
+    assert.equal(history.status, 200);
+    const occurrences = record(history.value).items;
+    assert.ok(Array.isArray(occurrences));
+    const matching = occurrences.map(record).filter(item => record(item.thought).id === sourceId);
+    assert.equal(matching.length, 2, "rediscovery must append a distinct occurrence");
+    assert.equal(matching[0]?.id, firstOccurrence);
+    assert.notEqual(matching[1]?.id, firstOccurrence);
+    const retry = await page.request.delete(`${origin}/api/search-sessions/${sessionId}/discoveries/${firstOccurrence}`, { headers: { origin } });
+    assert.equal(retry.status(), 204);
+    await expect(page.getByText("Owned evidence is relevant.")).toBeVisible();
+    if (narrow) await page.getByRole("button", { name: "Session actions" }).click();
+    await page.getByRole("link", { name: "History", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "History · User-only" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Your message" })).toHaveCount(0);
+    await expect(page.getByText("Removed from this search")).toBeVisible();
+
+    await page.getByRole("link", { name: "Return to search" }).click();
+    await page.waitForURL(savedUrl);
+    const second = await captureResponse(page, "/api/search-sessions", () => page.getByRole("button", { name: "New search" }).click());
+    const secondId = string(record(second.session).id); assert.notEqual(secondId, sessionId);
+    await expect(page).toHaveURL(url => url.pathname.includes(encodeURIComponent(secondId)));
+    await page.goto(savedUrl, { waitUntil: "networkidle" });
+    if (narrow) await page.getByRole("button", { name: "Session actions" }).click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("dialog", { name: "Delete this search?" }).getByRole("button", { name: "Delete search" }).click();
+    await expect(page.getByRole("heading", { name: "Saved searches" })).toBeVisible();
+    assert.equal((await daemonCall(daemon, `/search-sessions/${sessionId}`)).status, 404);
+    assert.equal((await daemonCall(daemon, `/search-sessions/${secondId}`)).status, 200);
+    await settleKnowledge(dbPath, pulse);
+    assert.deepEqual(knowledge(dbPath), before, "search and local deletion must not change library knowledge");
+  } finally { page.off("request", observe); }
+}
+
 async function walkthrough(viewport: { width: number; height: number }): Promise<void> {
   const dbPath = resolve(root, `owned-${viewport.width}.sqlite`);
   const fake = new FixtureClient(); let tick: (() => void) | undefined;
@@ -202,6 +320,8 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await page.getByRole("button", { name: "Clear title" }).click();
     await expect(page.getByText(/title cleared/i).first()).toBeVisible();
     await settleKnowledge(dbPath, pulse);
+    await searchWalkthrough(page, origin, running, dbPath, id, content, viewport.width < 600, pulse);
+    await page.goto(`${origin}/ideas/${encodeURIComponent(id)}`, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "More actions" }).click();
     await page.getByRole("button", { name: /reject idea/i }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Reject this idea" }).click();

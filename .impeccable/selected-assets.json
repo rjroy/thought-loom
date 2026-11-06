@@ -176,6 +176,50 @@
     "runtimeRasters": false,
     "reproduction": "exact request and ordered selected references are local; regeneration not promised byte-identical; future generation requires separate authorization"
   },
+  "agenticSearch": {
+    "handoff": ".impeccable/mocks/agentic-search/README.md",
+    "primaryAssetId": "agentic-search-focused",
+    "supportingAssetIds": [
+      "agentic-search-states"
+    ],
+    "approval": {
+      "userWords": "Approve B",
+      "recordedAtUTC": "2026-11-06",
+      "question": "Approve this desktop/narrow composition with the existing header and session actions retained?",
+      "optionDescription": "Select refined B, with the original B session sheet/Delete specimens and recorded status/copy corrections.",
+      "scope": "selected composition and explicit handoff exceptions; not client implementation, production artwork or runtime image integration",
+      "approved": true,
+      "unseenStatesApproved": false,
+      "implementationAuthorized": false,
+      "runtimeAcceptance": false
+    },
+    "brandSourceVerification": {
+      "guideHistoricalPath": "/home/rjroy/Projects/personal-brand/brand/BRAND.md",
+      "themeHistoricalPath": "/home/rjroy/Projects/personal-brand/brand/theme/colors.toml",
+      "cleanRevisionVerifiedByParent": "3ff26cffbfc3317ab1d1bc71b372cea1cc631104",
+      "dateUTC": "2026-11-06",
+      "sixteenColorsMatchRetainedLocalPalette": true,
+      "paletteReference": "brand.palette",
+      "fontReference": "brand.font",
+      "existingBrandAssetsRefreshed": false,
+      "externalRuntimeDependency": false
+    },
+    "generation": {
+      "route": "codex exec --skip-git-repo-check --image <reference1> --image <reference2> - < <extracted-request>",
+      "hostTimeoutMs": 600000,
+      "runnerVersion": "codex-cli 0.166.0",
+      "runnerModelObserved": "gpt-6-luna (automatic configuration; no model override)",
+      "imageModel": null,
+      "imageModelNote": "not exposed by runner; not guessed",
+      "runtimeRasters": false
+    },
+    "exceptions": [
+      "Primary narrow pixels omit shared header navigation/back and active-session title/actions: retain the existing responsive shell, visible title and plainly labelled Session actions disclosure.",
+      "Supporting image is selected only for session sheet, Delete confirmation and separate unconfirmed/queued specimens; its old main layout, Bookmark label, unlabeled composer and success-like uncertain-admission checkmark are overridden by the handoff.",
+      "Use actual Source Sans 3 and current exact Quiet Night tokens, readable wrapping/targets/focus; generated colors, glow, italics and approximate narrow raster sizing are not literal specifications.",
+      "Additional state/behavior rules are contract-driven reuse of selected/existing component patterns, not additional approved raster states."
+    ]
+  },
   "assets": [
     {
       "id": "quiet-night",
@@ -2217,13 +2261,158 @@
         },
         "limitation": "proportional raster preview, not CSS viewport/responsive/keyboard/touch/a11y proof; approved readable-flow rules override literal raster sizing"
       }
+    },
+    {
+      "id": "agentic-search-focused",
+      "name": "Focused conversational search: selected desktop/narrow composition",
+      "familyId": "agentic-search",
+      "kind": "generated exploratory UI comp; desktop and approximate narrow board",
+      "image": ".impeccable/mocks/agentic-search/focused.png",
+      "sha256": "e73a86c4ae1a83ec0a16126f7155d16ac89f3cf5b792b557530fb28bbf746cb8",
+      "actualDimensions": { "width": 1568, "height": 1003 },
+      "colorSpace": "sRGB",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "Approve B",
+        "recordedAtUTC": "2026-11-06",
+        "scope": "refined B desktop/narrow conversation-discoveries composition and Explore entry, with existing header/session actions retained and handoff exceptions",
+        "approximateCompositionOnly": true,
+        "unseenStatesApproved": false,
+        "exactViewportApproved": false,
+        "accessibilityAuditApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "rulesLocation": ".impeccable/mocks/agentic-search/README.md"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-06",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6-luna (automatic configuration; no model override)",
+        "promptSha256": "b558462a4c22b70011f5d9211a2848061cae4e0775d86a8bb13c6ad891717beb",
+        "references": [
+          {
+            "path": ".impeccable/mocks/agentic-search/states.png",
+            "sha256": "cd3cc942faad6e79931268edb5dd4a58e6382c238c544a51863a5a13f48823da",
+            "role": "user-selected B focused split/contextual session composition; old defects are not authority",
+            "historicalInputPath": "/tmp/opencode/thoughtloom-mus5-comps/b.png"
+          },
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "approved Quiet Night shell/typography/components; not Explore layout/content"
+          }
+        ],
+        "sourceCopy": {
+          "historicalPath": "/tmp/opencode/thoughtloom-mus5-comps/b-refined.png",
+          "sha256": "e73a86c4ae1a83ec0a16126f7155d16ac89f3cf5b792b557530fb28bbf746cb8",
+          "requiredForHandoff": false
+        },
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1b1d4-779a-7443-a852-fc5eda164a3a/exec-63838727-127d-43f0-b4b3-b6b0bc3e259a.png",
+          "sha256": "78d496f5e3b4fcfb573f24364f1ac9a26ca23788196cb1143b2186b21c437616",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "79419f06367f4c13e27c5d45fc2b06567f02567ff4f3d4e890d6640a84005e8a",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "packagedBytesMatchSelectedSource": true,
+          "runtimeAuditPerformed": false
+        }
+      },
+      "framing": {
+        "approximatePhoneCompositionOnly": true,
+        "exactViewportVerified": false,
+        "limitation": "multi-view hierarchy board, not a literal phone viewport, touch, keyboard, responsive or accessibility audit; existing header/actions and readable-flow rules override omitted/tiny raster chrome"
+      }
+    },
+    {
+      "id": "agentic-search-states",
+      "name": "Focused search supporting session sheet, Delete and status specimens",
+      "familyId": "agentic-search",
+      "kind": "generated exploratory UI board; scoped supporting specimens only",
+      "image": ".impeccable/mocks/agentic-search/states.png",
+      "sha256": "cd3cc942faad6e79931268edb5dd4a58e6382c238c544a51863a5a13f48823da",
+      "actualDimensions": { "width": 1586, "height": 992 },
+      "colorSpace": "sRGB",
+      "opaque": true,
+      "approved": true,
+      "approval": {
+        "userWords": "Approve B",
+        "recordedAtUTC": "2026-11-06",
+        "scope": "original B session sheet/Delete confirmation and separate unconfirmed/queued specimens only, subject to checkmark/copy/control corrections; old main layout is superseded by refined B",
+        "approximateCompositionOnly": true,
+        "unseenStatesApproved": false,
+        "exactViewportApproved": false,
+        "accessibilityAuditApproved": false,
+        "shippingRasterApproved": false,
+        "implementationAuthorized": false,
+        "rulesLocation": ".impeccable/mocks/agentic-search/README.md"
+      },
+      "provenance": {
+        "dateUTC": "2026-11-06",
+        "runnerVersion": "codex-cli 0.166.0",
+        "runnerModelObserved": "gpt-6-luna (automatic configuration; no model override)",
+        "promptSha256": "a7260b892acc8c5b363673ed1f7db36f685f0421906c69b62fbf02522a2e3b08",
+        "references": [
+          {
+            "path": ".impeccable/mocks/explore/compact.png",
+            "sha256": "7afed2ac12ce2145ca8e683f27be46baab5ca2f006c4f75bdcda4e5cc5c2208f",
+            "role": "Quiet Night visual language only; not prior arrangement/content"
+          },
+          {
+            "path": ".impeccable/mocks/idea/rows.png",
+            "sha256": "2286095e1c2c9b6fdcbbed443fb19da37177f80b6761b15cbf2067595af1f110",
+            "role": "Quiet Night visual language only; not prior arrangement/content"
+          }
+        ],
+        "sourceCopy": {
+          "historicalPath": "/tmp/opencode/thoughtloom-mus5-comps/b.png",
+          "sha256": "cd3cc942faad6e79931268edb5dd4a58e6382c238c544a51863a5a13f48823da",
+          "requiredForHandoff": false
+        },
+        "nativeOutput": {
+          "historicalPath": "/home/rjroy/.codex/generated_images/01a1b1c9-bde2-73f0-b47a-1b698267ab6b/exec-f2f6bbcb-6e80-4452-bad2-a1efbc4335f2.png",
+          "sha256": "acc64f0d0c5d652ac185107a873ade7dc46bda6a5b9095b56d775c9eb037b2e1",
+          "requiredForHandoff": false
+        },
+        "decodedRGB8Sha256": "39f837d6de11ca54a1c96d1e477947e40741993891ffe2528a6feb93e48a26b4",
+        "checks": {
+          "nativeOpened": true,
+          "candidateOpened": true,
+          "nativeCopyMatchedBeforePromptEmbedding": true,
+          "decodedPixelsMatchNative": true,
+          "embeddedRequestMatchesProducingInput": true,
+          "packagedBytesMatchSelectedSource": true,
+          "runtimeAuditPerformed": false
+        }
+      }
     }
   ],
   "files": [
     {
       "path": ".impeccable/README.md",
-      "bytes": 23962,
-      "sha256": "4fe5ef74b710767aea2efe6700943f44cffbc6d52761a6c3b356cf129ea2a8ca"
+      "bytes": 29553,
+      "sha256": "58596ca7bf37528e01f08334537655b9668fe684e8749b83db8aad287c4d2312"
+    },
+    {
+      "path": ".impeccable/mocks/agentic-search/README.md",
+      "bytes": 14187,
+      "sha256": "a0bfa69def877bb0320ffea236c43e2518aaba291c3198e448f0a023014d7ba8"
+    },
+    {
+      "path": ".impeccable/mocks/agentic-search/focused.png",
+      "bytes": 1636302,
+      "sha256": "e73a86c4ae1a83ec0a16126f7155d16ac89f3cf5b792b557530fb28bbf746cb8"
+    },
+    {
+      "path": ".impeccable/mocks/agentic-search/states.png",
+      "bytes": 1623584,
+      "sha256": "cd3cc942faad6e79931268edb5dd4a58e6382c238c544a51863a5a13f48823da"
     },
     {
       "path": ".impeccable/brand/fonts/OFL.txt",

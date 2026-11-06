@@ -1,7 +1,7 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { AgentConfig } from "../daemon/agent-config";
-import type { RunSources } from "../domain/run";
+import { RunFenceError, type RunSources } from "../domain/run";
 import { normalizeBinding, validateServiceUrl } from "./binding";
 import { AgentUnavailableError } from "./errors";
 import { OpenCodeAdapter, type AgentBinding, type PublicClient, type ResolvedAgentService } from "./opencode-adapter";
@@ -11,12 +11,19 @@ import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteAgenticExports } from "../storage/agentic-export";
 import { MarkdownImportWorker, type ImportNative } from "./import-worker";
+import { searchRunEffort } from "../storage/search-initial-context";
+import type { SearchClockDependencies } from "../domain/search-time";
+import type { ExecutionOwnerLease } from "../storage/execution-owner";
+import type { SqliteSearchRetention } from "../storage/search-retention";
 
 export interface ConfiguredWorkerDependencies extends RunSources {
   readonly db: Database;
   readonly config: AgentConfig;
   readonly resolve: (config: AgentConfig) => Promise<ResolvedAgentService>;
   readonly client: (service: ResolvedAgentService) => PublicClient;
+  readonly searchClock?: SearchClockDependencies;
+  /** Runtime-owned capability. Direct isolated worker fixtures do not acquire a deployed daemon lease. */
+  readonly executionOwner?: ExecutionOwnerLease;
 }
 
 /** One worker and one lazy attachment snapshot; no SDK/service work at construction or daemon readiness. */
@@ -33,24 +40,24 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   private paused = false;
   constructor(private readonly dependencies: ConfiguredWorkerDependencies) {
     this.logger = dependencies.logger ?? createLogger();
-    this.bindings = new SqliteAgentBindings(dependencies.db,this.logger);
+    this.bindings = new SqliteAgentBindings(dependencies.db,this.logger,dependencies.executionOwner);
     this.runs = new SqliteRunRepository(dependencies.db,dependencies);
     this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
     this.importWorker=new MarkdownImportWorker({...dependencies,native:(bindings,localFence) => {
       let adapter: OpenCodeAdapter | undefined;
       const owned=async (binding: AgentBinding): Promise<OpenCodeAdapter> => {
-        localFence(); await this.resolve(); localFence();
+        localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
         const service=this.service;
         if (this.paused || !service || service.url!==binding.serviceUrl) throw new AgentUnavailableError("Import-owned service is unavailable");
         if (!adapter) {
-          try { adapter=new OpenCodeAdapter(dependencies.client(service),bindings,{ordinary:bindings.assertActive.bind(bindings),import:localFence},this.logger); }
+          try { adapter=new OpenCodeAdapter(dependencies.client(service),bindings,{ordinary:bindings.assertActive.bind(bindings),import:localFence,runtime:() => this.assertOwner()},this.logger); }
           catch { throw new AgentUnavailableError("Import client is unavailable"); }
         }
         return adapter;
       };
       const native: ImportNative={
         bindingFor:async run => {
-          localFence(); await this.resolve(); localFence();
+          localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
           const service=this.service, config=dependencies.config;
           if (!service || this.paused) throw new AgentUnavailableError("Import agent service is unavailable");
           const variant=config.effort.standard;
@@ -65,9 +72,9 @@ export class ConfiguredRunWorker implements SupervisedWorker {
       return native;
     }});
     this.worker = new RunWorker({...dependencies,bindingFor:run => {
-      if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return null;
-      const effort = run.kind === "export" ? this.exports.intent(run.id)?.effort : "standard";
-      if (effort === undefined) return null; // Unknown legacy intent is blocked, never assigned an invented effort/question.
+      if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return null;
+      const effort = run.kind === "search" ? searchRunEffort(dependencies.db,run.id) : run.kind === "export" ? this.exports.intent(run.id)?.effort : "standard";
+      if (effort === undefined || effort === null) return null; // Unknown legacy intent is blocked, never assigned an invented effort/question.
       const service = this.service;
       if (!service) return null;
       const config = dependencies.config;
@@ -77,34 +84,47 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     },native:bindings => {
       let adapter: OpenCodeAdapter | undefined;
       const owned = async (binding: AgentBinding): Promise<OpenCodeAdapter> => {
+        this.assertOwner();
         await this.resolve();
+        this.assertOwner();
         const service = this.service;
         // Never retarget a persisted session or send a newly selected endpoint's credentials to an old endpoint.
         if (this.paused || !service || service.url !== binding.serviceUrl) throw new AgentUnavailableError("Run-owned service is unavailable");
-        return adapter ??= new OpenCodeAdapter(dependencies.client(service),bindings,bindings.assertActive.bind(bindings),this.logger);
+        return adapter ??= new OpenCodeAdapter(dependencies.client(service),bindings,{ordinary:bindings.assertActive.bind(bindings),
+          import:() => { throw new RunFenceError("Import authority is not available on the ordinary transport"); },runtime:() => this.assertOwner()},this.logger);
       };
       const native: WorkerNative = {
         ensureSession:async (claim,binding) => (await owned(binding)).ensureSession(claim,binding),
-        submit:async (claim,binding,prompt) => (await owned(binding)).submit(claim,binding,prompt),
+        submit:async (claim,binding,prompt,onAdmission) => (await owned(binding)).submit(claim,binding,prompt,onAdmission),
         observe:async (claim,binding,prompts) => (await owned(binding)).observe(claim,binding,prompts),
         cancel:async (runId,binding,prompt) => (await owned(binding)).cancel(runId,binding,prompt),
+        cancelSearch:async (identity,authorize) => {
+          authorize();
+          const adapter = await owned(identity.binding);
+          authorize();
+          return adapter.cancelSearch(identity,authorize);
+        },
       };
       return native;
     }});
   }
+  private assertOwner(): void { this.dependencies.executionOwner?.assertHeld(); }
   private resolve(): Promise<void> {
+    this.assertOwner();
     if (this.service) return Promise.resolve();
     if (!this.resolving) this.resolving = (async () => {
       this.logger.verbose("[agent runtime] resolve service attempt");
       try {
         const selected = await this.dependencies.resolve(this.dependencies.config);
+        this.assertOwner();
         if (this.paused) return;
         const url = validateServiceUrl(selected.url);
         const headers = selected.headers === undefined ? undefined : Object.freeze(Object.fromEntries(new Headers(selected.headers)));
         this.service = Object.freeze({url,...(headers === undefined ? {} : {headers}),...(selected.token === undefined ? {} : {token:selected.token})});
         this.logger.verbose("[agent runtime] resolve service succeeded");
         if (this.unavailable) { this.unavailable = false; this.logger.info("[agent runtime] service available"); }
-      } catch {
+      } catch (error) {
+        if (error instanceof RunFenceError) throw error;
         if (!this.unavailable) { this.unavailable = true; this.logger.warning("[agent runtime] service unavailable"); }
         else this.logger.verbose("[agent runtime] service remains unavailable");
         throw new AgentUnavailableError("Configured agent service is unavailable");
@@ -112,16 +132,26 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     })().finally(() => { this.resolving = undefined; });
     return this.resolving;
   }
-  async tick(runId: string): Promise<void> {
+  private async beforePoll(runId: string): Promise<void> {
     if (this.paused) return;
     const run = this.runs.get(runId);
-    if (run && run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export") return;
+    if (run && run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return;
     // Canonical local output and terminal cleanup without a binding do not require discovery or a network connection.
     const selectable = run && (run.kind !== "export" || this.exports.intent(runId) !== null);
     if (selectable && ["queued","submitting","running","uncertain"].includes(run.status) && !this.bindings.get(runId)) {
-      try { await this.resolve(); } catch { return; } // A later technical poll retries unavailable discovery.
+      try { await this.resolve(); } catch (error) { if (error instanceof RunFenceError) throw error; } // A later poll retries unavailable discovery.
     }
-    if (!this.paused) await this.worker.tick(runId);
   }
+  tick(runId: string): Promise<void> { return this.worker.tick(runId,() => this.beforePoll(runId)); }
+  searchRetention(): SqliteSearchRetention | null { return this.worker.searchRetention(); }
+  onSearchCleanupAvailable(notify: () => void): () => void { return this.worker.onSearchCleanupAvailable(notify); }
   pause(): void { this.paused = true; this.worker.pause(); this.importWorker.pause(); }
+  /** Final run-lane/shared-resolver join after listener producers finish; the import driver owns its file lanes. */
+  async drain(): Promise<readonly PromiseSettledResult<void>[]> {
+    this.pause();
+    const [runs,resolution] = await Promise.all([this.worker.drain(),Promise.allSettled(this.resolving ? [this.resolving] : [])]);
+    return [...runs,...resolution];
+  }
+  /** Trusted retention hook; clears timing metadata only, never native work or run authority. */
+  forgetSearchClock(runId: string): void { this.worker.forgetSearchClock(runId); }
 }

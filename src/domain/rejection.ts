@@ -7,23 +7,32 @@ import { nonEmpty, ValidationError } from "./validation";
 export type Actor = "user" | "ai";
 export type ReadScope = { actor: "user"; mode: "normal" | "show-rejected" | "history" } | { actor: "ai"; mode: "normal" };
 
+/** Identity-only mutation projection; branch traversal and confirmation remain domain rules. */
+export interface RejectionState {
+  readonly thoughts: readonly Pick<Thought, "id" | "parentId">[];
+  readonly connections: readonly Pick<Connection, "id">[];
+  readonly rejectedThoughtIds: readonly string[];
+}
+export type RejectionTarget = { readonly kind: "thought" | "connection" | "branch"; readonly id: string };
+
 /** A repository snapshot is internal raw data, never a consumer-facing result. */
-export interface RejectionSnapshot {
+export interface RejectionSnapshot extends RejectionState {
   readonly thoughts: readonly Thought[];
   readonly connections: readonly Connection[];
   readonly responses: readonly ResponseRecord[];
-  readonly rejectedThoughtIds: readonly string[];
   readonly rejectedConnectionIds: readonly string[];
 }
 export type ThoughtRead = Thought & { readonly rejected?: boolean };
 export type ConnectionRead = Connection & { readonly rejected?: boolean };
 export interface RejectionTransaction {
   snapshot(): RejectionSnapshot;
+  state?(target: RejectionTarget): RejectionState;
   setThoughtRejected(id: string, rejected: boolean): void;
   setConnectionRejected(id: string, rejected: boolean): void;
 }
 export interface RejectionRepository {
   snapshot(): RejectionSnapshot;
+  state?(target: RejectionTarget): RejectionState;
   transaction<T>(action: (tx: RejectionTransaction) => T): T;
   exportTree?(rootId: string): readonly ExportTreeNode[];
 }
@@ -74,7 +83,12 @@ export function scopeActiveConnection(actor: Actor, connection: Connection, reje
   return actor === "ai" ? { ...connection, sourceIds: connection.sourceIds.filter(id => !rejected.has(id)) } : connection;
 }
 
-function branch(snapshot: RejectionSnapshot, rootId: string): string[] {
+function rejectionState(reader: Pick<RejectionRepository, "state" | "snapshot">, target: RejectionTarget): RejectionState {
+  nonEmpty(target.id, "id");
+  return reader.state ? reader.state(target) : reader.snapshot();
+}
+
+function branch(snapshot: RejectionState, rootId: string): string[] {
   nonEmpty(rootId, "rootId");
   if (!snapshot.thoughts.some(thought => thought.id === rootId)) throw new ValidationError("Thought not found");
   const children = new Map<string, string[]>();
@@ -98,7 +112,7 @@ function branch(snapshot: RejectionSnapshot, rootId: string): string[] {
   return result.sort();
 }
 
-function preview(snapshot: RejectionSnapshot, rootId: string): BranchPreview {
+function preview(snapshot: RejectionState, rootId: string): BranchPreview {
   const branchIds = branch(snapshot, rootId);
   const rejected = new Set(snapshot.rejectedThoughtIds);
   const affectedIds = branchIds.filter(id => !rejected.has(id));
@@ -153,7 +167,7 @@ export class RejectionService {
 
   previewBranch(actor: Actor, rootId: string): BranchPreview {
     requireUser(actor);
-    return preview(this.repository.snapshot(), rootId);
+    return preview(rejectionState(this.repository, { kind: "branch", id: rootId }), rootId);
   }
 
   rejectBranch(actor: Actor, confirmation: BranchPreview | null): void {
@@ -161,7 +175,7 @@ export class RejectionService {
     if (!confirmation || typeof confirmation.rootId !== "string" || !confirmation.rootId.trim()) throw new BranchConfirmationError("Branch confirmation required");
     this.repository.transaction(tx => {
       let current: BranchPreview;
-      try { current = preview(tx.snapshot(), confirmation.rootId); }
+      try { current = preview(rejectionState(tx, { kind: "branch", id: confirmation.rootId }), confirmation.rootId); }
       catch (error) {
         if (error instanceof ValidationError) throw new BranchConfirmationError("Branch confirmation is stale");
         throw error;
@@ -177,7 +191,7 @@ export class RejectionService {
     requireUser(actor);
     nonEmpty(id, "id");
     this.repository.transaction(tx => {
-      if (!tx.snapshot().thoughts.some(thought => thought.id === id)) throw new ValidationError("Thought not found");
+      if (!rejectionState(tx, { kind: "thought", id }).thoughts.some(thought => thought.id === id)) throw new ValidationError("Thought not found");
       tx.setThoughtRejected(id, rejected);
     });
   }
@@ -186,7 +200,7 @@ export class RejectionService {
   restoreBranch(actor: Actor, id: string): void {
     requireUser(actor);
     this.repository.transaction(tx => {
-      const snapshot = tx.snapshot();
+      const snapshot = rejectionState(tx, { kind: "branch", id });
       const rejected = new Set(snapshot.rejectedThoughtIds);
       for (const thoughtId of branch(snapshot, id)) if (rejected.has(thoughtId)) tx.setThoughtRejected(thoughtId, false);
     });
@@ -195,7 +209,7 @@ export class RejectionService {
     requireUser(actor);
     nonEmpty(id, "id");
     this.repository.transaction(tx => {
-      if (!tx.snapshot().connections.some(connection => connection.id === id)) throw new ValidationError("Connection not found");
+      if (!rejectionState(tx, { kind: "connection", id }).connections.some(connection => connection.id === id)) throw new ValidationError("Connection not found");
       tx.setConnectionRejected(id, rejected);
     });
   }

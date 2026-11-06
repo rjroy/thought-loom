@@ -96,9 +96,9 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
     });
   }
   fail(claim: Claim): void {
-    this.guarded("fail run",claim,run => {
+    this.guardedExecution("fail run",claim,run => {
       // Reuse Stop's retention and native-settlement fence, without misreporting failure as successful completion.
-      this.finalInterrupt(run);
+      this.finalInterrupt(run,"failed");
       this.db.run("UPDATE runs SET status='failed' WHERE id=?",[run.id]);
     });
   }
