@@ -131,6 +131,8 @@ bun --no-env-file run typecheck
 
 Build spellfix first for `search-contract` as described above. These checks cover exact imported thought text and later title attribution, unchanged user/AI combinations, source/imported-original filter/count shapes, fresh import membership/seal FK declarations, and populated predecessor preservation/reopen. The dedicated foundation fixtures also exercise direct-SQL seal and mapping guards, deferred-commit failure and rollback, reservation interleaving across two connections, bounded write-lock contention, rejection-safe inspection, and finalization rollback at 11 injected points including the last weave admission. Migration fixtures inject failures during staging and after destructive rebuild work has begun. These establish controlled transaction behavior, not simultaneous independent-worker execution or a large-database performance benchmark. The storage fixtures use test-owned parser manifests/ranges; the separate parser tests exercise the implemented Markdown preparation and selection functions. Neither suite establishes import-native terminal correlation or HTTP upload behavior.
 
+For loose-file identity and HTTP admission specifically, run `bun --no-env-file test tests/markdown-import-foundation.test.ts tests/markdown-import-api.test.ts`. These owned SQLite and daemon fixtures cover same-name distinct bytes, library-wide duplicate skips without additional import runs, stable non-loose path protection, and repeated migration of legacy locator guards with retained documents and pending work. Build spellfix first; no provider, shared daemon or personal database is used.
+
 The separate no-agent daemon integration check is:
 
 ```sh

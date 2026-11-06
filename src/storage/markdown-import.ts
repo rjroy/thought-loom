@@ -145,7 +145,8 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
   private payload(fileId: string): Uint8Array | null { return (this.db.query("SELECT bytes FROM markdown_import_payloads WHERE file_id=?").get(fileId) as {bytes:Uint8Array}|null)?.bytes ?? null; }
   private admissionChoice(namespaceId: string, path: string, bytes: Uint8Array, sha256: Uint8Array, exceptFile?: string):
     {kind:"skip";outcome:"skipped-identical"|"skipped-changed";documentId:string} | {kind:"waiter";fileId:string} | {kind:"holder"} {
-    const located = this.db.query(`SELECT d.id,d.original_bytes AS bytes,d.sha256,d.byte_length AS size FROM import_locations l
+    const loose = this.isLooseNamespace(namespaceId);
+    const located = loose ? null : this.db.query(`SELECT d.id,d.original_bytes AS bytes,d.sha256,d.byte_length AS size FROM import_locations l
       JOIN import_documents d ON d.id=l.document_id JOIN import_document_seals s ON s.document_id=d.id WHERE l.namespace_id=? AND l.relative_path=CAST(? AS TEXT)`).get(namespaceId,pathBytes(path)) as {id:string;bytes:Uint8Array;sha256:Uint8Array;size:number}|null;
     if (located) {
       const same = equalBytes(located.bytes,bytes);
@@ -162,9 +163,14 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       const pending = this.payload(hashHolder.id);
       if (!pending || !equalBytes(pending,bytes)) throw new ImportPreservationError("digest-collision");
     }
-    const locatorHolder = this.db.query("SELECT id FROM markdown_import_files WHERE outcome IS NULL AND waiting_on_file_id IS NULL AND namespace_id=? AND relative_path=CAST(? AS TEXT) AND id IS NOT ?").get(namespaceId,pathBytes(path),exceptFile ?? null) as {id:string}|null;
+    const locatorHolder = loose ? null : this.db.query("SELECT id FROM markdown_import_files WHERE outcome IS NULL AND waiting_on_file_id IS NULL AND namespace_id=? AND relative_path=CAST(? AS TEXT) AND id IS NOT ?").get(namespaceId,pathBytes(path),exceptFile ?? null) as {id:string}|null;
     const holder = locatorHolder ?? hashHolder;
     return holder ? {kind:"waiter",fileId:holder.id} : {kind:"holder"};
+  }
+  private isLooseNamespace(namespaceId: string): boolean {
+    const namespace = this.db.query("SELECT kind FROM import_namespaces WHERE id=?").get(namespaceId) as {kind:string} | null;
+    if (!namespace) throw new ImportPreservationError("Import namespace missing");
+    return namespace.kind==="loose-markdown";
   }
   /** Bounded local work, not native dispatch. Settled holders wake contenders by rerunning the same ordered checks. */
   resolveWaiters(limit = 50): number {
@@ -374,7 +380,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
         }
         this.db.run("INSERT INTO import_document_parts(document_id,position,kind,start_byte,end_byte,thought_id,thought_ordinal) VALUES (?,?,?,?,?,?,?)",[documentId,position,part.kind,part.startByte,part.endByte,thoughtId,ordinal]);
       }
-      this.db.run("INSERT INTO import_locations(namespace_id,relative_path,document_id) VALUES (?,CAST(? AS TEXT),?)",[file.namespaceId,pathBytes(file.relativePath),documentId]);
+      if (!this.isLooseNamespace(file.namespaceId)) this.db.run("INSERT INTO import_locations(namespace_id,relative_path,document_id) VALUES (?,CAST(? AS TEXT),?)",[file.namespaceId,pathBytes(file.relativePath),documentId]);
       this.db.run("INSERT INTO import_document_seals(document_id) VALUES (?)",[documentId]);
       thoughtIds.forEach((subjectId,ordinal) => admitWeave(this.db,this.sources,{subjectId,triggerId:`import:${documentId}:${ordinal}`}));
       this.db.run("UPDATE markdown_import_files SET outcome='imported',document_id=? WHERE id=?",[documentId,file.id]);

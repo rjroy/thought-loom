@@ -77,6 +77,31 @@ test("batch creation uses the daemon namespace, idempotency, validation and user
   expect((await request("/imports/markdown?unexpected=1", json({}, "other"))).status).toBe(400);
 }), 10000);
 
+test("ordinary same-name selections import distinct bytes and skip repeated bytes without new runs", async () => owned(async (request, dbPath) => {
+  const batch = await create(request, "loose-api-first");
+  const firstBytes = new TextEncoder().encode("First selected page."), secondBytes = new TextEncoder().encode("Second selected page.");
+  const firstResponse = await request(`/imports/markdown/${batch.id}/files`, upload("index.md", firstBytes, "first"));
+  expect(firstResponse.status).toBe(202);
+  const first = await completed(request, batch.id, ((await firstResponse.json()) as { file: ImportFile }).file.id);
+  expect(first.state).toBe("imported");
+  const later = await create(request, "loose-api-later");
+  const secondResponse = await request(`/imports/markdown/${later.id}/files`, upload("index.md", secondBytes, "second"));
+  expect(secondResponse.status).toBe(202);
+  const second = await completed(request, later.id, ((await secondResponse.json()) as { file: ImportFile }).file.id);
+  expect(second.state).toBe("imported");
+  expect(second.documentId).not.toBe(first.documentId);
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    const runs = db.query("SELECT count(*) AS n FROM runs WHERE kind='import'").get();
+    for (const [key, name] of [["repeat", "index.md"], ["renamed", "copy.md"]]) {
+      const response = await request(`/imports/markdown/${later.id}/files`, upload(name, firstBytes, key));
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { file: ImportFile }).file).toMatchObject({ state: "skipped-identical", documentId: first.documentId, runId: null });
+    }
+    expect(db.query("SELECT count(*) AS n FROM runs WHERE kind='import'").get()).toEqual(runs);
+  } finally { db.close(); }
+}), 15000);
+
 test("multipart admission, completion, inspection and rejection preserve the user-only source boundary", async () => owned(async (request, dbPath) => {
   const batch = await create(request);
   const path = "private-path-token/original.md";
@@ -97,11 +122,13 @@ test("multipart admission, completion, inspection and rejection preserve the use
   expect(identicalResponse.status).toBe(200);
   expect(((await identicalResponse.json()) as { file: ImportFile }).file).toMatchObject({ state: "skipped-identical", documentId, runId: null });
   const changedResponse = await request(`/imports/markdown/${batch.id}/files`, upload(path, new TextEncoder().encode("new revision"), "changed-key"));
-  expect(changedResponse.status).toBe(200);
-  expect(((await changedResponse.json()) as { file: ImportFile }).file).toMatchObject({ state: "skipped-changed", documentId, runId: null });
+  expect(changedResponse.status).toBe(202);
+  const changed = await completed(request, batch.id, ((await changedResponse.json()) as { file: ImportFile }).file.id);
+  expect(changed).toMatchObject({ state: "imported", documentId: expect.any(String) });
+  expect(changed.documentId).not.toBe(documentId);
   const sealed = await request(`/imports/markdown/${batch.id}/seal`, json({}));
   expect(sealed.status).toBe(200);
-  expect(((await sealed.json()) as { import: ImportBatch }).import).toMatchObject({ state: "completed", counts: { admitted: 3, imported: 1, skippedIdentical: 1, skippedChanged: 1, pending: 0 } });
+  expect(((await sealed.json()) as { import: ImportBatch }).import).toMatchObject({ state: "completed", counts: { admitted: 3, imported: 2, skippedIdentical: 1, skippedChanged: 0, pending: 0 } });
   expect((await request(`/imports/markdown/${batch.id}/seal`, json({}))).status).toBe(200);
   const sealedReplay = await request(`/imports/markdown/${batch.id}/files`, upload(path, bytes, "file-key"));
   expect(sealedReplay.status).toBe(200);
@@ -163,7 +190,7 @@ test("multipart admission, completion, inspection and rejection preserve the use
   const rejectedParts = ((await (await request(`/import-sources/${documentId}/parts?scope=history`)).json()) as { items: ImportPart[] }).items;
   expect(rejectedParts.find(item => item.thoughtId === part.thoughtId)?.rejected).toBe(true);
   const db = new Database(dbPath, { readonly: true });
-  try { expect(db.query("SELECT count(*) AS n FROM runs WHERE kind='import'").get()).toEqual({ n: 1 }); }
+  try { expect(db.query("SELECT count(*) AS n FROM runs WHERE kind='import'").get()).toEqual({ n: 2 }); }
   finally { db.close(); }
 }), 15000);
 

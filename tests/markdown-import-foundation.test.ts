@@ -53,6 +53,11 @@ function partition(bytes: Uint8Array, start = 0): ImportPartition {
   return { manifest, cuts: ["b0", "b1"], parts: [...(start ? [{ kind: "bom" as const, startByte: 0, endByte: start }] : []), { kind: "thought", startByte: start, endByte: bytes.length }], segmentation: { method: "structural", reason: "ai-unconfigured" } };
 }
 
+function stableBatch(db: Database, imports: SqliteMarkdownImports, key: string): ImportBatch {
+  db.run("INSERT OR IGNORE INTO import_namespaces(id,kind,label,created_at) VALUES ('stable-fixture','fixture','Stable','2030')");
+  return imports.createBatch("user", key, "stable-fixture");
+}
+
 function ready(imports: SqliteMarkdownImports, fileId: string, bytes: Uint8Array, start = 0, split = false, custom?: ImportPartition) {
   const claim = imports.claim(fileId);
   const p: ImportPartition = split ? {
@@ -67,6 +72,108 @@ function ready(imports: SqliteMarkdownImports, fileId: string, bytes: Uint8Array
 }
 
 describe("Markdown import foundation", () => {
+  test("loose selections reserve distinct same-name bytes independently and deduplicate identical pending bytes", () => fixture((_db, _other, imports, second) => {
+    const batch = imports.createBatch("user", "loose-pending");
+    const first = imports.admitFile("user", batch.id, "one", "index.md", encode("first page"));
+    const distinct = second.admitFile("user", batch.id, "two", "index.md", encode("second page"));
+    const duplicate = second.admitFile("user", batch.id, "three", "renamed.md", encode("first page"));
+    expect(first.state).toBe("queued");
+    expect(distinct.state).toBe("queued");
+    expect(distinct.runId).not.toBe(first.runId);
+    expect(duplicate).toMatchObject({ state: "waiting", runId: null });
+    const done = imports.finalize(ready(imports, first.id, encode("first page")));
+    expect(second.resolveWaiters()).toBe(1);
+    expect(second.file("user", batch.id, duplicate.id)).toMatchObject({ state: "skipped-identical", documentId: done.documentId, runId: null });
+    expect(second.finalize(ready(second, distinct.id, encode("second page"))).state).toBe("imported");
+  }));
+
+  test("legacy loose locators do not block new same-name bytes or cross-library exact-byte deduplication", () => fixture((db, _other, imports, _second, inspection) => {
+    const firstBytes = encode("legacy page"), nextBytes = encode("different page");
+    const firstBatch = imports.createBatch("user", "legacy-batch");
+    const first = imports.admitFile("user", firstBatch.id, "first", "index.md", firstBytes);
+    const legacy = imports.finalize(ready(imports, first.id, firstBytes));
+    if (!legacy.documentId) throw new Error("Legacy document missing");
+    // Model a previously committed loose locator even if new imports no longer create one.
+    if (!db.query("SELECT 1 FROM import_locations WHERE namespace_id=? AND relative_path=?").get(firstBatch.namespaceId, "index.md")) {
+      db.run("INSERT INTO import_locations(namespace_id,relative_path,document_id) VALUES (?,?,?)", [firstBatch.namespaceId, "index.md", legacy.documentId]);
+    }
+    const thought = inspection.parts(history, legacy.documentId).items.find(part => part.kind === "thought")?.thoughtId;
+    if (!thought) throw new Error("Legacy thought missing");
+    new RejectionService(new SqliteRejectionRepository(db)).rejectThought("user", thought);
+    const nextBatch = imports.createBatch("user", "later-batch", firstBatch.namespaceId);
+    const next = imports.admitFile("user", nextBatch.id, "next", "index.md", nextBytes);
+    expect(next.state).toBe("queued");
+    const imported = imports.finalize(ready(imports, next.id, nextBytes));
+    expect(imported.state).toBe("imported");
+    expect(imported.documentId).not.toBe(legacy.documentId);
+    expect(inspection.raw(history, legacy.documentId)).toEqual(firstBytes);
+    expect(inspection.raw(history, imported.documentId ?? "missing")).toEqual(nextBytes);
+    const runCount = db.query("SELECT count(*) AS n FROM runs").get();
+    for (const [key, path, content, documentId] of [
+      ["same", "index.md", firstBytes, legacy.documentId],
+      ["renamed", "copy.md", firstBytes, legacy.documentId],
+      ["other", "index.md", nextBytes, imported.documentId],
+    ] as const) {
+      expect(imports.admitFile("user", nextBatch.id, key, path, content)).toMatchObject({ state: "skipped-identical", documentId, runId: null });
+    }
+    expect(db.query("SELECT count(*) AS n FROM runs").get()).toEqual(runCount);
+    expect(db.query("SELECT thought_id FROM rejected_thoughts").all()).toEqual([{ thought_id: thought }]);
+  }));
+
+  test("explicit non-loose namespace protects stable paths while identical bytes deduplicate across namespaces", () => fixture((db, _other, imports) => {
+    db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,?,?,?)", ["stable", "fixture", "Stable", "2030"]);
+    const stable = imports.createBatch("user", "stable-batch", "stable");
+    const bytes = encode("stable page");
+    const first = imports.admitFile("user", stable.id, "first", "folder/index.md", bytes);
+    const committed = imports.finalize(ready(imports, first.id, bytes));
+    expect(imports.admitFile("user", stable.id, "changed", "folder/index.md", encode("edited page"))).toMatchObject({ state: "skipped-changed", documentId: committed.documentId, runId: null });
+    const loose = imports.createBatch("user", "loose-batch");
+    expect(imports.admitFile("user", loose.id, "copy", "copy.md", bytes)).toMatchObject({ state: "skipped-identical", documentId: committed.documentId, runId: null });
+  }));
+
+  test("stable path contenders wait for the holder and keep changed-path protection", () => fixture((db, _other, imports, second) => {
+    const batch = stableBatch(db, imports, "stable-pending"), bytes = encode("stable original");
+    const holder = imports.admitFile("user", batch.id, "holder", "index.md", bytes);
+    const waiter = second.admitFile("user", batch.id, "waiter", "index.md", encode("stable edit"));
+    expect(waiter).toMatchObject({ state: "waiting", runId: null });
+    expect(() => db.run("UPDATE markdown_import_files SET waiting_on_file_id=NULL,run_id=? WHERE id=?", [holder.runId, waiter.id])).toThrow(/pending locator reserved/);
+    expect(() => db.run(`INSERT INTO markdown_import_files(id,import_id,namespace_id,position,request_key,relative_path,sha256,byte_length,created_at,run_id)
+      SELECT 'forged',import_id,namespace_id,2,'forged',relative_path,sha256,byte_length,created_at,run_id FROM markdown_import_files WHERE id=?`, [holder.id])).toThrow(/pending locator reserved/);
+    const done = imports.finalize(ready(imports, holder.id, bytes));
+    expect(second.resolveWaiters()).toBe(1);
+    expect(second.file("user", batch.id, waiter.id)).toMatchObject({ state: "skipped-changed", documentId: done.documentId, runId: null });
+  }));
+
+  test("migration replaces legacy locator guards without changing existing documents, locators or pending inputs", () => fixture((db, _other, imports, _second, inspection) => {
+    const batch = imports.createBatch("user", "migration-batch"), bytes = encode("legacy persisted words");
+    const first = imports.admitFile("user", batch.id, "first", "index.md", bytes);
+    const done = imports.finalize(ready(imports, first.id, bytes));
+    if (!done.documentId) throw new Error("Legacy document missing");
+    db.run("INSERT INTO import_locations VALUES (?,?,?)", [batch.namespaceId, "index.md", done.documentId]);
+    const thought = inspection.parts(history, done.documentId).items.find(part => part.kind === "thought")?.thoughtId;
+    if (!thought) throw new Error("Legacy thought missing");
+    new RejectionService(new SqliteRejectionRepository(db)).rejectThought("user", thought);
+    expect(db.query("SELECT thought_id FROM rejected_thoughts").all()).toEqual([{ thought_id: thought }]);
+    const pending = imports.admitFile("user", batch.id, "pending", "pending.md", encode("pending words"));
+    const tables = ["import_documents", "import_locations", "import_document_parts", "import_document_seals", "markdown_import_files", "markdown_import_payloads", "thoughts", "rejected_thoughts"];
+    const snapshot = () => tables.map(table => db.query(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const before = snapshot();
+    db.exec(`CREATE UNIQUE INDEX import_pending_locator ON markdown_import_files(namespace_id,relative_path) WHERE outcome IS NULL AND waiting_on_file_id IS NULL;
+      DROP TRIGGER imports_seal_complete;
+      CREATE TRIGGER imports_seal_complete BEFORE INSERT ON import_document_seals BEGIN
+        SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM import_documents d JOIN import_locations l ON l.document_id=d.id AND l.namespace_id=d.original_namespace_id AND l.relative_path=d.original_path WHERE d.id=NEW.document_id) THEN RAISE(ABORT,'import original locator missing') END;
+      END;`);
+    migrate(db);
+    migrate(db);
+    expect(snapshot()).toEqual(before);
+    expect(db.query("SELECT thought_id FROM rejected_thoughts").all()).toEqual([{ thought_id: thought }]);
+    expect(inspection.raw(history, done.documentId)).toEqual(bytes);
+    expect(imports.file("user", batch.id, pending.id)?.state).toBe("queued");
+    expect(imports.admitFile("user", batch.id, "new", "index.md", encode("new words")).state).toBe("queued");
+    expect(imports.admitFile("user", batch.id, "duplicate", "copy.md", bytes)).toMatchObject({ state: "skipped-identical", documentId: done.documentId, runId: null });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  }));
+
   test("admission receipts distinguish replay from a newly admitted skip without changing entity wrappers", () => fixture((db, _other, imports) => {
     requireAdmissions(imports);
     const namespace = imports.namespaces("user")[0];
@@ -97,7 +204,7 @@ describe("Markdown import foundation", () => {
     expect(imports.admitFileAdmission("user", first.batch.id, "holder", "first.md", bytes)).toEqual({ file: committed, replayed: true });
     expect(imports.admitFileAdmission("user", first.batch.id, "waiter", "copy.md", bytes)).toMatchObject({ replayed: true, file: { id: waiter.file.id, state: "skipped-identical", documentId: committed.documentId } });
     expect(imports.admitFileAdmission("user", first.batch.id, "new-copy", "another.md", bytes)).toMatchObject({ replayed: false, file: { state: "skipped-identical", documentId: committed.documentId, runId: null } });
-    expect(imports.admitFileAdmission("user", first.batch.id, "new-revision", "first.md", encode("revision"))).toMatchObject({ replayed: false, file: { state: "skipped-changed", documentId: committed.documentId, runId: null } });
+    expect(imports.admitFileAdmission("user", first.batch.id, "new-revision", "first.md", encode("revision"))).toMatchObject({ replayed: false, file: { state: "queued", documentId: null } });
     expect(db.query("SELECT count(*) AS n FROM markdown_import_files").get()).toEqual({ n: 4 });
   }));
 
@@ -138,7 +245,7 @@ describe("Markdown import foundation", () => {
 
   test("preserves leading FEFF path bytes in sealed canonical source and locator", () => fixture((db, _other, imports, _second, inspection) => {
     const path = "\ufeffname.md", bytes = encode("owned words");
-    const batch = imports.createBatch("user", "batch"), file = imports.admitFile("user", batch.id, "file", path, bytes);
+    const batch = stableBatch(db, imports, "batch"), file = imports.admitFile("user", batch.id, "file", path, bytes);
     const result = imports.finalize(ready(imports, file.id, bytes));
     if (!result.documentId) throw new Error("finalization returned no document");
     const expected = Buffer.from(encode(path)).toString("hex").toUpperCase();
@@ -148,17 +255,17 @@ describe("Markdown import foundation", () => {
   }));
 
   test("pending FEFF-prefixed and unprefixed paths reserve independently for different bytes", () => fixture((db, _other, imports, second) => {
-    const batch = imports.createBatch("user", "batch");
-    const prefixed = imports.admitFile("user", batch.id, "prefixed", "\ufeffname.md", encode("first words"));
-    const plain = second.admitFile("user", batch.id, "plain", "name.md", encode("different words"));
+    const batch = stableBatch(db, imports, "batch");
+    const plain = imports.admitFile("user", batch.id, "plain", "name.md", encode("first words"));
+    const prefixed = second.admitFile("user", batch.id, "prefixed", "\ufeffname.md", encode("different words"));
     expect(prefixed.state).toBe("queued");
     expect(plain.state).toBe("queued");
-    expect(plain.runId).not.toBeNull();
+    expect(prefixed.runId).not.toBeNull();
     expect(db.query("SELECT count(*) AS n FROM markdown_import_files WHERE outcome IS NULL AND waiting_on_file_id IS NULL").get()).toEqual({ n: 2 });
   }));
 
-  test("committed FEFF locator is distinct and still detects changes to that exact path", () => fixture((_db, _other, imports) => {
-    const batch = imports.createBatch("user", "batch"), bytes = encode("first words");
+  test("committed FEFF locator is distinct and still detects changes to that exact path", () => fixture((db, _other, imports) => {
+    const batch = stableBatch(db, imports, "batch"), bytes = encode("first words");
     const first = imports.admitFile("user", batch.id, "first", "\ufeffname.md", bytes);
     const committed = imports.finalize(ready(imports, first.id, bytes));
     const plain = imports.admitFile("user", batch.id, "plain", "name.md", encode("different words"));
@@ -194,8 +301,8 @@ describe("Markdown import foundation", () => {
 
   test("replay, conflict, cross-connection waiters, skip precedence and rejected thought remain stable", () => fixture((db, _other, imports, second) => {
     const bytes = encode("first words"), otherBytes = encode("second words");
-    const batch = imports.createBatch("user", "batch");
-    expect(second.createBatch("user", "batch")).toEqual(batch);
+    const batch = stableBatch(db, imports, "batch");
+    expect(second.createBatch("user", "batch", "stable-fixture")).toEqual(batch);
     const holder = imports.admitFile("user", batch.id, "one", "first.md", bytes);
     expect(second.admitFile("user", batch.id, "one", "first.md", bytes)).toEqual(holder);
     expect(() => second.admitFile("user", batch.id, "one", "first.md", otherBytes)).toThrow(ImportConflictError);
@@ -382,7 +489,7 @@ describe("import commit and rollback guards", () => {
     ["run completion", "BEFORE UPDATE OF status ON runs WHEN NEW.status='completed'"],
     ["payload deletion", "BEFORE DELETE ON markdown_import_payloads"],
   ])("finalization rolls back at %s and the same owned request can retry", (_label, trigger) => fixture((db, _other, imports) => {
-    const bytes = encode("atomic words"), batch = imports.createBatch("user", "batch");
+    const bytes = encode("atomic words"), batch = stableBatch(db, imports, "batch");
     const file = imports.admitFile("user", batch.id, "file", "atomic.md", bytes);
     const claim = ready(imports, file.id, bytes, 0, true);
     const tables = ["import_documents", "thoughts", "thought_titles", "thought_source_seals", "import_document_parts", "import_locations", "import_document_seals", "markdown_import_files", "markdown_import_payloads", "runs", "run_steps"];
