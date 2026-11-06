@@ -3,16 +3,16 @@ import type { ThoughtAuthor, MaterialKind, TitleAuthor } from "./thought";
 import type { Logger } from "../logging";
 import { createLogger } from "../logging";
 import { protocolJson } from "./run-protocol";
-import { nonEmpty, record, ValidationError } from "./validation";
+import { record, ValidationError } from "./validation";
 import type { ContextRef, RunStatus } from "./run";
-
-export class SearchForbiddenError extends Error {}
-export class SearchNotFoundError extends Error {}
-export class SearchConflictError extends Error {
-  constructor(readonly code: "session-deleted" | "revision-conflict" | "list-changed" | "native-cleanup-required"
-    | "context-changed" | "idempotency-conflict" | "turn-active") { super(code); }
-}
-export class SearchStorageError extends Error {}
+import { SearchWorkspaceService, type SearchDiscoveryView, type SearchThoughtPreview, type SearchWorkspace,
+  type SearchWorkspacePage, type SearchWorkspaceQuery } from "./agentic-search-workspace";
+export type { SearchDiscoveryView, SearchThoughtPreview, SearchWorkspace, SearchWorkspacePage, SearchWorkspaceQuery } from "./agentic-search-workspace";
+import { requireSearchUser, SearchConflictError, SearchNotFoundError, searchPageLimit, searchRevision, searchSessionView, searchString } from "./search-session-guards";
+export { requireSearchUser, SearchConflictError, SearchForbiddenError, SearchNotFoundError, SearchStorageError,
+  searchPageLimit, searchRevision, searchSessionView, searchString } from "./search-session-guards";
+export { selectSearchClockContext, normalizeSearchTimeRange } from "./search-time";
+export type { SearchClockSample, SearchClockSelection, SearchClockContext, SearchClockSelectionResult, SearchTimeRangeRequest, SearchTimeRangeReceipt } from "./search-time";
 
 export interface SearchSessionView {
   readonly id: string;
@@ -111,6 +111,10 @@ export interface SearchSessionTransaction {
   purge(sessionId: string, at: string): void;
   openComposer(sessionId: string, composerId: string, at: string): SearchComposerView;
   offerMessage(sessionId: string, composerId: string, messageId: string): SearchComposerOutcome<SearchMessageOffer>;
+  messages(sessionId: string, query: SearchWorkspaceQuery): SearchComposerOutcome<SearchWorkspacePage<SearchMessageView>>;
+  discoveries(sessionId: string, query: SearchWorkspaceQuery): SearchComposerOutcome<SearchWorkspacePage<SearchDiscoveryView>>;
+  previewThought(sessionId: string, composerId: string, thoughtId: string): SearchComposerOutcome<SearchThoughtPreview>;
+  refreshComposer(sessionId: string, composerId: string): SearchComposerOutcome<SearchComposerView>;
   turnByKey(sessionId: string, requestKey: string): SearchRetainedTurn | null;
   hasActiveTurn(sessionId: string): boolean;
   prepareAdmission(sessionId: string, request: SearchTurnRequest): SearchComposerOutcome<SearchPreparedAdmission>;
@@ -118,11 +122,12 @@ export interface SearchSessionTransaction {
   removeDiscovery(sessionId: string, entryId: string, at: () => string): boolean;
 }
 export type SearchSessionOperation = "create" | "list" | "get" | "rename" | "history" | "delete"
-  | "openComposer" | "offerMessage" | "admitTurn" | "turnByKey" | "removeDiscovery";
+  | "openComposer" | "offerMessage" | "admitTurn" | "turnByKey" | "removeDiscovery"
+  | "messages" | "discoveries" | "previewThought" | "refreshComposer";
 export interface SearchSessionRepository {
   transaction<T>(operation: SearchSessionOperation, action: (tx: SearchSessionTransaction) => T): T;
 }
-export interface SearchSessions {
+export interface SearchSessions extends SearchWorkspace {
   create(actor: Actor, requestKey: string, payload: unknown): SearchSessionCreation;
   list(actor: Actor, request?: unknown): SearchCatalogPage;
   get(actor: Actor, sessionId: string): SearchSessionView | null;
@@ -136,21 +141,9 @@ export interface SearchSessions {
   removeDiscovery(actor: Actor, sessionId: string, entryId: string): void;
 }
 
-export function requireSearchUser(actor: Actor): void {
-  if (actor !== "user") throw new SearchForbiddenError("Search sessions are user-only");
-}
 export function searchRequestKey(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) throw new ValidationError("Invalid search request key");
   return value;
-}
-export function searchRevision(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new ValidationError("Invalid search revision");
-  return value;
-}
-export function searchString(value: unknown, field: string): string {
-  const text = nonEmpty(value, field);
-  if (text.includes("\0") || !text.isWellFormed()) throw new ValidationError(`Invalid search ${field}`);
-  return text;
 }
 /** Daemon record times are canonical UTC instants, not caller clock samples. */
 export function searchRecordTime(value: unknown): string {
@@ -207,11 +200,6 @@ export function validateSearchRequestClock(clock: SearchRequestClock): void {
     })) throw new ValidationError();
   } catch { throw new ValidationError("Search request clock contradicts its time zone or calendar"); }
 }
-function pageLimit(input: unknown): number {
-  const value = searchRevision(input);
-  if (value < 1 || value > 200) throw new ValidationError("Invalid search page limit");
-  return value;
-}
 export function searchCatalogQuery(input: unknown): SearchCatalogQuery {
   const data = optionalFields(input, ["limit", "cursor"]);
   let cursor: SearchCatalogCursor | null = null;
@@ -220,10 +208,10 @@ export function searchCatalogQuery(input: unknown): SearchCatalogQuery {
     if (c.kind !== "search-sessions" || c.scope !== "user" || c.order !== "last-activity-desc") throw new ValidationError("Invalid search catalog continuation");
     const sequence = searchRevision(c.sequence), highWater = searchRevision(c.highWater);
     if (sequence < 1 || sequence > highWater) throw new ValidationError("Invalid search catalog position");
-    cursor = Object.freeze({ kind: c.kind, scope: c.scope, order: c.order, limit: pageLimit(c.limit),
+    cursor = Object.freeze({ kind: c.kind, scope: c.scope, order: c.order, limit: searchPageLimit(c.limit),
       catalogRevision: searchRevision(c.catalogRevision), highWater, sequence, lastActivityAt: searchRecordTime(c.lastActivityAt) });
   }
-  const limit = pageLimit(data.limit === undefined ? cursor?.limit ?? 50 : data.limit);
+  const limit = searchPageLimit(data.limit === undefined ? cursor?.limit ?? 50 : data.limit);
   if (cursor && cursor.limit !== limit) throw new ValidationError("Search catalog limit changed");
   return { limit, cursor };
 }
@@ -236,17 +224,13 @@ export function searchHistoryQueries(sessionId: string, input: unknown): SearchH
       const c = fields(page.cursor, ["kind", "scope", "sessionId", "limit", "after", "highWater"]);
       const after = searchRevision(c.after), highWater = searchRevision(c.highWater);
       if (c.kind !== kind || c.scope !== "history" || c.sessionId !== sessionId || after > highWater) throw new ValidationError("Invalid search history continuation");
-      cursor = Object.freeze({ kind, scope: "history", sessionId, limit: pageLimit(c.limit), after, highWater });
+      cursor = Object.freeze({ kind, scope: "history", sessionId, limit: searchPageLimit(c.limit), after, highWater });
     }
-    const limit = pageLimit(page.limit === undefined ? cursor?.limit ?? 50 : page.limit);
+    const limit = searchPageLimit(page.limit === undefined ? cursor?.limit ?? 50 : page.limit);
     if (cursor && cursor.limit !== limit) throw new ValidationError("Search history limit changed");
     return { limit, cursor };
   }
   return { messages: query("messages"), discoveries: query("discoveries") };
-}
-export function searchSessionView(row: SearchSessionRecord): SearchSessionView {
-  if (row.deletedAt !== null || row.title === null) throw new SearchNotFoundError("search-session-not-found");
-  return Object.freeze({ id: row.id, title: row.title, createdAt: row.createdAt, lastActivityAt: row.lastActivityAt, revision: searchRevision(row.revision) });
 }
 function requireSession(tx: SearchSessionTransaction, id: string): SearchSessionView {
   const row = tx.get(id);
@@ -257,8 +241,10 @@ function requireSession(tx: SearchSessionTransaction, id: string): SearchSession
 /** User control/history boundary. It has no knowledge writer, agent credential or native dispatcher. */
 export class SearchSessionService implements SearchSessions {
   private readonly logger: Logger;
+  private readonly workspace: SearchWorkspace;
   constructor(private readonly repository: SearchSessionRepository, private readonly sources: SearchSessionSources) {
     this.logger = sources.logger ?? createLogger();
+    this.workspace = new SearchWorkspaceService(repository, this.logger);
   }
   private command<T>(operation: "create" | "rename" | "delete" | "openComposer" | "admitTurn" | "removeDiscovery", context: { readonly sessionId?: string }, action: () => T): T {
     this.logger.info(`[search sessions] ${operation} attempt`, context);
@@ -359,6 +345,18 @@ export class SearchSessionService implements SearchSessions {
       throw new SearchConflictError("context-changed");
     }
     return outcome.value;
+  }
+  messages(actor: Actor, sessionId: string, request: unknown): SearchWorkspacePage<SearchMessageView> {
+    return this.workspace.messages(actor, sessionId, request);
+  }
+  discoveries(actor: Actor, sessionId: string, request: unknown): SearchWorkspacePage<SearchDiscoveryView> {
+    return this.workspace.discoveries(actor, sessionId, request);
+  }
+  previewThought(actor: Actor, sessionId: string, composerId: string, thoughtId: string): SearchThoughtPreview {
+    return this.workspace.previewThought(actor, sessionId, composerId, thoughtId);
+  }
+  refreshComposer(actor: Actor, sessionId: string, composerId: string): SearchComposerView {
+    return this.workspace.refreshComposer(actor, sessionId, composerId);
   }
   admitTurn(actor: Actor, sessionId: string, requestKey: string, input: unknown): SearchTurnControlView {
     requireSearchUser(actor); searchString(sessionId, "sessionId"); searchRequestKey(requestKey);

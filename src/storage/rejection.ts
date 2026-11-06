@@ -1,9 +1,12 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionTransaction } from "../domain/rejection";
+import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionState, RejectionTarget, RejectionTransaction } from "../domain/rejection";
 import { createThought } from "../domain/thought";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
+import { immediate } from "./transaction";
+import { readRejectionState } from "./rejection-state";
+import { recordSearchEligibilityChange } from "./search-invalidation";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[rejection storage] ${operation} attempt`);
@@ -77,21 +80,32 @@ export class SqliteRejectionRepository implements RejectionRepository {
     return boundary(this.logger, "snapshot", () => this.db.transaction(() => this.readSnapshot())());
   }
 
+  state(target: RejectionTarget): RejectionState {
+    return boundary(this.logger, "target state", () => this.db.transaction(() => readRejectionState(this.db, target))());
+  }
+
+  private setRejected(kind: "thought" | "connection", id: string, rejected: boolean): void {
+    const operation = `${kind} ${rejected ? "reject" : "restore"}`;
+    this.logger.verbose(`[rejection storage] ${operation} attempt`);
+    const table = kind === "thought" ? "rejected_thoughts" : "rejected_connections", column = `${kind}_id`;
+    const key = new TextEncoder().encode(id);
+    const changed = rejected
+      ? this.db.run(`INSERT OR IGNORE INTO ${table} (${column}) VALUES (CAST(? AS TEXT))`, [key])
+      : this.db.run(`DELETE FROM ${table} WHERE ${column}=CAST(? AS TEXT)`, [key]);
+    if (changed.changes === 0) {
+      this.logger.verbose(`[rejection storage] ${operation} unchanged`);
+      return;
+    }
+    const invalidated = recordSearchEligibilityChange(this.db, kind, id, rejected);
+    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated });
+  }
+
   transaction<T>(action: (tx: RejectionTransaction) => T): T {
-    return boundary(this.logger, "transaction", () => this.db.transaction(() => action({
+    return boundary(this.logger, "transaction", () => immediate(this.db, () => action({
       snapshot: () => this.readSnapshot(),
-      setThoughtRejected: (id, rejected) => {
-        this.logger.verbose(`[rejection storage] thought ${rejected ? "reject" : "restore"} attempt`);
-        if (rejected) this.db.run("INSERT OR IGNORE INTO rejected_thoughts (thought_id) VALUES (?)", [id]);
-        else this.db.run("DELETE FROM rejected_thoughts WHERE thought_id = ?", [id]);
-        this.logger.verbose(`[rejection storage] thought ${rejected ? "reject" : "restore"} applied in transaction`);
-      },
-      setConnectionRejected: (id, rejected) => {
-        this.logger.verbose(`[rejection storage] connection ${rejected ? "reject" : "restore"} attempt`);
-        if (rejected) this.db.run("INSERT OR IGNORE INTO rejected_connections (connection_id) VALUES (?)", [id]);
-        else this.db.run("DELETE FROM rejected_connections WHERE connection_id = ?", [id]);
-        this.logger.verbose(`[rejection storage] connection ${rejected ? "reject" : "restore"} applied in transaction`);
-      },
-    })).immediate());
+      state: target => readRejectionState(this.db, target),
+      setThoughtRejected: (id, rejected) => this.setRejected("thought", id, rejected),
+      setConnectionRejected: (id, rejected) => this.setRejected("connection", id, rejected),
+    })));
   }
 }

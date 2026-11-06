@@ -10,6 +10,7 @@ import { purgeLocalSearchSession } from "./search-purge";
 import { SqliteSearchComposers } from "./search-composer";
 import { SqliteSearchTurns } from "./search-turns";
 import { touchSearchSession } from "./search-session-activity";
+import { SqliteSearchWorkspace } from "./search-workspace";
 
 const columns = "id,create_request_key AS createRequestKey,title,created_at AS createdAt,last_activity_at AS lastActivityAt,revision,deleted_at AS deletedAt";
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -22,6 +23,7 @@ export class SqliteSearchSessions implements SearchSessionRepository {
     this.logger.verbose(`[search session storage] ${operation} attempt`);
     try {
       const composers = new SqliteSearchComposers(this.db), turns = new SqliteSearchTurns(this.db);
+      const workspace = new SqliteSearchWorkspace(this.db, composers);
       const result = immediate(this.db, () => action({
         get: id => this.db.query(`SELECT ${columns} FROM search_sessions WHERE id=CAST(? AS TEXT)`).get(text(id)) as SearchSessionRecord | null,
         byCreateKey: key => this.db.query(`SELECT ${columns} FROM search_sessions WHERE create_request_key=?`).get(key) as SearchSessionRecord | null,
@@ -42,6 +44,10 @@ export class SqliteSearchSessions implements SearchSessionRepository {
         purge: (id, at) => { this.requireCatalogCapacity(); purgeLocalSearchSession(this.db, id, at); },
         openComposer: (id, composerId, at) => composers.open(id, composerId, at),
         offerMessage: (id, composerId, messageId) => composers.offerMessage(id, composerId, messageId),
+        messages: (id, query) => workspace.messages(id, query),
+        discoveries: (id, query) => workspace.discoveries(id, query),
+        previewThought: (id, composerId, thoughtId) => workspace.previewThought(id, composerId, thoughtId),
+        refreshComposer: (id, composerId) => composers.refresh(id, composerId),
         turnByKey: (id, key) => turns.byKey(id, key),
         hasActiveTurn: id => turns.hasActive(id),
         prepareAdmission: (id, request) => composers.prepareAdmission(id, request),

@@ -20,6 +20,24 @@ export class SqliteSearchRepository implements SearchRepository {
     return { inspect: scope.actor === "user" && scope.mode !== "normal" ? 1 : 0, ai: scope.actor === "ai" ? 1 : 0 };
   }
 
+  /** Shared lexical preparation; correction is attempted only when there are no scoped hits. */
+  lexicalMatch(scope: ReadScope, query: string): string | null {
+    let tokens: string[] = query.match(/[\p{L}\p{N}]+/gu) ?? [];
+    if (!tokens.length) return null;
+    const matchFor = (words: string[]) => words.map(token => `"${token}"*`).join(" AND ");
+    const match = matchFor(tokens);
+    const { inspect, ai } = this.flags(scope);
+    const found = this.db.query(`SELECT 1 FROM thought_search_fts f JOIN thoughts t ON t.id=f.thought_id
+      WHERE thought_search_fts MATCH ? AND (?=1 OR NOT EXISTS (SELECT 1 FROM rejected_thoughts WHERE thought_id=t.id))
+      UNION ALL SELECT 1 FROM response_search_fts f JOIN responses r ON r.id=f.response_id
+      WHERE response_search_fts MATCH ? AND EXISTS (SELECT 1 FROM response_thoughts rt LEFT JOIN rejected_thoughts x ON x.thought_id=rt.thought_id
+        WHERE rt.response_id=r.id AND (?=1 OR x.thought_id IS NULL))
+      AND (?=0 OR NOT EXISTS (SELECT 1 FROM response_thoughts rt JOIN rejected_thoughts x ON x.thought_id=rt.thought_id WHERE rt.response_id=r.id)) LIMIT 1`)
+      .get(match, inspect, match, inspect, ai);
+    if (!found) tokens = tokens.map(token => this.suggestions(scope, token).find(candidate => candidate.distance <= (token.length < 5 ? 100 : 200))?.word ?? token);
+    return matchFor(tokens);
+  }
+
   search(scope: ReadScope, query: string): readonly SearchHit[] {
     this.logger.verbose("[search storage] search attempt");
     try {
@@ -53,12 +71,7 @@ export class SqliteSearchRepository implements SearchRepository {
     this.logger.verbose("[search storage] query attempt");
     try {
       const page = this.db.transaction(() => {
-        let tokens: string[] = query.match(/[\p{L}\p{N}]+/gu) ?? [];
-        if (tokens.length && this.search(scope, query).length === 0) {
-          const corrected = tokens.map(token => this.suggestions(scope, token).find(candidate => candidate.distance <= (token.length < 5 ? 100 : 200))?.word ?? token);
-          if (corrected.some((value, index) => value.toLowerCase() !== tokens[index]?.toLowerCase())) tokens = corrected;
-        }
-        const match = tokens.length ? tokens.map(token => `"${token.replaceAll('"', '""')}"*`).join(" AND ") : '""';
+        const match = this.lexicalMatch(scope, query) ?? '""';
         const { inspect, ai } = this.flags(scope);
         const params = { $match: match, $inspect: inspect, $ai: ai, $from: options.from ?? null, $to: options.to ?? null,
           $authors: JSON.stringify(options.authors ?? []), $kinds: JSON.stringify(options.kinds ?? []) };

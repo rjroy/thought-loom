@@ -2,14 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { SearchHistoryContent, SearchHistoryCursor, SearchHistoryDiscovery, SearchHistoryMessage,
   SearchHistoryPage, SearchHistoryQueries, SearchHistoryQuery, SearchThoughtSummary } from "../domain/agentic-search";
 import { displayTitle } from "../domain/thought";
-import { searchEligibilitySql as eligible, searchEvidence as evidence } from "./search-eligibility";
-
-function available(owner: "message_id" | "discovery_id", id: string, evidenceJson: string): string {
-  return `(NOT EXISTS (SELECT 1 FROM search_content_dependencies dep WHERE dep.${owner}=${id}
-    AND NOT (${eligible("dep.ref_kind", "dep.ref_id")}))
-    AND NOT EXISTS (SELECT 1 FROM json_each(${evidenceJson}) citation WHERE citation.type!='text'
-      OR NOT (${eligible("'thought'", "citation.value")})))`;
-}
+import { searchEligibilitySql as eligible, searchContentEligibilitySql as available, searchEvidence as evidence } from "./search-eligibility";
 
 interface MessageRow extends Omit<SearchHistoryMessage, "evidenceThoughtIds" | "availability"> {
   readonly evidenceJson: string;

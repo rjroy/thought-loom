@@ -17,6 +17,9 @@ import { SearchSessionService, type SearchSessionSources, type SearchSessions } 
 import { SqliteSearchSessions } from "./search-sessions";
 import type { SearchPublication } from "../domain/search-publication";
 import { SqliteSearchPublication } from "./search-publication";
+import type { SearchInvestigation } from "../domain/investigative-retrieval";
+import { SqliteSearchInvestigation } from "./investigative-retrieval";
+import { SqliteSearchRepository } from "./search";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -184,6 +187,18 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       migrateRunSchema(db);
       migrateImportFoundation(db);
       migrateSearchFoundation(db);
+      if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
+        CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_update AFTER UPDATE ON thought_titles WHEN OLD.title IS NOT NEW.title OR OLD.title_author IS NOT NEW.title_author BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_title_delete AFTER DELETE ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_response_insert AFTER INSERT ON responses BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_association_insert AFTER INSERT ON response_thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_source_insert AFTER INSERT ON thought_sources BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_insert AFTER INSERT ON connections BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_update AFTER UPDATE ON connections WHEN OLD.id IS NOT NEW.id OR OLD.from_id IS NOT NEW.from_id OR OLD.to_id IS NOT NEW.to_id OR OLD.category IS NOT NEW.category BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+        CREATE TRIGGER IF NOT EXISTS retrieval_connection_delete AFTER DELETE ON connections BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
+      `);
       if (!db.query("SELECT 1 FROM import_namespaces WHERE kind='loose-markdown'").get()) {
         db.run("INSERT INTO import_namespaces(id,kind,label,created_at) VALUES (?,'loose-markdown','Loose Markdown',?)",[randomUUID(),new Date().toISOString()]);
       }
@@ -198,6 +213,11 @@ export class SqliteStore {
 
   searchSessions(sources: SearchSessionSources): SearchSessions {
     return new SearchSessionService(new SqliteSearchSessions(this.db, sources.logger ?? this.logger), { ...sources, logger: sources.logger ?? this.logger });
+  }
+
+  /** Internal AI-normal candidate retrieval; not a full-read witness. */
+  searchInvestigation(): SearchInvestigation {
+    return new SqliteSearchInvestigation(this.db, new SqliteSearchRepository(this.db, undefined, this.logger), this.logger);
   }
 
   /** Trusted dispatcher integration only; never expose this facet as user/model-selected authority. */

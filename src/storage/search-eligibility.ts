@@ -16,6 +16,13 @@ export function searchEligibilitySql(kind: string, id: string): string {
       AND NOT EXISTS (SELECT 1 FROM response_thoughts a JOIN rejected_thoughts x ON x.thought_id=a.thought_id WHERE a.response_id=r.id))
     ELSE 0 END`;
 }
+/** Shared normal/history availability indicator. Callers still decide whether unavailable prose may be returned. */
+export function searchContentEligibilitySql(owner: "message_id" | "discovery_id", id: string, evidenceJson: string): string {
+  return `(NOT EXISTS (SELECT 1 FROM search_content_dependencies dep WHERE dep.${owner}=${id}
+    AND NOT (${searchEligibilitySql("dep.ref_kind", "dep.ref_id")}))
+    AND NOT EXISTS (SELECT 1 FROM json_each(${evidenceJson}) citation WHERE citation.type!='text'
+      OR NOT (${searchEligibilitySql("'thought'", "citation.value")})))`;
+}
 export function searchEvidence(json: string): readonly string[] {
   try {
     const ids = references(JSON.parse(json), "evidenceThoughtIds").map(id => searchString(id, "evidence thought ID"));
