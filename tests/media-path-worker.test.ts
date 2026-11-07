@@ -4,6 +4,7 @@ import { MarkdownImportWorker } from "../src/agent/import-worker";
 import type { ImportObservation, PersistedPrompt } from "../src/agent/opencode-adapter";
 import { SearchService } from "../src/domain/search";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
+import { SqliteMediaAdmissions } from "../src/storage/media-admission";
 import { SqliteSearchRepository } from "../src/storage/search";
 import { bounded } from "./fixtures/media-files";
 import { mediaPathFixture, pathBinding, pathComplete, pathRequest, promptStrings } from "./fixtures/media-path-worker";
@@ -58,6 +59,70 @@ test("initial media weaving requests a summary and publishes its searchable inte
   await w.instance.tick(run.id);
   expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id)).toEqual(children);
 },null));
+
+test("failed source weaving retries the retained original through the normal worker", async () => mediaPathFixture(async f => {
+  const media = new SqliteMediaAdmissions(f.db,f.sources), sourceId = f.source.mediaSource.id;
+  const metadata = f.db.query("SELECT rowid,* FROM media_sources ORDER BY rowid").all();
+  const first = f.ops.admitWeave("user",{subjectId:f.source.id,triggerId:`media-import:${sourceId}`});
+  const failed = f.worker(() => pathComplete("The original could not be understood."));
+  await f.finish(failed.instance,first.id);
+  expect(failed.client.scriptErrors).toEqual([]);
+  expect(f.run(first.id).status).toBe("failed");
+  expect(f.steps.cancellation(first.id)).toBe("pending");
+  expect(failed.client.prompts).toHaveLength(1);
+  const initial = failed.client.prompts[0], failureReply = f.runs.reply(first.id);
+  if (!initial || !failureReply) throw new Error("Expected the failed source prompt and retained limitation reply");
+  expect(promptStrings(initial.text)).toContain(f.path);
+  expect(failureReply).toMatchObject({text:"The original could not be understood.",state:"complete",thoughtIds:[f.source.id]});
+  expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id)).toEqual([]);
+  expect(f.store.getThought(f.source.id)).toEqual(f.source);
+  expect(Array.from(await readFile(f.path))).toEqual(Array.from(f.bytes));
+  expect(() => media.retry("user",sourceId,"retained-retry")).toThrow("Previous source processing is still active or unresolved");
+  expect(f.db.query("SELECT id FROM runs WHERE weave_subject_id=?").all(f.source.id)).toEqual([{id:first.id}]);
+
+  await bounded(failed.instance.tick(first.id),"normal failed-source cancellation");
+  expect(failed.client.inboxCancellations).toEqual([{sessionID:initial.sessionID,inboxID:initial.id}]);
+  expect(failed.client.interrupts).toEqual([initial.sessionID]);
+  expect(f.steps.cancellation(first.id)).toBe("settled");
+  expect(f.run(first.id).status).toBe("failed");
+  expect(failed.client.prompts).toHaveLength(1);
+
+  const retry = media.retry("user",sourceId,"retained-retry");
+  expect(retry.id).not.toBe(first.id);
+  expect(f.ops.weaveIntent(retry.id)).toEqual({subjectId:f.source.id,triggerId:`media-retry:${sourceId}:retained-retry`});
+  expect(media.retry("user",sourceId,"retained-retry")).toEqual(retry);
+  expect(() => media.retry("user",sourceId,"concurrent-retry")).toThrow("Previous source processing is still active or unresolved");
+  const summary = "The retained image contains a red region beside a blue region.";
+  const retried = f.worker(index => index === 0 ? pathRequest("interpretation",{text:summary,sourceIds:[]}) : pathComplete("Saved the retained source summary."));
+  await f.finish(retried.instance,retry.id);
+  expect(retried.client.scriptErrors).toEqual([]);
+  expect(f.run(retry.id).status).toBe("completed");
+  expect(retried.client.prompts).toHaveLength(2);
+  const retryInitial = retried.client.prompts[0];
+  if (!retryInitial) throw new Error("Expected the retry's normal initial prompt");
+  expect(promptStrings(retryInitial.text)).toContain(f.path);
+  expect(f.requestedSources).toEqual([sourceId,sourceId]);
+  const children = f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id);
+  expect(children).toHaveLength(1);
+  const child = children[0], step = f.steps.steps(retry.id)[0];
+  if (!child || !step) throw new Error("Expected the retry's canonical interpretation and request");
+  expect(child).toMatchObject({author:"ai",kind:"ai-interpretation",text:summary,parentId:f.source.id});
+  expect(f.ops.stepReceipt(retry.id,step.promptId)).toMatchObject({result:{type:"interpretation",thought:{id:child.id}}});
+  expect(f.runs.reply(retry.id)).toMatchObject({text:"Saved the retained source summary.",state:"complete",thoughtIds:[f.source.id,child.id]});
+  expect(f.runs.reply(first.id)).toEqual(failureReply);
+
+  expect(media.retry("user",sourceId,"retained-retry")).toEqual(f.run(retry.id));
+  expect(() => media.retry("user",sourceId,"duplicate-summary")).toThrow("Source already has an initial interpretation; use Evolve");
+  await bounded(failed.instance.tick(first.id),"settled failed-source replay");
+  await bounded(retried.instance.tick(retry.id),"completed source retry replay");
+  expect(failed.client.prompts).toHaveLength(1);
+  expect(retried.client.prompts).toHaveLength(2);
+  expect(f.db.query("SELECT id FROM runs WHERE weave_subject_id=? ORDER BY rowid").all(f.source.id)).toEqual([{id:first.id},{id:retry.id}]);
+  expect(f.db.query("SELECT rowid,* FROM media_sources ORDER BY rowid").all()).toEqual(metadata);
+  expect(f.store.getThought(f.source.id)).toEqual(f.source);
+  expect(Array.from(await readFile(f.path))).toEqual(Array.from(f.bytes));
+  expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id)).toEqual(children);
+}));
 
 test("Evolve receives the eligible ancestor's original path and exact user clarification", async () => mediaPathFixture(async f => {
   const admission = f.admissions.admit("user","evolve",{parentId:f.source.id,text:"Explain the color contrast."});
