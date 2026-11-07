@@ -127,7 +127,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     this.logger.verbose("[run storage] search prompt successor confirmed",{runId:claim.runId,from:promptId,to:successor.promptId,position:successor.position,generation:claim.generation});
     return successor;
   }
-  private appendSuccessor(run: RunRecord, step: RunStep, resultJson: string, promptId: string, input: string | null): RunStep {
+  private appendSuccessor(run: RunRecord, step: RunStep, resultJson: string, promptId: string, input: string): RunStep {
     if (this.db.query("SELECT 1 FROM run_steps WHERE prompt_id=?").get(promptId)) throw new RunConflictError("Prompt identity already issued");
     this.db.run("UPDATE run_steps SET state='processed',result_json=? WHERE run_id=? AND prompt_id=?",[resultJson,run.id,step.promptId]);
     this.db.run("INSERT INTO run_steps (run_id,position,prompt_id,input,state,native_state) VALUES (?,?,?,?,'prepared','unknown')",
