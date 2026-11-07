@@ -16,9 +16,18 @@ Use the committed lockfile. SQLite support comes from Bun's built-in `bun:sqlite
 
 ### Internal media validation
 
-The internal [`createMediaValidator`](../src/storage/media-validator.ts) factory supplies a callback compatible with the private file service's injected validator. Nothing automatically connects them or starts this validator during daemon startup. There is no media environment variable, upload route or browser media workflow. The normal worker's [shared-file path support](#retained-media-and-shared-filesystem) requires an injected resolver; the daemon does not yet supply one. Existing text and Markdown flows are unchanged.
+Daemon startup constructs [`createMediaValidator`](../src/storage/media-validator.ts), connects it to the private file service and installs the normal worker's [shared-file path resolver](#retained-media-and-shared-filesystem). The [user-only media API](daemon-api.md#retained-media-import-and-source-inspection) accepts images/PDFs even without agent configuration; interpretation remains queued in that case. No browser media workflow is implemented.
 
-An internal caller must provide positive safe-integer raster limits (`maxBytes`, per-frame `maxDimension`, aggregate `maxTotalPixels`, `maxFrames`), PDF limits (`maxBytes`, `maxPages`, `maxObjects`, `maxDepth`) and process limits (`dataBytes`, `cpuSeconds`, `wallMs`, combined `outputBytes`), plus an instance logger. The factory does not supply production defaults. The proposed 1 GiB DATA, 8 seconds CPU, 10 seconds wall time and 8 KiB output profile is a candidate, not active daemon configuration. The core limit is zero. The current Linux implementation launches the owned Bun child through `/usr/bin/prlimit` from util-linux, with `--no-env-file` and a minimal fixed environment. The controlled compatibility work used Bun 1.4.3; the lockfile pins Sharp 0.35.5 and `@cantoo/pdf-lib` 2.11.1. No Python wrapper, converter, renderer or package is installed implicitly.
+The Linux validator requires `/usr/bin/prlimit` from util-linux and the frozen workspace dependencies. It launches an owned Bun child with `--no-env-file` and a minimal fixed environment; Sharp and the PDF parser load only in that child. The lockfile pins Sharp 0.35.5 and `@cantoo/pdf-lib` 2.11.1. No converter, renderer, Python wrapper or package is installed implicitly. The runtime supplies these explicit budgets:
+
+| Boundary | Active limit |
+| --- | --- |
+| Original bytes | `THOUGHTLOOM_MEDIA_MAX_BYTES`, default `16777216` (16 MiB), for raster/PDF validation and verified original reads. |
+| Raster | Per-frame dimension 16384; aggregate 67108864 pixels; 256 frames. |
+| PDF | 1024 pages; 100000 objects; depth 128. |
+| Validator child | 1073741824 bytes DATA (1 GiB); 8 seconds CPU; 10000 ms wall time; 8192 combined output bytes; core limit zero. |
+
+Only the original-byte limit has an environment setting. The other budgets are fixed runtime values, not additional configuration options.
 
 The parent supervisor imports only core types, not Sharp or the PDF parser. It feeds a borrowed staged-file descriptor from offset zero to one child lane, checks the announced length and file identity/timestamps, and never closes the caller's descriptor. Cancellation stops the affected work; close seals admission and cancels entered work. Both join the child, feed and output collection before releasing the lane. A successful result requires completed input, zero child exit, drained output and a closed, allowlisted response. The private file service separately verifies the staged fingerprint before publication; the supervisor's identity/timestamp check is not a substitute for that digest check.
 
@@ -166,11 +175,13 @@ Loading is lazy when spelling support is requested, not part of daemon readiness
 | `THOUGHTLOOM_PORT` | No | Integer from `0` through `65535`; default `3001`. `0` selects an available ephemeral port. |
 | `THOUGHTLOOM_AGENT_CONFIG` | No | Server-only JSON agent configuration described below. Omit it to use ordinary daemon features without agent configuration. |
 | `THOUGHTLOOM_LOG_LEVEL` | No | `error`, `warning`, `info` (default), or `verbose`; case-insensitive. Controls daemon diagnostics. |
-| `THOUGHTLOOM_IMPORT_MAX_BYTES` | No | Positive safe integer, default `1048576` (1 MiB): maximum bytes in one uploaded file. Invalid values fail startup without echoing the value. |
+| `THOUGHTLOOM_IMPORT_MAX_BYTES` | No | Positive safe integer, default `1048576` (1 MiB): maximum bytes in one uploaded Markdown file. Invalid values fail startup without echoing the value. |
+| `THOUGHTLOOM_MEDIA_DIR` | No | Absolute private directory; default `<canonical-db-path>.media`. The existing parent must be accessible. The daemon and OpenCode must share access to these absolute paths. |
+| `THOUGHTLOOM_MEDIA_MAX_BYTES` | No | Positive safe integer, default `16777216` (16 MiB): maximum media upload and verified original-read size. Invalid values fail startup without echoing them. |
 
 The server's bind address is not configurable: it is `127.0.0.1`, not all interfaces. Loopback binding does not replace authentication.
 
-Import uploads additionally allow at most 4 KiB of UTF-8 metadata and 64 KiB of multipart framing/headers; the streamed aggregate is bounded before parsing. At most two upload receivers buffer concurrently; another receives `503` and `Retry-After`. Configure any future server-side proxy to allow the file bound plus those overheads without truncating bytes. These are transport/capacity bounds, not vault file-count, model-turn, token, or cost quotas. Parsing remains in-process. Parser memory depends on content and runtime; the byte default is not a proven parser memory bound and provides no hard memory or latency guarantee.
+Markdown and media upload routes each allow at most 4 KiB of UTF-8 metadata and 64 KiB of multipart framing/headers; the streamed aggregate is bounded before parsing. Each has two upload receivers; another receives `503 receiver-busy` with `Retry-After: 1`. Media admission shares one file-publication lane and one validator child lane. Its display filename is bounded to 1024 UTF-8 bytes and never selects a storage path. These capacities, metadata/header limits and filename bound are fixed, not environment settings. Configure any server-side proxy for the chosen file bound plus overhead without truncating bytes. These are technical resource bounds, not vault file-count, model-turn, token or cost quotas. Multipart/Markdown parsing remains in-process; its byte limits are not hard process-memory or latency guarantees. Media format decoding has the separate child limits above.
 
 ### Agent configuration
 
@@ -245,7 +256,22 @@ Interpretations use the existing knowledge operations and become searchable AI c
 
 Search, Agentic Export and import segmentation receive no original path and retain denied native tools. Search/Export media reads return only descriptor/clarification metadata; segmentation has no library-read capability. Weaver/Evolve filesystem access remains the trusted, permissive environment described above, not a per-file sandbox.
 
-`ConfiguredRunWorker` accepts the same resolver dependency, but daemon startup does not yet construct the private file service, connect its validator or supply the resolver. Media upload/download/retry HTTP routes, media startup settings and the browser import workflow are not implemented. Internal source admission and deliberate retry reuse ordinary weave scheduling and lifecycle checks; they do not create a public import workflow. See the [storage contract](database-schema.md#media-source-storage-foundation) and [shared-file worker checks](testing.md#shared-file-media-worker-checks). Those controlled tests verify path delivery and application persistence, not actual OpenCode tool execution or model understanding.
+The daemon supplies this resolver to `ConfiguredRunWorker` from its actual private store. Upload validates and retains the original, then atomically admits the source and normal weave. Without agent configuration, upload/receipt/inspection/download still work and weaving remains queued. With configuration, the existing supervisor drives normal weaving; startup or later captures can incur model charges. Source retries reuse ordinary cancellation, eligibility and duplicate-interpretation checks. See the [API](daemon-api.md#retained-media-import-and-source-inspection) and [owned HTTP checks](testing.md#media-import-http-workflow-checks). These controlled checks establish file/path delivery and application behavior, **not actual operator-service filesystem tools or configured-model understanding**. Verify the operator's tools/model separately; the daemon does not switch models or manage OpenCode.
+
+The private layout contains `store.json`, `objects`, `staging` and private `prepared` scratch. The SQL `media_store.store_id` and marker must match; filenames never choose an object path. Startup opens the store only under the actual database lease. A new empty library receives a matching identity/marker; once sources are retained, a missing directory/marker or any identity mismatch fails startup rather than adopting unrelated files. Unsafe permissions are refused. Do not repair such failures by deleting the marker, replacing the SQL identity or pointing an existing library at an empty directory. Keep the matching database and media directory together.
+
+The daemon checks at most 64 entries for unreferenced orphan cleanup on startup and after admission. Entries must be older than the fixed 24-hour grace; active work and referenced originals are retained, including rejected/failed sources. Scratch and unexpected multi-link files remain conservatively retained. This is bounded opportunistic cleanup, not immediate deletion or a secure-erasure guarantee. Lowering the byte limit can make larger retained originals unavailable to current verified reads; it does not remove them. File/path/validator failures leave existing source records intact. Reconcile an uncertain upload by its existing request key and an uncertain run by its existing run ID, not a fresh duplicate upload/retry.
+
+### Paired media backup and restore
+
+1. Record the canonical SQLite path, effective media directory (explicit setting or the SQLite filename plus `.media`), release and private configuration. Keep credentials outside public backup metadata.
+2. Stop the web client and daemon normally; confirm successful shutdown and no process still writing either data location. The daemon joins handlers/workers and closes file/validator work before releasing the database lease. Do not replace files under a running daemon or stop/reconfigure the operator-managed OpenCode service implicitly.
+3. Copy the stopped SQLite database and any SQLite companion files **together with the entire matching media directory**, including `store.json` and all subdirectories, as one backup set. Preserve the service UID, private directory/file modes and exact bytes; protect backups like the originals. A database-only backup cannot recover retained media. Do not omit originals because their sources are rejected or failed.
+4. Rehearse restoration into a new, empty, owned location without overwriting the current library. Restore the matching pair and release, set `THOUGHTLOOM_DB_PATH` and, when needed, `THOUGHTLOOM_MEDIA_DIR`, and preserve `0700` directories/`0600` files. Leave agent configuration absent during this first inspection. For production continuation of saved work, retain the original shared absolute media paths: prepared prompts and native sessions may already reference them and are not rewritten when data is moved.
+5. Start the daemon, check readiness and marker/SQL identity acceptance, then use a known receipt and user inspection/download to compare a representative retained original with the backup. The [owned-file walkthrough](testing.md#manual-media-import-walkthrough) demonstrates those checks. A relocated, agentless download check is not proof that existing native sessions can resume at new paths. Enable agents intentionally only after shared path access and normal run recovery are understood.
+6. If identity/ownership checks fail, stop and correct the selected pair, directory and permissions while preserving both the backup and failed state. Do not clear rows, mint a replacement marker or discard unresolved run history to force startup. Restoring an older backup loses later writes; preserve them before deciding on production replacement.
+
+See [production upgrades/recovery](production-deployment.md#5-back-up-upgrade-and-recover). The owned tests cover orderly restart, paired copies and mismatch refusal, not arbitrary crashes, power loss or every filesystem/backup utility.
 
 ## Logging
 
@@ -270,7 +296,7 @@ Restart the daemon to change its configured level. Each daemon instance owns its
 
 ## Startup and readiness
 
-Startup validates configuration, resolves/creates the supported database file, acquires its execution-owner lease, then opens the knowledge database, runs the [schema migration](database-schema.md#migrations), registers that lease's immutable owner record in a short transaction, and wires the domain services into Hono. Ownership and registration are required even without agent configuration, before worker construction, listener readiness or local import scheduling.
+Startup validates configuration, resolves/creates the supported database file, acquires its execution-owner lease, then opens the knowledge database, runs the [schema migration](database-schema.md#migrations) and registers that lease's immutable owner record. Under that lease it constructs the validator, opens/checks the matching private media store, performs bounded orphan cleanup and installs the normal worker's path resolver, before wiring Hono and starting the listener/queues. The validator child is launched on validation, not merely by constructing startup services. Ownership and media-store checks apply even without agent configuration. Partial-startup failure closes entered resources before the knowledge database and lease.
 
 ### Database execution ownership
 
@@ -306,7 +332,7 @@ A successful startup emits a lifecycle event containing the bound URL, for examp
 
 For port `0`, use the URL from the readiness event rather than assuming a port number. HTTP requests must carry the appropriate server credential; see [authentication](daemon-api.md#authentication).
 
-Back up a database you care about before upgrading. Existing titles migrate into separate metadata automatically. Tests exercise migrations using isolated databases, never your configured database.
+Back up the matching database **and media directory** before upgrading; follow the [paired procedure](#paired-media-backup-and-restore). Existing titles migrate into separate metadata automatically. Tests exercise migrations using isolated databases, never your configured database.
 
 ## Connect a manual client
 
@@ -325,6 +351,8 @@ See [manual requests](daemon-api.md#manual-requests) for capture and title examp
 ## Stop and restart
 
 Use Ctrl+C or send SIGTERM. Shutdown seals new application-handler admission (late arrivals receive `503`), pauses workers/timers and stops the listener, then joins registered handlers and the actual run/import lanes before closing the knowledge database and finally its execution-owner sidecar. Configured service resolution is inside the existing coalesced per-run flight, not an untracked preflight; a final worker/shared-resolver and import-driver join follows the handler drain. Each run's registered promise includes its serialized search-cleanup tail, so direct cleanup ticks and held cleanup RPCs also join before lease release. Retention retirement never drops those held lanes; the supervisor also joins its coalesced notification flight. A local purge committed after pause leaves durable pending metadata without starting another RPC. Pause prevents further cleanup RPCs; unfinished remote work stays durable pending. A listener-stop error does not skip those joins: any surviving listener is sealed from database/application work. An unknown or still-pending local drain does not release ownership merely because a shutdown timeout passed. The lease's `release()` closes a resource; it does not fabricate a drain certificate.
+
+After handlers and normal worker/import work have joined, shutdown closes the private media service and validator, joining their file/subprocess activity, **then** closes the knowledge database and releases the lease. Partial startup uses the same cleanup order. Errors do not skip later cleanup attempts. Originals, marker identity, queued jobs, failed outcomes and unsettled native work remain retained across an orderly restart.
 
 The local driver yields between bounded work phases, cancels its timer before drain, and performs no further durable transition after pause. Local shutdown is not user Stop: it does not undo saved work or request native cancellation merely because the daemon is leaving. Restart reconciles existing identities and resumes eligible local imports. Repeated stop requests do not repeat closure; cleanup continues after individual errors and reports a sanitized failure/nonzero exit status when needed. Forced process death releases local OS locks, not remote admission uncertainty.
 
@@ -347,6 +375,8 @@ Other common checks:
 - Missing database path: set `THOUGHTLOOM_DB_PATH` to the intended location.
 - `Daemon startup failed: execution owner already held`: another runtime owns this database, including through another relative/symlink spelling. Stop/drain the actual owner; do not delete its sidecar or infer death from elapsed time.
 - Generic `Daemon startup failed`: check whether the port is occupied and the database directory is accessible. Unexpected exception text is intentionally not exposed.
+- Media startup refusal: verify the effective media directory, service UID/private modes and matching database/`store.json` pair; do not delete or regenerate identity to bypass it. Ensure `/usr/bin/prlimit` and the frozen validator dependencies are available for uploads.
+- Media `503 original-unavailable`: verify the retained original, permissions and configured byte limit; source metadata remains available. Media `422 unsupported-source-content` reports refused validation, including malformed formats or child resource/failure conditions, not a model result. Inspect sanitized diagnostics rather than logging file contents or paths.
 - Client `401`: the token is absent or does not match the running daemon; generating another token in a different shell does not update the daemon.
 
 Lifecycle and request boundaries emit attempt/outcome events. Do not add full configuration dumps or request bodies to logs to diagnose failures; they can contain credentials or thought content.

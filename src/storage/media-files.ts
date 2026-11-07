@@ -50,7 +50,7 @@ export interface MediaFiles {
 
 type FailureCode = "storage-closed" | "ownership-lost" | "invalid-input" | "source-too-large" | "invalid-media" |
   "source-exists" | "original-unavailable" | "admission-failed" | "storage-failed";
-class MediaFilesError extends Error {
+export class MediaFilesError extends Error {
   constructor(readonly code: FailureCode) { super(`Media file operation failed: ${code}`); }
 }
 function failure(error: unknown): MediaFilesError | MediaStoragePathError {

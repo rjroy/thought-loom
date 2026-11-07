@@ -7,7 +7,7 @@ tags: [thoughtloom, media-import, shared-filesystem, backend]
 
 # Retained media backend
 
-The product agreement is [Retained media import](../../context/media-import.md). Current schema, API, startup and testing contracts are maintained in `docs/`.
+The product agreement is [Retained media import](../../context/media-import.md). The daemon implements the user-only [media API](../../../docs/daemon-api.md#retained-media-import-and-source-inspection) and normal-worker path integration. Current [startup/backup](../../../docs/server-startup.md#retained-media-and-shared-filesystem) and [owned HTTP test](../../../docs/testing.md#media-import-http-workflow-checks) contracts describe its supported boundaries. The web media client is not implemented.
 
 ## Storage
 
@@ -19,9 +19,9 @@ A source is a `media-original` thought with source authorship and null text. Its
 
 The daemon and OpenCode must share the filesystem. OpenCode must be able to read the retained absolute paths using its existing trusted tools. File ownership and directory access must support that deployment requirement.
 
-Use normal Weave/Evolve execution. Initial source weaving receives the retained file path and exact clarification, or instructions to summarize the file when clarification is absent. OpenCode reads the file and makes its content available to the configured model. Thoughtloom does not transmit file bytes through a separate attachment protocol.
+Use normal Weave/Evolve execution. Initial source weaving receives the retained file path and exact clarification, or instructions to summarize the file when clarification is absent. OpenCode's trusted tools read the file and make its content available to the configured model.
 
-Scoped Weave/Evolve reads can supply a retained original's daemon-selected path when the source is eligible. Paths come from managed storage and source identity, never an arbitrary caller path. Reuse normal context, request validation, thought publication and run lifecycle controls. Do not require separate binary-observation receipts or media-specific conversation verification.
+Scoped Weave/Evolve reads can supply a retained original's daemon-selected path when the source is eligible. Paths come from managed storage and source identity, never an arbitrary caller path. Reuse normal context, request validation, thought publication and run lifecycle controls.
 
 Search, Agentic Export and Markdown segmentation gain no file-opening capability. Their existing restricted tool policies remain unchanged. Trusted native filesystem tools are not a sandbox; the application controls which eligible source paths it supplies.
 

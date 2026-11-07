@@ -10,7 +10,10 @@ import { createLogger, type Logger } from "../logging";
 import { AgentNotConfiguredError, type AgentService } from "../domain/agent";
 import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError } from "../domain/run";
 import { ImportConflictError, ImportForbiddenError, ImportNotFoundError, ImportPreservationError, type ImportInspectionRepository, type MarkdownImportRepository } from "../domain/markdown-import";
-import { createMarkdownImportRoutes, ImportHttpError } from "./markdown-import-routes";
+import { createMarkdownImportRoutes } from "./markdown-import-routes";
+import { ImportHttpError } from "./import-body";
+import { createMediaRoutes } from "./media-routes";
+import { MediaImportError, type MediaImports } from "../domain/media-import";
 import { createSearchSessionRoutes } from "./search-session-routes";
 import { object, SearchHttpError, type SearchEnv } from "./search-http";
 import { SearchConflictError, SearchForbiddenError, SearchNotFoundError, type SearchSessions } from "../domain/agentic-search";
@@ -38,6 +41,7 @@ export interface AppOptions {
   readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
+  readonly media?: { readonly commands: MediaImports; readonly maxBytes: number; readonly notify: () => void };
 }
 
 type AppEnv = SearchEnv;
@@ -93,6 +97,8 @@ function safePath(path: string): string {
   if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
   if (path === "/exports/agentic") return "/exports/agentic";
+  if (parts[1] === "imports" && parts[2] === "media") return "/imports/media" + (parts[3] === "by-key" ? "/by-key/:key" : "");
+  if (parts[1] === "media-sources") return "/media-sources" + (parts.length > 2 ? "/:id" : "") + (["raw","retry"].includes(parts[3] ?? "") ? "/" + parts[3] : "");
   if (path === "/import-namespaces") return "/import-namespaces";
   if (parts[1] === "imports" && parts[2] === "markdown") return "/imports/markdown" + (parts.length > 3 ? "/:id" : "") + (parts[4] === "files" ? "/files" + (parts.length > 5 ? "/:fileId" : "") : parts[4] === "seal" ? "/seal" : "");
   if (parts[1] === "import-sources") return "/import-sources" + (parts.length > 2 ? "/:id" : "") + (["parts","raw"].includes(parts[3] ?? "") ? "/" + parts[3] : "");
@@ -115,12 +121,21 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError || error instanceof SearchHttpError ? error.status :
       error instanceof AgentNotConfiguredError ? 503 :
+      error instanceof MediaImportError ? error.code === "invalid-media" ? 422 : 503 :
       error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError || error instanceof SearchConflictError ? 409 :
       error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError || error instanceof ImportForbiddenError || error instanceof SearchForbiddenError ? 403 :
       error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError || error instanceof SearchNotFoundError ? 404 :
       error instanceof ImportPreservationError && error.message.startsWith("Unsupported source") ? 422 :
       error instanceof ValidationError ? 400 : 500;
     if (status === 500) diagnostics.error("[daemon] request failed", { method: c.req.method, path: safePath(new URL(c.req.url).pathname) });
+    const mediaPath = safePath(new URL(c.req.url).pathname);
+    if (mediaPath.startsWith("/imports/media") || mediaPath.startsWith("/media-sources")) {
+      const code = error instanceof ImportHttpError ? error.code : error instanceof MediaImportError ? error.code === "invalid-media" ? "unsupported-source-content" : error.code :
+        error instanceof RunConflictError && error.message === "Media idempotency conflict" ? "idempotency-conflict" :
+        status === 409 ? "media-processing-conflict" : status === 400 ? "invalid-media-request" : status === 403 ? "forbidden" : status === 404 ? "not-found" : "media-request-failed";
+      return c.json({error:status === 400 ? "Bad request" : status === 403 ? "Forbidden" : status === 404 ? "Not found" : status === 409 ? "Conflict" :
+        status === 413 ? "Payload too large" : status === 415 ? "Unsupported media type" : status === 422 ? "Unsupported source" : status === 503 ? "Service unavailable" : "Internal server error",code},status);
+    }
     if (error instanceof ImportHttpError) return c.json({error:status===403 ? "Forbidden" : status===404 ? "Not found" : status===503 ? "Service unavailable" : "Bad request",code:error.code},status);
     if (error instanceof ImportConflictError) return c.json({error:"Conflict",code:error.message === "import-sealed" ? "import-sealed" : "idempotency-conflict"},status);
     if (error instanceof ImportPreservationError && status===422) return c.json({error:"Unsupported source",code:error.message === "Unsupported source content" ? "unsupported-source-content" : "unsupported-source-encoding"},status);
@@ -138,7 +153,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
-    if (event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
+    if (event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
@@ -152,6 +167,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   });
 
   if (options.imports) app.route("/",createMarkdownImportRoutes(options.imports.commands,options.imports.inspection,options.imports.maxBytes));
+  if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
 
   if (options.search) {

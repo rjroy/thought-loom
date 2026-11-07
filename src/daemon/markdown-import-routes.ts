@@ -1,18 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { Actor, ReadScope } from "../domain/rejection";
-import { uniqueKeys } from "../domain/run-protocol";
+import { ImportHttpError, invalidImport as bad, metadataLimit, multipartOverhead, multipartBoundary, multipart, readBytes, strictObject, utf8 } from "./import-body";
 import { importRequestKey, type ImportInspectionRepository, type ImportPage, type ImportPageCursor, type MarkdownImportRepository } from "../domain/markdown-import";
 
 type Env = { Variables: { actor: Actor } };
 type Ctx = Context<Env>;
-export class ImportHttpError extends Error {
-  constructor(readonly status: 400 | 403 | 404 | 413 | 415 | 503, readonly code: string) { super(code); }
-}
-const bad = (): never => { throw new ImportHttpError(400,"invalid-import-request"); };
 const invalidCursor = (): never => { throw new ImportHttpError(400,"invalid-cursor"); };
-const metadataLimit = 4096;
-const multipartOverhead = 65536;
 
 function params(c: Ctx, allowed: readonly string[]): URLSearchParams {
   const p = new URL(c.req.url).searchParams;
@@ -24,92 +18,9 @@ function key(c: Ctx): string {
   if (value === undefined) return bad();
   return importRequestKey(value);
 }
-function strictObject(text: string, allowed: readonly string[]): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(text);
-    uniqueKeys(text);
-    if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(name => !allowed.includes(name))) return bad();
-    return value as Record<string, unknown>;
-  } catch { return bad(); }
-}
-async function readBytes(request: Request, limit: number): Promise<Uint8Array> {
-  const reader = request.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let length = 0, complete = false;
-  try {
-    while (true) {
-      const item = await reader.read();
-      if (item.done) { complete = true; break; }
-      length += item.value.byteLength;
-      if (length > limit) throw new ImportHttpError(413,"source-too-large");
-      chunks.push(item.value);
-    }
-    const result = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) { result.set(chunk,offset); offset += chunk.length; }
-    return result;
-  } finally {
-    if (!complete) { try { await reader.cancel(); } catch { /* Request is already gone. */ } }
-    reader.releaseLock();
-  }
-}
-function utf8(bytes: Uint8Array): string {
-  try { return new TextDecoder("utf-8",{fatal:true}).decode(bytes); } catch { return bad(); }
-}
 async function jsonBody(c: Ctx, allowed: readonly string[]): Promise<Record<string,unknown>> {
   if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(c.req.header("content-type") ?? "")) throw new ImportHttpError(415,"unsupported-media-type");
   return strictObject(utf8(await readBytes(c.req.raw,metadataLimit)),allowed);
-}
-/** Parse only the two permitted parts, retaining metadata bytes for fatal UTF-8 decoding. */
-function multipart(bytes: Uint8Array, boundary: string): {metadata: string; metadataBytes: number; file: Uint8Array} {
-  const data=Buffer.from(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-  const marker=Buffer.from(`--${boundary}`), delimiter=Buffer.from(`\r\n--${boundary}`);
-  if (!data.subarray(0,marker.length).equals(marker)) return bad();
-  let position=marker.length, metadata: string|undefined, metadataBytes=0, file: Uint8Array|undefined;
-  while (true) {
-    if (data.subarray(position,position+2).equals(Buffer.from("--"))) {
-      position+=2;
-      if (position!==data.length && !(position+2===data.length && data.subarray(position).equals(Buffer.from("\r\n")))) return bad();
-      break;
-    }
-    if (!data.subarray(position,position+2).equals(Buffer.from("\r\n"))) return bad();
-    position+=2;
-    const endHeaders=data.indexOf("\r\n\r\n",position);
-    if (endHeaders<0 || endHeaders-position>multipartOverhead) return bad();
-    const headerBytes=data.subarray(position,endHeaders);
-    if (headerBytes.some(byte => byte<32 && byte!==13 && byte!==10 && byte!==9)) return bad();
-    const headers=new Map<string,string>();
-    for (const line of utf8(headerBytes).split("\r\n")) {
-      const match=/^([A-Za-z0-9-]+):[ \t]*(.*)$/.exec(line);
-      if (!match || !match[1] || match[2]===undefined) return bad();
-      const name=match[1].toLowerCase();
-      if (headers.has(name) || (name!=="content-disposition" && name!=="content-type")) return bad();
-      headers.set(name,match[2]);
-    }
-    const disposition=headers.get("content-disposition") ?? "";
-    const part=/^form-data;\s*name="(metadata|file)"(?:;\s*filename="(?:[^"\\\r\n]|\\["\\])*")?\s*$/i.exec(disposition);
-    if (!part) return bad();
-    const start=endHeaders+4;
-    let end=data.indexOf(delimiter,start);
-    while (end>=0) {
-      const suffix=data.subarray(end+delimiter.length,end+delimiter.length+2);
-      if (suffix.equals(Buffer.from("\r\n")) || suffix.equals(Buffer.from("--"))) break;
-      end=data.indexOf(delimiter,end+delimiter.length);
-    }
-    if (end<0) return bad();
-    if (part[1]==="metadata") {
-      if (metadata!==undefined || /;\s*filename=/i.test(disposition) || end-start>metadataLimit) return bad();
-      metadata=utf8(data.subarray(start,end));
-      metadataBytes=end-start;
-    } else if (part[1]==="file") {
-      if (file!==undefined) return bad();
-      file=data.subarray(start,end);
-    } else return bad();
-    position=end+2+marker.length;
-  }
-  if (metadata===undefined || file===undefined) return bad();
-  return {metadata,metadataBytes,file};
 }
 function inspection(c: Ctx, allowed: readonly string[] = []): ReadScope {
   const p = params(c,["scope",...allowed]);
@@ -173,9 +84,7 @@ export function createMarkdownImportRoutes(imports: MarkdownImportRepository, in
   });
   app.post("/imports/markdown/:id/files",gate,async c => {
     params(c,[]); const requestKey=key(c), contentType=c.req.header("content-type") ?? "";
-    const media=/^multipart\/form-data\s*;\s*boundary=(?:([A-Za-z0-9'()+_,.\/:=?-]{1,70})|"([A-Za-z0-9'()+_,.\/:=?-]{1,70})")\s*$/i.exec(contentType);
-    const boundary=media?.[1] ?? media?.[2];
-    if (!boundary) throw new ImportHttpError(415,"unsupported-media-type");
+    const boundary=multipartBoundary(contentType);
     if (receivers>=2) { c.header("retry-after","1"); throw new ImportHttpError(503,"receiver-busy"); }
     receivers++;
     try {

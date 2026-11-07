@@ -15,7 +15,7 @@ This is the product agreement for `thought-loom-dkx`. Current implementation con
 
 Reuse normal Weave/Evolve execution and its existing lifecycle controls. File contents are opened by OpenCode's trusted tools using the supplied path.
 
-The [backend design](../work/design/media-import.md) describes the file-path integration and daemon contracts. Implementation details and supported behavior are documented in `docs/`.
+The [backend design](../work/design/media-import.md) describes the file-path integration. The implemented user-only upload, receipt, source inspection/download and retry contracts are in the [daemon API](../../docs/daemon-api.md#retained-media-import-and-source-inspection); [startup](../../docs/server-startup.md#retained-media-and-shared-filesystem) covers shared paths, limits and paired backups. Media UI remains separate.
 
 ## Source and interpretation
 

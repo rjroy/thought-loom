@@ -1,6 +1,7 @@
 import { parseAgentConfig, validateAgentConfig, type AgentConfig } from "./agent-config";
 import { ConfigError } from "./config-error";
 import type { LogLevel } from "../logging";
+import { isAbsolute } from "node:path";
 export { ConfigError } from "./config-error";
 
 export interface DaemonConfig {
@@ -10,6 +11,8 @@ export interface DaemonConfig {
   readonly agent?: AgentConfig | null;
   readonly logLevel?: LogLevel;
   readonly importMaxBytes?: number;
+  readonly mediaDir?: string;
+  readonly mediaMaxBytes?: number;
 }
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
@@ -20,6 +23,8 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
   if (rawPort !== undefined && !/^\d+$/.test(rawPort)) throw new ConfigError(portDiagnostic);
   const rawImportMax = env.THOUGHTLOOM_IMPORT_MAX_BYTES;
   if (rawImportMax !== undefined && !/^\d+$/.test(rawImportMax)) throw new ConfigError("THOUGHTLOOM_IMPORT_MAX_BYTES must be a positive safe integer");
+  const rawMediaMax = env.THOUGHTLOOM_MEDIA_MAX_BYTES;
+  if (rawMediaMax !== undefined && !/^\d+$/.test(rawMediaMax)) throw new ConfigError("THOUGHTLOOM_MEDIA_MAX_BYTES must be a positive safe integer");
   const agent = parseAgentConfig(env);
   const config = {
     port: rawPort === undefined ? 3001 : Number(rawPort),
@@ -27,6 +32,8 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
     credentials: { user: env.THOUGHTLOOM_USER_TOKEN, ai: env.THOUGHTLOOM_AI_TOKEN },
     logLevel: env.THOUGHTLOOM_LOG_LEVEL,
     ...(rawImportMax === undefined ? {} : {importMaxBytes:Number(rawImportMax)}),
+    ...(rawMediaMax === undefined ? {} : {mediaMaxBytes:Number(rawMediaMax)}),
+    ...(env.THOUGHTLOOM_MEDIA_DIR === undefined ? {} : {mediaDir:env.THOUGHTLOOM_MEDIA_DIR}),
     ...(agent === null ? {} : {agent}),
   };
   return validateConfig(config);
@@ -59,5 +66,10 @@ export function validateConfig(input: unknown): DaemonConfig {
   if (level !== "error" && level !== "warning" && level !== "info" && level !== "verbose") throw new ConfigError("THOUGHTLOOM_LOG_LEVEL must be error, warning, info or verbose");
   const importMaxBytes = "importMaxBytes" in input ? input.importMaxBytes : undefined;
   if (importMaxBytes !== undefined && (typeof importMaxBytes !== "number" || !Number.isSafeInteger(importMaxBytes) || importMaxBytes < 1)) throw new ConfigError("THOUGHTLOOM_IMPORT_MAX_BYTES must be a positive safe integer");
-  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(importMaxBytes === undefined ? {} : {importMaxBytes}), ...(agent === null ? {} : {agent}) };
+  const mediaMaxBytes = "mediaMaxBytes" in input ? input.mediaMaxBytes : undefined;
+  if (mediaMaxBytes !== undefined && (typeof mediaMaxBytes !== "number" || !Number.isSafeInteger(mediaMaxBytes) || mediaMaxBytes < 1)) throw new ConfigError("THOUGHTLOOM_MEDIA_MAX_BYTES must be a positive safe integer");
+  const mediaDir = "mediaDir" in input ? input.mediaDir : undefined;
+  if (mediaDir !== undefined && (typeof mediaDir !== "string" || !isAbsolute(mediaDir) || mediaDir.includes("\0"))) throw new ConfigError("THOUGHTLOOM_MEDIA_DIR must be an absolute directory path");
+  return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(importMaxBytes === undefined ? {} : {importMaxBytes}),
+    ...(mediaMaxBytes === undefined ? {} : {mediaMaxBytes}), ...(mediaDir === undefined ? {} : {mediaDir}), ...(agent === null ? {} : {agent}) };
 }

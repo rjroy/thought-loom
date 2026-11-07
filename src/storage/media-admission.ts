@@ -64,6 +64,22 @@ export class SqliteMediaAdmissions {
     if (!thought || thought.kind !== "media-original") throw new RunConflictError("Retained media root is unavailable");
     return thought;
   }
+  byKey(actor: Actor, requestKey: string): MediaSourceAdmission | null {
+    if (actor !== "user") throw new RunForbiddenError("Media receipts are user-only");
+    const key = importRequestKey(requestKey);
+    return this.db.transaction(() => {
+      const source = this.db.query<{sourceId:string;thoughtId:string},[string]>(
+        "SELECT id AS sourceId,source_thought_id AS thoughtId FROM media_sources WHERE request_key=?").get(key);
+      return source ? this.initial(source) : null;
+    })();
+  }
+  private initial(source: {readonly thoughtId: string; readonly sourceId: string}): MediaSourceAdmission {
+    const row = this.db.query<{id:string},[string,string]>(
+      "SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=?").get(source.thoughtId,`media-import:${source.sourceId}`);
+    const run = row ? readRun(this.db,row.id) : null;
+    if (!run) throw new RunConflictError("Media source has no initial admission");
+    return {thought:this.sourceThought(source.thoughtId),run,replayed:true};
+  }
   private replay(existing: RetainedSource, input: MediaSourceWrite): MediaSourceAdmission {
     const source = input.thought.mediaSource;
     // IDs and creation times are daemon allocations, not the upload payload. Titles are independently editable metadata.
@@ -71,20 +87,21 @@ export class SqliteMediaAdmissions {
         existing.clarification !== source.clarification || !equalBytes(existing.sha256,input.sha256)) {
       throw new RunConflictError("Media idempotency conflict");
     }
-    const row = this.db.query<{id:string},[string,string]>(
-      "SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=?").get(existing.thoughtId,`media-import:${existing.sourceId}`);
-    const run = row ? readRun(this.db,row.id) : null;
-    if (!run) throw new RunConflictError("Media source has no initial admission");
-    return {thought:this.sourceThought(existing.thoughtId),run,replayed:true};
+    return this.initial(existing);
   }
   /** A deliberate user retry reuses the retained source, never an unknown active native outcome. */
   retry(actor: Actor, sourceId: string, requestKey: string): RunRecord {
+    return this.retryAdmission(actor,sourceId,requestKey).run;
+  }
+  retryAdmission(actor: Actor, sourceId: string, requestKey: string): {readonly run: RunRecord; readonly replayed: boolean} {
     if (actor !== "user") throw new RunForbiddenError("Media retry is user-only");
     const key = importRequestKey(requestKey);
     return immediate(this.db,() => {
       const source = this.db.query<{thoughtId:string},[string]>("SELECT source_thought_id AS thoughtId FROM media_sources WHERE id=?").get(sourceId);
       if (!source) throw new RunConflictError("Retained source is unavailable");
-      return admitWeave(this.db,this.sources,{subjectId:source.thoughtId,triggerId:`media-retry:${sourceId}:${key}`});
+      const triggerId = `media-retry:${sourceId}:${key}`;
+      const replayed = this.db.query("SELECT 1 FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=?").get(source.thoughtId,triggerId) !== null;
+      return {run:admitWeave(this.db,this.sources,{subjectId:source.thoughtId,triggerId}),replayed};
     });
   }
 }
