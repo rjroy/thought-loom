@@ -31,6 +31,7 @@ async function createFixture(temp: string): Promise<string> {
     "package.json", "bun.lock", "tsconfig.json", "src/logging.ts",
     "apps/web/package.json", "apps/web/tsconfig.json", "apps/web/next.config.ts",
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
+    "apps/web/public/backgrounds/explore-clearing.png",
     "apps/web/public/glyphs/lantern.svg", "apps/web/public/glyphs/sprout.svg",
     "apps/web/public/glyphs/captured-original.svg", "apps/web/public/glyphs/user-contribution.svg", "apps/web/public/glyphs/ai-interpretation.svg",
     "apps/web/public/glyphs/developing-idea.svg", "apps/web/public/glyphs/imported-original.svg", "apps/web/public/glyphs/full-reply.svg",

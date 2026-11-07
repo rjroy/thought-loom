@@ -1,0 +1,36 @@
+{
+  "status": "production-derivative-candidate-not-integrated",
+  "source": "source.png",
+  "sourceSha256": "73dca3c3d76b1f0731d3a3a9339eb4a73138ae0d25c846edfc3d676cad9d44ec",
+  "sourceDimensions": [
+    2172,
+    724
+  ],
+  "recipeSha256": "571f1ad426782451ea1c8799500cb0b5150e5e3ce24c645347a2cc4a214571ba",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "operation": "Color-derived alpha matte, retained RGB unchanged before resampling; no repainting or contour masks",
+  "matte": {
+    "backdropRgb": [
+      2,
+      30,
+      35
+    ],
+    "innerDistance": 12,
+    "outerDistance": 36,
+    "sourceAlphaCounts": {
+      "transparent": 1377247,
+      "partial": 34706,
+      "opaque": 160575
+    }
+  },
+  "output": "lantern-clearing.png",
+  "outputDimensions": [
+    1122,
+    374
+  ],
+  "outputSha256": "8e1d4900bb7f0b465d4d80c63be61352556cccbfcdc4df4c122bf8e05490abfd",
+  "outputBytes": 120186,
+  "resampling": "Lanczos",
+  "consumer": "Initial Explore only; 560px image width, desktop 560x168 crop and narrow left-bottom crop; existing frame-edge fade remains a consumer presentation, not baked twice",
+  "reproducibility": "Two complete independent passes from packaged approved source; byte-identical PNG and report"
+}

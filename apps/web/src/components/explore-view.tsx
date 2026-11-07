@@ -392,6 +392,13 @@ export function ExploreView() {
               </select>
             </label>
           </div>
+          {view.phase === "initial" && !view.validation && (
+            <div className={styles.clearing} aria-hidden="true">
+              <Image src="/backgrounds/explore-clearing.png" alt="" aria-hidden="true"
+                width={1122} height={374} unoptimized loading="eager" draggable={false}
+                className={styles.clearingImage} />
+            </div>
+          )}
           {view.phase === "error" && (
             <button className={`${styles.button} ${styles.primary}`} type="button"
               onClick={() => void runSearch(current.current.query)}>Retry search</button>
