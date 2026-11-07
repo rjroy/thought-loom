@@ -1,0 +1,148 @@
+{
+  "status": "exact-motion-approved-integrated-r1-noscript-reduced-motion-repair-pending-independent-verification",
+  "authorization": "User first authorized Make the motion study using existing supplied artwork, then explicitly selected Approve and implement for the exact2.4s desktop/phone study, framing/dissolve, real Explore root-only navigation and Skip/Escape/reduced-motion. Mechanical preparation and runtime integration authorized; no new art generation.",
+  "mode": "Experience arrival leading to existing Operate Explore; established Quiet Night identity remains unchanged",
+  "brief": "0\u2013150ms still scene;150\u20131350ms overlapping peripheral sprouts/connections;1150\u20131650ms central plant last;1650\u20131950ms complete hold;1950\u20132400ms scene dissolve into current Explore reference. Skip immediately/Escape; reduced motion immediate Explore. Phone contains whole art, Skip outside it.",
+  "inputFiles": {
+    "tmp/brand-imagery-demo.html": {
+      "bytes": 1017459,
+      "sha256": "12efd838e5d28578ad909a6b84a92b2324d4aded45d843b19ed22a2a51de5db3"
+    },
+    "tmp/brand-imagery.svg": {
+      "bytes": 5765057,
+      "sha256": "64d9990f7e187b8951a417222a4eb7ada60fe59c7883471b98cac96fcbd28dbe"
+    },
+    "tmp/brand-imagery-demo-build.py": {
+      "bytes": 5334,
+      "sha256": "7e6927d7e52750fca164f560dd7ef34d32691670aa33ed39095bf8249be885a9"
+    }
+  },
+  "sourceLayers": {
+    "clean-plate": {
+      "bytes": 640898,
+      "sha256": "1ce48ed5c1ec9547fc8c6167818a666a3ffe00ca4c4501ef9e0d8b516f8a6192",
+      "retained": "byte-identical base64 image payload inside study.html"
+    },
+    "original-art": {
+      "bytes": 114906,
+      "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8",
+      "retained": "byte-identical base64 image payload inside study.html"
+    }
+  },
+  "mechanicalReuse": "Exact supplied embedded WebP payloads and reveal geometry preserved in immutable study. Assembly added a redundant identical initial mask attribute already present in supplied HTML; browsers accept it. Strict XML production extraction normalizes only that identical redundancy in memory, with a controlled regression test. Source study and user files are never rewritten. Only timing metadata is retargeted in the extracted reveal assembly reference.",
+  "sourceArtNotUsed": "tmp/brand-imagery.svg is a 5.8MB static tracing with 14,089 paths, not the animation source.",
+  "reference": {
+    "baseCommit": "f04f2fac964dd05a5f587a9bec0f9cf0dea3483a",
+    "currentCommit": "de0e7d64b1f15efb6e33cecac5c0fffece585558",
+    "freshness": "git diff f04f2fa..de0e7d6 changes only Capture page/CSS/canopy public art under apps/web/src and apps/web/public. Existing Explore actual-client captures therefore remain relevant.",
+    "sha256": {
+      "apps/web/src/app/globals.css": "4f8b81305b713bc40feee5c4d0dcbd4cd8330154cca26ea1f800cfc782d97e28",
+      "apps/web/src/app/layout.tsx": "f57647844ffa10883ce34bcc38e120b1d463024d6c11f8b7ccc08e77b0a0a365",
+      "apps/web/src/components/explore-view.tsx": "89d2abac48ea9b7c0e98d0ea2a819c29b452e15ee8f86360050e25e9e34c2b2c",
+      "apps/web/src/components/explore.module.css": "84a34ff33d5be26d3d065b456d5a4ce1f3972af1c17cdfc5c2d60062845457b0",
+      "apps/web/public/backgrounds/explore-clearing.png": "8e1d4900bb7f0b465d4d80c63be61352556cccbfcdc4df4c122bf8e05490abfd",
+      "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c",
+      ".impeccable/candidates/explore-clearing/review/runtime-desktop.png": "d0f6f5ad95dac874be202a87b588f573341aece27e90addb30ed9f51191a09f1",
+      ".impeccable/candidates/explore-clearing/review/runtime-phone.png": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+    }
+  },
+  "dependencies": "Existing locally installed Playwright and /usr/bin/chromium for inspection only. Bundled Source Sans 3 and existing Explore screenshots referenced relatively, not duplicated. No network or app/daemon service required.",
+  "limitations": [
+    "Approved standalone study uses screenshot Explore reference; actual runtime uses one real Explore presentation instead.",
+    "Selected actual-client captures predate shell-containing-block correction and do not validate corrected sticky navigation.",
+    "Independent final full foundation and fresh review pending after source correction; no final runtime green or user acceptance claimed.",
+    "In-flight remembered-search resume not covered by completed-search warm fixture.",
+    "No new generation, heavy tracing promotion, original/study edits or broader UI redesign."
+  ],
+  "validation": {
+    "status": "Historical approved standalone study validation; user has since approved exact comp and authorized runtime implementation. Actual-client validation is recorded separately under runtime.",
+    "receipt": "review/checks.json",
+    "studySha256": "4bf00c2ef8d646535449b2ff6e424126258c26b470aad21ac1147376d4780fec",
+    "uninterruptedElapsedMs": {
+      "desktop": 2408.8999999910593,
+      "phone": 2410.7000000029802
+    },
+    "integrity": "Both embedded WebP payloads and complete supplied inline SVG geometry verified byte-identical after accounting for the one recorded initial mask attribute. All supplied original files and referenced current UI inputs remain hash-identical.",
+    "detector": "impeccable detect --json study.html index.html: exit0, zero findings",
+    "reviewPage": "1600px and390px checks passed: two scaled native-size previews, Replay, no overflow, no external requests or script errors. Scratch inspection evidence remains under .lore/local/whimsy-backgrounds/splash-discovery."
+  },
+  "production": {
+    "status": "designer-reviewed-promoted-byte-identically",
+    "recipe": "build.py",
+    "receipt": "production/receipt.json",
+    "inputs": [
+      "production/splash-landscape.webp",
+      "production/splash-complete.webp",
+      "production/reveal.svg"
+    ],
+    "sourceStudySha256": "4bf00c2ef8d646535449b2ff6e424126258c26b470aad21ac1147376d4780fec",
+    "visualReview": "Both exact extracted native1536x1024 WebPs opened; intended display/framing retained. Byte identity implies pixel identity. Actual runtime completed-scene crops match approved study with zero differing pixels desktop+phone.",
+    "controlledTests": "6 passed with test-owned data/markup/ranges; read-only actual-package verification separately passed."
+  },
+  "runtime": {
+    "status": "r1-first-bounded-production-repair-authored-typecheck-static-browser-sanity-passed-independent-runtime-verification-pending",
+    "evidence": [
+      "review/runtime-desktop.png",
+      "review/runtime-desktop-dissolve.png",
+      "review/runtime-phone.png",
+      "review/runtime-phone-dissolve.png"
+    ],
+    "receipt": "review/runtime-checks.json",
+    "sourceLocation": "apps/web/src/components/root-splash.tsx and matching scene/shell/CSS; root page + shared-shell guard; explicit read-only Explore presentation mode",
+    "publicUrls": [
+      "/backgrounds/splash-landscape.webp",
+      "/backgrounds/splash-complete.webp"
+    ],
+    "behavior": "Root-only SSR-covered/inert arrival; one real remembered-or-initial Explore presentation under fixed approved scene; read-only saved-scroll alignment after layout readiness; replace destination after approved fade or bypass; no screenshot, persistence or duplicate search during presentation.",
+    "diagnosis": "Designer initially misclassified auto-scroll overwriting remembered state as setup-only. Independent existing Explore viewport assertion exposed the production header-only wrapper restricting sticky containment. First production correction removes extra layout box via Fragment and guards existing skip/header directly; no restoration-algorithm repair or behavioral-test edit by Designer.",
+    "shellCorrection": {
+      "sourceSha256": {
+        "apps/web/src/app/layout.tsx": "5ee5e2cae6e2447ac4daa1bebbb95fc00fa72a3abb075fb99a8c42b78aa7c5b4",
+        "apps/web/src/components/root-splash-shell.tsx": "dfffb2a4df6cf51043e317e472a6b18941a18b2e42a775084babded7ef3d8c1d"
+      },
+      "reason": "Preserve original body-level header geometry/sticky containing block while retaining root-only SSR hidden/inert state and dissolve visibility.",
+      "validation": "Typecheck/static checks follow; independent final full runtime and fresh review pending. Selected actual captures predate this correction."
+    },
+    "r1Correction": {
+      "finding": "R1: reduced-motion overlay display:none also hid its nested noscript Open Explore link; with JavaScript disabled the bypass could not run.",
+      "red": "Parent reported independent expanded-test RED: THOUGHTLOOM_TEST_ROOT_SPLASH=1 bun --no-env-file run web:test:runtime exit1 at root-splash.runtime.ts176 missing visible Explore link; /tmp/opencode/root-splash-nojs-reduced-red.log.",
+      "firstRepair": "One noscript-only style addition: [data-root-splash] .<CSS-module-overlay-class> { display:grid; }. Its greater specificity keeps the static surface/link visible with scripts disabled under either motion preference. JS-enabled noscript content is not applied; existing reduced-motion CSS and immediate navigation remain unchanged.",
+      "source": "apps/web/src/components/root-splash.tsx",
+      "sourceSha256": "49407f59e916038163e9546fbe6c78055aa59720e9efc14c533c6bdb9db8884e",
+      "unchanged": "Approved study/originals, artwork bytes, masks, timeline, root-only shell, history behavior and behavioral tests. No CSS-module media-rule change, dependencies or generation.",
+      "authorValidation": {
+        "typecheck": "bun --no-env-file run web:typecheck passed",
+        "sanityKind": "Isolated CSS/noscript browser sanity using actual CSS and authored noscript rule; not Next runtime verification",
+        "sanityStatus": "passed",
+        "cases": [
+          {
+            "javaScriptEnabled": true,
+            "reducedMotion": "no-preference",
+            "display": "grid",
+            "keyboardNavigation": null
+          },
+          {
+            "javaScriptEnabled": true,
+            "reducedMotion": "reduce",
+            "display": "none",
+            "keyboardNavigation": null
+          },
+          {
+            "javaScriptEnabled": false,
+            "reducedMotion": "no-preference",
+            "display": "grid",
+            "keyboardNavigation": "passed"
+          },
+          {
+            "javaScriptEnabled": false,
+            "reducedMotion": "reduce",
+            "display": "grid",
+            "keyboardNavigation": "passed"
+          }
+        ],
+        "scratchReceipt": ".lore/local/whimsy-backgrounds/splash-runtime/r1-noscript-sanity.json"
+      },
+      "pending": "Independent focused Next runtime/regression execution and fresh reviewer verification. No author Next build or final runtime-green claim."
+    }
+  }
+}

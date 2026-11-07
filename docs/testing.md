@@ -153,6 +153,8 @@ The import runtime companion exercises the Capture entry and retained draft, sel
 
 The runtime harness copies an explicit allowlist of current working-tree application/configuration files into an owned temporary workspace, installs the frozen root lock there with lifecycle scripts disabled, and builds and starts there with test-owned configuration. Dependencies resolve inside that workspace, not through links to the working tree. Generated `next-env.d.ts` and `.next` files are created by the fixture build, not copied or required from an earlier working-tree build. It excludes personal `.env` files and databases; do not remove personal configuration to run the checks. Update the source allowlist when adding runtime inputs so the fixture continues to represent the application. Bun's environment-file flag does not disable Next.js's independent application environment loading.
 
+For the focused root intro browser checks, run `THOUGHTLOOM_TEST_ROOT_SPLASH=1 bun --no-env-file run web:test:runtime`. These use the same owned build and desktop/phone Chromium contexts. They exercise root lifecycle, actual history replacement, Skip/Escape cleanup, reduced motion, a no-JavaScript link, direct Explore/deep-link bypass and blank-search request absence; they do not certify visual timing, artwork integrity, screen readers or physical devices.
+
 Header navigation checks locate the contextual Back control inside the banner, verify its destination-specific accessible name, hover/keyboard-focus tooltip, target and focus treatment, and reject duplicate content-area return links. Idea returns to the previous viewed thought when available, otherwise validated Explore results with query and scroll intact. Evolve/Export retain their contextual destinations and mounted workspace state; root Explore/Capture do not inherit a stale arrow. Parent-title navigation and Export's internal Back to setup remain separate content actions. Both browser source-copy allowlists include the shared contextual-back component.
 
 Browser checks cover the shared foundation, Capture, Explore, Idea, Evolve and Export. The owned fake daemon exercises actual server-side authentication, forbidden-origin rejection before upstream writes, canonical capture receipts, pending double-click suppression, definite denial and deliberate retry, uncertain outcomes without automatic repost, explicit duplicate intent, retained snapshots, and clear-after-success. Controlled `web-capture` unit tests separately cover malformed receipts, failed transport, forbidden caller metadata, optional titles and snapshot copying. Owned HTTP transport tests exercise timeout, redirect denial and redaction. Screenshots alone establish neither API behavior nor complete accessibility compliance.
@@ -203,6 +205,27 @@ The Export companion exercises independent methods, contextual normal-scope root
 The Idea metadata check requires About to share the existing desktop action row while allowing narrow wrapping. It exercises the disclosure's expanded state, keyboard activation and retained focus, then checks the existing metadata inside that disclosure rather than matching repeated source IDs elsewhere on the page. Opening About must not alter the selected thought or add a metadata-fetch operation. Resting-state checks require Edit title, Full reply, About and More actions to remain native buttons with underlined text using the existing link-color token, distinct from focal thought text.
 
 For a focused Explore browser check, run `THOUGHTLOOM_TEST_EXPLORE=1 bun --no-env-file run web:test:runtime`. It includes imported-source authorship and material filters, their counts, query forwarding and bookmark restoration, using test-owned search results. This focused mode does not replace the complete runtime check.
+
+### Root splash checks
+
+The user-approved root intro has a [source-preserving package](../.impeccable/candidates/root-splash/README.md). Its two public WebPs are byte-identical extractions from the immutable approved study; no image encoder, generator, heavy tracing or screenshot is used in the runtime. Explicit mechanical checks are:
+
+```sh
+python3 -B .impeccable/candidates/root-splash/build.py --verify
+python3 -B -m unittest discover -s .impeccable/candidates/root-splash -p 'test_build.py' -v
+```
+
+The six helper tests own their payloads, XML and numeric ranges; actual artwork identity and retimed mask assembly are separately verified by the read-only package check. Both production-browser harness allowlists include only the two promoted WebPs and the four new root-splash component/CSS inputs, not the authoring/review package.
+
+Run the focused actual-client boundary through:
+
+```sh
+THOUGHTLOOM_TEST_ROOT_SPLASH=1 bun --no-env-file run web:test:runtime
+```
+
+`root-splash.runtime.ts` exercises ordinary root completion, served artwork byte/hash identity, keyboard isolation, history replacement, explicit-root replay, Skip/Escape and stale-handler cleanup, direct-route bypass, reduced-motion/no-script entry and each artwork failure. No-script entry is checked under both default and reduced motion: Open Explore must be visible, reachable by Tab and usable with Enter. The JavaScript-enabled reduced-motion path separately requires immediate navigation without the intro delay. Its warm-provider regression preserves remembered query/results/expansion and saved scroll without a repeated completed search or premature root URL change. Ordinary Explore keeps its sticky header available while reading: real-user Capture navigation must begin with the link fully in view and must not move the saved reading position. Programmatic activation after scrolling can mask a broken sticky containing block and is not a substitute for that navigation contract. In-flight remembered-search resumption is not established by the completed-search fixture. The focused mode uses the existing isolated production build/fake daemon and default desktop/narrow viewports; it is not a standalone HTML test, operator service, physical-device, software-keyboard or screen-reader certification.
+
+The designer's exact-frame/actual-playback static study checks remain separate from actual runtime evidence. Runtime visual inspection covers the real opaque overlay, completed scene, dissolve, SSR route-aware hidden/inert shell and the actual Explore destination at 1440 × 900 and 390 × 844. Completed-art crops match the approved study with zero differing pixels. Selected captures predate the shell-containing-block correction and do not replace full sticky-navigation regression checks. A green command must be recorded after independent final execution; art/motion evidence alone does not establish full-suite green or preserved ordinary header behavior.
 
 ### Conversational search client checks
 

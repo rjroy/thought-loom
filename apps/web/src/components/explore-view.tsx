@@ -70,10 +70,19 @@ function relationship(result: SearchResult): string {
   }
 }
 
-export function ExploreView() {
+export function ExploreView({ presentationOnly = false }: { presentationOnly?: boolean } = {}) {
   const params = useSearchParams().toString();
   const memory = useExploreMemory();
-  const [view, setView] = useState<ExploreState>(emptyState);
+  const [view, setView] = useState<ExploreState>(() => {
+    const saved = memory.current;
+    if (presentationOnly) return saved?.state ?? emptyState();
+    const decoded = decodeSearchQuery(new URLSearchParams(params));
+    const returning = params === "" && saved?.state.query.q.trim();
+    const matching = decoded && saved && queryUrl(decoded) === saved.url && queryUrl(saved.state.query) === saved.url;
+    return saved && (returning || matching)
+      ? { ...saved.state, query: decoded ?? saved.state.query, validation: returning ? saved.state.validation : null }
+      : emptyState();
+  });
   const current = useRef(view);
   const lastUrl = useRef("/explore");
   const handledUrl = useRef<string | null>(null);
@@ -88,10 +97,11 @@ export function ExploreView() {
   const queryField = useRef<HTMLInputElement>(null);
 
   const commit = useCallback((next: ExploreState) => {
+    if (presentationOnly) return;
     current.current = next;
     setView(next);
     memory.current = { state: next, url: lastUrl.current, scrollY: scrollY.current };
-  }, [memory]);
+  }, [memory, presentationOnly]);
 
   const runSearch = useCallback(async (query: SearchQuery, options: {
     updateUrl?: boolean;
@@ -137,6 +147,7 @@ export function ExploreView() {
   }, [commit]);
 
   useLayoutEffect(() => {
+    if (presentationOnly) return;
     alive.current = true;
     const rememberScroll = () => {
       // Do not record Next's incoming-route scroll reset as a reading position.
@@ -151,9 +162,10 @@ export function ExploreView() {
       request.current?.abort();
       window.removeEventListener("scroll", rememberScroll);
     };
-  }, [memory]);
+  }, [memory, presentationOnly]);
 
   useEffect(() => {
+    if (presentationOnly) return;
     if (handledUrl.current === params) return;
     handledUrl.current = params;
     const decoded = decodeSearchQuery(new URLSearchParams(params));
@@ -187,9 +199,21 @@ export function ExploreView() {
         validation: params ? "link" : null,
       });
     }
-  }, [params, memory, commit, runSearch]);
+  }, [params, memory, commit, runSearch, presentationOnly]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (presentationOnly) {
+      // Align only after fonts/layout settle under the still-opaque fixed intro.
+      // This snapshot never installs scroll listeners or writes shared memory.
+      let active = true;
+      let frame = 0;
+      void document.fonts.ready.then(() => {
+        if (active) frame = requestAnimationFrame(() => {
+          if (active && memory.current) window.scrollTo(0, memory.current.scrollY);
+        });
+      });
+      return () => { active = false; cancelAnimationFrame(frame); };
+    }
     if (restoreScroll.current === null || view.phase === "loading") return;
     const y = restoreScroll.current;
     const frame = requestAnimationFrame(() => {
@@ -201,7 +225,7 @@ export function ExploreView() {
       restoreScroll.current = null;
     });
     return () => cancelAnimationFrame(frame);
-  }, [view, memory]);
+  }, [view, memory, presentationOnly]);
 
   useEffect(() => {
     if (filtersOpen) filterHeading.current?.focus();

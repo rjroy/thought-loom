@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
+import { checkRootSplash } from "./root-splash.runtime";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
@@ -33,6 +34,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf", "apps/web/public/fonts/OFL.txt",
     "apps/web/public/backgrounds/explore-clearing.png",
     "apps/web/public/backgrounds/capture-canopy.png",
+    "apps/web/public/backgrounds/splash-landscape.webp", "apps/web/public/backgrounds/splash-complete.webp",
     "apps/web/public/glyphs/lantern.svg", "apps/web/public/glyphs/sprout.svg",
     "apps/web/public/glyphs/captured-original.svg", "apps/web/public/glyphs/user-contribution.svg", "apps/web/public/glyphs/ai-interpretation.svg",
     "apps/web/public/glyphs/developing-idea.svg", "apps/web/public/glyphs/imported-original.svg", "apps/web/public/glyphs/full-reply.svg",
@@ -40,6 +42,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/components/content-glyph.tsx", "apps/web/src/components/content-glyph.module.css",
     "apps/web/src/proxy.ts", "apps/web/src/components/primary-navigation.tsx", "apps/web/src/components/contextual-back.tsx", "apps/web/src/components/capture-form.tsx",
     "apps/web/src/components/explore-view.tsx", "apps/web/src/components/explore-provider.tsx", "apps/web/src/components/explore.module.css",
+    "apps/web/src/components/root-splash.tsx", "apps/web/src/components/root-splash-scene.tsx", "apps/web/src/components/root-splash-shell.tsx", "apps/web/src/components/root-splash.module.css",
     "apps/web/src/components/agentic-search-provider.tsx", "apps/web/src/features/agentic-search/types.ts", "apps/web/src/features/agentic-search/request.ts", "apps/web/src/features/agentic-search/location.ts", "apps/web/src/features/agentic-search/controller.ts",
     "apps/web/src/components/agentic-search-view.tsx", "apps/web/src/components/agentic-search-sessions.tsx", "apps/web/src/components/agentic-search-content.tsx", "apps/web/src/components/agentic-search.module.css",
     "apps/web/src/app/explore/ask/page.tsx", "apps/web/src/app/explore/ask/saved/page.tsx", "apps/web/src/app/explore/ask/[id]/page.tsx", "apps/web/src/app/explore/ask/[id]/history/page.tsx",
@@ -174,7 +177,7 @@ async function checkDevQueryPrivacy(fixtureWeb: string, env: NodeJS.ProcessEnv, 
   await new Promise<void>(resolveListen => reservation.listen(0, "127.0.0.1", resolveListen));
   const port = (reservation.address() as AddressInfo).port;
   await new Promise<void>((resolveClose, reject) => reservation.close(error => error ? reject(error) : resolveClose()));
-  const origin = `http://127.0.0.1:${port}`;
+    const origin = `http://127.0.0.1:${port}`;
   const child = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], {
     ...env, NODE_ENV: "development", THOUGHTLOOM_WEB_ORIGIN: origin,
   });
@@ -268,6 +271,16 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    if (process.env.THOUGHTLOOM_TEST_ROOT_SPLASH === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          await checkRootSplash(browser, origin, viewport);
+        }
+      } finally { await browser.close(); }
+      console.log("Root splash runtime checks passed");
+      return;
+    }
     const glyphCase = process.env.THOUGHTLOOM_TEST_GLYPH_CASE;
     if (glyphCase) {
       assert.ok(["explore", "idea", "evolve"].includes(glyphCase), "Unknown focused glyph case");
@@ -370,6 +383,9 @@ async function main(): Promise<void> {
 
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     try {
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+        await checkRootSplash(browser, origin, viewport);
+      }
       for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
         const page = await browser.newPage({ viewport });
         const leaks: string[] = [];
