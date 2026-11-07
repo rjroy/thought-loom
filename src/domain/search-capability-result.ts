@@ -14,7 +14,7 @@ import { oneOf, record } from "./validation";
 const string = (input: unknown): string => searchString(input,"result field");
 const position = (input: unknown): number | null => input === null ? null : searchRevision(input);
 const authors = ["user","ai","source"] as const;
-const kinds = ["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original"] as const;
+const kinds = ["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original","media-original"] as const;
 function cursor(input: unknown): string | null {
   if (input === null) return null;
   const value = string(input);
@@ -72,7 +72,11 @@ export function readSearchCapabilityResult(request: SearchCapabilityRequest, inp
       case "readThought": {
         fields(data,["type","thought"]);
         if (data.type !== "thought") throw new RunConflictError();
-        if (data.thought !== null) fields(data.thought,["id","text","title","titleAuthor","author","kind","createdAt","origin","parentId","sourceIds"]);
+        if (data.thought !== null) {
+          const thought = record(data.thought);
+          fields(thought,["id","text","title","titleAuthor","author","kind","createdAt","origin","parentId","sourceIds", ...(thought.kind === "media-original" ? ["mediaSource"] : [])]);
+          if (thought.kind === "media-original") fields(thought.mediaSource,["id","name","mimeType","byteLength","fileAuthorship","clarification","clarificationAuthor"]);
+        }
         const thought = data.thought === null ? null : createThought(data.thought);
         if (thought && thought.id !== request.arguments.id) throw new RunConflictError();
         return { type: "thought", thought };

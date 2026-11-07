@@ -24,6 +24,14 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Media-source domain checks
+
+```sh
+bun --no-env-file test tests/domain.test.ts tests/simple-export.test.ts tests/agentic-export.test.ts
+```
+
+Controlled domain values cover the null-text `media-original` source, separately attributed exact user clarification, filename display fallback and honest export descriptors. Existing textual kinds must still reject null or blank text. These are domain/projection checks, not evidence of media persistence, file validation, upload routes, model attachment support or a browser import flow.
+
 ### Runtime execution-owner checks
 
 ```sh

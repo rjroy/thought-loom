@@ -48,11 +48,20 @@ describe("headless search contract", () => {
   test("filters OR within groups and AND across groups; option counts omit only their own group", () => fixture(({ service }) => {
     const page = service.query(user, "cobalt", { authors: ["user"], kinds: ["user-contribution", "developing-idea"], from: start, to: end });
     expect(page.results.map(result => result.id)).toEqual(["u2"]);
-    expect(page.counts).toEqual({ authors: { user: 1, ai: 3, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 } });
+    expect(page.counts).toEqual({ authors: { user: 1, ai: 3, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0, "media-original": 0 } });
     expect(Object.keys(page.counts).sort()).toEqual(["authors", "kinds"]);
     const either = service.query(user, "cobalt", { authors: ["user", "ai"], kinds: ["user-contribution", "developing-idea"], from: start, to: end });
     expect(either.results.map(result => result.id).sort()).toEqual(["a1", "r1", "r2", "u2"]);
     expect(service.query(user, "cobalt", { authors: ["user"] }).results.map(result => result.id).sort()).toEqual(["u1", "u2"]);
+  }));
+
+  test("accepts the media-original kind filter on a text-only library", () => fixture(({ service }) => {
+    const page = service.query(user, "cobalt", { kinds: ["media-original"] });
+    expect(page.results).toEqual([]);
+    expect(page.counts.authors).toEqual({ user: 0, ai: 0, source: 0 });
+    expect(page.counts.kinds["media-original"]).toBe(0);
+    // Kind facet counts omit the selected kind filter, retaining other matches.
+    expect(page.counts.kinds["captured-original"]).toBeGreaterThan(0);
   }));
 
   test("response matches have independent identity and AI authorship; target supplies kind and creation date", () => fixture(({ service }) => {
@@ -140,7 +149,7 @@ describe("search result recorded context", () => {
     for (const sort of ["newest", "oldest", "relevance"] as const) {
       const page = service.query(user, "nebula", { ...options, sort });
       expect(page.results.map(item => item.id)).toEqual(["ctx-target"]);
-      expect(page.counts).toEqual({ authors: { user: 1, ai: 0, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 } });
+      expect(page.counts).toEqual({ authors: { user: 1, ai: 0, source: 0 }, kinds: { "captured-original": 0, "user-contribution": 1, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0, "media-original": 0 } });
       expect(contextFor(page, "ctx-target")).toEqual(expected);
     }
     // A title hit alone is not an eligible matching neighbor.
@@ -225,6 +234,13 @@ describe("GET /search transport", () => {
         const combined = await request("/search?q=cobalt&author=user&author=ai&kind=captured-original&kind=developing-idea");
         expect(combined.status).toBe(200);
         expect((await combined.json()).results.map((item: { id: string }) => item.id).sort()).toEqual(["one", "two"]);
+        const media = await request("/search?q=cobalt&kind=media-original");
+        expect(media.status).toBe(200);
+        const mediaPage = await media.json();
+        expect(mediaPage.results).toEqual([]);
+        expect(mediaPage.counts.authors).toEqual({ user: 0, ai: 0, source: 0 });
+        expect(mediaPage.counts.kinds["media-original"]).toBe(0);
+        expect(mediaPage.counts.kinds["captured-original"]).toBeGreaterThan(0);
         for (const filter of ["author=source", "kind=imported-original", "author=source&kind=imported-original"]) {
           const imported = await request(`/search?q=cobalt&${filter}`);
           expect(imported.status).toBe(200);

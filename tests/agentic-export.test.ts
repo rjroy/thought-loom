@@ -14,10 +14,23 @@ import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { SqliteTitleRepository } from "../src/storage/title";
 import { TitleService } from "../src/domain/title";
 import { ValidationError } from "../src/domain/validation";
+import { exportSources, renderExportReport } from "../src/domain/agentic-export";
 
 const now = () => "2032-01-01T00:00:00Z";
 const native: NativeDispatcher = { submit: async () => {}, observe: async () => "running" };
 const envelope = (markdown: string, sourceThoughtIds: readonly string[]): ReportEnvelope => ({ version: 1, kind: "report", markdown, sourceThoughtIds });
+
+test("media citations retain source attribution and do not claim binary access", () => {
+  const sources = exportSources([{ id: "media-root", title: "Sketch.png", author: "source", kind: "media-original" }]);
+  expect(sources).toEqual([{ id: "media-root", title: "Sketch.png", author: "source", kind: "media-original" }]);
+  const report = renderExportReport("# Findings\n\nA recorded source.", sources);
+  expect(report).toContain("Sketch");
+  expect(report).toContain("media-original");
+  expect(report).toMatch(/thought author:\s*source/i);
+  expect(report).toMatch(/(?:descriptor|metadata)/i);
+  expect(report).toMatch(/(?:binary|file).*(?:not|no)|(?:not|no).*(?:binary|file)/i);
+  expect(() => exportSources([{ id: "media-root", title: "Sketch.png", author: "user", kind: "media-original" }])).toThrow(ValidationError);
+});
 function fixture(action: (f: ReturnType<typeof setup>, path: string) => void) {
   const dir = mkdtempSync(join("/tmp/opencode", "agentic-export-"));
   const path = join(dir, "owned.sqlite");

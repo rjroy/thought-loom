@@ -35,6 +35,8 @@ There is no title column in the current table. `BEFORE UPDATE` and `BEFORE DELET
 
 `source` and `imported-original` must occur together, with `origin='markdown-import'` and a null evolution parent. Supporting-source inserts are forbidden for imported originals; source membership is not `sourceIds`. All existing user/AI and non-import kind combinations remain valid. Ordinary `saveThought()` refuses imports instead of inferring a title author from `source`; the dedicated import writer owns their mapping and initial null titles. Later user/AI title edits and fills remain valid.
 
+The domain's planned-media variant does not change this SQLite schema yet. `media-original` has null text in the domain and is rejected by the ordinary storage writer. Media metadata tables, a thought-table migration and external retained files are separate implementation work, not existing database capabilities. See the [approved media design](../.lore/work/design/media-import.md).
+
 Thought writers bind UTF-8 bytes with `CAST(? AS TEXT)` rather than passing text directly as a Bun string parameter, which consumes an initial U+FEFF. This preserves recorded text even when a segment begins with U+FEFF somewhere other than the original file's initial BOM. Stored BLOB bytes and returned JavaScript text are separate validation boundaries. Migration preserves actual legacy stored bytes; it cannot infer characters already lost by an older write.
 
 ### `thought_titles`

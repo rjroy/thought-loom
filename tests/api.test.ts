@@ -185,7 +185,7 @@ describe("daemon API contract", () => {
 
   test("response reverse discovery preserves shared order, fallback associations and scope privacy", async () => {
     const base = new MemoryRepository().snapshot().thoughts[1];
-    if (!base) throw new Error("missing child fixture");
+    if (!base || base.kind === "media-original") throw new Error("missing text child fixture");
     const contribution: Thought = { ...base, id: "contribution", parentId: "root", author: "user", kind: "user-contribution", origin: "contribution", sourceIds: [] };
     const shared = { id: "shared", text: "shared addendum", role: "addendum", state: "complete", thoughtIds: ["sibling", "child", "grandchild"] } as const;
     const fallback = { id: "fallback", text: "fallback on contribution", role: "fallback", state: "interrupted", thoughtIds: ["contribution"] } as const;

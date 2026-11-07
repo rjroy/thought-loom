@@ -3,7 +3,7 @@ import { createApp, type BoundaryEvent } from "../src/daemon/app";
 import { CreationService } from "../src/domain/creation";
 import { ForbiddenActorError, RejectionService, type RejectionRepository, type RejectionSnapshot, type RejectionTransaction } from "../src/domain/rejection";
 import { SimpleExportNotFoundError, SimpleExportService, type SimpleExportRequest } from "../src/domain/simple-export";
-import type { Thought } from "../src/domain/thought";
+import { createThought, type Thought } from "../src/domain/thought";
 import { TitleService } from "../src/domain/title";
 import { ValidationError } from "../src/domain/validation";
 
@@ -48,6 +48,31 @@ function fixture() {
 const request = (count: number, traversal: "breadth" | "depth"): SimpleExportRequest => ({ rootId: "source-root", count, traversal });
 
 describe("Simple Markdown export", () => {
+  test.each([null, "  Look at the upper corner.\r\n  Keep this spacing.  "]) ("exports a media source honestly with clarification %p", clarification => {
+    const media = createThought({
+      id: "media-root", text: null, title: null, titleAuthor: null, author: "source", kind: "media-original",
+      createdAt: "2030-01-01", origin: "media-import", parentId: null, sourceIds: [],
+      mediaSource: { id: "file-1", name: "Sketch.png", mimeType: "image/png", byteLength: 123, fileAuthorship: "unverified", clarification, clarificationAuthor: clarification === null ? null : "user" },
+    });
+    const repository: RejectionRepository = {
+      snapshot: () => ({ thoughts: [media], connections: [], responses: [], rejectedThoughtIds: [], rejectedConnectionIds: [] }),
+      transaction: () => { throw new Error("Unexpected write"); },
+    };
+    const markdown = new SimpleExportService(new RejectionService(repository)).render("user", { rootId: "media-root", count: 1, traversal: "breadth" });
+    expect(markdown).toContain("## Sketch.png");
+    expect(markdown).toContain("image/png");
+    expect(markdown).toContain("123");
+    expect(markdown).toMatch(/author:\s*source/i);
+    expect(markdown).toMatch(/file authorship:\s*unverified/i);
+    expect(markdown).not.toMatch(/\bnull\b|undefined/i);
+    if (clarification !== null) {
+      expect(markdown).toContain(clarification);
+      expect(markdown).toMatch(/clarification[^\n]*user|user[^\n]*clarification/i);
+    } else {
+      expect(markdown).not.toMatch(/clarification[^\n]*user|user[^\n]*clarification/i);
+    }
+  });
+
   test("breadth and depth apply the count to active evolution thoughts, not links or rejected nodes", () => {
     const { repo, service } = fixture();
     const before = JSON.stringify(repo.snapshot());
@@ -59,7 +84,10 @@ describe("Simple Markdown export", () => {
       expect(result).not.toContain("Connected but outside evolution tree");
       expect(result).not.toContain("external connection secret");
       expect(result).not.toContain("Private full addendum not exported");
-      expect(thoughts.filter(item => item.id !== "source-hidden" && item.id !== "source-outside" && result.includes(item.text))).toHaveLength(4);
+      expect(thoughts.filter(item => {
+        if (item.kind === "media-original") throw new Error("expected text-only export fixture");
+        return item.id !== "source-hidden" && item.id !== "source-outside" && result.includes(item.text);
+      })).toHaveLength(4);
     }
     const breadthA = breadth.indexOf("First branch wording");
     const breadthB = breadth.indexOf("Second branch wording");

@@ -75,6 +75,60 @@ describe("thought data boundary", () => {
       { parentId: ["one", "two"] }, { sourceIds: "other" },
     ]) expect(() => createThought({ ...input, ...bad })).toThrow(ValidationError);
   });
+
+  const mediaSource = {
+    id: "media-1", name: "Sketch.png", mimeType: "image/png", byteLength: 123,
+    fileAuthorship: "unverified", clarification: null, clarificationAuthor: null,
+  } as const;
+  const media = {
+    ...input, text: null, titleAuthor: null, author: "source", kind: "media-original",
+    origin: "media-import", parentId: null, sourceIds: [], mediaSource,
+  } as const;
+
+  test("retains a media root without invented text and uses its filename as fallback", () => {
+    const thought = createThought(media);
+    expect(thought).toEqual(media);
+    expect(displayTitle(thought)).toBe("Sketch.png");
+    const titled = createThought({ ...media, title: "My title", titleAuthor: "user" });
+    expect(displayTitle(titled)).toBe("My title");
+  });
+
+  test("retains exact user clarification separately from unverified file authorship", () => {
+    const clarification = "  Please examine this\r\n  detail.  ";
+    const source = { ...mediaSource, clarification, clarificationAuthor: "user" };
+    const thought = createThought({ ...media, mediaSource: source });
+    expect(thought).toMatchObject({ text: null, author: "source", mediaSource: source });
+    source.clarification = "changed after construction";
+    expect(thought).toMatchObject({ mediaSource: { clarification, clarificationAuthor: "user", fileAuthorship: "unverified" } });
+  });
+
+  test.each([
+    ["text", { text: "invented content" }],
+    ["user authorship", { author: "user" }],
+    ["AI authorship", { author: "ai" }],
+    ["origin", { origin: "capture" }],
+    ["parent", { parentId: "parent" }],
+    ["supporting source", { sourceIds: ["support"] }],
+    ["missing descriptor", { mediaSource: undefined }],
+    ["empty descriptor id", { mediaSource: { ...mediaSource, id: "" } }],
+    ["empty filename", { mediaSource: { ...mediaSource, name: "" } }],
+    ["empty MIME", { mediaSource: { ...mediaSource, mimeType: "" } }],
+    ["zero byte length", { mediaSource: { ...mediaSource, byteLength: 0 } }],
+    ["unverified file authorship replaced", { mediaSource: { ...mediaSource, fileAuthorship: "user" } }],
+    ["blank clarification", { mediaSource: { ...mediaSource, clarification: " \n", clarificationAuthor: "user" } }],
+    ["unattributed clarification", { mediaSource: { ...mediaSource, clarification: "Look here", clarificationAuthor: null } }],
+    ["attributed absent clarification", { mediaSource: { ...mediaSource, clarificationAuthor: "user" } }],
+    ["AI clarification", { mediaSource: { ...mediaSource, clarification: "Look here", clarificationAuthor: "ai" } }],
+  ])("rejects media root with invalid %s", (_description, bad) => {
+    expect(() => createThought({ ...media, ...bad })).toThrow(ValidationError);
+  });
+
+  test("every existing text kind still rejects null and blank text", () => {
+    for (const kind of ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"] as const) {
+      const base = kind === "imported-original" ? imported : { ...input, kind };
+      for (const text of [null, "", " \n"]) expect(() => createThought({ ...base, text })).toThrow(ValidationError);
+    }
+  });
 });
 
 describe("connection data boundary", () => {

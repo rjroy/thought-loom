@@ -19,6 +19,7 @@ For product discussion, “note” is an umbrella term. Original source material
 
 - **Captured original:** what the user entered, with its date and provenance. This is a historical record, not text the AI may silently improve or replace.
 - **Imported original:** exact wording from an [imported source document](markdown-import.md), attributed as Imported source rather than automatically to the importer or AI. Original authorship is unverified; import does not imply endorsement.
+- **Media original:** an approved [media-import source](media-import.md), retaining an image or PDF outside SQLite. Its root has null thought text and source attribution; optional exact user clarification is separate, user-attributed metadata. This planned kind must not fabricate a textual original or claim that the importer authored the file.
 - **User contribution during development:** a question, challenge, or new thought entered in a discussion. Retain the user's actual words and the context in which they were contributed. Disagreement or correction is expressed as a new thought, not an edit to an existing one.
 - **AI interpretation:** an attributed reading of existing material. It is a hypothesis about meaning, not a replacement original or an assertion that the user agrees.
 - **Developing idea:** a retained thought emerging from interpretation or dialogue. It may be AI-authored or user-authored; kind and authorship are separate facts. Further development creates new thoughts, not new versions of this one.
@@ -45,13 +46,15 @@ Keep its identity, actual text, available title, authorship, creation date, and 
 
 The daemon generates the identity and creation timestamp when creating a thought and returns the created values in its response. Public callers must not need to generate these values.
 
-Imported originals additionally retain document membership and byte position as source metadata, not thought-supporting sources or evolution parents. Retained whole-document artifacts are user-only. The initial segmentation agent may read the submitted document for that operation; later agents cannot retrieve the retained artifact or use its metadata to bypass individual thought rejection.
+Markdown imported originals additionally retain document membership and byte position as source metadata, not thought-supporting sources or evolution parents. Their retained whole-document artifacts are user-only. The initial segmentation agent may read the submitted document for that operation; later agents cannot retrieve the retained artifact or use its metadata to bypass individual thought rejection. The separately agreed media-source policy permits Weave and Evolve to reopen eligible original media, without changing this Markdown exclusion.
 
 ## Editable title metadata
 
 Store titles separately from immutable thoughts, with one title-metadata record per thought rather than a general-purpose metadata system. Return the current title alongside the thought in the ordinary API response; clients should not need a separate request to assemble it.
 
 Capture normally has no title, though a user-supplied title is allowed. The weaver generates a title when a note has none. Until a title is available, its first five words provide the display label. Do not require a person to write a title before saving.
+
+The planned media-original kind has no thought text; its filename supplies the display fallback instead. Clearing its title invites title-only regeneration, not another initial interpretation.
 
 The user can edit or clear a note's title without changing its text, identity, authorship, creation time, or evolution ancestry, and without creating an evolution step. Track whether the current title is user-authored or AI-authored separately from the thought's authorship.
 

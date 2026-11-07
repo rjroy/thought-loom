@@ -73,7 +73,7 @@ test("a new descendant invalidates a preview and rejection is all-or-nothing", (
   seed(store);
   const preview = service.previewBranch("user", "child");
   const original = thoughts[1];
-  if (original === undefined) throw new Error("invalid test fixture");
+  if (original === undefined || original.kind === "media-original") throw new Error("invalid text test fixture");
   store.saveThought({ ...original, id: "new-child", parentId: "child", sourceIds: [] });
   expect(() => service.rejectBranch("user", preview)).toThrow(BranchConfirmationError);
   expect(sorted(service.listThoughts(user).map(t => t.id))).toEqual(["child", "grandchild", "new-child", "outside", "root", "sibling"]);

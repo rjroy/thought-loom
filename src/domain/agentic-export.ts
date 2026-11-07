@@ -25,8 +25,8 @@ export function exportSources(input: unknown): readonly ExportSource[] {
     const keys = ["id","title","author","kind"];
     if (Object.keys(source).length !== keys.length || keys.some(key => !Object.hasOwn(source,key))) throw new ValidationError("Invalid export source fields");
     const author = oneOf(source.author,"author",["user","ai","source"]);
-    const kind = oneOf(source.kind,"kind",["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original"]);
-    if ((author === "source") !== (kind === "imported-original")) throw new ValidationError("Invalid imported attribution");
+    const kind = oneOf(source.kind,"kind",["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original","media-original"]);
+    if ((author === "source") !== (kind === "imported-original" || kind === "media-original")) throw new ValidationError("Invalid imported attribution");
     return Object.freeze({id:nonEmpty(source.id,"id"),title:nonEmpty(source.title,"title"),author,kind});
   });
   if (new Set(result.map(source => source.id)).size !== result.length) throw new ValidationError("Duplicate export source");
@@ -49,7 +49,7 @@ function sourceId(id: string): string {
 export function renderExportReport(markdown: string, sources: readonly ExportSource[]): string {
   nonEmpty(markdown,"markdown");
   const citations = sources.length ? "Recorded thought identities and attribution (not endorsement):\n\n" + sources.map(source =>
-    `- ${label(source.title)}: ID: ${sourceId(source.id)}; thought author: ${source.author}; kind: ${source.kind}.`).join("\n") :
+    `- ${label(source.title)}: ID: ${sourceId(source.id)}; thought author: ${source.author}; kind: ${source.kind}.${source.kind === "media-original" ? " Access to the descriptor or clarification does not imply binary file access." : ""}`).join("\n") :
     "No source thoughts were cited; this report has no validated thought citations.";
   return `${markdown}\n\n## Sources\n\n${citations}\n`;
 }

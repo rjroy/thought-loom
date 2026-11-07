@@ -33,6 +33,8 @@ Weaver instructions support URL summaries and source-informed interpretations th
 
 Lossless Markdown import is available from Capture through a separate import workspace, with queued execution, restricted configured segmentation or local structural fallback, bookmarkable reports, and user-only original-byte inspection. Imported wording is preserved; document order does not create an evolution chain.
 
+Retained image/PDF import is being built separately. Its [approved agreement](.lore/context/media-import.md) keeps files outside SQLite and interpretations separate from originals. Domain modeling is not an available upload workflow; media storage and HTTP import remain unimplemented.
+
 Conversational agentic search is available from Explore's **Ask your library** and **Saved searches** links: saved conversations rediscover existing thoughts without creating new knowledge. Sessions have bookmarkable links and remain until explicitly deleted. See the [web workflow](docs/server-startup.md#conversational-search) or try the [isolated daemon walkthrough](docs/testing.md#isolated-agentic-search-walkthrough) without a provider.
 
 The separate Next.js/React client provides Capture, bookmarkable Explore searches, Idea reading with title metadata, user-created connections and rejection/restoration controls, Evolve with recorded developments and known-run status/Stop, and Simple/Agentic Markdown exports. Browser requests use a server-only daemon boundary. Without agent configuration, capture, search, user-created connections and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration. Settings remains reserved, with no implemented settings screen.

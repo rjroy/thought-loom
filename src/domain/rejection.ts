@@ -71,6 +71,7 @@ function inspection(scope: ReadScope): boolean {
 /** Apply normal-scope provenance redaction to an active thought. */
 export function scopeActiveThought(actor: Actor, thought: Thought, rejected: ReadonlySet<string>): Thought | null {
   if (rejected.has(thought.id)) return null;
+  if (thought.kind === "media-original") return thought;
   return actor === "ai" ? { ...thought,
     parentId: thought.parentId !== null && rejected.has(thought.parentId) ? null : thought.parentId,
     sourceIds: thought.sourceIds.filter(id => !rejected.has(id)),
