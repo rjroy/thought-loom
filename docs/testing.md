@@ -50,7 +50,20 @@ These tests use owned Linux directories and SQLite fixtures, explicit identities
 
 The fault suite supplies instance-local filesystem delegates for `sync`, `link` and `unlink`, performing real owned I/O and injecting failures or held completion at selected publication boundaries. It checks that failed publication does not falsely admit a source or destroy an existing original, that ambiguous SQL/link outcomes preserve referenced bytes, that unsafe layouts are refused, and that shutdown joins held I/O before releasing descriptors. No global filesystem mock is installed.
 
-This is not evidence of image/PDF decoding, parser subprocess containment, arbitrary process-crash recovery, daemon media integration or power-loss durability. No original from a personal directory, operator service or provider is a fixture. The injected validator must not be mistaken for the future real format validator.
+This is not evidence of image/PDF decoding, parser subprocess containment, arbitrary process-crash recovery, daemon media integration or power-loss durability. No original from a personal directory, operator service or provider is a fixture. The sentinel validator in these tests is not the separate bounded format validator.
+
+### Bounded media validation checks
+
+```sh
+bun --no-env-file test tests/media-validation-rasters.test.ts tests/media-validation-pdf.test.ts
+bun --no-env-file test tests/media-validator.test.ts tests/media-validator-races.test.ts
+```
+
+These isolated checks exercise the [internal validator](server-startup.md#internal-media-validation), not a daemon upload or a browser flow. They use synthetic, test-owned bytes and explicit test-owned budgets. Raster controls include independently framed PNG/GIF data, JPEG/WebP fixtures, corrupt and truncated pixels, later animation frames, APNG refusal, unsupported content and byte/dimension/pixel/frame boundaries. PDF controls use synthetic classic and library-written documents, public parser objects, page/object/depth limits, active or embedded content, encrypted inputs and a dangling trailer `Encrypt` reference. They do not use a personal file or a provider.
+
+The Cantoo 2.11.1 classic writer encrypts streams but does not encrypt Info strings in the encryption fixture. The controlled encrypted documents therefore omit `Info` and contain a known page-content stream. Tests check the security dictionary and permissions, ciphertext, wrong-password refusal and exact plaintext recovery with the test-owned password. This replaces an invalid title-string encryption witness; normal unencrypted metadata coverage remains separate. Production validation supplies no password and rejects encryption, not a decryption feature.
+
+Supervisor tests launch an owned Bun child through the real `prlimit` command with explicit test limits, check inherited DATA/CPU/core limits via `/proc/self/limits`, and exercise genuine PNG/PDF worker inputs. Controlled child substitutions cover strict result shape, bad MIME, extra output, crashes, nonzero exits, output flooding, CPU/wall termination, environment isolation, cancellation and borrowed descriptors. Instance-local gates exercise same-size file mutation during feeding, abort or early child exit while pumping, and delayed stdout/stderr EOF after child exit before the next lane may start. These checks do not establish containment for every native allocation, format or race, actual daemon integration, or real service/provider behavior. Commands describe coverage, not a claim that the current working tree has passed them.
 
 ### Runtime execution-owner checks
 
