@@ -114,7 +114,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   recordPartial(claim: Claim, draft: ReplyDraft): void {
     this.guarded("partial", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
-      if (this.weavePurpose(run) === "media-title-only") throw new RunForbiddenError("Media title-only work requires canonical prompt completion");
+      if (this.weavePurpose(run) !== "ordinary") throw new RunForbiddenError("Media work requires canonical prompt completion");
       const checked = createSharedResponse({ ...draft, state: "interrupted" });
       this.checkAssociations(run,checked,visible);
       this.db.run("INSERT INTO run_replies (run_id,draft_json) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=excluded.draft_json", [claim.runId,JSON.stringify({ id: checked.id,text: checked.text,role: checked.role,thoughtIds: checked.thoughtIds })]);
@@ -127,7 +127,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   finish(claim: Claim, response: SharedResponse): void {
     this.guarded("finish", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
-      if (this.weavePurpose(run) === "media-title-only") throw new RunForbiddenError("Media title-only work requires canonical prompt completion");
+      if (this.weavePurpose(run) !== "ordinary") throw new RunForbiddenError("Media work requires canonical prompt completion");
       const value = createSharedResponse(response);
       this.checkAssociations(run,value,visible);
       new SqliteSharedResponses(this.db,this.logger).save(value);

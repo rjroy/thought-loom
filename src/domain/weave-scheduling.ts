@@ -7,11 +7,11 @@ import { nonEmpty } from "./validation";
 export type WeavePurpose = "ordinary" | "media-title-only";
 const titleClearPrefix = "title-clear:";
 
-/** Media interpretation needs a later admitted attempt, never an ordinary textual weave trigger. */
+/** An explicit title clear never schedules a new source interpretation. */
 export function resolveWeavePurpose(kind: MaterialKind, triggerId: string): WeavePurpose {
   if (kind !== "media-original") return "ordinary";
   if (triggerId.startsWith(titleClearPrefix) && triggerId.slice(titleClearPrefix.length).trim().length > 0) return "media-title-only";
-  throw new RunForbiddenError("Media weave has no admitted purpose");
+  return "ordinary";
 }
 
 /** Apply before effects and before returning any retained result or receipt. */

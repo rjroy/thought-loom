@@ -15,31 +15,23 @@ import { SqliteCapabilityDispatcher } from "../../src/storage/capability";
 import { SqliteRunRepository } from "../../src/storage/run";
 import { SqliteRunOperations } from "../../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../../src/storage/run-protocol";
-import { insertRun } from "../../src/storage/run-record";
 import { SqliteRunWorkerState } from "../../src/storage/run-worker";
 import { migrate, SqliteStore } from "../../src/storage/sqlite";
 import { SqliteTitleRepository } from "../../src/storage/title";
 import { immediate } from "../../src/storage/transaction";
 import { mediaDigest, mediaStoreId, mediaThought, mediaTime } from "./media-source";
-import { mediaChildPredecessor, type RetainedMediaChild } from "./media-child-predecessor";
 
 export const mediaNeighbor: TextThought = {
   id: "media-purpose-neighbor", text: "A separate recorded thought", title: null, titleAuthor: null,
   author: "user", kind: "captured-original", createdAt: mediaTime, origin: "fixture", parentId: null, sourceIds: [],
 };
 
-function setup(db: Database, source: "fresh" | "retained" = "fresh") {
+function setup(db: Database) {
   let sequence = 0;
   const sources = { id: () => `media-purpose-${++sequence}`, now: () => mediaTime, logger: createLogger("verbose", () => {}) };
   const store = new SqliteStore(db, undefined, sources.logger);
-  if (source === "fresh") {
-    store.initializeMediaStore(mediaStoreId);
-    // Real metadata admission, not a file-admission or format-validation fixture.
-    store.saveMediaSource({ thought: mediaThought, requestKey: "media-purpose-source", sha256: mediaDigest });
-  } else {
-    expect(store.mediaStoreId()).toBe(mediaStoreId);
-    expect(store.getThought(mediaThought.id)).toEqual(mediaThought);
-  }
+  store.initializeMediaStore(mediaStoreId);
+  store.saveMediaSource({ thought: mediaThought, requestKey: "media-purpose-source", sha256: mediaDigest });
   store.saveThought(mediaNeighbor);
   const titles = new TitleService(new SqliteTitleRepository(db, sources));
   titles.setUser("user", mediaThought.id, "Existing source label");
@@ -61,9 +53,12 @@ export function mediaWeaveFixture(action: (fixture: MediaWeaveFixture) => void):
   try { migrate(db); action(setup(db)); } finally { db.close(); }
 }
 
-/** Start current services only after the child-only predecessor has survived migration and a real file reopen. */
-export function retainedChildMediaWeaveFixture(child: RetainedMediaChild, action: (fixture: MediaWeaveFixture) => void): void {
-  mediaChildPredecessor(mediaThought, child, db => action(setup(db,"retained")));
+export function mediaChildWeaveFixture(child: {readonly id:string;readonly text:string}, action: (fixture: MediaWeaveFixture) => void): void {
+  mediaWeaveFixture(f => {
+    f.store.saveThought({id:child.id,text:child.text,title:null,titleAuthor:null,author:"ai",kind:"ai-interpretation",
+      createdAt:mediaTime,origin:"weave",parentId:mediaThought.id,sourceIds:[]});
+    action(f);
+  });
 }
 
 export async function asyncMediaWeaveFixture(action: (fixture: MediaWeaveFixture) => Promise<void>): Promise<void> {
@@ -99,17 +94,6 @@ export function seedMediaRelations(f: MediaWeaveFixture): void {
     category: "related", explanation: "An existing relation, not title instructions", proposedBy: "ai", sourceIds: [] });
   f.store.saveResponse({ id: "media-purpose-response", text: "An unrelated retained reply", role: "addendum",
     state: "complete", thoughtIds: [mediaThought.id, mediaNeighbor.id] });
-}
-
-/** A retained predecessor row must not acquire authority merely by bypassing today's admission API. */
-export function retainUnmappedMediaWeave(f: MediaWeaveFixture) {
-  const run: RunRecord = {
-    id: "retained-media-weave", kind: "weave", status: "queued", sessionId: "retained-media-session",
-    promptId: "retained-media-prompt", createdAt: mediaTime, generation: 1, inputThoughtId: null, nativeState: "unknown",
-  };
-  const intent = { subjectId: mediaThought.id, triggerId: "unmapped-retained-trigger" };
-  insertRun(f.db, run, intent);
-  return { run, intent, claim: { runId: run.id, generation: run.generation } };
 }
 
 export function bindMediaReplay(f: MediaWeaveFixture, prepared: PreparedMediaRun): AgentBinding {

@@ -6,7 +6,6 @@ import type { Connection } from "../domain/connection";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import { record } from "../domain/validation";
 import type { Logger } from "../logging";
-import { sealQueuedMediaAttempt, type MediaInterruptionReason } from "./media-attempt-termination";
 import { SqliteSharedResponses } from "./shared-response";
 
 export type RunVisibility = (ref: ContextRef) => ContextValue | null;
@@ -56,7 +55,7 @@ export function ordinaryRunContextValid(db: Database, run: RunRecord, visible: R
 /** Canonical ordinary finalInterrupt body, shared with rejection without a repository/aggregate import cycle.
  * Caller owns the existing immediate transaction. Native cancellation/drain remains the worker's later responsibility.
  */
-export function interruptOrdinaryRun(db: Database, run: RunRecord, reason: MediaInterruptionReason, logger: Logger): void {
+export function interruptOrdinaryRun(db: Database, run: RunRecord, _reason: "stopped" | "context-invalidated" | "failed", logger: Logger): void {
   if (!db.inTransaction) throw new RunConflictError("Run interruption requires its owning transaction");
   requireOrdinaryRun(run);
   const row = db.query<{ draft: string | null; responseId: string | null }, [string]>(
@@ -72,13 +71,11 @@ export function interruptOrdinaryRun(db: Database, run: RunRecord, reason: Media
       mediaWeave = subject.kind === "media-original";
     }
   }
-  // Legacy drafts cannot publish an unmapped media interpretation or replace canonical title-only completion.
+  // Source-root replies are finalized by the Weaver; interruption never publishes a draft summary.
   if (!mediaWeave && row?.draft && !row.responseId && associations) {
     const response = createSharedResponse({ ...record(JSON.parse(row.draft)), ...associations, state: "interrupted" });
     new SqliteSharedResponses(db,logger).save(response);
     db.run("UPDATE run_replies SET draft_json=NULL,response_id=? WHERE run_id=?",[response.id,run.id]);
   }
-  // Retain exact original inputs and attribution; fencing is not native completion or retry clearance.
   db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);
-  sealQueuedMediaAttempt(db,run.id,run.generation,reason,logger);
 }

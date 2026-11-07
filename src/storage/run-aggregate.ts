@@ -7,7 +7,7 @@ import { CreationService } from "../domain/creation";
 import type { SharedResponse } from "../domain/shared-response";
 import { parseEnvelope, protocolJson, type RunStep } from "../domain/run-protocol";
 import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type ContextRef, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
-import { isStepOperationCapability, stepOperationScope, type WeaveIntent } from "../domain/run-operations";
+import { isStepOperationCapability, type WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
 import { SqliteKnowledgeWriter } from "./knowledge-write";
 import { insertRun, readRun } from "./run-record";
@@ -15,8 +15,7 @@ import { immediate } from "./transaction";
 import { requireSearchExecutionOwner, searchExecutionContextValid } from "./search-run-authority";
 import { searchRevision } from "../domain/search-session-guards";
 import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose } from "../domain/weave-scheduling";
-import { mediaInputSources, requireMediaDelivery } from "./run-media";
-import { capabilityOperation, isReadCapability, parseCapabilityRequest, readCapabilityResult } from "../domain/capability";
+import { isReadCapability } from "../domain/capability";
 import { interruptOrdinaryRun, issuedRunThoughts, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type RunVisibility } from "./run-fences";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
@@ -97,7 +96,6 @@ export class SqliteRunAggregate {
   }
   protected transitionNative(claim: Claim, status: RunStatus, nativeState?: NativeState, promptId?: string): void {
     const transition = this.guardedExecution("status",claim,run => {
-      requireMediaDelivery(this.db,run.id);
       if (run.kind === "search" && status === "submitting") throw new RunForbiddenError("Search submission requires its durable owner authorization");
       if (promptId !== undefined && promptId !== run.promptId) throw new RunFenceError("Native callback belongs to an earlier prompt");
       const allowed: Partial<Record<RunStatus, readonly RunStatus[]>> = {queued:["submitting"],submitting:["running","uncertain"],running:["running","uncertain"],uncertain:["running","uncertain"]};
@@ -176,7 +174,7 @@ export class SqliteRunAggregate {
     if (!row) throw new RunConflictError("Run has no current prompt");
     return decodeStep(row);
   }
-  /** Existing advancement contract, also reused when qualifying a media successor's retained prefix. */
+  /** A successor uses the exact result already confirmed by its canonical dispatcher. */
   protected confirmedStepResult(step: RunStep, result: unknown): string {
     const resultJson = protocolJson(result);
     if (step.result !== null && protocolJson(step.result) !== resultJson) throw new RunConflictError("Result differs from the dispatched step result");
@@ -190,42 +188,6 @@ export class SqliteRunAggregate {
       }
     }
     return resultJson;
-  }
-  /** Media cannot qualify an exact current prompt by skipping an unprocessed or unconfirmed earlier input. */
-  private requireMediaHistory(run: RunRecord, position: number): void {
-    if (!Number.isSafeInteger(position) || position < 0) throw new RunConflictError("Invalid media step position");
-    const prefix = this.readSteps(run.id).filter(step => step.position < position);
-    if (prefix.length !== position) throw new RunConflictError("Media input has an incomplete predecessor history");
-    for (const [index,step] of prefix.entries()) {
-      if (step.position !== index || step.input === null || step.state !== "processed" || step.envelope?.kind !== "request" || step.result === null) {
-        throw new RunConflictError("Media predecessors must have confirmed processed requests");
-      }
-      const request = parseCapabilityRequest(step.envelope.request), operation = capabilityOperation(request);
-      this.requireWeaveCapability(run,request.capability);
-      this.confirmedStepResult(step,step.result);
-      if (operation !== null) {
-        stepOperationScope(run,this.readWeaveIntent(run.id),operation);
-        const receipt = this.readReceipt(run.id,step.promptId);
-        if (!receipt || protocolJson(JSON.parse(receipt.operation)) !== protocolJson(operation)) throw new RunConflictError("Media predecessor receipt differs from its request");
-      } else if (request.capability === "search" || request.capability === "readThought" || request.capability === "readConnection" || request.capability === "readResponse") {
-        // Reuse the closed read-result decoder, not an invented interpretation of arbitrary retained JSON.
-        readCapabilityResult(request,step.result);
-      } else throw new RunConflictError("Media predecessor has no confirmed ordinary capability");
-    }
-  }
-  /** Called in the preparation transaction: source eligibility/exposure and exact input are one commit, never an observation. */
-  protected confirmMediaInput(run: RunRecord, step: RunStep, input: string, visible: Visible): void {
-    const sources = mediaInputSources(this.db,step.promptId,input);
-    if (sources.length !== 0) this.requireMediaHistory(run,step.position);
-    for (const id of sources) {
-      const ref = {kind:"thought",id} as const;
-      if (!visible(ref)) throw new RunFenceError("Media source is no longer eligible");
-      if (step.input !== null) {
-        if (!this.db.query("SELECT 1 FROM run_context WHERE run_id=? AND kind='thought' AND ref_id=?").get(run.id,id)) {
-          throw new RunConflictError("Sealed media input lacks its source exposure");
-        }
-      } else this.track(run.id,ref);
-    }
   }
   protected issued(id: string): readonly string[] {
     return issuedRunThoughts(this.db,id);

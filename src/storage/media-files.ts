@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite";
 import type { Logger } from "../logging";
 import type { BigIntStats, Dir } from "node:fs";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { initializeMediaStore, mediaStoreId } from "./media-source";
 import { createMediaFile, defaultMediaFileOperations, guardedFileIo, hasFileCode, inspectMediaFile, mediaChild, mediaFileId, MediaStoragePathError,
   openMediaFile, openMediaLayout, openMediaScan, sameMediaInode, verifyMediaFile,
@@ -39,6 +41,8 @@ export interface MediaFiles {
   publish(sourceId: string, input: AsyncIterable<Uint8Array>, admit: (artifact: MediaFileArtifact) => void): Promise<MediaFileArtifact>;
   /** Trusted internal verified read; callers must separately enforce consumer/AI read scope. */
   readOriginal(sourceId: string): Promise<Uint8Array>;
+  /** Verified stable path on the filesystem shared with OpenCode; callers enforce their normal source scope. */
+  originalPath(sourceId: string): Promise<string>;
   cleanup(): Promise<{ readonly scanned: number; readonly removed: number; readonly hasMore: boolean }>;
   /** Seal new work, cancel and join entered producers, then release owned descriptors; idempotent. */
   close(): Promise<void>;
@@ -269,30 +273,36 @@ class OwnedMediaFiles implements MediaFiles {
   }
 
   readOriginal(sourceId: string): Promise<Uint8Array> {
-    return this.run("read",async () => {
-      mediaFileId(sourceId);
-      const source = this.source(sourceId);
-      if (!source || !Number.isSafeInteger(source.byte_length) || source.byte_length <= 0 || source.byte_length > this.options.limits.maxBytes ||
-        !(source.sha256 instanceof Uint8Array) || source.sha256.length !== 32) throw new MediaFilesError("original-unavailable");
-      let file: OwnedMediaFile | undefined;
-      try {
-        await this.layout.verify(this.guard);
-        file = await openMediaFile(this.layout.objects,sourceId,this.guard);
-        const before = await verifyMediaFile(this.layout.objects,sourceId,file,this.guard);
-        if (before.size !== BigInt(source.byte_length)) throw new MediaFilesError("original-unavailable");
-        const result = await this.readAndHash(file,source.byte_length,true);
-        const after = await verifyMediaFile(this.layout.objects,sourceId,file,this.guard);
-        if (!unchanged(before,after) || !timingSafeEqual(result.sha256,source.sha256)) throw new MediaFilesError("original-unavailable");
-        return result.bytes;
-      } catch (error) {
-        if (error instanceof MediaFilesError && ["ownership-lost","storage-closed","admission-failed"].includes(error.code)) throw error;
-        throw new MediaFilesError("original-unavailable");
-      } finally { await file?.handle.close(); }
-    });
+    return this.run("read",async () => (await this.original(sourceId,true)).bytes);
+  }
+  originalPath(sourceId: string): Promise<string> {
+    return this.run("read",async () => (await this.original(sourceId,false)).path);
+  }
+  private async original(sourceId: string, keepBytes: boolean): Promise<{readonly bytes: Uint8Array; readonly path: string}> {
+    mediaFileId(sourceId);
+    const source = this.source(sourceId);
+    if (!source || !Number.isSafeInteger(source.byte_length) || source.byte_length <= 0 || source.byte_length > this.options.limits.maxBytes ||
+      !(source.sha256 instanceof Uint8Array) || source.sha256.length !== 32) throw new MediaFilesError("original-unavailable");
+    let file: OwnedMediaFile | undefined;
+    try {
+      await this.layout.verify(this.guard);
+      file = await openMediaFile(this.layout.objects,sourceId,this.guard);
+      const before = await verifyMediaFile(this.layout.objects,sourceId,file,this.guard);
+      if (before.size !== BigInt(source.byte_length)) throw new MediaFilesError("original-unavailable");
+      const result = await this.readAndHash(file,source.byte_length,keepBytes);
+      const after = await verifyMediaFile(this.layout.objects,sourceId,file,this.guard);
+      if (!unchanged(before,after) || !timingSafeEqual(result.sha256,source.sha256)) throw new MediaFilesError("original-unavailable");
+      const directory = await guardedFileIo(this.guard,() => realpath(this.layout.objects.anchor));
+      await this.layout.verify(this.guard);
+      return {bytes:result.bytes,path:join(directory,sourceId)};
+    } catch (error) {
+      if (error instanceof MediaFilesError && ["ownership-lost","storage-closed","admission-failed"].includes(error.code)) throw error;
+      throw new MediaFilesError("original-unavailable");
+    } finally { await file?.handle.close(); }
   }
 
   private async cleanupEntry(directory: MediaDirectory, kind: "objects" | "staging" | "prepared", name: string, cutoff: bigint): Promise<boolean> {
-    // Prepared-part reference/settlement authority is not implemented in this slice. Retain them conservatively.
+    // Unrecognized scratch files are retained; only owned unreferenced originals/staging enter automatic cleanup.
     if (kind === "prepared") return false;
     const key = kind === "staging" && name.endsWith(".partial") ? name.slice(0,-8) : name;
     try { mediaFileId(key); } catch { return false; }

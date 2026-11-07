@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { capabilityResultPrompt, initialWorkerPrompt } from "../src/agent/worker-prompts";
+import { capabilityResultPrompt } from "../src/agent/worker-prompts";
 import { readCapabilityResult, type CapabilityRequest, type ReadCapabilityRequest } from "../src/domain/capability";
 import { RunFenceError, RunForbiddenError } from "../src/domain/run";
 import { stepOperationEnvelope, type StepOperation, type StepOperationResult } from "../src/domain/run-operations";
@@ -8,8 +8,8 @@ import type { TextThought } from "../src/domain/thought";
 import { record } from "../src/domain/validation";
 import { mediaThought, mediaTime } from "./fixtures/media-source";
 import { asyncMediaWeaveFixture, bindMediaReplay, mediaNeighbor, mediaReplayWorker, mediaWeaveFixture, prepareMediaRun,
-  retainForbiddenMediaSuccessor, retainUnmappedMediaWeave, seedMediaRelations, startMediaTitleClear,
-  retainedChildMediaWeaveFixture,
+  retainForbiddenMediaSuccessor, seedMediaRelations, startMediaTitleClear,
+  mediaChildWeaveFixture,
   type MediaWeaveFixture, type PreparedMediaRun } from "./fixtures/media-weave";
 
 const interpretation: Extract<StepOperation, { type: "interpretation" }> = {
@@ -66,16 +66,6 @@ describe("persisted media weave purpose", () => {
     expect(f.runs.receipt(prepared.run.id, "legacy-title-bypass")).toBeNull();
     noIssuedInterpretation(f, prepared);
   }));
-
-  test.each(["manual-media-pass", `capture:${mediaThought.id}`, "evolve:unmapped-follow-up", `media:${mediaThought.mediaSource.id}:0`])(
-    "unmapped media trigger %s cannot admit a run or initial step", triggerId => mediaWeaveFixture(f => {
-      expect(() => f.ops.admitWeave("user", { subjectId: mediaThought.id, triggerId })).toThrow(RunForbiddenError);
-      for (const table of ["runs", "run_steps", "run_context", "run_operation_receipts", "run_issued_thoughts"]) {
-        expect(f.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
-      }
-      expect(f.store.getThought(mediaThought.id)).toEqual({ ...mediaThought, title: "Existing source label", titleAuthor: "user" });
-    }),
-  );
 
   test("title-only context advertises only title fill, not neighboring knowledge", () => mediaWeaveFixture(f => {
     seedMediaRelations(f);
@@ -141,20 +131,18 @@ describe("persisted media weave purpose", () => {
     noIssuedInterpretation(f, prepared);
   }));
 
-  test.each(["typed storage", "capability dispatcher"] as const)("a retained interpretation receipt cannot authorize title-only replay through %s", boundary => retainedChildMediaWeaveFixture(
+  test.each(["typed storage", "capability dispatcher"] as const)("a retained interpretation receipt cannot authorize title-only replay through %s", boundary => mediaChildWeaveFixture(
     { id: "retained-forbidden-interpretation", text: interpretation.text }, f => {
     const prepared = startMediaTitleClear(f);
     request(f, prepared, interpretationRequest);
     const child: TextThought = { id: "retained-forbidden-interpretation", text: interpretation.text, title: null, titleAuthor: null,
       author: "ai", kind: "ai-interpretation", createdAt: mediaTime, origin: "weave", parentId: mediaThought.id, sourceIds: [] };
-    // The historical child survived migration/reopen; it is not a new write through today's generic writer.
+    // The child exists independently of this title-only request.
     expect(f.store.getThought(child.id)).toEqual(child);
     expect(f.ops.stepReceipt(prepared.run.id, prepared.step.promptId)).toBeNull();
     expect(f.db.query("SELECT thought_id FROM run_issued_thoughts WHERE run_id=?").all(prepared.run.id)).toEqual([]);
-    expect(f.db.query("SELECT * FROM media_weave_attempts").all()).toEqual([]);
-    expect(f.db.query("SELECT * FROM run_media_parts").all()).toEqual([]);
     const result: StepOperationResult = { type: "interpretation", thought: child };
-    // Deliberate adversarial corruption, not a canonical producer, accepted interpretation or delivery witness.
+    // Deliberate adversarial corruption, not a canonical producer for this request.
     // A syntactically valid retained receipt/issued association must still fail the current purpose wall.
     f.db.run(`INSERT INTO run_operation_receipts(run_id,operation_id,operation_json,thought_id,result_json,format)
       VALUES (?,?,?,?,?,'step')`, [prepared.run.id, prepared.step.promptId, protocolJson(interpretation), child.id, protocolJson(result)]);
@@ -258,29 +246,6 @@ describe("persisted media weave purpose", () => {
     expect(f.store.getThought(mediaThought.id)).toEqual({ ...mediaThought, title: "The user's newer title", titleAuthor: "user" });
     expect(f.ops.stepReceipt(prepared.run.id, prepared.step.promptId)).toEqual({ operation: { type: "title-fill", title: "A late generated title" }, result });
     expect(f.db.query("SELECT thought_id FROM run_issued_thoughts WHERE run_id=?").all(prepared.run.id)).toEqual([]);
-  }));
-
-  test("a retained unmapped media run cannot be reused or prepare initial context", () => mediaWeaveFixture(f => {
-    const retained = retainUnmappedMediaWeave(f);
-    expect(() => f.ops.admitWeave("user", retained.intent)).toThrow(RunForbiddenError);
-    expect(() => f.state.prepareInitial(retained.claim, initialWorkerPrompt)).toThrow(RunForbiddenError);
-    expect(f.steps.steps(retained.run.id)[0]).toMatchObject({ state: "prepared", input: null, envelope: null, result: null });
-    expect(f.runs.contextRefs(retained.run.id)).toEqual([]);
-  }));
-
-  test("a retained unmapped media run cannot publish an otherwise valid final reply", () => mediaWeaveFixture(f => {
-    const retained = retainUnmappedMediaWeave(f);
-    // Historical completion is setup, not authorization through today's worker preparation path.
-    f.db.run("UPDATE run_steps SET input=? WHERE run_id=?", ["retained predecessor input", retained.run.id]);
-    f.db.run("UPDATE run_steps SET state='completed',native_state='completed',envelope_json=? WHERE run_id=?", [
-      protocolJson({ version: 1, kind: "complete", reply: "An unmapped job must not publish this reply" }), retained.run.id,
-    ]);
-    f.db.run("UPDATE runs SET status='uncertain' WHERE id=?", [retained.run.id]);
-    expect(f.steps.steps(retained.run.id)[0]?.envelope?.kind).toBe("complete");
-    expect(() => f.state.finish(retained.claim, retained.run.promptId)).toThrow(RunForbiddenError);
-    expect(f.runs.reply(retained.run.id)).toBeNull();
-    expect(f.db.query("SELECT id FROM responses").all()).toEqual([]);
-    expect(f.runs.get(retained.run.id)?.status).not.toBe("completed");
   }));
 
   test("Evolve from a media root keeps normal contribution, development and child-weave authority", () => mediaWeaveFixture(f => {

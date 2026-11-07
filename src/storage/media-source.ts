@@ -53,7 +53,7 @@ export function initializeMediaStore(db: Database, supplied: string): string {
     return id;
   });
 }
-/** Supplied IDs/digest are daemon-owned inputs. Filesystem publication and attempt admission are separate commands. */
+/** Supplied IDs/digest are daemon-owned inputs. Filesystem publication and normal weave scheduling are separate operations. */
 export function saveMediaSource(db: Database, input: MediaSourceWrite): void {
   const thought = createThought(input.thought), key = importRequestKey(input.requestKey);
   if (thought.kind !== "media-original" || thought.title !== null || thought.titleAuthor != null) throw new ValidationError("A new media root must be untitled");

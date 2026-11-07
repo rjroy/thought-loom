@@ -73,6 +73,8 @@ describe("owned retained media files with an injected validator", () => {
       expect(commits).toBe(1);
       expect(new Uint8Array(artifact.sha256)).toEqual(fileDigest);
       expect(new Uint8Array(await files.readOriginal(fileSourceId))).toEqual(fileBytes);
+      expect(await files.originalPath(fileSourceId)).toBe(object);
+      expect(await readBytes(await files.originalPath(fileSourceId))).toEqual(fileBytes);
       expect(f.db.query("SELECT sha256,byte_length FROM media_sources").get()).toEqual({ sha256:fileDigest,byte_length:fileBytes.length });
       expect(f.db.query("SELECT * FROM runs").all()).toEqual([]);
       const retained = await lstat(object);
@@ -82,6 +84,7 @@ describe("owned retained media files with an injected validator", () => {
       const corrupted = new Uint8Array(fileBytes); corrupted[0] = 1;
       await writeFile(object,corrupted);
       await expect(files.readOriginal(fileSourceId)).rejects.toThrow();
+      await expect(files.originalPath(fileSourceId)).rejects.toThrow();
       expect(f.db.query("SELECT sha256 FROM media_sources").get()).toEqual({ sha256:fileDigest });
       const logText = JSON.stringify(f.logs);
       for (const sensitive of ["private-original-sentinel","display-only.png","Zircon clarification"]) expect(logText).not.toContain(sensitive);

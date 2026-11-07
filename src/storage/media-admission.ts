@@ -3,11 +3,11 @@ import type { Actor } from "../domain/rejection";
 import { RunConflictError, RunForbiddenError, type RunRecord, type RunSources } from "../domain/run";
 import { createThought, type MediaThought } from "../domain/thought";
 import { equalBytes, importRequestKey } from "../domain/markdown-import-contract";
-import { nonEmpty, ValidationError } from "../domain/validation";
+import { ValidationError } from "../domain/validation";
 import { createLogger, type Logger } from "../logging";
-import { initialMediaAttemptRequestKey } from "./media-attempt-schema";
 import { saveMediaSource, type MediaSourceWrite } from "./media-source";
-import { insertRun, readRun } from "./run-record";
+import { readRun } from "./run-record";
+import { admitWeave } from "./weave-admission";
 import { SqliteStore } from "./sqlite";
 import { immediate } from "./transaction";
 
@@ -27,7 +27,7 @@ interface RetainedSource {
   readonly clarification: string | null;
 }
 
-/** User-only, source-first storage command. Admission supplies identity, not execution or file-delivery authority. */
+/** Source metadata and normal initial weaving commit together after private-file publication. */
 export class SqliteMediaAdmissions {
   private readonly logger: Logger;
   constructor(private readonly db: Database, private readonly sources: RunSources) { this.logger = sources.logger ?? createLogger(); }
@@ -47,14 +47,7 @@ export class SqliteMediaAdmissions {
 
         // This existing metadata-only writer joins the outer transaction. It still never schedules work by itself.
         saveMediaSource(this.db,write);
-        const run: RunRecord = { id: nonEmpty(this.sources.id(),"runId"), kind: "weave", status: "queued",
-          sessionId: nonEmpty(this.sources.sessionId?.() ?? this.sources.id(),"sessionId"),
-          promptId: nonEmpty(this.sources.promptId?.() ?? this.sources.id(),"promptId"), createdAt: nonEmpty(this.sources.now(),"createdAt"),
-          generation: 0, inputThoughtId: null, nativeState: "unknown" };
-        // Canonical insertion creates the existing initial run_steps row. Ordinary weave admission deliberately still denies this purpose.
-        insertRun(this.db,run,{subjectId:thought.id,triggerId:`media:${thought.mediaSource.id}:0`});
-        this.db.run("INSERT INTO media_weave_attempts(source_id,position,run_id,request_key) VALUES (?,0,?,?)",
-          [thought.mediaSource.id,run.id,initialMediaAttemptRequestKey]);
+        const run = admitWeave(this.db,this.sources,{subjectId:thought.id,triggerId:`media-import:${thought.mediaSource.id}`});
         return {thought:this.sourceThought(thought.id),run:Object.freeze(run),replayed:false};
       });
       const context = { sourceId: result.thought.mediaSource.id, thoughtId: result.thought.id, runId: result.run.id };
@@ -78,16 +71,20 @@ export class SqliteMediaAdmissions {
         existing.clarification !== source.clarification || !equalBytes(existing.sha256,input.sha256)) {
       throw new RunConflictError("Media idempotency conflict");
     }
-    const attempt = this.db.query<{ runId: string; requestKey: string }, [string]>(
-      "SELECT run_id AS runId,request_key AS requestKey FROM media_weave_attempts WHERE source_id=? AND position=0").get(existing.sourceId);
-    // A metadata-only predecessor is not a lost response to this command and must never acquire a late attempt.
-    if (!attempt || attempt.requestKey !== initialMediaAttemptRequestKey) throw new RunConflictError("Media source has no initial admission");
-    const run = readRun(this.db,attempt.runId);
-    const intent = this.db.query<{ subjectId: string | null; triggerId: string | null }, [string]>(
-      "SELECT weave_subject_id AS subjectId,weave_trigger_id AS triggerId FROM runs WHERE id=?").get(attempt.runId);
-    if (!run || run.kind !== "weave" || !intent || intent.subjectId !== existing.thoughtId || intent.triggerId !== `media:${existing.sourceId}:0`) {
-      throw new RunConflictError("Media initial admission identity differs");
-    }
+    const row = this.db.query<{id:string},[string,string]>(
+      "SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=?").get(existing.thoughtId,`media-import:${existing.sourceId}`);
+    const run = row ? readRun(this.db,row.id) : null;
+    if (!run) throw new RunConflictError("Media source has no initial admission");
     return {thought:this.sourceThought(existing.thoughtId),run,replayed:true};
+  }
+  /** A deliberate user retry reuses the retained source, never an unknown active native outcome. */
+  retry(actor: Actor, sourceId: string, requestKey: string): RunRecord {
+    if (actor !== "user") throw new RunForbiddenError("Media retry is user-only");
+    const key = importRequestKey(requestKey);
+    return immediate(this.db,() => {
+      const source = this.db.query<{thoughtId:string},[string]>("SELECT source_thought_id AS thoughtId FROM media_sources WHERE id=?").get(sourceId);
+      if (!source) throw new RunConflictError("Retained source is unavailable");
+      return admitWeave(this.db,this.sources,{subjectId:source.thoughtId,triggerId:`media-retry:${sourceId}:${key}`});
+    });
   }
 }

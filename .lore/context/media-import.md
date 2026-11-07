@@ -1,17 +1,21 @@
 ---
 title: Retained media import
-date: 2026-11-06
+date: 2026-11-07
 status: approved
 tags: [thoughtloom, media-import, product]
 ---
 
 # Retained media import
 
-This is the approved product agreement for `thought-loom-dkx`. The [backend design](../work/design/media-import.md) defines the architecture and remaining daemon contracts. Internal metadata persistence and atomic initial source/run/attempt admission, backend thought/search/scoped/investigative/saved-search/export projections, a private file-store service with injected validation, and [bounded format-validation helpers](../../docs/server-startup.md#internal-media-validation) are implemented; see the [current storage contract](../../docs/database-schema.md#media-source-storage-foundation). The validator is not wired into the file service or daemon.
+This is the product agreement for `thought-loom-dkx`. Current implementation contracts belong in `docs/`, not in this agreement.
 
-The internal groundwork also includes original-part manifests, ordinary Weaver/Evolve submission intent, title-only purpose enforcement, untouched queued-attempt Stop seals, immediate source-rejection fences and generic media-root interpretation denial. Historical children remain readable and preserved by migration, not adopted as proof of a confirmed initial interpretation. This is partial lifecycle/safety support, not an available media-import workflow or successful media publication.
+## Shared-filesystem architecture
 
-The [execution activation gate](../../docs/database-schema.md#media-execution-activation-gate) still requires mapped preparation/authorization, prepared/authorized all-step Stop/failure/rejection seals, actual held-flight joining, trusted binary observation and atomic interpretation publication before delivery opens; reconciliation/settlement and deliberate retry remain later work. Daemon file-retention wiring, media upload/download/retry endpoints and startup/file configuration are also unimplemented. Initial admission is not execution authority. The existing Next.js client remains text-only; client design and implementation are separate work. Requirements below describe the complete agreed direction, not a claim that these remaining capabilities are available.
+**The daemon and OpenCode must share a filesystem.** Retain the original file in daemon-managed storage, then tell OpenCode its accessible absolute path and the user's clarification or summary request. OpenCode's existing trusted tools read the file and make its content available to the configured model.
+
+Reuse normal Weave/Evolve execution and its existing lifecycle controls. File contents are opened by OpenCode's trusted tools using the supplied path.
+
+The [backend design](../work/design/media-import.md) describes the file-path integration and daemon contracts. Implementation details and supported behavior are documented in `docs/`.
 
 ## Source and interpretation
 
@@ -24,9 +28,10 @@ The [execution activation gate](../../docs/database-schema.md#media-execution-ac
 
 ## Agent access and failures
 
-- Weave and Evolve must discover eligible retained media and be able to reopen it. Reading source metadata is not the same as reading the file.
+- Weave and Evolve must discover eligible retained media and be able to reopen it through a scoped, daemon-selected file path. A caller does not choose an arbitrary filesystem path.
 - The existing trusted-tool policy applies: content may be sent to the configured model and processed using trusted tools without separate per-file confirmation. Permissive tools remain an accepted non-sandbox boundary.
 - Temporary extraction or conversion is allowed when direct model input is unavailable. Do not persist extracted-text thoughts or silently switch models. Preserve the original and disclose processing limitations.
 - Search, Agentic Export and Markdown segmentation gain no media-open or native-tool access. Markdown's retained whole-document artifact remains user-only.
-- Rejection excludes the source's metadata and bytes from application-mediated AI access, including through an active interpretation. Rejection is not file deletion. Previously transmitted content cannot be withdrawn.
+- Rejection excludes the source's metadata and file path from application-mediated AI access, including through an active interpretation. Rejection is not file deletion. Previously transmitted content cannot be withdrawn; permissive same-user filesystem tools are not a sandbox.
 - On interpretation failure, retain the file and source, show the failure and permit a deliberate safe retry without reupload. Unknown native outcomes must be reconciled rather than automatically duplicated. A saved initial interpretation is not recreated by retry, title clearing or later rejection; use Evolve for further development.
+- The Next.js client remains a separate scope. Media UI requires its own design and implementation work.

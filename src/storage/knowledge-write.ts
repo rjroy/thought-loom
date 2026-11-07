@@ -19,11 +19,6 @@ export class SqliteKnowledgeWriter {
       const thought = createThought(input);
       if (thought.kind === "media-original" || thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
       this.db.transaction(() => {
-        // Generic persistence cannot supply binary-read evidence or the atomic run receipt/issued/attempt association.
-        if (thought.kind === "ai-interpretation" && thought.parentId !== null &&
-            this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(thought.parentId)) {
-          throw new ValidationError("Media-source interpretations require verified run publication");
-        }
         // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
         this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",
           [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);

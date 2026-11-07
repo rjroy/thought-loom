@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchTerminalCertificate } from "./search-cleanup-contract";
 import { AgentBindingError, assertBindingPermissions } from "./binding";
 import type { InboxItem, NativeMessage } from "./opencode-adapter";
-import { hasUntrackedNativeContext } from "./history";
+import { hasUntrackedInboxContext, hasUntrackedNativeContext } from "./history";
 
 export interface SearchHistoryFacts {
   readonly admissions: readonly SearchAdmissionFact[];
@@ -60,7 +60,7 @@ export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: re
   finish();
   for (const item of inbox) {
     const owned = known.get(item.id);
-    if (item.type !== "user" || item.sessionID !== identity.binding.sessionId || !Number.isFinite(item.time.created) || !owned ||
+    if (hasUntrackedInboxContext(item) || item.type !== "user" || item.sessionID !== identity.binding.sessionId || !Number.isFinite(item.time.created) || !owned ||
       owned.inputSha256 === null || searchInputHash(item.payload.text) !== owned.inputSha256 || inboxIds.has(item.id)) conflict();
     inboxIds.add(item.id);
   }

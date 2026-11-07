@@ -16,7 +16,7 @@ Use the committed lockfile. SQLite support comes from Bun's built-in `bun:sqlite
 
 ### Internal media validation
 
-The internal [`createMediaValidator`](../src/storage/media-validator.ts) factory supplies a callback compatible with the private file service's injected validator. Nothing automatically connects them or starts this validator during daemon startup. There is no media environment variable, upload route, agent binary access or browser media workflow. Existing text and Markdown flows are unchanged.
+The internal [`createMediaValidator`](../src/storage/media-validator.ts) factory supplies a callback compatible with the private file service's injected validator. Nothing automatically connects them or starts this validator during daemon startup. There is no media environment variable, upload route or browser media workflow. The normal worker's [shared-file path support](#retained-media-and-shared-filesystem) requires an injected resolver; the daemon does not yet supply one. Existing text and Markdown flows are unchanged.
 
 An internal caller must provide positive safe-integer raster limits (`maxBytes`, per-frame `maxDimension`, aggregate `maxTotalPixels`, `maxFrames`), PDF limits (`maxBytes`, `maxPages`, `maxObjects`, `maxDepth`) and process limits (`dataBytes`, `cpuSeconds`, `wallMs`, combined `outputBytes`), plus an instance logger. The factory does not supply production defaults. The proposed 1 GiB DATA, 8 seconds CPU, 10 seconds wall time and 8 KiB output profile is a candidate, not active daemon configuration. The core limit is zero. The current Linux implementation launches the owned Bun child through `/usr/bin/prlimit` from util-linux, with `--no-env-file` and a minimal fixed environment. The controlled compatibility work used Bun 1.4.3; the lockfile pins Sharp 0.35.5 and `@cantoo/pdf-lib` 2.11.1. No Python wrapper, converter, renderer or package is installed implicitly.
 
@@ -228,6 +228,24 @@ bun run daemon
 These assignments generate distinct credentials for this shell session. Store them securely if you need to reuse them. Do not put them in browser code, commits, diagnostic output, or world-readable launch scripts.
 
 If you create a launcher, have it change to the project root before calling `bun run daemon`. Otherwise, Bun may not find this project's package script. Quote paths and variable expansions in shell scripts.
+
+### Native SDK compatibility
+
+The maintained published `@opencode/client` package is pinned to **2.2.5**. The [compatibility agreement](../.lore/context/architecture.md#opencode-integration-and-compatibility) permits newer operator-service versions: do not reject one solely for its version or implicitly start, stop or upgrade it. Validate the API capabilities actually needed; a pinned SDK or synthetic fixture version is not proof of every service's compatibility.
+
+The normal adapter submits retained text prompts and correlates replies with their saved session/prompt identities and complete paginated history. Settled native tool turns are permitted for Weaver/Evolve; restricted sessions retain their deny policy. Unsupported or foreign input remains unsafe for recovery. An uncertain acknowledgement is not a reason to resend. See the [adapter and native-tool checks](testing.md#business-behavior-protected) and separate opt-in acceptance fixture; synthetic SDK responses do not establish compatibility with every service or model.
+
+### Retained media and shared filesystem
+
+**The daemon and OpenCode must share a filesystem.** OpenCode must be able to read the daemon-selected absolute original path. The Linux private file service uses directories owned by the daemon's UID with mode `0700` and files with mode `0600`; deploy OpenCode under that UID with access to those same absolute paths. Thoughtloom does not configure cross-user permissions or remote file sharing.
+
+The normal [`RunWorker`](../src/agent/worker.ts) accepts `mediaPath(sourceId)`, supplied by its trusted caller. [`MediaFiles.originalPath`](../src/storage/media-files.ts) verifies the retained original and returns its stable absolute path. The worker selects the source ID from an eligible scoped Thought, never from a model-supplied path. Initial Weaver/Evolve context and later `readThought` continuations can include that path with the exact user clarification, or default summary instructions. OpenCode's normal permitted tools open the file for the configured model. Paths are private prompt context, not fields in public Thought descriptors or capability results.
+
+Interpretations use the existing knowledge operations and become searchable AI children; the normal Full reply records the outcome. Title-clear work on a media root is title-only and does not reopen or summarize the file again. Scoped reads record context before asynchronous path resolution, and ordinary claim/context checks fence later continuation or publication after Stop or rejection, including rejection followed by restoration. Rejection retains the original file. Already-sent paths or context cannot be withdrawn from trusted native tools.
+
+Search, Agentic Export and import segmentation receive no original path and retain denied native tools. Search/Export media reads return only descriptor/clarification metadata; segmentation has no library-read capability. Weaver/Evolve filesystem access remains the trusted, permissive environment described above, not a per-file sandbox.
+
+`ConfiguredRunWorker` accepts the same resolver dependency, but daemon startup does not yet construct the private file service, connect its validator or supply the resolver. Media upload/download/retry HTTP routes, media startup settings and the browser import workflow are not implemented. Internal source admission and deliberate retry reuse ordinary weave scheduling and lifecycle checks; they do not create a public import workflow. See the [storage contract](database-schema.md#media-source-storage-foundation) and [shared-file worker checks](testing.md#shared-file-media-worker-checks). Those controlled tests verify path delivery and application persistence, not actual OpenCode tool execution or model understanding.
 
 ## Logging
 

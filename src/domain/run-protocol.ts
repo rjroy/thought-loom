@@ -22,23 +22,9 @@ export interface RunStep {
   /** Confirmed capability output may be retained before processing binds it to the next exact input. */
   readonly result: unknown | null;
 }
-/** Internal prepared-original fingerprints, never byte payloads or native observation evidence. */
-export interface OriginalMediaPart {
-  readonly position: number;
-  readonly sourceId: string;
-  readonly representation: "original";
-  readonly mimeType: string;
-  readonly byteLength: number;
-  readonly sha256: string;
-  readonly preparedKey: null;
-  readonly recipe: null;
-}
-export interface OriginalMediaManifest { readonly version: 1; readonly parts: readonly OriginalMediaPart[] }
 export interface NextStep {
   readonly promptId: string;
   readonly input: string;
-  /** Trusted preparation output for an atomic successor commit, not an agent capability argument. */
-  readonly media?: OriginalMediaManifest;
 }
 export type CancellationState = "none" | "pending" | "settled";
 export class ProtocolValidationError extends Error {}

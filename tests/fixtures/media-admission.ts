@@ -1,12 +1,10 @@
-import { expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { RunRecord, RunSources } from "../../src/domain/run";
+import type { RunSources } from "../../src/domain/run";
 import { createLogger } from "../../src/logging";
 import { SqliteMediaAdmissions } from "../../src/storage/media-admission";
 import type { MediaSourceWrite } from "../../src/storage/media-source";
-import { insertRun } from "../../src/storage/run-record";
 import { migrate, SqliteStore } from "../../src/storage/sqlite";
 import { mediaDigest, mediaStoreId, mediaThought, mediaTime } from "./media-source";
 
@@ -18,32 +16,10 @@ export function mediaAdmissionInput(index = 0): MediaSourceWrite {
   } };
 }
 
-export function requireMediaAttemptSchema(db: Database): void {
-  const names = db.query<{ name: string }, []>("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name);
-  // A desired migration assertion precedes every query/fixture insert into the new journal.
-  expect(names).toContain("media_weave_attempts");
-  expect(db.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
-}
-
-export interface InitialMediaAttempt {
-  readonly source_id: string;
-  readonly position: number;
-  readonly run_id: string;
-  readonly request_key: string;
-  readonly open_slot: number;
-  readonly interpretation_thought_id: string | null;
-}
-export function mediaAttempts(db: Database): readonly InitialMediaAttempt[] {
-  return db.query<InitialMediaAttempt, []>(`SELECT source_id,position,run_id,request_key,open_slot,interpretation_thought_id
-    FROM media_weave_attempts ORDER BY source_id,position`).all();
-}
-
 const admissionTables = ["media_sources", "thoughts", "thought_titles", "thought_source_seals", "thought_sources", "runs",
-  "run_steps", "media_weave_attempts", "run_context", "run_operation_receipts", "run_issued_thoughts", "run_replies", "agent_bindings"];
+  "run_steps", "run_context", "run_operation_receipts", "run_issued_thoughts", "run_replies", "agent_bindings"];
 export function mediaAdmissionSnapshot(db: Database) {
-  return admissionTables.map(table => ({ table, rows: table === "media_weave_attempts"
-    ? db.query("SELECT * FROM media_weave_attempts ORDER BY source_id,position").all()
-    : db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all() }));
+  return admissionTables.map(table => ({ table, rows: db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all() }));
 }
 
 export async function mediaAdmissionFixture(action: (fixture: {
@@ -60,13 +36,4 @@ export async function mediaAdmissionFixture(action: (fixture: {
     store.initializeMediaStore(mediaStoreId);
     await action({ db, other, path, store, sources, admissions: new SqliteMediaAdmissions(db, sources), second: new SqliteMediaAdmissions(other, sources) });
   } finally { other.close(); db.close(); rmSync(directory, { recursive: true, force: true }); }
-}
-
-/** Canonical run/initial-step insertion, deliberately independent of new admission's business guards. */
-export function insertMediaAttemptRun(db: Database, id: string, subjectId: string, sourceId: string,
-  position = 0, triggerId = `media:${sourceId}:${position}`, kind: "weave" | "export" = "weave"): RunRecord {
-  const run: RunRecord = { id, kind, status: "queued", sessionId: `${id}-session`, promptId: `${id}-prompt`,
-    createdAt: mediaTime, generation: 0, inputThoughtId: null, nativeState: "unknown" };
-  insertRun(db, run, kind === "weave" ? { subjectId, triggerId } : null);
-  return run;
 }

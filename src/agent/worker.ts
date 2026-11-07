@@ -1,7 +1,9 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
+import { isAbsolute } from "node:path";
 import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, type RunStep } from "../domain/run-protocol";
+import type { Thought } from "../domain/thought";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../storage/capability";
 import { SqliteRunOperations } from "../storage/run-operations";
@@ -9,9 +11,9 @@ import { SqliteRunProtocolRepository } from "../storage/run-protocol";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteRunWorkerState } from "../storage/run-worker";
 import { SqliteAgenticExports } from "../storage/agentic-export";
-import { AgentBindingError, assertBindingPermissions, normalizeBinding } from "./binding";
+import { AgentBindingError, allowsNativeTools, assertBindingPermissions, normalizeBinding } from "./binding";
 import type { AgentBinding, NativePhase, Observation, PersistedPrompt } from "./opencode-adapter";
-import { capabilityResultPrompt, initialWorkerPrompt } from "./worker-prompts";
+import { capabilityResultPrompt, initialWorkerPrompt, type MediaPath } from "./worker-prompts";
 import { SqliteSearchCapabilityDispatcher } from "../storage/search-capability";
 import { SqliteSearchPromptClock } from "../storage/search-prompt-clock";
 import type { SearchClockDependencies } from "../domain/search-time";
@@ -34,6 +36,8 @@ interface WorkerOwnershipDependencies extends RunSources {
   readonly db: Database;
   readonly searchClock?: SearchClockDependencies;
   readonly executionOwner?: ExecutionOwnerLease;
+  /** Daemon-owned resolver; the worker scopes source IDs before requesting an absolute shared-filesystem path. */
+  readonly mediaPath?: (sourceId: string) => Promise<string>;
 }
 export type WorkerDependencies = WorkerOwnershipDependencies & ({
   /** Bind the supplied bindings.assertActive to its receiver; it fences SQL claims/context and local pause around native calls. */
@@ -87,11 +91,7 @@ export class RunWorker {
   constructor(private readonly dependencies: WorkerDependencies) {
     const {db} = dependencies;
     this.logger = dependencies.logger ?? createLogger();
-    this.bindings = new WorkerBindings(db,runId => {
-      if (this.paused) throw new WorkerPaused();
-      if (this.flights.get(runId)?.retired) throw new WorkerRetired();
-      this.dependencies.executionOwner?.assertHeld();
-    },this.logger,dependencies.executionOwner);
+    this.bindings = new WorkerBindings(db,runId => this.localFence(runId),this.logger,dependencies.executionOwner);
     this.runs = new SqliteRunRepository(db,dependencies);
     this.searchClock = new SqliteSearchPromptClock(db,dependencies.now,dependencies.searchClock);
     this.steps = new SqliteRunProtocolRepository(db,this.logger,this.searchClock);
@@ -127,6 +127,11 @@ export class RunWorker {
   private active(claim: Claim, prompt?: PersistedPrompt): void {
     if (this.paused) throw new WorkerPaused();
     this.bindings.assertActive(claim,prompt);
+  }
+  private localFence(runId: string): void {
+    if (this.paused) throw new WorkerPaused();
+    if (this.flights.get(runId)?.retired) throw new WorkerRetired();
+    this.dependencies.executionOwner?.assertHeld();
   }
   private transport(): WorkerNative {
     const factory = this.dependencies.native;
@@ -166,14 +171,18 @@ export class RunWorker {
       const step = this.steps.steps(runId).at(-1);
       if (!step) throw new RunConflictError("Run has no current step");
       if (step.input === null) {
-        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding));
+        const context = run.kind === "search" ? null : this.state.initialContext(owner);
+        const paths = context === null || (context.job.kind === "weave" && context.job.purpose === "media-title-only")
+          ? [] : await this.mediaPaths(owner,run.kind,binding,context.thoughts);
+        this.active(owner);
+        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths));
         this.bindings.bind(runId,binding,owner);
         return;
       }
       if (!this.bindings.get(runId)) { this.bindings.bind(runId,binding,owner); return; }
       const prompt = {promptId:step.promptId,input:step.input};
       this.active(owner,prompt);
-      if (step.envelope !== null) { this.process(owner,step,run.kind,binding); return; }
+      if (step.envelope !== null) { await this.process(owner,step,run.kind,binding); return; }
       if (!this.ensured.has(runId)) {
         if ((await this.call(owner,prompt,"ensure session",() => this.transport().ensureSession(owner,binding))).ok) this.ensured.add(runId);
         return;
@@ -214,7 +223,7 @@ export class RunWorker {
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
   }
-  private process(claim: Claim, step: RunStep, kind: RunKind, binding: AgentBinding): void {
+  private async process(claim: Claim, step: RunStep, kind: RunKind, binding: AgentBinding): Promise<void> {
     this.active(claim);
     if (kind === "search") {
       if (step.envelope?.kind === "search-reply") {
@@ -230,13 +239,44 @@ export class RunWorker {
     }
     if (step.envelope?.kind === "complete" || step.envelope?.kind === "report") {
       this.state.finish(claim,step.promptId);
-      this.logger.info("[worker] run completed", { runId: claim.runId, kind });
+      if (this.runs.get(claim.runId)?.status === "failed") this.logger.error("[worker] source interpretation missing",{runId:claim.runId,kind});
+      else this.logger.info("[worker] run completed", { runId: claim.runId, kind });
       this.forget(claim.runId); return;
     }
     if (step.envelope?.kind !== "request") throw new RunConflictError("Completed step has no canonical envelope");
     const result = this.capabilities.dispatch(claim,step.promptId,step.envelope.request);
     if (step.result === null) return;
-    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind,binding)});
+    const paths = result.type === "thought" && result.thought !== null
+      ? await this.mediaPaths(claim,kind,binding,[result.thought]) : [];
+    this.active(claim);
+    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind,binding,paths)});
+  }
+  private async mediaPaths(claim: Claim, kind: RunKind, binding: AgentBinding, thoughts: readonly Thought[]): Promise<readonly MediaPath[]> {
+    if (kind !== "weave" && kind !== "evolve") return [];
+    const paths: MediaPath[] = [];
+    for (const thought of thoughts) {
+      if (thought.kind !== "media-original") continue;
+      this.active(claim);
+      if (!allowsNativeTools(binding)) throw new RunConflictError("This saved session cannot open original files");
+      const resolve = this.dependencies.mediaPath;
+      if (!resolve) throw new RunConflictError("Retained original storage is unavailable");
+      const context = {runId:claim.runId,sourceId:thought.mediaSource.id};
+      this.logger.verbose("[worker] original path attempt",context);
+      try {
+        const path = await resolve(thought.mediaSource.id);
+        this.active(claim);
+        if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || path.startsWith("/proc/self/fd/")) {
+          throw new RunConflictError("Retained original path is unavailable");
+        }
+        paths.push({thoughtId:thought.id,path});
+        this.logger.verbose("[worker] original path available",context);
+      } catch (error) {
+        this.active(claim);
+        this.logger.warning("[worker] original path unavailable",context);
+        throw error;
+      }
+    }
+    return paths;
   }
   private async call<T>(claim: Claim, prompt: PersistedPrompt, operation: "ensure session" | "submit" | "observe", action: () => Promise<T>): Promise<{readonly ok:true;readonly value:T} | {readonly ok:false}> {
     this.active(claim,prompt);

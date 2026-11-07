@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { nonEmpty, record } from "../domain/validation";
 import { protocolJson } from "../domain/run-protocol";
 import type { RunKind } from "../domain/run";
+import type { NativeSession } from "./opencode-adapter";
 
 export type ModelRef = Readonly<SdkModelRef>;
 export interface AgentBinding {
@@ -67,4 +68,21 @@ export function sameBinding(left: AgentBinding, right: AgentBinding): boolean { 
 export function sameModel(left: ModelRef, right: ModelRef): boolean {
   // Native create/get normalizes an omitted variant to "default"; this is not catalog selection.
   return left.providerID === right.providerID && left.id === right.id && (left.variant ?? "default") === (right.variant ?? "default");
+}
+
+/** Shared owned-session identity. Cancellation may use this without adopting drifted execution settings. */
+export function assertNativeSessionOwner(runId: string, binding: AgentBinding, session: NativeSession): void {
+  if (session.id !== binding.sessionId || session.metadata.owner !== "thoughtloom" || session.metadata.runId !== runId || session.metadata.protocolVersion !== "1") {
+    throw new AgentBindingError("Native session ownership differs");
+  }
+}
+
+/** Exact execution/read binding, independent of the transport operation or terminal interpretation. */
+export function assertNativeSessionBinding(runId: string, binding: AgentBinding, session: NativeSession): void {
+  assertNativeSessionOwner(runId,binding,session);
+  if (session.unsafe || session.location.directory !== binding.location.directory || !sameModel(binding.model,session.model) ||
+      protocolJson(session.permissions) !== protocolJson(binding.permissions) ||
+      protocolJson(session.metadata) !== protocolJson({owner:"thoughtloom",runId,protocolVersion:"1"})) {
+    throw new AgentBindingError("Native session does not match its owned binding");
+  }
 }

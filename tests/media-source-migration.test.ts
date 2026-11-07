@@ -5,9 +5,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { immediate } from "../src/storage/transaction";
+import { SqliteRunOperations } from "../src/storage/run-operations";
 import { initializeSqlMediaStore, insertMediaSource, mediaDigest, mediaStoreId, mediaThought, mediaTime,
   requireMediaSchema, requireMediaWriter } from "./fixtures/media-source";
-import { foreignKeyGroups, orderForeignKeyGroups, type ForeignKeyPart } from "./fixtures/sqlite-foreign-keys";
+import { foreignKeyGroups } from "./fixtures/sqlite-foreign-keys";
 
 const frozenTables = ["thoughts", "thought_titles", "thought_sources", "thought_source_seals", "import_namespaces",
   "import_documents", "import_document_seals", "import_document_parts", "import_locations", "responses", "response_thoughts",
@@ -16,8 +17,6 @@ const frozenTables = ["thoughts", "thought_titles", "thought_sources", "thought_
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 const frozenBytes = new Uint8Array(Buffer.from("efbbbf436166c3a90d0ae6bca2e5ad970d0a", "hex"));
 const frozenStepColumns = "rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json,submit_owner";
-const mediaSubmitOwnerForeignKey: readonly ForeignKeyPart[] = [{seq:0,table:"execution_owners",from:"media_submit_owner_id",to:"id",
-  on_update:"NO ACTION",on_delete:"NO ACTION",match:"NONE"}];
 
 function seedFrozen(db: Database): void {
   db.exec(readFileSync(new URL("./fixtures/pre-media-schema.sql", import.meta.url), "utf8"));
@@ -68,27 +67,11 @@ function preserved(db: Database, excludeNewMedia = false) {
   return frozenTables.map(table => {
     const where = !excludeNewMedia ? "" : table === "thoughts" ? " WHERE id!='media-root'" :
       ["thought_titles", "thought_source_seals"].includes(table) ? " WHERE thought_id!='media-root'" : "";
-    // Explicitly retain every predecessor step column; new nullable attribution is checked separately.
+    // Explicitly retain every predecessor step column.
     const columns = table === "run_steps" ? frozenStepColumns : "rowid,*";
     return { table, rows: db.query(`SELECT ${columns} FROM ${quote(table)}${where} ORDER BY rowid`).all(),
       fks: foreignKeyGroups(db,table) };
   });
-}
-
-function expectedMigrated(before: ReturnType<typeof preserved>) {
-  // Compare all original FK groups plus precisely the new relation; no incoming/composite constraint is filtered out.
-  return before.map(item => item.table === "run_steps" ? {...item,fks:orderForeignKeyGroups([...item.fks,mediaSubmitOwnerForeignKey])} : item);
-}
-
-function expectNullMediaStepAttribution(db: Database): void {
-  expect(db.query("PRAGMA table_info(run_steps)").all()).toEqual(expect.arrayContaining([
-    expect.objectContaining({name:"media_submit_owner_id",type:"TEXT",notnull:0,dflt_value:null}),
-    expect.objectContaining({name:"media_submit_generation",type:"INTEGER",notnull:0,dflt_value:null}),
-  ]));
-  expect(db.query("SELECT rowid,prompt_id,media_submit_owner_id,media_submit_generation FROM run_steps ORDER BY rowid").all()).toEqual([
-    {rowid:71,prompt_id:"prompt-weave",media_submit_owner_id:null,media_submit_generation:null},
-    {rowid:73,prompt_id:"prompt-search",media_submit_owner_id:null,media_submit_generation:null},
-  ]);
 }
 
 function preservedArtifacts(db: Database) {
@@ -101,6 +84,59 @@ function fileFixture(action: (db: Database, path: string) => void): void {
 }
 
 describe("media source migration and immutable metadata", () => {
+  test("media file-run schema upgrade preserves core records, fences active work and rolls back an interrupted cleanup", () => fileFixture((db,path) => {
+    seedFrozen(db); migrate(db); initializeSqlMediaStore(db); insertMediaSource(db);
+    let sequence = 0;
+    const run = new SqliteRunOperations(db,{id:() => `schema-${++sequence}`,now:() => mediaTime})
+      .admitWeave("user",{subjectId:mediaThought.id,triggerId:`media-import:${mediaThought.mediaSource.id}`});
+    db.run("UPDATE run_steps SET input=CAST(? AS TEXT),state='submitting' WHERE run_id=?",[new TextEncoder().encode("\uFEFFexact retained input café\r\n"),run.id]);
+    db.run("UPDATE runs SET status='submitting' WHERE id=?",[run.id]);
+    const core = (connection: Database) => [...frozenTables,"media_store","media_sources"].map(table => ({table,
+      rows:connection.query(`SELECT ${table === "run_steps" ? frozenStepColumns : "rowid,*"} FROM ${quote(table)}${table === "runs" ? " WHERE id!=?" : ""} ORDER BY rowid`)
+        .all(...(table === "runs" ? [run.id] : [])),fks:foreignKeyGroups(connection,table)}));
+    const before = core(db);
+    db.exec(`ALTER TABLE run_steps ADD COLUMN media_submit_owner_id TEXT REFERENCES execution_owners(id);
+      ALTER TABLE run_steps ADD COLUMN media_submit_generation INTEGER;
+      CREATE TABLE media_weave_attempts(source_id TEXT REFERENCES media_sources(id),run_id TEXT REFERENCES runs(id));
+      CREATE TABLE run_media_parts(prompt_id TEXT REFERENCES run_steps(prompt_id),observed INTEGER NOT NULL DEFAULT 0);`);
+    db.run("INSERT INTO media_weave_attempts VALUES (?,?)",[mediaThought.mediaSource.id,run.id]);
+    db.run("INSERT INTO run_media_parts(prompt_id) VALUES (?)",[run.promptId]);
+    db.run("UPDATE run_steps SET media_submit_owner_id='old-owner',media_submit_generation=0 WHERE run_id=?",[run.id]);
+    db.exec(`CREATE TRIGGER media_attempt_sealed_run BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'sealed source run'); END;
+      CREATE TRIGGER media_submission_once BEFORE UPDATE ON run_steps BEGIN SELECT RAISE(ABORT,'sealed source step'); END;`);
+    const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all();
+    const data = () => [...frozenTables,"media_store","media_sources","media_weave_attempts","run_media_parts"]
+      .map(table => ({table,rows:db.query(`SELECT rowid,* FROM ${quote(table)} ORDER BY rowid`).all()}));
+    const oldSchema = schema(), oldData = data();
+    let injected = false;
+    const failing = new Proxy(db,{get(target,key) {
+      if (key === "exec") return (sql: string) => {
+        const result = target.exec(sql);
+        if (sql === "DROP TABLE run_media_parts") { injected = true; throw new Error("schema cleanup fault after real DDL"); }
+        return result;
+      };
+      const member = Reflect.get(target,key,target);
+      return typeof member === "function" ? member.bind(target) : member;
+    }});
+    expect(() => migrate(failing)).toThrow("schema cleanup fault after real DDL");
+    expect(injected).toBe(true); expect(db.inTransaction).toBe(false);
+    expect(schema()).toEqual(oldSchema); expect(data()).toEqual(oldData);
+    migrate(db);
+    expect(core(db)).toEqual(before);
+    const fenced = db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(run.id);
+    expect(fenced).toEqual({status:"interrupted",generation:1,cancellation_state:"pending"});
+    expect(db.query("SELECT name FROM sqlite_schema WHERE name IN ('media_weave_attempts','run_media_parts','media_attempt_sealed_run','media_submission_once')").all()).toEqual([]);
+    const columns = db.query<{name:string},[]>("PRAGMA table_info(run_steps)").all().map(column => column.name);
+    expect(columns).not.toContain("media_submit_owner_id"); expect(columns).not.toContain("media_submit_generation");
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); migrate(reopened);
+      expect(core(reopened)).toEqual(before);
+      expect(reopened.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(run.id)).toEqual(fenced);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  }));
+
   test("core migration creates empty media identity/source tables and accepts null text only for an associated media root", () => {
     const db = new Database(":memory:");
     try {
@@ -119,11 +155,10 @@ describe("media source migration and immutable metadata", () => {
   });
 
   test("a populated frozen cyclic predecessor preserves bytes, rowids, incoming FKs and sealed associations through repeated reopen", () => fileFixture((db, path) => {
-    seedFrozen(db); const before = expectedMigrated(preserved(db)), artifacts = preservedArtifacts(db);
+    seedFrozen(db); const before = preserved(db), artifacts = preservedArtifacts(db);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrate(db); requireMediaSchema(db);
     expect(preserved(db)).toEqual(before);
-    expectNullMediaStepAttribution(db);
     expect(preservedArtifacts(db)).toEqual(expect.arrayContaining(artifacts));
     expect(db.query("SELECT original_bytes FROM import_documents WHERE id='legacy-document'").get()).toEqual({ original_bytes: frozenBytes });
     expect(db.query("SELECT * FROM media_store").all()).toEqual([]);
@@ -132,7 +167,6 @@ describe("media source migration and immutable metadata", () => {
     try {
       migrate(reopened); migrate(reopened);
       expect(preserved(reopened, true)).toEqual(before);
-      expectNullMediaStepAttribution(reopened);
       expect(preservedArtifacts(reopened)).toEqual(expect.arrayContaining(artifacts));
       expect(new SqliteStore(reopened).getThought(mediaThought.id)).toEqual(mediaThought);
       expect(reopened.query("SELECT * FROM media_store").all()).toEqual([{ singleton: 1, store_id: mediaStoreId }]);
@@ -183,7 +217,7 @@ describe("media source migration and immutable metadata", () => {
   }));
 
   test("failure after real destructive closure DDL rolls back the complete frozen schema/data and permits a clean retry", () => fileFixture(db => {
-    seedFrozen(db); const before = expectedMigrated(preserved(db)), artifacts = preservedArtifacts(db);
+    seedFrozen(db); const before = preserved(db), artifacts = preservedArtifacts(db);
     // Rollback still compares every column and raw FK ordinal, not the successful-upgrade projection.
     const completeData = () => frozenTables.map(table => ({table,
       rows:db.query(`SELECT rowid,* FROM ${quote(table)} ORDER BY rowid`).all(),
@@ -210,7 +244,6 @@ describe("media source migration and immutable metadata", () => {
     expect(schema()).toEqual(oldSchema); expect(completeData()).toEqual(beforeRollback);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrate(db); requireMediaSchema(db); expect(preserved(db)).toEqual(before);
-    expectNullMediaStepAttribution(db);
     expect(preservedArtifacts(db)).toEqual(expect.arrayContaining(artifacts));
   }));
 

@@ -21,22 +21,19 @@ import { SqliteSearchRepository } from "../src/storage/search";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { SqliteTitleRepository } from "../src/storage/title";
 import { initializeSqlMediaStore, insertMediaSource, mediaThought, mediaTime } from "./fixtures/media-source";
-import { mediaChildPredecessor } from "./fixtures/media-child-predecessor";
 
 const ai = { actor: "ai", mode: "normal" } as const;
 const normal = { actor: "user", mode: "normal" } as const;
 const history = { actor: "user", mode: "history" } as const;
 function fixture(action: (db: Database, store: SqliteStore, rejection: RejectionService, repository: SqliteSearchRepository) => void,
-  thought: MediaThought = mediaThought, retainedChildText?: string): void {
-  if (retainedChildText !== undefined) {
-    mediaChildPredecessor(thought, { id: "child", text: retainedChildText }, db => action(db, new SqliteStore(db),
-      new RejectionService(new SqliteRejectionRepository(db)), new SqliteSearchRepository(db)));
-    return;
-  }
+  thought: MediaThought = mediaThought, childText?: string): void {
   const db = new Database(":memory:");
   try {
     migrate(db); initializeSqlMediaStore(db); insertMediaSource(db, thought);
-    action(db, new SqliteStore(db), new RejectionService(new SqliteRejectionRepository(db)), new SqliteSearchRepository(db));
+    const store = new SqliteStore(db);
+    if (childText !== undefined) store.saveThought({id:"child",text:childText,title:null,titleAuthor:null,author:"ai",kind:"ai-interpretation",
+      createdAt:mediaTime,origin:"weave",parentId:thought.id,sourceIds:[]});
+    action(db,store,new RejectionService(new SqliteRejectionRepository(db)),new SqliteSearchRepository(db));
   } finally { db.close(); }
 }
 

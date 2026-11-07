@@ -58,6 +58,11 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
         return existing.result;
       }
       if (step.promptId !== run.promptId || step.state !== "completed") throw new RunFenceError("Prompt is no longer current");
+      if (operation.type === "interpretation" && subjectId !== null &&
+          this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(subjectId) &&
+          this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
+        throw new RunConflictError("Source already has an initial interpretation; use Evolve");
+      }
       const effect = this.apply(operation,subjectId);
       const thoughtId = effect.type === "development" || effect.type === "interpretation" ? effect.thought.id : null;
       this.db.run(`INSERT INTO run_operation_receipts (run_id,operation_id,operation_json,thought_id,result_json,format) VALUES (?,?,?,?,?,'step')`,
@@ -117,7 +122,11 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
         role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
       new SqliteSharedResponses(this.db,this.logger).save(response);
       this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
-      this.db.run("UPDATE runs SET status='completed',generation=generation+1 WHERE id=?",[run.id]);
+      const missingInterpretation = this.weavePurpose(run) === "ordinary" &&
+        this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(intent.subjectId) !== null &&
+        this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId) === null;
+      this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=? WHERE id=?",
+        [missingInterpretation ? "failed" : "completed",missingInterpretation ? "pending" : "none",run.id]);
     });
   }
   fail(claim: Claim): void {

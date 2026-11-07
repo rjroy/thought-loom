@@ -10,7 +10,6 @@ import { searchString } from "../domain/search-session-guards";
 import { confirmSearchResult } from "./search-capability-result";
 import { requireCurrentSearchPublication, requireSearchFullReads, searchPublicationOwner } from "./search-publication-guard";
 import { retainedSearchSuccessorClock, type SqliteSearchPromptClock } from "./search-prompt-clock";
-import { confirmOriginalMediaManifest, insertOriginalMediaParts, readOriginalMediaParts, requireMediaDelivery } from "./run-media";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
@@ -23,18 +22,15 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     return this.currentStep(run.id);
   }
   prepare(claim: Claim, input: NextStep): RunStep {
-    const prepared = this.guarded("prepare prompt",claim,(run,visible) => {
+    const prepared = this.guarded("prepare prompt",claim,run => {
       const promptId = nonEmpty(input.promptId,"promptId");
       const text = nonEmpty(input.input,"input");
       const step = this.current(run,promptId);
-      if (input.media !== undefined) confirmOriginalMediaManifest(input.media,readOriginalMediaParts(this.db,promptId).manifest);
       if (step.input !== null) {
         if (step.input !== text) throw new RunConflictError("Prompt input differs from prepared input");
-        this.confirmMediaInput(run,step,text,visible);
         return step;
       }
       if (step.state !== "prepared" || run.status !== "queued" || run.nativeState !== "unknown") throw new RunConflictError("Legacy prompt input is unknown and cannot be replaced");
-      this.confirmMediaInput(run,step,text,visible);
       this.db.run("UPDATE run_steps SET input=? WHERE run_id=? AND prompt_id=?",[text,run.id,promptId]);
       return { ...step, input: text };
     });
@@ -43,7 +39,6 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
   }
   setStepState(claim: Claim, promptId: string, state: "submitting" | "uncertain"): void {
     this.guarded("prompt state",claim,run => {
-      requireMediaDelivery(this.db,run.id);
       const step = this.current(run,promptId);
       if (step.input === null) throw new RunConflictError("Exact prompt input was not retained");
       const allowed = state === "submitting" ? step.state === "prepared" : state === "uncertain" && ["submitting","uncertain"].includes(step.state);
@@ -60,10 +55,13 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       if (run.kind === "search") {
         if (value.kind === "request") parseSearchCapabilityRequest(value.request);
         else if (value.kind !== "search-reply") throw new RunForbiddenError("Search envelope authority required");
-      } else if (value.kind === "search-reply" || (value.kind === "request" && isSearchOnlyCapability(value.request.capability))) {
+      } else if (value.kind === "search-reply" ||
+          (value.kind === "request" && isSearchOnlyCapability(value.request.capability))) {
         throw new RunForbiddenError("Search run authority required");
       }
-      if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) throw new RunForbiddenError("Final envelope does not match the run kind");
+      if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) {
+        throw new RunForbiddenError("Final envelope does not match the run kind");
+      }
       const encoded = protocolJson(value);
       if (step.envelope !== null) {
         if (protocolJson(step.envelope) !== encoded) throw new RunConflictError("Completed prompt envelope differs");
@@ -77,7 +75,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     this.logger.verbose("[run storage] prompt completion confirmed", { runId: claim.runId, promptId, kind, generation: claim.generation });
   }
   advance(claim: Claim, promptId: string, result: unknown, next: NextStep): RunStep {
-    const successor = this.guarded<RunStep>("advance prompt",claim,(run,visible) => {
+    const successor = this.guarded<RunStep>("advance prompt",claim,run => {
       const step = this.readStep(run.id,promptId);
       if (!step) throw new RunConflictError("Prompt does not belong to this run");
       if (step.envelope?.kind === "request") this.requireWeaveCapability(run,step.envelope.request.capability);
@@ -89,27 +87,11 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
         if (protocolJson(step.result) !== resultJson || !successor || successor.position !== step.position+1 || successor.input !== nextInput) {
           throw new RunConflictError("Processed prompt result or successor differs");
         }
-        const {manifest} = readOriginalMediaParts(this.db,successor.promptId);
-        if (next.media !== undefined) confirmOriginalMediaManifest(next.media,manifest);
-        else if (manifest.parts.length !== 0) throw new RunConflictError("Successor replay requires its exact prepared parts");
-        this.confirmMediaInput(run,successor,nextInput,visible);
         return successor;
       }
       this.current(run,promptId);
       if (step.state !== "completed" || step.envelope?.kind !== "request") throw new RunConflictError("Only a completed capability request can advance");
-      if (next.media !== undefined) {
-        if ((run.kind !== "weave" && run.kind !== "evolve") || this.weavePurpose(run) !== "ordinary") throw new RunForbiddenError("Media preparation requires ordinary Weaver or Evolve authority");
-        if (step.result === null) throw new RunConflictError("Media successor requires its already confirmed predecessor result");
-        const prepared = this.appendSuccessor(run,step,resultJson,nextPromptId,null);
-        insertOriginalMediaParts(this.db,prepared.promptId,next.media);
-        this.confirmMediaInput(run,prepared,nextInput,visible);
-        this.db.run("UPDATE run_steps SET input=? WHERE run_id=? AND prompt_id=?",[nextInput,run.id,prepared.promptId]);
-        return {...prepared,input:nextInput};
-      }
-      const prepared = this.appendSuccessor(run,step,resultJson,nextPromptId,nextInput);
-      // A text-only argument cannot smuggle a media claim into sealed input without any persisted parts.
-      this.confirmMediaInput(run,prepared,nextInput,visible);
-      return prepared;
+      return this.appendSuccessor(run,step,resultJson,nextPromptId,nextInput);
     });
     this.logger.verbose("[run storage] prompt successor confirmed", { runId: claim.runId, from: promptId, to: successor.promptId, position: successor.position, generation: claim.generation });
     return successor;

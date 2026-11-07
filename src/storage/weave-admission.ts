@@ -22,13 +22,23 @@ export function admitWeave(db: Database, sources: WeaveSources, input: WeaveInte
       const subject = db.query<{ kind: MaterialKind }, [string]>(`SELECT t.kind FROM thoughts t WHERE t.id=? AND NOT EXISTS
         (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)`).get(intent.subjectId);
       if (!subject) throw new RunNotFoundError();
-      resolveWeavePurpose(subject.kind,intent.triggerId);
+      const purpose = resolveWeavePurpose(subject.kind,intent.triggerId);
       const existing = db.query(`SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? ORDER BY rowid LIMIT 1`)
         .get(intent.subjectId,intent.triggerId) as {id:string} | null;
       if (existing) {
         const run = readRun(db,existing.id);
         if (!run) throw new RunConflictError("Existing weave has no current step");
         return {run,reused:true};
+      }
+      if (subject.kind === "media-original" && purpose === "ordinary") {
+        if (db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId)) {
+          throw new RunConflictError("Source already has an initial interpretation; use Evolve");
+        }
+        const previous = db.query<{status:string;cancellation:string},[string]>(`SELECT status,cancellation_state AS cancellation
+          FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id NOT LIKE 'title-clear:%' ORDER BY rowid DESC LIMIT 1`).get(intent.subjectId);
+        if (previous && (!["failed","interrupted"].includes(previous.status) || previous.cancellation !== "settled")) {
+          throw new RunConflictError("Previous source processing is still active or unresolved");
+        }
       }
       const run: RunRecord = {id:nonEmpty(sources.id(),"runId"),kind:"weave",status:"queued",sessionId:nonEmpty(sources.sessionId?.() ?? sources.id(),"sessionId"),
         promptId:nonEmpty(sources.promptId?.() ?? sources.id(),"promptId"),createdAt:nonEmpty(sources.now(),"createdAt"),generation:0,inputThoughtId:null,nativeState:"unknown"};

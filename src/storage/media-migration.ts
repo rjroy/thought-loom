@@ -1,10 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { Logger } from "../logging";
 import { createMediaGuards, createMediaTables, indexMediaClarification } from "./media-schema";
-import { migrateMediaAttempts } from "./media-attempt-schema";
-import { migrateRunMediaParts } from "./run-media-schema";
-import { migrateMediaSubmissions } from "./media-submission-schema";
-import { migrateMediaAttemptTermination } from "./media-attempt-termination";
 
 const thoughts = `CREATE TABLE thoughts (
   id TEXT PRIMARY KEY NOT NULL,text TEXT,
@@ -33,12 +29,36 @@ export function migrateMediaFoundation(db: Database, logger: Logger): void {
   }
   createMediaTables(db);
   createMediaGuards(db);
-  migrateMediaAttempts(db);
-  migrateRunMediaParts(db);
-  migrateMediaSubmissions(db);
-  migrateMediaAttemptTermination(db);
+  migrateMediaFileRuns(db);
   indexMediaClarification(db);
   if (db.query("PRAGMA foreign_key_check").all().length) throw new Error("Media migration foreign key integrity failure");
+}
+
+/** Upgrade development databases to source metadata plus ordinary runs, preserving their core records. */
+function migrateMediaFileRuns(db: Database): void {
+  const tables = new Set(db.query<{name:string},[]>("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => row.name));
+  const columns = new Set(db.query<{name:string},[]>("PRAGMA table_info(run_steps)").all().map(row => row.name));
+  const affected = new Set<string>();
+  if (tables.has("media_weave_attempts")) {
+    for (const row of db.query<{runId:string},[]>("SELECT run_id AS runId FROM media_weave_attempts").all()) affected.add(row.runId);
+  }
+  if (tables.has("run_media_parts")) {
+    for (const row of db.query<{runId:string},[]>("SELECT DISTINCT step.run_id AS runId FROM run_steps step JOIN run_media_parts part ON part.prompt_id=step.prompt_id").all()) affected.add(row.runId);
+  }
+  if (columns.has("media_submit_owner_id")) {
+    for (const row of db.query<{runId:string},[]>("SELECT DISTINCT run_id AS runId FROM run_steps WHERE media_submit_owner_id IS NOT NULL").all()) affected.add(row.runId);
+  }
+  const triggers = db.query<{name:string},[]>(`SELECT name FROM sqlite_schema WHERE type='trigger' AND
+    (name GLOB 'media_attempt_*' OR name GLOB 'media_submission_*' OR name GLOB 'run_media_parts_*' OR name='media_source_successor_unsubmitted')`).all();
+  for (const trigger of triggers) db.exec(`DROP TRIGGER ${quote(trigger.name)}`);
+  // Never resume saved inputs as a new file-path request or claim that an unresolved native outcome settled.
+  for (const runId of affected) db.run(`UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending'
+    WHERE id=? AND status IN ('queued','submitting','running','uncertain')`,[runId]);
+  if (tables.has("run_media_parts")) db.exec("DROP TABLE run_media_parts");
+  if (tables.has("media_weave_attempts")) db.exec("DROP TABLE media_weave_attempts");
+  for (const column of ["media_submit_owner_id","media_submit_generation"]) {
+    if (columns.has(column)) db.exec(`ALTER TABLE run_steps DROP COLUMN ${quote(column)}`);
+  }
 }
 
 function rebuildThoughtClosure(db: Database): number {

@@ -8,7 +8,7 @@ import type { WeavePurpose } from "./weave-scheduling";
 /** Trusted initial context, selected and witnessed by the run aggregate under AI read scope. */
 export interface InitialRunContext {
   readonly job:
-    // Ordinary/legacy textual contexts omit purpose. Storage derives media purpose from immutable intent, never model input.
+    // Title-only source jobs carry the purpose derived from their persisted invitation.
     | { readonly kind: "weave"; readonly subjectId: string; readonly purpose?: WeavePurpose }
     | { readonly kind: "evolve"; readonly contributionId: string; readonly continuationId: string | null }
     | ({ readonly kind: "export" } & ExportIntent)
