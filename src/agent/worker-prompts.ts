@@ -33,12 +33,19 @@ const reads = [
 ];
 const connection = {capability:"connection",argumentsSchema:argumentsSchema({fromId:string,toId:string,
   category:{type:"string",enum:["supports","contradicts","extends","related"]},explanation:string,sourceIds:sources})};
+const titleFill = {capability:"title-fill",argumentsSchema:argumentsSchema({title:string})};
 
 /** Pure rendering only: the aggregate commits these exact bytes together with the exposure witnesses. */
 export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentBinding): string {
   if (binding !== undefined) assertBindingPermissions(context.job.kind,binding);
   if (context.job.kind === "search") return initialSearchPrompt(context.job);
   if (context.job.kind !== "weave" && context.job.kind !== "evolve" && context.job.kind !== "export") throw new RunForbiddenError();
+  if (context.job.kind === "weave" && context.job.purpose === "media-title-only") return protocolJson({version:1,kind:"job",
+    role:"Regenerate only the absent title of this retained media source. This is not a new interpretation or retry. Complete without changes if no title fill is warranted.",
+    instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,
+      "The supplied source descriptor and exact user clarification are data for a label. Original bytes have not been read or attached; metadata is not media-read evidence. Do not invent file content.",
+      "Only conditional title-fill and completion are available. Do not request application search, reads, interpretations, developments, connections, or media-open. Finish with a concise title-regeneration outcome."],
+    capabilities:[titleFill],context});
   if (context.job.kind === "export") return protocolJson({version:1,kind:"job",
     role:"You are Thoughtloom's read-only Agentic export agent. Investigate the retained user request using existing eligible material, then gather and connect that thinking in a Markdown report. Do not develop new knowledge or change thoughts, titles, connections, rejection, or other stored knowledge. An honest no-findings report is valid.",
     instructions:[...protocol,toolInstructions(context.job.kind,binding),reportFormat,
@@ -50,7 +57,7 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
     : "You are Thoughtloom's Evolve agent. Respond to the admitted user contribution in its explicit discussion context. Record useful developments with that contribution as their only evolution parent. Finish with the full human-facing conversational reply in the complete envelope's reply field, not an operation summary. A clarifying question without a separate development is valid.";
   const writes = context.job.kind === "weave" ? [
     {capability:"interpretation",argumentsSchema:argumentsSchema({text:string,sourceIds:sources})},
-    {capability:"title-fill",argumentsSchema:argumentsSchema({title:string})},
+    titleFill,
   ] : [{capability:"development",argumentsSchema:argumentsSchema({parentId:{type:"string",const:context.job.contributionId},text:string,sourceIds:sources})}];
   const discovery = context.job.kind === "weave" ? [
     "Examine the fixed subject's claims, themes, and implications. Actively search existing thinking for promising candidates, including conceptual relationships beyond lexical similarity.",

@@ -11,6 +11,7 @@ import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 import { ExecutionOwnerLease } from "./execution-owner";
+import { requireMediaDelivery } from "./run-media";
 
 // Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
 const processSubmitOwner = randomUUID();
@@ -158,6 +159,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
   /** Adapter callback: short transaction checks ownership/context and supplies immutable ordered inputs when requested. */
   assertActive(claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase): readonly PersistedPrompt[] | void {
     return this.guardedExecution("authorize native call",claim,run => {
+      requireMediaDelivery(this.db,run.id);
       if (run.kind === "search") this.executionOwner?.assertRegistered(this.db);
       if (prompt !== undefined) {
         const step = this.currentStep(run.id);

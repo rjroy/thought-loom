@@ -18,9 +18,12 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
   constructor(db: Database, private readonly sources: RunSources,
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
-    const prepared = this.guardedExecution("prepare worker context",claim,run => {
+    const prepared = this.guardedExecution("prepare worker context",claim,(run,visible) => {
       const step = this.currentStep(run.id);
-      if (step.input !== null) return { step, clock: null };
+      if (step.input !== null) {
+        this.confirmMediaInput(run,step,step.input,visible);
+        return { step, clock: null };
+      }
       if (step.position !== 0 || step.state !== "prepared" || run.status !== "queued" || run.nativeState !== "unknown") {
         throw new RunConflictError("Unknown legacy input cannot be reconstructed");
       }
@@ -30,6 +33,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       const context = search?.context ?? this.initialContext(run);
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
       const input = nonEmpty(render(context),"initial input");
+      this.confirmMediaInput(run,step,input,visible);
       if (search) for (const ref of search.dependencies) this.track(run.id,ref);
       for (const thought of context.thoughts) this.trackThought(run.id,thought);
       for (const connection of context.connections) this.trackConnection(run.id,connection);
@@ -54,6 +58,10 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     const subjectId = run.kind === "weave" ? this.readWeaveIntent(run.id)?.subjectId : run.inputThoughtId;
     const subject = subjectId === null || subjectId === undefined ? undefined : visible.get(subjectId);
     if (!subject) throw new RunConflictError("Run subject identity is unavailable");
+    if (this.weavePurpose(run) === "media-title-only") {
+      // No interpretation pointer exists yet. Do not substitute an arbitrary child, reply, or discovered neighbor.
+      return {job:{kind:"weave",subjectId:subject.id,purpose:"media-title-only"},thoughts:[subject],connections:[],responses:[]};
+    }
     const thoughts: Thought[] = [];
     const selected = new Set<string>();
     let thought: Thought | undefined = subject;

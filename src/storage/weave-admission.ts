@@ -2,6 +2,8 @@ import { createLogger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { RunConflictError, RunNotFoundError, type RunRecord, type RunSources } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
+import type { MaterialKind } from "../domain/thought";
+import { resolveWeavePurpose } from "../domain/weave-scheduling";
 import { nonEmpty, record } from "../domain/validation";
 import { insertRun, readRun } from "./run-record";
 
@@ -16,9 +18,11 @@ export function admitWeave(db: Database, sources: WeaveSources, input: WeaveInte
   logger.verbose("[run storage] admit weave attempt",{subjectId:intent.subjectId});
   try {
     const result = db.transaction(() => {
-      // AI thought eligibility needs only existence/rejection, not thought text or a corpus snapshot.
-      if (!db.query(`SELECT 1 FROM thoughts t WHERE t.id=? AND NOT EXISTS
-        (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)`).get(intent.subjectId)) throw new RunNotFoundError();
+      // Resolve purpose before the idempotent existing-run path too. No thought content or corpus snapshot is needed.
+      const subject = db.query<{ kind: MaterialKind }, [string]>(`SELECT t.kind FROM thoughts t WHERE t.id=? AND NOT EXISTS
+        (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)`).get(intent.subjectId);
+      if (!subject) throw new RunNotFoundError();
+      resolveWeavePurpose(subject.kind,intent.triggerId);
       const existing = db.query(`SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? ORDER BY rowid LIMIT 1`)
         .get(intent.subjectId,intent.triggerId) as {id:string} | null;
       if (existing) {

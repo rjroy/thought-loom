@@ -21,22 +21,23 @@ import { SqliteSearchRepository } from "../src/storage/search";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { SqliteTitleRepository } from "../src/storage/title";
 import { initializeSqlMediaStore, insertMediaSource, mediaThought, mediaTime } from "./fixtures/media-source";
+import { mediaChildPredecessor } from "./fixtures/media-child-predecessor";
 
 const ai = { actor: "ai", mode: "normal" } as const;
 const normal = { actor: "user", mode: "normal" } as const;
 const history = { actor: "user", mode: "history" } as const;
 function fixture(action: (db: Database, store: SqliteStore, rejection: RejectionService, repository: SqliteSearchRepository) => void,
-  thought: MediaThought = mediaThought): void {
+  thought: MediaThought = mediaThought, retainedChildText?: string): void {
+  if (retainedChildText !== undefined) {
+    mediaChildPredecessor(thought, { id: "child", text: retainedChildText }, db => action(db, new SqliteStore(db),
+      new RejectionService(new SqliteRejectionRepository(db)), new SqliteSearchRepository(db)));
+    return;
+  }
   const db = new Database(":memory:");
   try {
     migrate(db); initializeSqlMediaStore(db); insertMediaSource(db, thought);
     action(db, new SqliteStore(db), new RejectionService(new SqliteRejectionRepository(db)), new SqliteSearchRepository(db));
   } finally { db.close(); }
-}
-
-function child(store: SqliteStore, text = "Retained independent development"): void {
-  store.saveThought({ id: "child", text, title: null, titleAuthor: null, author: "ai", kind: "ai-interpretation",
-    createdAt: mediaTime, origin: "weave", parentId: mediaThought.id, sourceIds: [] });
 }
 
 describe("persisted media-source projections", () => {
@@ -57,8 +58,7 @@ describe("persisted media-source projections", () => {
     expect(db.query("SELECT hex(CAST(clarification AS BLOB)) AS bytes FROM media_sources").get()).toEqual({ bytes: expectedHex });
   }));
 
-  test("keyword results and counts retain the media union and use clarification rather than a null thought body", () => fixture((_db, store, _rejection, repository) => {
-    child(store, "Zircon interpretation wording");
+  test("keyword results and counts retain the media union and use clarification rather than a null thought body", () => fixture((_db, _store, _rejection, repository) => {
     const page = new SearchService(repository).query(ai, "zircon", { authors: ["source"], kinds: ["media-original"] });
     expect(page.results).toEqual([expect.objectContaining({ kind: "thought", id: mediaThought.id, thoughtId: mediaThought.id,
       text: null, author: "source", materialKind: "media-original", title: mediaThought.mediaSource.name,
@@ -67,10 +67,9 @@ describe("persisted media-source projections", () => {
     expect(page.counts.kinds["media-original"]).toBe(1);
     const hit = repository.search(ai, "zircon").find(item => item.id === mediaThought.id);
     expect(hit).toMatchObject({ text: null, mediaSource: mediaThought.mediaSource });
-  }));
+  }, mediaThought, "Zircon interpretation wording"));
 
   test("both predecessor and matching-connection context hydrate the media descriptor", () => fixture((_db, store, _rejection, repository) => {
-    child(store, "Chromium descendant wording");
     const predecessor = repository.query(ai, "chromium", {}).results.find(item => item.id === "child");
     expect(predecessor?.context).toEqual({ kind: "predecessor", thought: mediaThought });
     store.saveThought({ id: "neighbor", text: "Zircon neighbor", title: null, author: "user", kind: "captured-original",
@@ -80,7 +79,7 @@ describe("persisted media-source projections", () => {
     store.saveConnection(connection);
     const connected = repository.query(ai, "zircon", {}).results.find(item => item.id === "neighbor");
     expect(connected?.context).toEqual({ kind: "connection", thought: mediaThought, connection });
-  }));
+  }, mediaThought, "Chromium descendant wording"));
 
   test("ordinary scoped capability reads hydrate source metadata and retain thought exposure", () => fixture((db, store) => {
     let n = 0; const sources = { id: () => `read-${++n}`, now: () => mediaTime };
@@ -135,8 +134,7 @@ describe("persisted media-source projections", () => {
     expect(sessions.history("user", session.id).discoveries.items[0]?.thought).toEqual(summary);
   }));
 
-  test("rejection hides metadata and vocabulary through active descendants, while explicit user inspection retains the original", () => fixture((_db, store, rejection, repository) => {
-    child(store);
+  test("rejection hides metadata and vocabulary through active descendants, while explicit user inspection retains the original", () => fixture((_db, _store, rejection, repository) => {
     expect(repository.suggest(ai, "zircon")).toContain("zircon");
     rejection.rejectThought("user", mediaThought.id);
     const visible = rejection.listThoughts(ai);
@@ -152,7 +150,7 @@ describe("persisted media-source projections", () => {
     expect(inspected.results).toEqual([expect.objectContaining({ text: null, mediaSource: mediaThought.mediaSource })]);
     rejection.restoreThought("user", mediaThought.id);
     expect(repository.suggest(ai, "zircon")).toContain("zircon");
-  }));
+  }, mediaThought, "Retained independent development"));
 
   test("only clarification and explicit titles enter FTS/vocabulary, including after clear and reindex", () => fixture((db, store, _rejection, repository) => {
     for (const term of ["filenamevault", "binarypayloadvault", "extractedtextvault", "fixture", "media", "png"]) {

@@ -8,6 +8,7 @@ import { createConnection } from "../domain/connection";
 import { createSharedResponse } from "../domain/shared-response";
 import { TitleConflictError, TitleNotFoundError, TitleService } from "../domain/title";
 import { record } from "../domain/validation";
+import { assertWeaveCapability } from "../domain/weave-scheduling";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteTitleRepository } from "./title";
 import { admitWeave } from "./weave-admission";
@@ -45,6 +46,7 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
     const result = this.guarded("execute step",claim,(run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       const operation = parseStepOperation(input);
+      this.requireWeaveCapability(run,operation.type);
       const step = this.readStep(run.id,promptId);
       if (!step || !["completed","processed"].includes(step.state) ||
           protocolJson(step.envelope) !== protocolJson(stepOperationEnvelope(operation))) throw new RunConflictError("Operation differs from the completed prompt request");
@@ -98,6 +100,19 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       // Associate the subject and every issued thought: a rejected summary must not
       // expose an outcome that may describe it to AI through another association.
       const issued = this.issued(run.id);
+      if (this.weavePurpose(run) === "media-title-only") {
+        if (issued.length) throw new RunForbiddenError("Media title-only work cannot publish issued knowledge");
+        // A later complete envelope cannot launder a retained forbidden request or a legacy receipt.
+        for (const earlier of this.readSteps(run.id)) {
+          if (earlier.envelope?.kind === "request") assertWeaveCapability("media-title-only",earlier.envelope.request.capability);
+        }
+        const receipts = this.db.query<{ format: string; operation: string }, [string]>(
+          "SELECT format,operation_json AS operation FROM run_operation_receipts WHERE run_id=?").all(run.id);
+        for (const receipt of receipts) {
+          if (receipt.format !== "step") throw new RunForbiddenError("Media title-only work cannot publish legacy operations");
+          assertWeaveCapability("media-title-only",parseStepOperation(JSON.parse(receipt.operation)).type);
+        }
+      }
       const response = createSharedResponse({ id: this.sources.id(), text: step.envelope.reply, state: "complete",
         role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
       new SqliteSharedResponses(this.db,this.logger).save(response);

@@ -1,6 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { Logger } from "../logging";
 import { createMediaGuards, createMediaTables, indexMediaClarification } from "./media-schema";
+import { migrateMediaAttempts } from "./media-attempt-schema";
+import { migrateRunMediaParts } from "./run-media-schema";
+import { migrateMediaSubmissions } from "./media-submission-schema";
+import { migrateMediaAttemptTermination } from "./media-attempt-termination";
 
 const thoughts = `CREATE TABLE thoughts (
   id TEXT PRIMARY KEY NOT NULL,text TEXT,
@@ -29,6 +33,10 @@ export function migrateMediaFoundation(db: Database, logger: Logger): void {
   }
   createMediaTables(db);
   createMediaGuards(db);
+  migrateMediaAttempts(db);
+  migrateRunMediaParts(db);
+  migrateMediaSubmissions(db);
+  migrateMediaAttemptTermination(db);
   indexMediaClarification(db);
   if (db.query("PRAGMA foreign_key_check").all().length) throw new Error("Media migration foreign key integrity failure");
 }

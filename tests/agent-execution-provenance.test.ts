@@ -9,6 +9,7 @@ import { createLogger } from "../src/logging";
 import { ScriptedClient, config, drive, fixture, now, setup, status } from "./agentic-search-capability-fixture";
 import type { NativeSession, PublicClient } from "../src/agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../src/agent/configured-worker";
+import { foreignKeyGroups, orderForeignKeyGroups, type ForeignKeyPart } from "./fixtures/sqlite-foreign-keys";
 
 const logger = createLogger("error", () => {});
 const credentials = { user: "user-0123456789-0123456789-abcdef", ai: "agent-0123456789-0123456789-abcdef" };
@@ -147,24 +148,45 @@ test("populated pre-provenance search journal keeps its unqualified submit owner
     db.run("INSERT INTO agent_bindings(run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version) VALUES (?,?,'http://127.0.0.1:44991','/owned','{}','[]',1)", [turn.run.id,native.session_id]);
     db.run("UPDATE run_steps SET input='legacy exact journal café',state='submitting',submit_owner='legacy-unqualified-owner' WHERE run_id=?", [turn.run.id]);
     db.run("UPDATE runs SET status='uncertain' WHERE id=?", [turn.run.id]);
+    const retainedStep = db.query<{ prompt_id: string }, [string]>("SELECT prompt_id FROM run_steps WHERE run_id=? AND position=0").get(turn.run.id);
+    expect(retainedStep).not.toBeNull();
+    if (retainedStep === null) throw new Error("Expected the populated historical initial step");
+    const retainedPromptId = retainedStep.prompt_id;
+    expect(retainedPromptId.length).toBeGreaterThan(0);
     const tables = ["thoughts", "thought_titles", "runs", "run_steps", "run_context", "search_sessions", "search_turns", "search_messages", "search_content_dependencies", "search_composer_contexts", "search_composer_dependencies"];
-    const snapshot = (connection: Database) => [tables.map(table => connection.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()),
+    const historicalStepColumns = "rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json,submit_owner";
+    const snapshot = (connection: Database) => [tables.map(table => connection.query(`SELECT ${table === "run_steps" ? historicalStepColumns : "rowid,*"} FROM ${table} ORDER BY rowid`).all()),
       connection.query("SELECT rowid,run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version FROM agent_bindings ORDER BY rowid").all()];
     const before = snapshot(db);
     const schema = db.query("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name").all();
-    const foreignKeys = (connection: Database) => (connection.query("PRAGMA foreign_key_list(agent_bindings)").all() as { table: string; from: string; to: string; on_update: string; on_delete: string; match: string }[])
-      .map(({ table, from, to, on_update, on_delete, match }) => ({ table, from, to, on_update, on_delete, match }));
-    const fks = foreignKeys(db);
+    const fks = foreignKeyGroups(db,"agent_bindings"), stepFks = foreignKeyGroups(db,"run_steps");
+    const mediaOwnerFk: readonly ForeignKeyPart[] = [{seq:0,table:"execution_owners",from:"media_submit_owner_id",to:"id",
+      on_update:"NO ACTION",on_delete:"NO ACTION",match:"NONE"}];
+    const expectedStepFks = orderForeignKeyGroups([...stepFks,mediaOwnerFk]);
+    const expectNullableMediaAttribution = (connection: Database) => {
+      expect(connection.query("PRAGMA table_info(run_steps)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({name:"media_submit_owner_id",type:"TEXT",notnull:0,dflt_value:null}),
+        expect.objectContaining({name:"media_submit_generation",type:"INTEGER",notnull:0,dflt_value:null}),
+      ]));
+      expect(connection.query("SELECT run_id,prompt_id,media_submit_owner_id,media_submit_generation FROM run_steps ORDER BY rowid").all())
+        .toEqual([{run_id:turn.run.id,prompt_id:retainedPromptId,media_submit_owner_id:null,media_submit_generation:null}]);
+      expect(foreignKeyGroups(connection,"run_steps")).toEqual(expectedStepFks);
+    };
     migrate(db, logger);
     expect(snapshot(db)).toEqual(before);
+    expectNullableMediaAttribution(db);
     expect(db.query("SELECT submit_owner FROM run_steps WHERE run_id=?").get(turn.run.id)).toEqual({ submit_owner: "legacy-unqualified-owner" });
     expect(db.query("SELECT execution_owner_id FROM agent_bindings WHERE run_id=?").get(turn.run.id)).toEqual({ execution_owner_id: null });
     expect(db.query("SELECT id FROM execution_owners WHERE id='legacy-unqualified-owner'").get()).toBeNull();
     expect(db.query("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name").all()).toEqual(expect.arrayContaining(schema));
-    expect(foreignKeys(db)).toEqual(expect.arrayContaining(fks));
+    expect(foreignKeyGroups(db,"agent_bindings")).toEqual(expect.arrayContaining(fks));
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     const reopened = new Database(path);
-    try { migrate(reopened, logger); expect(snapshot(reopened)).toEqual(before); expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]); }
+    try {
+      migrate(reopened, logger); expect(snapshot(reopened)).toEqual(before); expectNullableMediaAttribution(reopened);
+      expect(foreignKeyGroups(reopened,"agent_bindings")).toEqual(expect.arrayContaining(fks));
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    }
     finally { reopened.close(); }
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });

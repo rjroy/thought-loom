@@ -1,5 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { SearchStorageError, searchRevision } from "../domain/agentic-search";
+import type { RejectionService } from "../domain/rejection";
+import { RunConflictError } from "../domain/run";
+import type { Logger } from "../logging";
+import { interruptOrdinaryRun, ordinaryRunContextValid, scopedRunVisibility } from "./run-fences";
+import { readRun } from "./run-record";
 
 export interface SearchInvalidation {
   readonly interruptedRuns: number;
@@ -53,4 +58,29 @@ export function recordSearchEligibilityChange(db: Database, kind: "thought" | "c
     JOIN search_composer_contexts c ON c.id=d.composer_id JOIN search_sessions s ON s.id=c.session_id
     WHERE c.state='active' AND s.deleted_at IS NULL)`, [target]);
   return { interruptedRuns: runs.length, invalidatedComposers: composers.changes };
+}
+
+/** Source rejection only. Reuse the affected-reference closure and ordinary eligibility/fence, in the marker transaction. */
+export function recordMediaSourceRejection(db: Database, id: string, service: RejectionService, logger: Logger): number {
+  if (!db.inTransaction) throw new RunConflictError("Media rejection requires its marker transaction");
+  const target = new TextEncoder().encode(id);
+  if (!db.query("SELECT 1 FROM media_sources WHERE source_thought_id=CAST(? AS TEXT)").get(target)) return 0;
+  const candidates = db.query<{ id: string }, [Uint8Array]>(`${affectedReferences("thought")}
+    SELECT run.id FROM runs run WHERE run.kind IN ('weave','evolve')
+      AND run.status IN ('queued','submitting','running','uncertain') AND (
+        run.weave_subject_id=(SELECT id FROM target) OR run.input_thought_id=(SELECT id FROM target)
+        OR EXISTS(SELECT 1 FROM run_issued_thoughts issued WHERE issued.run_id=run.id AND issued.thought_id=(SELECT id FROM target))
+        OR EXISTS(SELECT 1 FROM run_context context JOIN affected a ON a.kind=context.kind AND a.id=context.ref_id WHERE context.run_id=run.id))`)
+    .all(target);
+  const visible = scopedRunVisibility(service);
+  let interrupted = 0;
+  for (const candidate of candidates) {
+    const run = readRun(db,candidate.id);
+    if (run === null) throw new RunConflictError("Media-dependent run journal unavailable");
+    if (ordinaryRunContextValid(db,run,visible)) continue;
+    interruptOrdinaryRun(db,run,"context-invalidated",logger);
+    logger.info("[run storage] media context fenced in rejection transaction", { runId: run.id, generation: run.generation, fencedGeneration: run.generation + 1 });
+    interrupted++;
+  }
+  return interrupted;
 }

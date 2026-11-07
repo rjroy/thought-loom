@@ -1,8 +1,23 @@
-import type { RunRecord } from "./run";
+import { RunForbiddenError, type RunRecord } from "./run";
 import type { WeaveIntent } from "./run-operations";
 import type { SharedResponse } from "./shared-response";
-import type { Thought } from "./thought";
+import type { MaterialKind, Thought } from "./thought";
 import { nonEmpty } from "./validation";
+
+export type WeavePurpose = "ordinary" | "media-title-only";
+const titleClearPrefix = "title-clear:";
+
+/** Media interpretation needs a later admitted attempt, never an ordinary textual weave trigger. */
+export function resolveWeavePurpose(kind: MaterialKind, triggerId: string): WeavePurpose {
+  if (kind !== "media-original") return "ordinary";
+  if (triggerId.startsWith(titleClearPrefix) && triggerId.slice(titleClearPrefix.length).trim().length > 0) return "media-title-only";
+  throw new RunForbiddenError("Media weave has no admitted purpose");
+}
+
+/** Apply before effects and before returning any retained result or receipt. */
+export function assertWeaveCapability(purpose: WeavePurpose, capability: string): void {
+  if (purpose === "media-title-only" && capability !== "title-fill") throw new RunForbiddenError("Media title regeneration permits only title fill and completion");
+}
 
 /** Semantic triggers, never inferred from text similarity, current time, or a corpus sweep. */
 export function captureWeaveIntent(thought: Thought): WeaveIntent | null {
@@ -12,7 +27,7 @@ export function captureWeaveIntent(thought: Thought): WeaveIntent | null {
 
 /** Every explicit user clear is a new invitation, including clearing an already absent title. */
 export function titleClearWeaveIntent(subjectId: string, invitationId: string): WeaveIntent {
-  return {subjectId:nonEmpty(subjectId,"subjectId"),triggerId:`title-clear:${nonEmpty(invitationId,"invitationId")}`};
+  return {subjectId:nonEmpty(subjectId,"subjectId"),triggerId:`${titleClearPrefix}${nonEmpty(invitationId,"invitationId")}`};
 }
 
 /** Called only after the canonical reply's issued-order associations and current eligibility are checked. */

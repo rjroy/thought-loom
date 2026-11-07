@@ -1,11 +1,11 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionState, RejectionTarget, RejectionTransaction } from "../domain/rejection";
+import { RejectionService, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
 import { immediate } from "./transaction";
 import { readRejectionState } from "./rejection-state";
-import { recordSearchEligibilityChange } from "./search-invalidation";
+import { recordMediaSourceRejection, recordSearchEligibilityChange } from "./search-invalidation";
 import { storedThoughts } from "./media-source";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
@@ -99,7 +99,9 @@ export class SqliteRejectionRepository implements RejectionRepository {
       return;
     }
     const invalidated = recordSearchEligibilityChange(this.db, kind, id, rejected);
-    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated });
+    const interruptedMediaRuns = rejected && kind === "thought"
+      ? recordMediaSourceRejection(this.db,id,new RejectionService(this),this.logger) : 0;
+    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns });
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {

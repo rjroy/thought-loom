@@ -66,6 +66,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     this.active(claim);
     const visible = this.visibility();
     if (!this.contextValid(run,visible)) { this.finalInterrupt(run); return null; }
+    this.requireWeaveCapability(run,ref.kind === "thought" ? "readThought" : ref.kind === "connection" ? "readConnection" : "readResponse");
     nonEmpty(ref.id, "id");
     const value = visible(ref);
     if (value) this.track(claim.runId,ref);
@@ -85,8 +86,13 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     return this.guarded("commit", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       if (input.type !== "development") throw new RunForbiddenError();
+      this.requireWeaveCapability(run,input.type);
       const operation: Operation = { id: nonEmpty(input.id,"id"), type: "development", parentId: nonEmpty(input.parentId,"parentId"), text: nonEmpty(input.text,"text"), sourceIds: references(input.sourceIds,"sourceIds") };
       if (run.kind === "evolve" && operation.parentId !== run.inputThoughtId) throw new RunConflictError("Development parent must be the admitted contribution");
+      // Legacy weave writes choose a parent separately from their persisted subject. That cannot grant media-root authority.
+      if (run.kind === "weave" && this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(operation.parentId)) {
+        throw new RunForbiddenError("Legacy development cannot target a media source root");
+      }
       const existing = this.receiptRead(claim.runId,operation.id);
       if (existing) {
         if (JSON.stringify(existing.operation) !== JSON.stringify(operation)) throw new RunConflictError();
@@ -108,6 +114,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   recordPartial(claim: Claim, draft: ReplyDraft): void {
     this.guarded("partial", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
+      if (this.weavePurpose(run) === "media-title-only") throw new RunForbiddenError("Media title-only work requires canonical prompt completion");
       const checked = createSharedResponse({ ...draft, state: "interrupted" });
       this.checkAssociations(run,checked,visible);
       this.db.run("INSERT INTO run_replies (run_id,draft_json) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=excluded.draft_json", [claim.runId,JSON.stringify({ id: checked.id,text: checked.text,role: checked.role,thoughtIds: checked.thoughtIds })]);
@@ -120,6 +127,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   finish(claim: Claim, response: SharedResponse): void {
     this.guarded("finish", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
+      if (this.weavePurpose(run) === "media-title-only") throw new RunForbiddenError("Media title-only work requires canonical prompt completion");
       const value = createSharedResponse(response);
       this.checkAssociations(run,value,visible);
       new SqliteSharedResponses(this.db,this.logger).save(value);
