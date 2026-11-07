@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
 
@@ -32,6 +33,76 @@ export function captureDaemon(token: string) {
 
 type Fixture = ReturnType<typeof captureDaemon>;
 type Probe = (method: string, path: string, headers: string, body?: string) => Promise<{ status: number; headers: string; body: string }>;
+const canopySelector = 'img[src="/backgrounds/capture-canopy.png"]';
+
+// The image may be clipped by its frame; measure only the portion actually painted.
+async function paintedCanopy(page: Page) {
+  return page.locator(canopySelector).evaluate(image => {
+    const original = image.getBoundingClientRect();
+    let left = original.left, right = original.right, top = original.top, bottom = original.bottom;
+    for (let parent = image.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+      if (/(hidden|clip|scroll|auto)/.test(style.overflowX)) { left = Math.max(left, bounds.left); right = Math.min(right, bounds.right); }
+      if (/(hidden|clip|scroll|auto)/.test(style.overflowY)) { top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom); }
+    }
+    const form = document.querySelector("form")?.getBoundingClientRect();
+    const main = document.querySelector("main");
+    const mainStyle = main && getComputedStyle(main);
+    return {
+      left, right, top, bottom, width: original.width, height: original.height, x: original.x, y: original.y + window.scrollY,
+      form: form ? { right: form.right, width: form.width } : null,
+      rootSize: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      innerWidth: main && mainStyle ? main.clientWidth - parseFloat(mainStyle.paddingLeft) - parseFloat(mainStyle.paddingRight) : null,
+    };
+  });
+}
+
+async function checkCanopyLayout(page: Page): Promise<void> {
+  const browser = page.context().browser();
+  assert.ok(browser, "canopy layout requires an owned browser");
+  for (const [width, enlarged] of [[768, false], [769, false], [900, false], [1024, false], [1440, false], [900, true]] as const) {
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    try {
+      const probe = await context.newPage();
+      await probe.goto(new URL("/capture", page.url()).href, { waitUntil: "networkidle" });
+      if (enlarged) await probe.addStyleTag({ content: "html { font-size: 125% !important; }" });
+      const canopy = probe.locator(canopySelector);
+      if (width <= 768) { await expect(canopy).not.toBeVisible(); continue; }
+      await expect(canopy).toBeVisible();
+      await probe.evaluate(() => document.fonts.ready);
+      await canopy.evaluate(image => (image as HTMLImageElement).decode());
+      let painted: Awaited<ReturnType<typeof paintedCanopy>> | undefined;
+      await expect.poll(async () => {
+        painted = await paintedCanopy(probe);
+        return painted.form !== null && painted.left - painted.form.right >= painted.rootSize;
+      }, { timeout: 5000, message: `canopy must clear the form by 1rem at ${width}` }).toBe(true);
+      assert.ok(painted?.form && painted.innerWidth);
+      assert.ok(painted.right > painted.left && painted.bottom > painted.top, `canopy must have a painted area at ${width}`);
+      assert.ok(Math.abs(painted.form.width / painted.innerWidth - 0.87) < 0.01, `form width changed at ${width}`);
+      const collisions = await probe.locator('input:visible, textarea:visible, button:visible, a:visible').evaluateAll((controls, rect) => controls.filter(control => {
+        const bounds = control.getBoundingClientRect();
+        return rect.left < bounds.right && rect.right > bounds.left && rect.top < bounds.bottom && rect.bottom > bounds.top;
+      }).map(control => control.textContent?.trim() || control.getAttribute("aria-label") || control.tagName), painted);
+      assert.deepEqual(collisions, [], `canopy overlaps controls at ${width}`);
+      if (enlarged) {
+        const overlaps = await probe.locator('input:visible, textarea:visible, button:visible, a:visible').evaluateAll(controls => {
+          const pairs: string[] = [];
+          controls.forEach((first, index) => controls.slice(index + 1).forEach(second => {
+            const a = first.getBoundingClientRect(), b = second.getBoundingClientRect();
+            if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) pairs.push(`${first.tagName}/${second.tagName}`);
+          }));
+          return pairs;
+        });
+        assert.deepEqual(overlaps, [], "enlarged-text controls must not overlap");
+      }
+      assert.ok(await probe.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `horizontal overflow at ${width}`);
+      if (width === 1440 && !enlarged) {
+        await probe.goto(new URL("/explore", page.url()).href, { waitUntil: "networkidle" });
+        await expect(probe.locator(canopySelector)).toHaveCount(0);
+      }
+    } finally { await context.close(); }
+  }
+}
 async function waitAttempts(daemon: Fixture, count: number): Promise<void> {
   await expect.poll(() => daemon.attempts.length, { timeout: 5000 }).toBe(count);
 }
@@ -70,7 +141,36 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
   const save = page.getByRole("button", { name: /^save$/i });
   const heading = page.getByRole("heading", { name: "Capture", exact: true });
   const glyph = heading.locator("img");
+  const canopy = page.locator(canopySelector);
+  const desktop = (page.viewportSize()?.width ?? 0) > 768;
   await expect(thought).toBeVisible({ timeout: 5000 });
+  let placement: Awaited<ReturnType<typeof paintedCanopy>> | undefined;
+  if (desktop) {
+    await expect(canopy).toHaveCount(1);
+    await expect(canopy).toBeVisible();
+    await expect(canopy).toHaveAttribute("alt", "");
+    assert.equal(await canopy.evaluate(image => !!image.closest('[aria-hidden="true"]')), true);
+    assert.equal(await canopy.evaluate(image => image.tabIndex), -1);
+    assert.equal(await canopy.evaluate(image => (image as HTMLImageElement).draggable), false);
+    await expect(canopy).toHaveCSS("pointer-events", "none");
+    await expect.poll(() => canopy.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth === 392 && image.naturalHeight === 588)).toBe(true);
+    await page.evaluate(() => document.fonts.ready);
+    await canopy.evaluate(image => (image as HTMLImageElement).decode());
+    const asset = await page.request.get(new URL("/backgrounds/capture-canopy.png", page.url()).href);
+    assert.equal(asset.status(), 200);
+    assert.deepEqual(await asset.body(), await readFile(new URL("../../../.impeccable/candidates/capture-canopy/production/capture-canopy.png", import.meta.url)));
+    placement = await paintedCanopy(page);
+    assert.ok(Math.abs(placement.width - 196) < 1 && Math.abs(placement.height - 294) < 1, "approved display size");
+    await checkCanopyLayout(page);
+  } else await expect(canopy).not.toBeVisible();
+  const unchangedCanopy = async () => {
+    if (!placement) { await expect(canopy).not.toBeVisible(); return; }
+    await expect(canopy).toBeVisible();
+    const current = await paintedCanopy(page);
+    for (const key of ["left", "right", "width", "height", "x", "y"] as const) {
+      assert.ok(Math.abs(current[key] - placement[key]) < 1, `canopy ${key} changed across Capture states`);
+    }
+  };
   await expect(glyph).toHaveAttribute("src", "/glyphs/sprout.svg");
   await expect(glyph).toHaveAttribute("alt", "");
   await expect(glyph).toHaveAttribute("aria-hidden", "true");
@@ -85,10 +185,15 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
   await thought.fill("   ");
   const beforeBlank = daemon.attempts.length;
   await save.click();
+  const validation = page.locator('#capture-thought-error[role="alert"]');
+  await expect(validation).toHaveText("Write a thought before saving.");
+  await expect(validation).toBeVisible();
+  await unchangedCanopy();
   await page.waitForTimeout(250);
   assert.equal(daemon.attempts.length, beforeBlank, "whitespace must not reach daemon");
 
   await thought.fill("  exact input\nsecond line  ");
+  await unchangedCanopy();
   await title.fill("");
   daemon.setMode("hold");
   const beforeSave = daemon.attempts.length;
@@ -97,6 +202,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
     await waitAttempts(daemon, beforeSave + 1);
     await expect(save).toBeDisabled();
     await expect(glyph).toBeVisible();
+    await unchangedCanopy();
     await retained(page, "  exact input\nsecond line  ");
     await page.waitForTimeout(250);
     assert.equal(daemon.attempts.length, beforeSave + 1, "pending double click must not duplicate capture");
@@ -106,6 +212,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
   } finally { daemon.release(); }
   await expect(page.getByText(receipt.text, { exact: true })).toBeVisible();
   await expect(glyph).toBeVisible();
+  await unchangedCanopy();
   await expect(page.getByText(receipt.title, { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /open idea/i })).toHaveAttribute("href", `/ideas/${encodeURIComponent(receipt.id)}`);
   await page.getByRole("button", { name: /capture another/i }).click();
@@ -118,6 +225,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
   const beforeDenial = daemon.attempts.length;
   await save.click();
   await expect(page.getByText(/not saved/i).first()).toBeVisible();
+  await unchangedCanopy();
   await retained(page, "retained denial draft");
   await retained(page, "retained denial title");
   await waitAttempts(daemon, beforeDenial + 1);
@@ -137,6 +245,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
     const before = daemon.attempts.length;
     await save.click();
     await expect(page.getByText(/could not confirm|couldn.t confirm|not sure|uncertain/i).first()).toBeVisible();
+    await unchangedCanopy();
     await retained(page, draft);
     await retained(page, draftTitle);
     await expect(page.getByText(/duplicate|another copy|may already/i).first()).toBeVisible();

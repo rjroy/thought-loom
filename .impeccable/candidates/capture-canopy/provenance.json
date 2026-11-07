@@ -1,0 +1,70 @@
+{
+  "status": "approved-source-integrated-designer-visual-review-passed-independent-final-validation-pending",
+  "date": "2026-11-06",
+  "authorization": "Original permission: while I write, then Approve and explore for one comp-only Codex concept. Subsequently the user approved the exact image, desktop placement and phone omission, then said please go authorizing production preparation and integration. The source-preserving derivative was reviewed before byte-identical promotion and Capture integration. No further generation or source change occurred.",
+  "brief": "Persistent broad mature-leaf silhouettes from Capture's upper-right unused desktop margin, cut-paper teal/gold, quieter than words/Save, preserve form geometry, unchanged through editing/saving/success/error, no animation/progress meaning; smaller phone fragment only if safe, otherwise omit.",
+  "source": "source.png",
+  "dimensions": [1024, 1536],
+  "format": "8-bit RGBA PNG with genuine partial and zero alpha",
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1b427-2e3e-7f93-bf20-f0363f2e4f42/exec-cda06900-c216-47a9-ad9c-96ad591ac2f4.png",
+  "nativeAndInitialCopySha256": "bf0145de22e14f294cbe81b23ff293c9d898536fa012c67012ad0966ca59deff",
+  "sourceSha256WithRequestMetadata": "94f3beee00bc89baf7706844e95760608d279830df303fc55b75d31cee4c5ab4",
+  "metadataEmbeddingPixelDifference": "ImageMagick compare -metric AE: 0 (0)",
+  "request": "request.txt",
+  "requestSha256": "fe7ed6a6550332ee1cb52529526f9b23f175bec9512e591ba7364883a37afd25",
+  "reference": { "repositoryPath": ".lore/context/brand-imagery.webp", "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8" },
+  "generation": {
+    "route": "codex exec --skip-git-repo-check --image .lore/context/brand-imagery.webp - < .impeccable/candidates/capture-canopy/request.txt",
+    "exitStatus": 0,
+    "invocations": 1,
+    "cliVersion": "0.166.0",
+    "observedRunnerModel": "gpt-6-luna",
+    "imageModel": "not exposed by launcher output; not inferred",
+    "sessionId": "01a1b427-2e3e-7f93-bf20-f0363f2e4f42",
+    "scratchLog": ".lore/local/whimsy-backgrounds/canopy-generation.log",
+    "nativeOriginalRetained": true
+  },
+  "alphaInspection": { "min8bit": 0, "max8bit": 254, "transparentPixels": 1189413, "partialPixels": 383451, "opaquePixels": 0 },
+  "uiBasis": {
+    "revision": "f04f2fac964dd05a5f587a9bec0f9cf0dea3483a",
+    "kind": "test-owned static Capture fixture, no application modifications",
+    "sourceSha256": {
+      "apps/web/src/app/globals.css": "4f8b81305b713bc40feee5c4d0dcbd4cd8330154cca26ea1f800cfc782d97e28",
+      "apps/web/src/components/capture.module.css": "20f27202a0f2810fb028e740af233e62cee8ba9868699b4718d070d03fbc5edf",
+      "apps/web/src/components/capture-form.tsx": "e853b7fd1393b52da944bcba38ec1a8bf6da9f34860a60160bd5d0acbae1ba68",
+      "apps/web/src/app/layout.tsx": "f57647844ffa10883ce34bcc38e120b1d463024d6c11f8b7ccc08e77b0a0a365",
+      "apps/web/public/glyphs/sprout.svg": "585b9522651ab998079ff283af994ce12aca44792359d4dc4369ed56f997b4b1",
+      "apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf": "800f5dca8b08b34304d233fc5f97446d479e8f56c4de58fcefa7eb431b4de36c"
+    }
+  },
+  "selectedEvidence": ["review/desktop.png", "review/phone.png"],
+  "captureCommand": "bun --no-env-file .impeccable/candidates/capture-canopy/review/capture.mjs",
+  "staticChecks": { "receipt": "review/checks.json", "probes": 12, "failures": 0, "desktopFrameStateInvariant": true, "desktopViewport": [1440, 900], "phoneViewport": [390, 844], "intermediateViewport": [800, 800] },
+  "visualReview": "Native and durable source plus approved composites opened. Desktop leaves remain subordinate and clear of controls. Phone omission preserves full-width writing room. Softer halo-like shading was disclosed and accepted with the exact source; it is preserved in production preparation.",
+  "production": {
+     "status": "designer-reviewed-independent-mechanical-tests-passed-promoted-byte-identically",
+    "candidate": "production/capture-canopy.png",
+    "sha256": "9a6ea0dff1109922d32862a4b7150bbf846a49153823541a60d0e237b73e02c0",
+    "dimensions": [392, 588],
+    "bytes": 119427,
+    "recipe": "build.py",
+    "receipt": "production/build-receipt.json",
+    "operation": "RGBA Lanczos resampling only; no matte, threshold, alpha cleanup, repaint, crop or recentering. Exact original source bytes remain unchanged.",
+    "display": [196, 294],
+    "reproducibility": "Build and read-only verification each completed two independent matching passes from packaged approved source",
+    "alpha": { "minimum": 0, "maximum": 255, "transparentPixels": 172198, "partialPixels": 55083, "opaquePixels": 3215, "note": "Interpolated alpha, not thresholded. Resampling/rounding can reach 255 although source maximum is 254." },
+    "designerEvidence": "review/production-desktop.png",
+    "visualProbeReceipt": "review/production-checks.json",
+    "visualProbeResults": "12 passing static cases, unchanged form geometry, state-invariant desktop frame, phone omitted",
+     "controlledTests": "Independent Fixer passed all six test_build.py tests: four pure fixtures and two controlled ImageMagick integration fixtures.",
+     "runtime": "Promoted byte-identically to apps/web/public/backgrounds/capture-canopy.png. Capture-only persistent decoration; omit at existing <=48rem full-width-form breakpoint; above it clip to actual spare gutter + page inset - 1rem. No form geometry change."
+   },
+   "runtimeReview": {
+     "status": "Designer actual-built-client visual review passed; independent final suite, code review and user runtime acceptance pending",
+     "evidence": ["review/runtime-desktop.png", "review/runtime-phone.png", "review/runtime-edge.png", "review/runtime-large-text.png", "review/runtime-error.png"],
+     "receipt": "review/runtime-checks.json",
+     "diagnosis": "No production positioning fix made. Initial full-suite clearance failure did not reproduce in the exact unmodified Capture test rerun, which passed layout then exposed ambiguous generic alert selection. Test author owns field-specific selector and atomic decoded-image/font-ready geometry measurement repair; clearance requirement is unchanged.",
+     "productionSourceIdentity": "Source master and derivative remain unchanged after approval and review respectively. Current runtime code fingerprints and measured frame/image distinction are in the receipt."
+   },
+   "limitations": ["One generation only; no retries, variants or source metadata edits after approval.", "Independent final runtime suite and read-only code review pending; designer visual inspection is not a full-suite green.", "No physical-device, software-keyboard, screen-reader or cross-browser certification.", "Phone omission is explicitly approved and follows the real full-width Capture breakpoint.", "Original image generation is not claimed byte-reproducible; mechanical derivative conversion is verified."]
+}

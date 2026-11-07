@@ -1,0 +1,32 @@
+{
+  "status": "prepared-derivative-not-integrated",
+  "source": "source.png",
+  "sourceSha256": "94f3beee00bc89baf7706844e95760608d279830df303fc55b75d31cee4c5ab4",
+  "sourceDimensions": [
+    1024,
+    1536
+  ],
+  "recipeSha256": "a1f903eece68077f71c20fc4270b16ebe2c0a7b3aa47979cc88ca5a510272772",
+  "imageMagick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "operation": "RGBA Lanczos resample only, no alpha threshold, new matte, cleanup, repaint, crop or recentering",
+  "displaySize": [
+    196,
+    294
+  ],
+  "pixelRatio": 2,
+  "output": "capture-canopy.png",
+  "outputDimensions": [
+    392,
+    588
+  ],
+  "outputSha256": "9a6ea0dff1109922d32862a4b7150bbf846a49153823541a60d0e237b73e02c0",
+  "outputBytes": 119427,
+  "sourceBytes": 1015545,
+  "alpha": {
+    "minimum": 0,
+    "maximum": 255,
+    "transparentPixels": 172198,
+    "partialPixels": 55083,
+    "opaquePixels": 3215
+  }
+}
