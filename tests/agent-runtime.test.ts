@@ -423,7 +423,7 @@ test("a failed pre-dispatch history read retries the same persisted prompt witho
       const finished = runs.get(run.id);
       if (!finished) throw new Error("Expected completed run");
       expect(finished.generation).toBeGreaterThan(afterFailure.generation);
-      expect(runs.reply(run.id)).toBeNull();
+      expect(runs.reply(run.id)).toMatchObject({ text: "no further findings", state: "complete", thoughtIds: ["preflight-subject"] });
     } finally { worker.pause(); }
   } finally { db.close(); }
 }));
@@ -494,6 +494,30 @@ test("configured runtime drives scoped weave and Evolve, exposes honest user sta
   expect(client.cancellations).toBe(0); // Daemon shutdown is not user Stop on unrelated work.
   const db = new Database(path, { readonly: true });
   try { expect(JSON.stringify(db.query("SELECT * FROM agent_bindings").all())).not.toContain(secret); } finally { db.close(); }
+}));
+
+test("a captured URL exposes the completed controlled Weaver outcome as a Full reply", async () => fixture(async dir => {
+  const path = join(dir, "weave-outcome.sqlite");
+  const client = new Client(); client.completeFirst = true;
+  const timer = controlled(client);
+  const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
+  try {
+    const captured = await call(daemon, "/thoughts", "POST", { text: "https://example.test/unavailable" });
+    expect(captured.status).toBe(201);
+    const root = string(object(captured.data).id);
+    const db = new Database(path, { readonly: true });
+    let runId: string;
+    try { runId = string(object(db.query("SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=?").get(root)).id); }
+    finally { db.close(); }
+    await progress(daemon, timer, async () => object((await call(daemon, `/runs/${runId}`)).data).status === "completed");
+    const replies = await call(daemon, `/thoughts/${root}/responses`);
+    expect(replies.status).toBe(200);
+    if (!Array.isArray(replies.data)) throw new Error("Expected response list");
+    expect(replies.data).toHaveLength(1);
+    const reply = object(replies.data[0]);
+    expect(reply).toMatchObject({ text: "no further findings", state: "complete", thoughtIds: [root] });
+    expect((await call(daemon, `/responses/${string(reply.id)}`)).data).toEqual(reply);
+  } finally { await bounded(daemon.stop(), "stop"); }
 }));
 
 test("configured but unreachable native service leaves admitted work honest and durable", async () => fixture(async dir => {

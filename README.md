@@ -29,6 +29,8 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, both Markdown export modes, and manual test scripts. Configured OpenCode integration supports background weaving, conversational development, and read-only report investigation through scoped application capabilities.
 
+Weaver instructions support URL summaries and source-informed interpretations through available native/MCP tools. Bare link lists can produce separately searchable sibling summaries with inline source links; completed weaving retains a Full reply with outcome and access limitations. Retrieval depends on the operator's tools and source access; Thoughtloom does not archive fetched source snapshots. See [URL-aware weaving](.lore/context/url-weaving.md).
+
 Lossless Markdown import is available from Capture through a separate import workspace, with queued execution, restricted configured segmentation or local structural fallback, bookmarkable reports, and user-only original-byte inspection. Imported wording is preserved; document order does not create an evolution chain.
 
 Conversational agentic search is available from Explore's **Ask your library** and **Saved searches** links: saved conversations rediscover existing thoughts without creating new knowledge. Sessions have bookmarkable links and remain until explicitly deleted. See the [web workflow](docs/server-startup.md#conversational-search) or try the [isolated daemon walkthrough](docs/testing.md#isolated-agentic-search-walkthrough) without a provider.

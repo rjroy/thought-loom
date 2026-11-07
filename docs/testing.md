@@ -309,6 +309,8 @@ Adapter tests also exercise the maintained public SDK against owned loopback HTT
 
 The worker core has a manual polling seam for controlled tests. It reuses durable steps, bindings, capability results and canonical replies. A tick is an execution boundary, not a model effort quota. Local pause is distinct from user Stop: it fences callbacks without undoing saved work or initiating cancellation. `agent-runtime` exercises configured scheduling, Evolve/status/Stop HTTP routes, role restrictions and unavailable-service behavior through an owned daemon with injected service/client dependencies.
 
+`bun --no-env-file test tests/worker.test.ts tests/run-operations.test.ts tests/agent-runtime.test.ts` covers URL-aware Weaver instructions and retained completed outcomes. Controlled capability sequences create separately searchable sibling interpretations with inline links, retain successful work alongside reported inaccessible sources, and expose the outcome through existing Full reply routes. Rejection and Stop fence publication, and shared-response visibility still excludes rejected associations from AI reads. Prompt checks establish instruction presence, not model compliance; scripted outputs establish application persistence, not actual public or authenticated URL retrieval. No source snapshot or live MCP/provider fixture is used.
+
 For role-based native tool permissions and history handling, run:
 
 ```sh

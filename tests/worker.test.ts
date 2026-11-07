@@ -6,6 +6,7 @@ import { AgentUncertainError, type AgentBinding, type Observation, type Persiste
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
+import { SearchService } from "../src/domain/search";
 import { RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
@@ -13,6 +14,7 @@ import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteSearchRepository } from "../src/storage/search";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 
 const now = () => "2031-01-01T00:00:00Z";
@@ -90,6 +92,49 @@ test("weave alone renders discovery guidance alongside the shared evidence fence
   for (const other of [evolve, exported]) expect(other.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
 });
 
+test("weave prompt gives intent-driven source guidance without broadening restricted roles", () => {
+  const context = { thoughts: [], connections: [], responses: [] };
+  const render = (job: Parameters<typeof initialWorkerPrompt>[0]["job"]) => initialWorkerPrompt({ ...context, job });
+  const weave = render({ kind: "weave", subjectId: "subject" }).toLowerCase();
+  // These assert instructions only; the controlled native fixture does not retrieve URLs.
+  for (const guidance of [/url|link/, /summari[sz]/, /intent|context/, /sibling|separat/, /attribution|source link/,
+    /fresh|afresh|again/, /fail|inaccessible|unavailable/, /fabricat|invent/, /follow.*link|link.*follow/]) expect(weave).toMatch(guidance);
+  const { instructions } = JSON.parse(weave) as { instructions: string[] };
+  expect(instructions.some(instruction => /(?:every|each|all) source-informed interpretations?.{0,120}(?:readable|markdown).{0,60}source links?.{0,60}(?:inline|directly|in (?:its|the) text)/i.test(instruction))).toBe(true);
+  const exported = render({ kind: "export", request: "fixture", effort: "standard" });
+  expect(exported).toContain("Use only the capabilities listed");
+  expect(exported).not.toMatch(/sibling interpretations/i);
+});
+
+test("controlled link-list weave saves searchable sibling summaries and a partial-failure outcome", async () => fixture(async f => {
+  f.store.saveThought({ id: "links", text: "https://example.test/one\nhttps://example.test/two\nhttps://example.test/missing", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  const run = f.ops.admitWeave("user", { subjectId: "links", triggerId: "link-list" });
+  const outputs = [
+    request("interpretation", { text: "Albatross findings [source](https://example.test/one)", sourceIds: [] }),
+    request("interpretation", { text: "Borealis findings [source](https://example.test/two)", sourceIds: [] }),
+    complete("Summarized two sources; https://example.test/missing was inaccessible."),
+  ];
+  const w = worker(f, index => outputs[index] ?? complete("unexpected extra turn"));
+  await drive(w.instance, f, run.id);
+  expect(f.runs.get(run.id)?.status).toBe("completed");
+  const issued = f.db.query("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position").all(run.id) as { id: string }[];
+  expect(issued).toHaveLength(2);
+  for (const [index, text] of ["Albatross findings [source](https://example.test/one)", "Borealis findings [source](https://example.test/two)"].entries()) {
+    expect(f.store.getThought(issued[index]?.id ?? "")).toMatchObject({ text, parentId: "links", kind: "ai-interpretation", author: "ai", sourceIds: [] });
+  }
+  const search = new SearchService(new SqliteSearchRepository(f.db));
+  for (const [index, query] of ["albatross", "borealis"].entries()) {
+    expect(search.search({ actor: "user", mode: "normal" }, query)).toContainEqual(expect.objectContaining({ kind: "thought", id: issued[index]?.id }));
+  }
+  expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='links'").get()).toEqual({ n: 2 });
+  const reply = f.runs.reply(run.id);
+  expect(reply).toMatchObject({ text: "Summarized two sources; https://example.test/missing was inaccessible.", state: "complete" });
+  expect(reply?.thoughtIds).toContain("links");
+  f.rejection.rejectThought("user", "links");
+  if (!reply) throw new Error("Expected retained outcome");
+  expect(f.rejection.getResponse({ actor: "ai", mode: "normal" }, reply.id)).toBeNull();
+}));
+
 test("worker without native configuration leaves an unbound queued run untouched", async () => fixture(async f => {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unconfigured" });
   const worker = new RunWorker({ db: f.db, id: f.id, now });
@@ -152,7 +197,7 @@ test("lost admission acknowledgement and shutdown recover existing prompt withou
   expect(second.native.observed.flat().map(p => p.promptId)).toContain(first.native.submitted[0]?.promptId);
   expect(new SqliteAgentBindings(f.db).get(run.id)).toEqual(bound);
   expect(second.native.bindingsSeen.every(value => value.model.id === "model-a")).toBe(true);
-  expect(f.runs.reply(run.id)).toBeNull();
+  expect(f.runs.reply(run.id)).toMatchObject({ text: "no findings", state: "complete", thoughtIds: ["root"] });
 }));
 
 test("unconfigured queued work performs no native call and remains durable", async () => fixture(async f => {
@@ -283,4 +328,23 @@ test("rejecting exposed input fences the session and settles cancellation instea
   expect(w.native.cancellations).toBe(1);
   expect(w.native.submitted).toHaveLength(1);
   expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE text='must not save'").get()).toEqual({ n: 0 });
+}));
+
+for (const fence of ["stop", "reject"] as const) test(`${fence} fences a completed but unpublished Weaver outcome while retaining confirmed summary`, async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: `outcome-${fence}` });
+  const outputs = [request("interpretation", { text: "Confirmed [source](https://example.test/one)", sourceIds: [] }), complete("A second source was inaccessible")];
+  const w = worker(f, index => outputs[index] ?? complete("unexpected"));
+  for (let i = 0; i < 20; i++) {
+    const last = f.steps.steps(run.id).at(-1);
+    if (last?.state === "completed" && last.envelope?.kind === "complete") break;
+    await w.instance.tick(run.id);
+  }
+  expect(f.steps.steps(run.id).at(-1)).toMatchObject({ state: "completed", envelope: { kind: "complete", reply: "A second source was inaccessible" } });
+  expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root'").get()).toEqual({ n: 1 });
+  if (fence === "stop") f.service.stop("user", run.id);
+  else f.rejection.rejectThought("user", "root");
+  await w.instance.tick(run.id);
+  expect(f.runs.get(run.id)?.status).toBe("interrupted");
+  expect(f.runs.reply(run.id)).toBeNull();
+  expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root'").get()).toEqual({ n: 1 });
 }));
