@@ -10,7 +10,7 @@ type Cursor = { version: 3; binding: string; revision: number; thoughtHigh: numb
 type Row = InvestigationCandidate & { key: number };
 const scope = { actor: "ai", mode: "normal" } as const;
 const authors = ["user", "ai", "source"];
-const kinds = ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original"];
+const kinds = ["captured-original", "user-contribution", "ai-interpretation", "developing-idea", "imported-original", "media-original"];
 // One key per process, shared across store facets and SQLite connections.
 const cursorKey = randomBytes(32);
 const cursorMac = (payload: string) => createHmac("sha256", cursorKey).update(payload).digest();
@@ -140,8 +140,10 @@ export class SqliteSearchInvestigation implements SearchInvestigation {
       const descending = request.sort === "newest";
       const key = request.sort === "relevance" ? "score" : "coalesce(julianday(createdAt),-1)";
       const rows = this.db.query(`WITH matched AS MATERIALIZED (
-        SELECT 'thought' AS kind,t.id AS id,t.id AS thoughtId,substr(t.text,1,160) AS snippet,t.author AS author,${thoughtScore} AS score
-        FROM ${thoughtSource} WHERE ${thoughtMatch} t.rowid <= $thoughtHigh AND NOT EXISTS (SELECT 1 FROM rejected_thoughts x WHERE x.thought_id=t.id)
+        SELECT 'thought' AS kind,t.id AS id,t.id AS thoughtId,
+          substr(CASE WHEN t.kind='media-original' THEN coalesce(s.clarification,'') ELSE t.text END,1,160) AS snippet,t.author AS author,${thoughtScore} AS score
+        FROM ${thoughtSource} LEFT JOIN media_sources s ON s.source_thought_id=t.id
+        WHERE ${thoughtMatch} t.rowid <= $thoughtHigh AND NOT EXISTS (SELECT 1 FROM rejected_thoughts x WHERE x.thought_id=t.id)
         UNION ALL
         SELECT 'response' AS kind,r.id AS id,(SELECT rt.thought_id FROM response_thoughts rt WHERE rt.response_id=r.id ORDER BY rt.position DESC LIMIT 1) AS thoughtId,
           substr(r.text,1,160) AS snippet,'ai' AS author,${responseScore} AS score

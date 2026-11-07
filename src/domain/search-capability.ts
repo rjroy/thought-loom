@@ -104,7 +104,7 @@ export function parseSearchCapabilityRequest(input: unknown): SearchCapabilityRe
     if (cursor !== null && cursor.length > 8192) throw new RunConflictError();
     return { capability: "findThoughts", arguments: { query: nullable(args.query),
       authors: filters(args.authors,["user","ai","source"]),
-      kinds: filters(args.kinds,["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original"]),
+      kinds: filters(args.kinds,["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original","media-original"]),
       from: nullable(args.from), until: nullable(args.until), sort: oneOf(args.sort,"sort",["relevance","newest","oldest"]), limit: limit(args.limit,100), cursor } };
   } catch (error) {
     if (error instanceof RunForbiddenError) throw error;

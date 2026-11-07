@@ -30,6 +30,18 @@ export type MediaThought = ThoughtBase & { readonly text: null; readonly author:
   readonly origin: "media-import"; readonly parentId: null; readonly mediaSource: MediaSource };
 export type Thought = TextThought | MediaThought;
 
+/** Validate the same descriptor for full thoughts and lightweight persisted search projections. */
+export function createMediaSource(input: unknown): MediaSource {
+  const source = record(input);
+  if (typeof source.byteLength !== "number" || !Number.isSafeInteger(source.byteLength) || source.byteLength <= 0) throw new ValidationError("Invalid media byte length");
+  const clarification = nullableString(source.clarification, "clarification");
+  const clarificationAuthor = source.clarificationAuthor === null ? null : oneOf(source.clarificationAuthor, "clarificationAuthor", ["user"]);
+  if ((clarification === null) !== (clarificationAuthor === null)) throw new ValidationError("Invalid clarification attribution");
+  return Object.freeze({ id: nonEmpty(source.id, "mediaSource.id"), name: nonEmpty(source.name, "mediaSource.name"),
+    mimeType: nonEmpty(source.mimeType, "mediaSource.mimeType"), byteLength: source.byteLength,
+    fileAuthorship: oneOf(source.fileAuthorship, "fileAuthorship", ["unverified"]), clarification, clarificationAuthor });
+}
+
 /** Validate and construct a thought from data crossing a storage boundary. */
 export function createThought(input: unknown): Thought {
   const data = record(input);
@@ -58,14 +70,7 @@ export function createThought(input: unknown): Thought {
     if (data.text !== null || origin !== "media-import" || parentId !== null || sourceIds.length !== 0 || author !== "source") {
       throw new ValidationError("Media-original requires null text, media-import origin, source authorship and no parent or supporting sources");
     }
-    const source = record(data.mediaSource);
-    if (!Number.isSafeInteger(source.byteLength) || (source.byteLength as number) <= 0) throw new ValidationError("Invalid media byte length");
-    const clarification = nullableString(source.clarification, "clarification");
-    const clarificationAuthor = source.clarificationAuthor === null ? null : oneOf(source.clarificationAuthor, "clarificationAuthor", ["user"]);
-    if ((clarification === null) !== (clarificationAuthor === null)) throw new ValidationError("Invalid clarification attribution");
-    const mediaSource = Object.freeze({ id: nonEmpty(source.id, "mediaSource.id"), name: nonEmpty(source.name, "mediaSource.name"),
-      mimeType: nonEmpty(source.mimeType, "mediaSource.mimeType"), byteLength: source.byteLength as number,
-      fileAuthorship: oneOf(source.fileAuthorship, "fileAuthorship", ["unverified"]), clarification, clarificationAuthor });
+    const mediaSource = createMediaSource(data.mediaSource);
     return Object.freeze({ ...common, text: null, author, kind, origin: "media-import", parentId: null, mediaSource });
   }
   if (data.mediaSource !== undefined) throw new ValidationError("Text thoughts cannot have a media source");

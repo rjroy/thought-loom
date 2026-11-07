@@ -33,7 +33,7 @@ export class SimpleExportService {
         `- Media type: ${JSON.stringify(thought.mediaSource.mimeType)}`,
         `- Byte length: ${thought.mediaSource.byteLength}`,
         `- File authorship: ${thought.mediaSource.fileAuthorship}`,
-        ...(thought.mediaSource.clarification === null ? [] : ["", "### Clarification (user)", "", thought.mediaSource.clarification]),
+        ...(thought.mediaSource.clarification === null ? [] : ["", "### User clarification", "", thought.mediaSource.clarification]),
       ] : [thought.text]),
     ].join("\n")).join("\n\n") + "\n";
   }

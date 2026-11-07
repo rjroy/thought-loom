@@ -1,15 +1,17 @@
 import { ForbiddenActorError, scopeActiveConnection, scopeActiveThought, type ReadScope } from "./rejection";
 import { nonEmpty, ValidationError } from "./validation";
-import type { ThoughtAuthor, MaterialKind, Thought } from "./thought";
+import type { ThoughtAuthor, MaterialKind, MediaSource, Thought } from "./thought";
 import type { Connection } from "./connection";
 
 /** A response hit points to its latest eligible associated thought. */
-export interface SearchHit {
-  readonly kind: "thought" | "response";
+interface SearchHitIdentity {
   readonly id: string;
   readonly thoughtId: string;
-  readonly text: string;
 }
+export type SearchHit = SearchHitIdentity & (
+  { readonly kind: "thought" | "response"; readonly text: string }
+  | { readonly kind: "thought"; readonly text: null; readonly mediaSource: MediaSource }
+);
 export interface SearchRepository {
   search(scope: ReadScope, query: string): readonly SearchHit[];
   suggest(scope: ReadScope, term: string): readonly string[];
@@ -22,14 +24,14 @@ export interface SearchOptions {
   readonly to?: string;
   readonly sort?: "relevance" | "newest" | "oldest";
 }
-export interface SearchResult extends SearchHit {
+export type SearchResult = SearchHit & {
   readonly title: string;
   readonly author: ThoughtAuthor;
   readonly materialKind: MaterialKind;
   readonly createdAt: string;
   readonly snippet: string;
   readonly context: SearchContext | null;
-}
+};
 export type SearchContext = { readonly kind: "connection"; readonly thought: Thought; readonly connection: Connection }
   | { readonly kind: "predecessor"; readonly thought: Thought };
 

@@ -24,13 +24,21 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
-### Media-source domain checks
+### Media-source domain and persistence checks
 
 ```sh
 bun --no-env-file test tests/domain.test.ts tests/simple-export.test.ts tests/agentic-export.test.ts
+bun --no-env-file test tests/media-source-migration.test.ts tests/media-source-projections.test.ts tests/search-capability-media-result.test.ts
+bun --no-env-file test tests/media-source-migration.test.ts tests/capability-migration.test.ts tests/agentic-search-migration.test.ts tests/markdown-import-foundation.test.ts
 ```
 
-Controlled domain values cover the null-text `media-original` source, separately attributed exact user clarification, filename display fallback and honest export descriptors. Existing textual kinds must still reject null or blank text. These are domain/projection checks, not evidence of media persistence, file validation, upload routes, model attachment support or a browser import flow.
+Controlled domain values cover the null-text `media-original` source, separately attributed exact user clarification, filename display fallback and honest export descriptors. Existing textual kinds must still reject null or blank text.
+
+The focused three-file persistence group uses the real migration and in-memory or uniquely owned `/tmp/opencode` SQLite databases, explicit IDs/clocks/digests and controlled clarification with BOM, whitespace, CRLF and non-ASCII text. Metadata bytes are sentinel inputs, not image/PDF decoding fixtures. It checks the initially empty store identity, explicit idempotent initialization, source-first atomic writer rollback, immutable associations, null-text/source-authorship guards, hydrated raw/scoped/search/context/capability/saved-search/export projections, rejection exclusion and clarification/title-only FTS/vocabulary. Projection/vocabulary checks need the [native spelling extension](server-startup.md#native-spelling-extension) built as described above. Retained-result decoder controls cover valid media projections and malformed/extra descriptor fields.
+
+`media-source-migration` uses [`fixtures/pre-media-schema.sql`](../tests/fixtures/pre-media-schema.sql), a frozen selected predecessor schema populated with Markdown document/seal membership, exact bytes, rowids, source seals, execution/search history and an additional incoming FK/index/trigger. It compares preservation through repeat migration and file reopen, checks FK integrity, and injects a failure immediately after real destructive closure DDL to check complete schema/data rollback and clean retry. The broader migration command retains older predecessor and Markdown-preservation checks rather than replacing them with empty-database setup.
+
+These boundaries do not establish file retention/ownership, format validation, upload/download/retry endpoints, native media transport/provider support, media interpretation/retry execution or a browser media flow. There are no live-service/provider or personal-data fixtures. The current Next.js decoders remain text-only; existing web checks protect text/Markdown behavior, not media rendering. Commands and coverage descriptions are not a claim that a particular working-tree revision has passed verification.
 
 ### Runtime execution-owner checks
 

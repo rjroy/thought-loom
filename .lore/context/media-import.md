@@ -7,7 +7,7 @@ tags: [thoughtloom, media-import, product]
 
 # Retained media import
 
-This is the approved product agreement for `thought-loom-dkx`, not a claim that media import is implemented. The [backend design](../work/design/media-import.md) defines the proposed persistence and daemon contracts. Client design and implementation are separate work.
+This is the approved product agreement for `thought-loom-dkx`. The [backend design](../work/design/media-import.md) defines the architecture and remaining daemon contracts. Internal metadata persistence and backend thought/search/scoped/investigative/saved-search/export projections are implemented; see the [current storage contract](../../docs/database-schema.md#media-source-storage-foundation). Actual file retention, media upload/download/retry endpoints, media execution/binary access and startup/file configuration are not implemented. The existing Next.js client remains text-only; client design and implementation are separate work. Requirements below describe the complete agreed direction, not a claim that the import workflow is available.
 
 ## Source and interpretation
 
