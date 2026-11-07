@@ -1,0 +1,31 @@
+{
+  "source": "source.png",
+  "sourceSha256": "73dca3c3d76b1f0731d3a3a9339eb4a73138ae0d25c846edfc3d676cad9d44ec",
+  "dimensions": [2172, 724],
+  "format": "opaque RGB PNG, original generation request embedded",
+  "approval": {
+    "direction": "User selected wider lantern-side clearing placement",
+    "exactSceneAndPlacement": "Parent session confirms user approval of exact scene and desktop/mobile placement",
+    "productionAndIntegration": "User: please implement; parent explicitly authorizes mechanical production preparation and runtime integration, without regeneration or scope expansion",
+    "thisPhase": "Derivative preparation and designer visual review only; no runtime components edited or derivative promoted to public"
+  },
+  "generation": {
+    "date": "2026-11-06",
+    "route": "codex exec --skip-git-repo-check --image .lore/context/brand-imagery.webp -",
+    "cliVersion": "0.166.0",
+    "observedRunnerModel": "gpt-6-luna",
+    "imageModel": "not exposed, not inferred",
+    "invocations": 1,
+    "sessionId": "01a1b3e9-348c-7390-842f-b5525fb4ac47",
+    "nativeSha256BeforeRequestMetadata": "2c7d429a60466359d970f375936f8ff76a2b21c25a2cfd3eb16aa4d6248a1f9f",
+    "metadataEmbeddingPixelDifference": "AE 0 (0)",
+    "requestSha256": "45afc55464cf58d2c4a41c0c21fb3879b62139afb1a11b75316fdaefefec14fe"
+  },
+  "reference": {
+    "repositoryPath": ".lore/context/brand-imagery.webp",
+    "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8",
+    "role": "user-provided inspiration, not a runtime asset or derivative build input"
+  },
+  "originalEvidence": ".lore/local/whimsy-backgrounds/wide-clearing-review.html; historical local evidence, not a rebuild dependency",
+  "reproductionBoundary": "Derivative rebuilds from packaged source are verified; original image generation is not claimed reproducible"
+}

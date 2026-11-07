@@ -1,0 +1,48 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024"><defs>
+          <filter id="soft-edge" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="3" /></filter>
+          <radialGradient id="center-hold">
+            <stop offset="60%" stop-color="black" />
+            <stop offset="100%" stop-color="white" />
+          </radialGradient>
+          <mask id="outside-center" maskUnits="userSpaceOnUse" x="0" y="0" width="1536" height="1024">
+            <rect width="1536" height="1024" fill="white" />
+            <circle cx="815" cy="412" r="140" fill="url(#center-hold)" />
+          </mask>
+          <mask id="reveal" maskUnits="userSpaceOnUse" x="0" y="0" width="1536" height="1024" style="mask-type: luminance">
+            <rect width="1536" height="1024" fill="black" />
+            <g mask="url(#outside-center)">
+              <g id="connections" fill="none" stroke="white" stroke-width="72" stroke-linecap="round" stroke-linejoin="round" filter="url(#soft-edge)">
+                <path data-start="0.23" data-duration="0.35" d="M434 562 L493 490 L526 409 L572 372 L667 347 L692 300" />
+                <path data-start="0.34360655737704915" data-duration="0.35" d="M493 490 L590 497" />
+                <path data-start="0.4509016393442623" data-duration="0.35" d="M653 519 L675 529 L752 458" />
+                <path data-start="0.4887704918032787" data-duration="0.35" d="M750 275 L850 298 L910 245 L934 200" />
+                <path data-start="0.5518852459016393" data-duration="0.35" d="M667 347 L745 405 M850 298 L839 348" />
+                <path data-start="0.6528688524590164" data-duration="0.35" d="M890 413 L960 395 L1003 398" />
+                <path data-start="0.7475409836065573" data-duration="0.35" d="M1047 335 L1100 291" />
+                <path data-start="0.7790983606557377" data-duration="0.35" d="M1003 398 L1075 439 L1095 449" />
+                <path data-start="0.8611475409836065" data-duration="0.35" d="M1155 267 L1204 256 L1265 228" />
+                <path data-start="0.987377049180328" data-duration="0.35" d="M1311 177 L1360 135 L1394 119" />
+                <path data-start="0.9368852459016394" data-duration="0.35" d="M1160 440 L1228 390 L1274 372" />
+                <path data-start="1.0" data-duration="0.35" d="M1140 480 L1204 510 L1252 522" />
+                <path data-start="0.6781147540983606" data-duration="0.35" d="M977 174 L1010 149 L1054 131" />
+              </g>
+              <g id="nodes" fill="white" filter="url(#soft-edge)">
+                <circle data-start="0.15" cx="470" cy="515" r="68" data-duration="0.35" />
+                <circle data-start="0.26409395973154365" cx="535" cy="378" r="86" data-duration="0.35" />
+                <circle data-start="0.3667785234899329" cx="627" cy="497" r="82" data-duration="0.35" />
+                <circle data-start="0.4124161073825503" cx="710" cy="268" r="91" data-duration="0.35" />
+                <circle data-start="0.5550335570469799" cx="946" cy="173" r="84" data-duration="0.35" />
+                <circle data-start="0.6463087248322147" cx="1003" cy="359" r="96" data-duration="0.35" />
+                <circle data-start="0.7432885906040269" cx="1120" cy="263" r="83" data-duration="0.35" />
+                <circle data-start="0.7832214765100671" cx="1128" cy="449" r="85" data-duration="0.35" />
+                <circle data-start="0.8516778523489933" cx="1280" cy="203" r="85" data-duration="0.35" />
+                <circle data-start="0.9258389261744966" cx="1292" cy="359" r="83" data-duration="0.35" />
+                <circle data-start="0.9771812080536912" cx="1278" cy="525" r="76" data-duration="0.35" />
+                <circle data-start="1.0" cx="1417" cy="99" r="87" data-duration="0.35" />
+              </g>
+            </g>
+            <circle id="center-plant" data-start="1.15" cx="815" cy="412" r="129" fill="white" filter="url(#soft-edge)" data-duration="0.5" />
+          </mask>
+        </defs>
+        </svg>

@@ -11,6 +11,7 @@ import { ContextualBack, ContextualBackProvider } from "../components/contextual
 import { CaptureProvider } from "../components/capture-provider";
 import { ImportProvider } from "../components/import-provider";
 import { AgenticSearchProvider } from "../components/agentic-search-provider";
+import { RootSplashShell } from "../components/root-splash-shell";
 import "./globals.css";
 
 const sourceSans = localFont({
@@ -44,10 +45,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
            <CaptureProvider>
             <ImportProvider>
            <AgenticSearchProvider>
-          <a className="skip-link" href="#main-content">
-            Skip to content
-          </a>
-          <header className="site-header">
+          <RootSplashShell>
             <div className="site-header-inner">
               <div className="site-header-identity">
                 <ContextualBack />
@@ -60,7 +58,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </div>
               <PrimaryNavigation />
             </div>
-          </header>
+          </RootSplashShell>
           <main id="main-content" className="workspace" tabIndex={-1}>
             {children}
           </main>

@@ -1,0 +1,302 @@
+{
+  "kind": "Standalone static motion study, not app integration",
+  "browser": "155.0.8059.84",
+  "externalRequests": [],
+  "errors": [],
+  "samples": [
+    {
+      "specimen": "desktop",
+      "viewport": [
+        1440,
+        900
+      ],
+      "timeMs": 0,
+      "filename": "desktop-0ms.png",
+      "hidden": false,
+      "opacity": 1,
+      "art": {
+        "x": 111,
+        "y": 12,
+        "width": 1218,
+        "height": 812
+      },
+      "skip": {
+        "x": 1293.984375,
+        "y": 836,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 0,
+      "visiblePeripheralNodes": 0,
+      "originalMask": "url(#reveal)",
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "desktop",
+      "viewport": [
+        1440,
+        900
+      ],
+      "timeMs": 900,
+      "filename": "desktop-900ms.png",
+      "hidden": false,
+      "opacity": 1,
+      "art": {
+        "x": 111,
+        "y": 12,
+        "width": 1218,
+        "height": 812
+      },
+      "skip": {
+        "x": 1293.984375,
+        "y": 836,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 0,
+      "visiblePeripheralNodes": 7,
+      "originalMask": "url(#reveal)",
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "desktop",
+      "viewport": [
+        1440,
+        900
+      ],
+      "timeMs": 1650,
+      "filename": "desktop-1650ms.png",
+      "hidden": false,
+      "opacity": 1,
+      "art": {
+        "x": 111,
+        "y": 12,
+        "width": 1218,
+        "height": 812
+      },
+      "skip": {
+        "x": 1293.984375,
+        "y": 836,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 1,
+      "visiblePeripheralNodes": 12,
+      "originalMask": null,
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "desktop",
+      "viewport": [
+        1440,
+        900
+      ],
+      "timeMs": 2175,
+      "filename": "desktop-2175ms.png",
+      "hidden": false,
+      "opacity": 0.5,
+      "art": {
+        "x": 111,
+        "y": 12,
+        "width": 1218,
+        "height": 812
+      },
+      "skip": {
+        "x": 1293.984375,
+        "y": 836,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 1,
+      "visiblePeripheralNodes": 12,
+      "originalMask": null,
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "desktop",
+      "viewport": [
+        1440,
+        900
+      ],
+      "timeMs": 2400,
+      "filename": "desktop-2400ms.png",
+      "hidden": true,
+      "opacity": 1,
+      "art": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "skip": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "centerOpacity": 0,
+      "visiblePeripheralNodes": 0,
+      "originalMask": null,
+      "referenceInert": false,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 0,
+      "finished": true
+    },
+    {
+      "specimen": "phone",
+      "viewport": [
+        390,
+        844
+      ],
+      "timeMs": 1650,
+      "filename": "phone-1650ms.png",
+      "hidden": false,
+      "opacity": 1,
+      "art": {
+        "x": 0,
+        "y": 260,
+        "width": 390,
+        "height": 260
+      },
+      "skip": {
+        "x": 268.984375,
+        "y": 780,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 1,
+      "visiblePeripheralNodes": 12,
+      "originalMask": null,
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "phone",
+      "viewport": [
+        390,
+        844
+      ],
+      "timeMs": 2175,
+      "filename": "phone-2175ms.png",
+      "hidden": false,
+      "opacity": 0.5,
+      "art": {
+        "x": 0,
+        "y": 260,
+        "width": 390,
+        "height": 260
+      },
+      "skip": {
+        "x": 268.984375,
+        "y": 780,
+        "width": 101.015625,
+        "height": 44
+      },
+      "centerOpacity": 1,
+      "visiblePeripheralNodes": 12,
+      "originalMask": null,
+      "referenceInert": true,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 27,
+      "finished": false
+    },
+    {
+      "specimen": "phone",
+      "viewport": [
+        390,
+        844
+      ],
+      "timeMs": 2400,
+      "filename": "phone-2400ms.png",
+      "hidden": true,
+      "opacity": 1,
+      "art": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "skip": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "centerOpacity": 0,
+      "visiblePeripheralNodes": 0,
+      "originalMask": null,
+      "referenceInert": false,
+      "horizontalOverflow": false,
+      "skipContrast": 14.899435516463779,
+      "animationCount": 0,
+      "finished": true
+    }
+  ],
+  "completion": [
+    {
+      "specimen": "desktop",
+      "durationMs": 2400,
+      "startedAt": 48.20000000298023,
+      "completedAt": 2457.0999999940395,
+      "elapsedMs": 2408.8999999910593,
+      "reason": "complete"
+    },
+    {
+      "specimen": "phone",
+      "durationMs": 2400,
+      "startedAt": 49.099999994039536,
+      "completedAt": 2459.7999999970198,
+      "elapsedMs": 2410.7000000029802,
+      "reason": "complete"
+    }
+  ],
+  "controls": [
+    {
+      "durationMs": 2400,
+      "startedAt": 50.29999999701977,
+      "completedAt": 106.59999999403954,
+      "elapsedMs": 56.29999999701977,
+      "reason": "skip"
+    },
+    {
+      "durationMs": 2400,
+      "startedAt": 51.3999999910593,
+      "completedAt": 66.79999999701977,
+      "elapsedMs": 15.400000005960464,
+      "reason": "escape"
+    },
+    {
+      "durationMs": 2400,
+      "startedAt": null,
+      "completedAt": 19.299999997019768,
+      "elapsedMs": 0,
+      "reason": "reduced-motion"
+    },
+    {
+      "reason": "no-script"
+    }
+  ],
+  "status": "passed",
+  "studySha256": "4bf00c2ef8d646535449b2ff6e424126258c26b470aad21ac1147376d4780fec"
+}

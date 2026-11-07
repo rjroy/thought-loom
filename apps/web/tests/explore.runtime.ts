@@ -61,6 +61,52 @@ export function searchDaemon(token: string) {
 }
 
 type Fixture = ReturnType<typeof searchDaemon>;
+const clearingSelector = 'img[src="/backgrounds/explore-clearing.png"]';
+
+async function expectNoClearing(page: Page): Promise<void> {
+  await expect(page.locator(clearingSelector)).not.toBeVisible();
+}
+
+async function checkClearingLayout(page: Page, origin: string): Promise<void> {
+  const browser = page.context().browser();
+  assert.ok(browser, "clearing layout requires an owned browser");
+  for (const [width, height, visible] of [
+    [359, 800, false], [360, 800, true], [390, 699, false], [390, 700, true],
+    [600, 800, true], [800, 800, true], [1024, 800, true],
+  ] as const) {
+    const context = await browser.newContext({ viewport: { width, height } });
+    try {
+      const probe = await context.newPage();
+      await probe.goto(`${origin}/explore`, { waitUntil: "networkidle" });
+      const scene = probe.locator(clearingSelector);
+      if (!visible) {
+        await expectNoClearing(probe);
+        continue;
+      }
+      await expect(scene).toBeVisible();
+      const filters = probe.getByRole("button", { name: /^filters$/i });
+      if (await filters.isVisible()) await filters.click();
+      const controls = probe.locator('input:visible, select:visible, button:visible, a:visible');
+      const overlaps = await scene.evaluate((image, selector) => {
+        let rect = image.getBoundingClientRect();
+        for (let parent = image.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (!/(hidden|clip|scroll|auto)/.test(`${style.overflowX} ${style.overflowY}`)) continue;
+          const bounds = parent.getBoundingClientRect();
+          rect = DOMRect.fromRect({ x: Math.max(rect.left, bounds.left), y: Math.max(rect.top, bounds.top), width: Math.max(0, Math.min(rect.right, bounds.right) - Math.max(rect.left, bounds.left)), height: Math.max(0, Math.min(rect.bottom, bounds.bottom) - Math.max(rect.top, bounds.top)) });
+        }
+        return Array.from(document.querySelectorAll(selector)).filter(control => {
+          const bounds = control.getBoundingClientRect();
+          return bounds.width > 0 && bounds.height > 0 && getComputedStyle(control).visibility !== "hidden" && rect.left < bounds.right && rect.right > bounds.left && rect.top < bounds.bottom && rect.bottom > bounds.top;
+        }).map(control => control.tagName + ":" + (control.getAttribute("aria-label") ?? control.textContent?.trim().slice(0, 40) ?? ""));
+      }, 'input, select, button, a');
+      assert.deepEqual(overlaps, [], `clearing overlaps controls at ${width}x${height}`);
+      assert.ok(await controls.count() > 0, "layout probe must exercise visible controls");
+      assert.ok(await probe.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `horizontal overflow at ${width}x${height}`);
+    } finally { await context.close(); }
+  }
+}
+
 /** Check the rendered decoration and the bytes actually delivered to the browser. */
 export async function expectGlyph(container: Locator, file: string, pixels: number): Promise<void> {
   const image = container.locator(`img[src$="/${file}"]`);
@@ -144,6 +190,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   const field = page.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i });
   const search = page.getByRole("button", { name: /^search$/i });
   const glyph = page.locator('img[src="/glyphs/lantern.svg"]');
+  const clearing = page.locator(clearingSelector);
   const openFilters = async () => {
     if (options.narrow) {
       const button = page.getByRole("button", { name: /^filters(?:\s*\(\d+\))?$/i });
@@ -172,15 +219,27 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   await expect(initialHeading.getByRole("img")).toHaveCount(0);
   assert.equal(await glyph.evaluate(image => image.tabIndex), -1);
   await expect.poll(() => glyph.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(clearing).toBeVisible();
+  await expect(clearing).toHaveAttribute("alt", "");
+  assert.equal(await clearing.evaluate(image => image.tabIndex), -1);
+  assert.equal(await clearing.evaluate(image => !!image.closest('[aria-hidden="true"]')), true);
+  await expect(clearing).toHaveCSS("pointer-events", "none");
+  await expect.poll(() => clearing.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+  const asset = await page.request.get(`${options.origin}/backgrounds/explore-clearing.png`);
+  assert.equal(asset.status(), 200);
+  assert.deepEqual(await asset.body(), await readFile(new URL("../../../.impeccable/candidates/explore-clearing/production/lantern-clearing.png", import.meta.url)));
+  if (!options.narrow) await checkClearingLayout(page, options.origin);
   assert.equal(searchCalls().length, before, "initial Explore must not query daemon");
   await search.click();
   await expect(page.getByText("Enter a few words to search.", { exact: true })).toBeVisible();
   await expect(glyph).toHaveCount(0);
+  await expectNoClearing(page);
   assert.equal(searchCalls().length, before, "blank validation must not query daemon");
   await field.fill("source-owned"); await search.click();
   const importedCard = page.locator("article").filter({ hasText: "Owned imported search result" });
   await expect(importedCard).toBeVisible();
   await expect(glyph).toHaveCount(0);
+  await expectNoClearing(page);
   await expect(importedCard.getByText("Imported source", { exact: true }).first()).toBeVisible();
   await expect(importedCard.getByText("AI", { exact: true })).toHaveCount(0);
   await openFilters();
@@ -226,6 +285,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
     await expect.poll(() => searchCalls().length).toBe(afterImported + 1);
     await expect(page.getByText(/searching|loading/i).first()).toBeVisible();
     await expect(glyph).toHaveCount(0);
+    await expectNoClearing(page);
   } finally { daemon.release(); daemon.setMode("normal"); }
   await expect(page.getByText("Owned development").first()).toBeVisible();
   await expect(page.getByText("Context title").first()).toBeVisible();
@@ -307,9 +367,11 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
     await fresh.reload({ waitUntil: "networkidle" });
     await expect(fresh.getByRole("textbox", { name: /^search (?:thoughts|your thinking)$/i })).toHaveValue("owned");
     await expect(fresh.locator('img[src="/glyphs/lantern.svg"]')).toHaveCount(0);
+    await expectNoClearing(fresh);
     await fresh.goto(`${options.origin}/explore?sort=invalid-owned`, { waitUntil: "networkidle" });
     await expect(fresh.getByRole("heading", { name: "Search link not valid" })).toBeVisible();
     await expect(fresh.locator('img[src="/glyphs/lantern.svg"]')).toHaveCount(0);
+    await expectNoClearing(fresh);
     assert.deepEqual(freshLeaks, []);
   } finally { await freshContext.close(); }
   await openFilters();
@@ -325,10 +387,12 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   await field.fill("empty-owned"); await search.click();
   await expect(page.getByText(/no results/i).first()).toBeVisible();
   await expect(glyph).toHaveCount(0);
+  await expectNoClearing(page);
   daemon.setMode("failure");
   await field.fill("failed-owned"); await search.click();
   await expect(page.getByText(/search unavailable|could not search|unable to search|search failed/i).first()).toBeVisible();
   await expect(glyph).toHaveCount(0);
+  await expectNoClearing(page);
   await expect(field).toHaveValue("failed-owned");
   daemon.setMode("normal");
   await page.getByRole("button", { name: /retry search/i }).click();

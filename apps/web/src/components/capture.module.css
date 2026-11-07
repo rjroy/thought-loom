@@ -1,3 +1,7 @@
+.workspace { position: relative; }
+/* Use the existing 13% spare width and outer inset, leaving control/focus clearance. */
+.canopy { position: absolute; inset-block-start: -2rem; inset-inline-end: calc(-1 * var(--page-inset)); inline-size: min(196px, calc(13% + var(--page-inset) - 1rem)); block-size: 294px; overflow: hidden; pointer-events: none; }
+.canopyImage { position: absolute; inset-block-start: 0; inset-inline-end: 0; display: block; inline-size: 196px; block-size: 294px; max-inline-size: none; pointer-events: none; user-select: none; }
 .heading { max-inline-size: none; }
 .headingRow { display: flex; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; margin-block-end: .5rem; }
 .headingRow h1 { display: flex; align-items: center; gap: .5rem; margin: 0; }
@@ -6,3 +10,7 @@
 .importAction:enabled:hover { color: var(--color-text); text-decoration-thickness: 2px; }
 .importAction:enabled:active { text-decoration-thickness: 3px; }
 .importAction:disabled { color: var(--color-muted); cursor: not-allowed; }
+
+@media (max-width: 48rem) {
+  .canopy { display: none; }
+}

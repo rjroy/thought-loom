@@ -1,0 +1,79 @@
+{
+  "source": "../study.html",
+  "sourceSha256": "4bf00c2ef8d646535449b2ff6e424126258c26b470aad21ac1147376d4780fec",
+  "operation": "Decode existing base64 WebPs without changing bytes; copy existing reveal definitions and retarget only timing metadata to the approved study.",
+  "recipe": "../build.py",
+  "tools": "Python 3 standard library only; no raster encoder or generation",
+  "images": {
+    "splash-landscape.webp": {
+      "bytes": 640898,
+      "sha256": "1ce48ed5c1ec9547fc8c6167818a666a3ffe00ca4c4501ef9e0d8b516f8a6192",
+      "nativeSize": [
+        1536,
+        1024
+      ]
+    },
+    "splash-complete.webp": {
+      "bytes": 114906,
+      "sha256": "ec9d6e81e99fc90695aa5e5787a896f5fd3300729122520e08991dc455cf52e8",
+      "nativeSize": [
+        1536,
+        1024
+      ]
+    }
+  },
+  "reveal": {
+    "file": "reveal.svg",
+    "bytes": 4071,
+    "sha256": "868bdc7f464c95bf1ca922ad520ff79abc454294b6a532baf08464f892735762",
+    "connections": 13,
+    "peripheralNodes": 12,
+    "centerNodes": 1,
+    "consumer": "Inline matching defs in runtime SVG. Standalone defs-only SVG is an assembly reference, not a publicly served illustration or an external-document mask."
+  },
+  "timelineMs": {
+    "landscape": [
+      0,
+      150
+    ],
+    "peripheral": [
+      150,
+      1350
+    ],
+    "center": [
+      1150,
+      1650
+    ],
+    "hold": [
+      1650,
+      1950
+    ],
+    "dissolve": [
+      1950,
+      2400
+    ]
+  },
+  "consumer": "Landscape WebP beneath completed-scene WebP; reveal mask applies only to completed scene until 1650ms, then remove it. Both are full opaque 3:2 scenes, not transparent cutouts. Keep the still landscape, original framing and entire overlay dissolve.",
+  "publicPromotion": [
+    "/backgrounds/splash-landscape.webp",
+    "/backgrounds/splash-complete.webp"
+  ],
+  "displayEvidence": {
+    "desktopViewport": [
+      1440,
+      900
+    ],
+    "desktopArt": [
+      1218,
+      812
+    ],
+    "phoneViewport": [
+      390,
+      844
+    ],
+    "phoneArt": [
+      390,
+      260
+    ]
+  }
+}

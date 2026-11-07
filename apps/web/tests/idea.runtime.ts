@@ -80,6 +80,11 @@ export function ideaDaemon(token: string) {
 }
 
 type Fixture = ReturnType<typeof ideaDaemon>;
+
+export function connectionRejectCount(daemon: Fixture, walkthroughStart: number): number {
+  return daemon.attempts.slice(walkthroughStart).filter(call => call.path === "/connections/idea-child-edge/reject").length;
+}
+
 export async function checkIdeaGlyphs(page: Page, daemon: Fixture, origin: string): Promise<void> {
   daemon.reset();
   await page.goto(`${origin}/ideas/idea-imported`, { waitUntil: "networkidle" });
@@ -136,6 +141,7 @@ export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: 
 
 export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { origin: string; narrow: boolean }): Promise<void> {
   daemon.reset();
+  const walkthroughStart = daemon.attempts.length;
   await page.goto(`${options.origin}/ideas/idea-imported`, { waitUntil: "networkidle" });
   await expect(page.getByText(imported.text, { exact: true })).toBeVisible();
   await expect(page.locator("main").getByText("Imported source", { exact: true }).first()).toBeVisible();
@@ -274,7 +280,7 @@ export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { o
   await childRow.getByText("Connection actions", { exact: true }).click();
   await childRow.getByRole("button", { name: /reject connection/i }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Reject connection" }).click();
-  await expect.poll(() => daemon.attempts.filter(call => call.path === "/connections/idea-child-edge/reject").length).toBe(1);
+  await expect.poll(() => connectionRejectCount(daemon, walkthroughStart)).toBe(1);
   await expect(childRow).toBeVisible();
   await expect(childRow).toContainText(/interpretation|child/i);
   assert.ok(!daemon.attempts.some(call => call.method === "POST" && call.path === "/thoughts/idea-child/reject"));

@@ -106,6 +106,7 @@ export async function checkImportBrowser(page: Page, daemon: ReturnType<typeof i
   await entry.click();
   await expect(page).toHaveURL(/\/import(?:\?|$)/);
   await expect(page.getByRole("heading", { name: /import markdown/i })).toBeVisible();
+  await expect(page.locator('img[src="/backgrounds/capture-canopy.png"]')).toHaveCount(0);
   await page.goBack();
   await expect(page.getByRole("textbox", { name: /^thought$/i })).toHaveValue("Owned unsaved capture draft");
   await expect(page.getByRole("textbox", { name: /^title/i })).toHaveValue("Owned draft title");

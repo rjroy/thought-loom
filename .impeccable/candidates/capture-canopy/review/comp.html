@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Capture canopy · static concept placement</title>
+  <link rel="stylesheet" href="../../../../apps/web/src/app/globals.css">
+  <link rel="stylesheet" href="../../../../apps/web/src/components/capture.module.css">
+  <style>
+    @font-face { font-family: "Source Sans Comp"; src: url("../../../../apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf") format("truetype"); font-weight: 200 900; font-display: block; }
+    :root { --font-source-sans: "Source Sans Comp"; }
+    .workspace { position: relative; }
+    .canopy { position: absolute; inset-block-start: 0; inset-inline-end: 0; inline-size: min(196px, calc((100% - 2 * var(--page-inset)) * .13 + var(--page-inset) - 1rem)); block-size: 294px; overflow: hidden; pointer-events: none; }
+    .canopy img { position: absolute; inset-block-start: 0; inset-inline-end: 0; display: block; inline-size: 196px; block-size: 294px; max-inline-size: none; pointer-events: none; user-select: none; }
+    body[data-art="off"] .canopy { display: none; }
+    [hidden] { display: none !important; }
+    @media (max-width: 48rem) { .canopy { display: none; } }
+  </style>
+</head>
+<body data-art="on">
+  <!-- Test-owned illustrative fixture, not the live client or a functioning save form. -->
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header"><div class="site-header-inner">
+    <div class="site-header-identity"><div class="brand"><a class="brand-name" href="#">thoughtloom</a><p class="brand-tagline">Where ideas take shape.</p></div></div>
+    <nav class="primary-navigation" aria-label="Main navigation"><a class="navigation-link" href="#">Explore</a><a class="navigation-link" href="#" aria-current="page">Capture</a><span class="navigation-reserved">Settings <span class="reserved-label">Reserved</span></span></nav>
+  </div></header>
+  <main id="main-content" class="workspace" tabindex="-1">
+    <div class="canopy" aria-hidden="true"><img src="../source.png" alt="" width="1024" height="1536" draggable="false"></div>
+    <section class="capture-workspace" aria-labelledby="capture-heading">
+      <header class="workspace-intro capture-heading heading"><div class="headingRow"><h1 id="capture-heading"><img src="../../../../apps/web/public/glyphs/sprout.svg" alt="" aria-hidden="true" width="24" height="24" class="headingGlyph">Capture</h1><button type="button" class="importAction">Import</button></div><p>Write or paste a thought.</p></header>
+      <div class="capture-content">
+        <div class="capture-status capture-status--editing" role="status" aria-atomic="true"></div>
+        <form class="capture-form" data-recovery="false" novalidate>
+          <div class="capture-field"><label for="capture-thought">Thought</label><textarea id="capture-thought" class="capture-control capture-thought" required>I can lose an idea by trying to finish it too soon.
+
+I want a place to keep the rough version, then return when I have something to add.</textarea></div>
+          <div class="capture-field"><label for="capture-title">Title <span class="capture-optional">(optional)</span></label><input id="capture-title" class="capture-control" type="text" value="Keep room for unfinished thinking"></div>
+          <div class="capture-actions"><button type="submit" class="capture-button capture-button--primary">Save</button></div>
+        </form>
+        <div class="receipt" hidden><dl class="capture-receipt"><dt>Thought</dt><dd></dd><dt>Title</dt><dd>Keep room for unfinished thinking</dd></dl><div class="capture-actions capture-actions--saved"><a class="capture-button capture-button--primary" href="#">Open idea</a><button class="capture-button" type="button">Capture another thought</button></div></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const query = new URLSearchParams(location.search);
+    if (query.get("asset") === "production") {
+      const image = document.querySelector(".canopy img");
+      image.src = "../production/capture-canopy.png";
+      image.width = 392; image.height = 588;
+    }
+    const state = ["saving", "saved", "not-saved"].includes(query.get("state")) ? query.get("state") : "editing";
+    if (query.get("art") === "off") document.body.dataset.art = "off";
+    document.body.dataset.state = state;
+    const status = document.querySelector(".capture-status"), form = document.querySelector("form");
+    const text = document.querySelector("textarea").value;
+    const states = {
+      saving: ["Saving…", "Waiting for confirmation. Your draft is still here."],
+      saved: ["Saved.", "Your original wording is saved. You can continue without waiting for background processing."],
+      "not-saved": ["Not saved", "Save unavailable. Your draft is still here. You can adjust it and try again."]
+    };
+    status.className = "capture-status capture-status--" + state;
+    if (states[state]) {
+      const heading = document.createElement("h2"), paragraph = document.createElement("p");
+      heading.textContent = states[state][0]; paragraph.textContent = states[state][1]; status.append(heading, paragraph);
+      form.dataset.recovery = "true";
+    }
+    if (state === "saving") {
+      document.querySelectorAll("textarea, input").forEach(field => field.readOnly = true);
+      document.querySelectorAll("button").forEach(button => button.disabled = true);
+    }
+    if (state === "saved") {
+      form.hidden = true;
+      document.querySelector(".receipt").hidden = false;
+      document.querySelector(".capture-receipt dd").textContent = text;
+    }
+    form.addEventListener("submit", event => event.preventDefault());
+    document.querySelectorAll('a[href="#"]').forEach(link => link.addEventListener("click", event => event.preventDefault()));
+  </script>
+</body>
+</html>

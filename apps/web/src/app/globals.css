@@ -90,6 +90,11 @@ a {
   transform: none;
 }
 
+/* SSR route guard hides shared chrome before a root intro can hydrate. */
+.root-splash-shell[data-root-arrival="true"] { visibility: hidden; }
+body:has([data-root-splash="dissolve"], [data-root-splash="finished"]) .root-splash-shell { visibility: visible; }
+body:has([data-root-splash="intro"], [data-root-splash="dissolve"]) { overflow: hidden; }
+
 .site-header {
   border-block-end: 1px solid var(--color-line);
 }
