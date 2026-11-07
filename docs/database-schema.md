@@ -325,7 +325,7 @@ Source detail/raw/parts require a user `history` inspection scope even when all 
 
 ## Media-source storage foundation
 
-[`media-schema.ts`](../src/storage/media-schema.ts) defines metadata only. No original-byte or extracted-text column is added. Actual private file retention, directory ownership/marker coordination, upload/download/retry endpoints and media execution/attachment tables remain unimplemented. No media startup or filesystem configuration is active.
+[`media-schema.ts`](../src/storage/media-schema.ts) defines metadata only. No original-byte or extracted-text column is added. The internal [`media-files.ts`](../src/storage/media-files.ts) service coordinates private directories, marker identity, publication and verified reads with an injected validator. Real image/PDF validation, daemon retention wiring, upload/download/retry endpoints and media execution/attachment tables remain unimplemented. No media startup or filesystem configuration is active.
 
 ### `media_store`
 
@@ -355,6 +355,14 @@ All source columns reject update, deletion and identity/request-key replacement.
 Internal `SqliteStore.saveMediaSource({thought,requestKey,sha256})` in [`media-source.ts`](../src/storage/media-source.ts) validates the domain media variant, an initially absent title and a 32-byte supplied digest. One immediate transaction inserts source metadata **before** the root, then its null title metadata and empty source seal. It requires prior explicit store initialization, copies the supplied digest, and admits no run. Equal digests may belong to distinct sources. This metadata seam neither verifies actual file bytes nor implements an HTTP idempotency/retry contract. UTF-8 byte binding preserves exact clarification, including a leading U+FEFF.
 
 Full Thought projections include the scoped `mediaSource` descriptor described in the [API](daemon-api.md#response-records). Search and investigative snippets use clarification only; saved-search discovery/history summaries use the filename only as a title fallback. Existing rejection/provenance rules apply to these projections. A thought full read proves descriptor/clarification exposure, not a binary read. Search and Agentic Export gain no file-open or native-tool capability; Markdown whole-document artifacts remain user-only.
+
+### Internal private-file service
+
+[`media-files.ts`](../src/storage/media-files.ts) receives an explicit private directory, store identity, instance logger, lifetime fence and validator. Its `store.json` marker records `{version:1,storeId}` and must match SQLite. The owned layout has `objects`, `staging` and `prepared` subdirectories; filenames supplied with thoughts never select storage paths. Linux directory handles anchor operations through `/proc/self/fd`, with no-follow, ownership, permission and hard-link checks in [`media-file-paths.ts`](../src/storage/media-file-paths.ts).
+
+Publication bounds and hashes the actual stream, validates staged bytes, syncs the file and publishes without replacing an existing object. Only then does it call the trusted synchronous SQL admission callback, outside a SQL transaction; that callback owns its short transaction. The service checks the resulting immutable source fingerprint. There is no atomic transaction spanning SQLite and the filesystem: failures can leave unreferenced files, while an ambiguous callback failure must preserve a committed original. No filesystem I/O belongs inside the callback's SQL transaction.
+
+Reads verify the stored reference and actual original fingerprint. Cleanup is bounded and reference-aware, never removes referenced originals merely because they are rejected or failed, and excludes active publication. Prepared derivatives and unexpected multi-link leftovers are conservatively retained. Closing joins entered work before releasing owned handles; it does not close the caller's database. These are internal storage operations, not consumer authorization or new daemon routes. Real image/PDF validation and daemon wiring remain separate work; see the [owned filesystem checks](testing.md#private-media-file-service-checks).
 
 ## Agentic search storage foundation
 

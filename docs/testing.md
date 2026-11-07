@@ -40,6 +40,18 @@ The focused three-file persistence group uses the real migration and in-memory o
 
 These boundaries do not establish file retention/ownership, format validation, upload/download/retry endpoints, native media transport/provider support, media interpretation/retry execution or a browser media flow. There are no live-service/provider or personal-data fixtures. The current Next.js decoders remain text-only; existing web checks protect text/Markdown behavior, not media rendering. Commands and coverage descriptions are not a claim that a particular working-tree revision has passed verification.
 
+### Private media-file service checks
+
+```sh
+bun --no-env-file test tests/media-files.test.ts tests/media-files-faults.test.ts
+```
+
+These tests use owned Linux directories and SQLite fixtures, explicit identities/clocks, and an injected validator that accepts sentinel bytes. They exercise private marker/identity initialization, publication without overwriting, fingerprint-verified reads, corruption/link refusal, cancellation, reference-aware cleanup, active staging, joined close and lifetime fencing. The service requires a synchronous trusted admission callback that owns its SQL transaction; filesystem work stays outside that transaction.
+
+The fault suite supplies instance-local filesystem delegates for `sync`, `link` and `unlink`, performing real owned I/O and injecting failures or held completion at selected publication boundaries. It checks that failed publication does not falsely admit a source or destroy an existing original, that ambiguous SQL/link outcomes preserve referenced bytes, that unsafe layouts are refused, and that shutdown joins held I/O before releasing descriptors. No global filesystem mock is installed.
+
+This is not evidence of image/PDF decoding, parser subprocess containment, arbitrary process-crash recovery, daemon media integration or power-loss durability. No original from a personal directory, operator service or provider is a fixture. The injected validator must not be mistaken for the future real format validator.
+
 ### Runtime execution-owner checks
 
 ```sh
