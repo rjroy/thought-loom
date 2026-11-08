@@ -9,6 +9,7 @@ const files: Record<ContentCue, string> = {
   "ai-interpretation": "ai-interpretation.svg",
   "developing-idea": "developing-idea.svg",
   "imported-original": "imported-original.svg",
+  "media-original": "imported-original.svg",
   "full-reply": "full-reply.svg",
   evolution: "evolution.svg",
   connection: "connection.png",

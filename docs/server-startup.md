@@ -61,7 +61,8 @@ Dev and production listeners bind to `127.0.0.1`; the default web origin is `htt
 | `THOUGHTLOOM_WEB_ORIGIN` | `http://127.0.0.1:3000`; the single trusted browser origin and Host. Accepts loopback HTTP(S) or an explicitly configured remote HTTPS origin, without credentials, paths, queries or fragments. |
 | `THOUGHTLOOM_DAEMON_URL` | `http://127.0.0.1:3001`; server-only daemon origin. Only loopback HTTP(S) origins are accepted, without embedded credentials, paths, queries, or fragments. |
 | `THOUGHTLOOM_USER_TOKEN` | The daemon's user-role bearer credential, validated when the server transport is used. Never expose it through a `NEXT_PUBLIC_*` variable. |
-| `THOUGHTLOOM_IMPORT_MAX_BYTES` | Maximum bytes in one imported file, default `1048576` (1 MiB). Set consistently for the web server and daemon; this is a transport safeguard, not a segmentation or model-effort setting. |
+| `THOUGHTLOOM_IMPORT_MAX_BYTES` | Maximum bytes in one imported Markdown file, default `1048576` (1 MiB). Set consistently for the web build, web server and daemon; this is a transport safeguard, not a segmentation or model-effort setting. |
+| `THOUGHTLOOM_MEDIA_MAX_BYTES` | Maximum bytes in one imported image or PDF, default `16777216` (16 MiB). Set consistently for the web build, web server and daemon. |
 
 Export these variables in the launching shell. Next.js has its own application environment-file handling; Bun's `--no-env-file` flag is not a guarantee that Next.js will ignore such files. Keep all daemon credentials server-only. The web client does not need the daemon's AI token, database path, or agent configuration. It does not make direct browser-to-daemon requests. Server requests reject redirects, use bounded timeouts and `no-store`, and sanitize failures. The web request boundary rejects untrusted Host values and missing or foreign Origin values on mutations; forwarded headers do not establish trust.
 
@@ -81,7 +82,7 @@ Drafts and recovery snapshots are held in mounted application memory, including 
 
 ### Markdown import workflow
 
-Choose **Import** beside the Capture heading to open `/import`. Choose Markdown files, then explicitly start the import; selecting files alone sends nothing. Invalid local files are marked **Not sent** and excluded from admitted totals. Each admitted file reports its own state, so a failed file does not stop the others. AI grouping and successful structural fallback both preserve the original wording; empty or metadata-only files may import with zero thoughts.
+Choose **Import** beside the Capture heading, then **Markdown** to open `/import`. The same chooser offers **Image or PDF** for the separate single-file media workspace at `/import/media`. Choose Markdown files, then explicitly start the import; selecting files alone sends nothing. Invalid local files are marked **Not sent** and excluded from admitted totals. Each admitted file reports its own state, so a failed file does not stop the others. AI grouping and successful structural fallback both preserve the original wording; empty or metadata-only files may import with zero thoughts.
 
 Reports use `/import?batchId=<id>` and can be bookmarked or reopened through **Recent imports**. Inspect source deliberately opens the retained original for the user, not an extra AI-readable thought. Eligible imported thoughts open the normal Idea view. Identical bytes are skipped across filenames; different bytes are imported even when ordinary selections share a filename. Only reliable known paths in non-loose namespaces receive changed-path protection.
 
@@ -89,7 +90,19 @@ An uncertain admission is not permission to upload another copy. If batch admiss
 
 The browser uses fixed `/api/imports/...` Next routes, which attach credentials server-side and forward to the existing daemon import and inspection APIs. Uploads are bounded before multipart parsing; malformed upstream success reports remain unconfirmed rather than becoming successful imports in the UI.
 
-When changing the import byte limit, provide it when building and starting the web server as well as starting the daemon. Next's proxy buffer allows the configured file size plus 4 KiB of metadata and 64 KiB of multipart framing, or its existing 10 MiB default when larger. The import boundary still enforces the individual file limit. This framework buffer is per request, not a global memory budget.
+When changing either import byte limit, provide it when building and starting the web server as well as starting the daemon. Next's proxy buffer allows the larger of the Markdown and media file limits, plus 4 KiB of metadata and 64 KiB of multipart framing, with a 10 MiB minimum. Each import boundary still enforces its own individual file limit. This framework buffer is per request, not a global memory budget.
+
+### Image and PDF import workflow
+
+Choose **Import → Image or PDF** from Capture to open `/import/media`. Select one supported image or PDF and optionally provide clarification. Selection sends nothing; **Import file** explicitly uploads the original and exact nonblank clarification. The original is retained separately from its AI interpretation. File authorship is unverified; clarification is attributed to you. Leaving clarification blank requests a summary.
+
+A confirmed upload means the original was saved, not that interpretation finished. An uncertain response retains the original request key, file and clarification in mounted application memory. **Check upload** reads that same key; an explicit resend uses the same frozen request rather than creating another source. No upload is automatically replayed. Reloading loses unsent selections and browser recovery state; leaving does not cancel admitted work. Once a receipt is confirmed, local file references are released and the saved receipt supplies the display.
+
+The source opens in the ordinary Idea view with file details, clarification and **Download original**. Its separately recorded AI interpretation appears in Surrounding context; Full reply remains available when a canonical reply exists. Status reads use the latest non-title source run, not the upload receipt's original run. Queued does not identify why processing has not started. A failed status read does not mean processing failed, and saved interpretations remain visible after later processing failure.
+
+Retry availability comes from the daemon. **Try interpretation again** explicitly requests work against the retained original without uploading it again. After an uncertain retry response, checking reads current processing; resending the same retry request is a separate explicit action that may start work if the earlier request never arrived. Stop targets a known weave run and is not a guarantee that external work stops instantly. Neither action is sent automatically.
+
+Rejected originals are hidden normally. Explicit user inspection can display and download them, but cannot Evolve or request interpretation while rejected. A rejected initial interpretation is not regenerated; use the existing restoration or Evolve actions as appropriate. Rejected content is unavailable to AI. All browser operations use fixed Next server routes; credentials and retained-file paths remain server-side.
 
 ### Conversational search
 

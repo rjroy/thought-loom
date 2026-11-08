@@ -104,6 +104,7 @@ export async function checkImportBrowser(page: Page, daemon: ReturnType<typeof i
   await page.getByRole("textbox", { name: /^title/i }).fill("Owned draft title");
   const entry = page.getByRole("link", { name: /^import$/i }).or(page.getByRole("button", { name: /^import$/i }));
   await entry.click();
+  await control(page, /^Markdown\b/i).click();
   await expect(page).toHaveURL(/\/import(?:\?|$)/);
   await expect(page.getByRole("heading", { name: /import markdown/i })).toBeVisible();
   await expect(page.locator('img[src="/backgrounds/capture-canopy.png"]')).toHaveCount(0);
@@ -111,6 +112,7 @@ export async function checkImportBrowser(page: Page, daemon: ReturnType<typeof i
   await expect(page.getByRole("textbox", { name: /^thought$/i })).toHaveValue("Owned unsaved capture draft");
   await expect(page.getByRole("textbox", { name: /^title/i })).toHaveValue("Owned draft title");
   await entry.click();
+  await control(page, /^Markdown\b/i).click();
   await expect(page.getByRole("heading", { name: /import markdown/i })).toBeVisible();
   const selection = page.locator('input[type="file"]');
   await selection.setInputFiles([{ name: "owned.md", mimeType: "text/markdown", buffer: original }, { name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from("owned non-markdown") }]);

@@ -56,7 +56,7 @@ export function searchDaemon(token: string) {
       const authorFiltered = dated.filter(item => !authors.length || authors.includes(item.author));
       const kindFiltered = dated.filter(item => !kinds.length || kinds.includes(item.materialKind));
       const results = authorFiltered.filter(item => !kinds.length || kinds.includes(item.materialKind));
-      const counts = { authors: { user: kindFiltered.filter(item => item.author === "user").length, ai: kindFiltered.filter(item => item.author === "ai").length, source: kindFiltered.filter(item => item.author === "source").length }, kinds: { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": authorFiltered.filter(item => item.materialKind === "developing-idea").length, "imported-original": authorFiltered.filter(item => item.materialKind === "imported-original").length } };
+      const counts = { authors: { user: kindFiltered.filter(item => item.author === "user").length, ai: kindFiltered.filter(item => item.author === "ai").length, source: kindFiltered.filter(item => item.author === "source").length }, kinds: { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": authorFiltered.filter(item => item.materialKind === "developing-idea").length, "imported-original": authorFiltered.filter(item => item.materialKind === "imported-original").length, "media-original": 0 } };
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ results, counts }));
     },
   };
@@ -248,7 +248,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
   const authors = page.getByRole("group", { name: "Authorship" });
   const materials = page.getByRole("group", { name: "Kind of material" });
   const sourceAuthor = authors.getByRole("checkbox", { name: /imported source/i });
-  const importedKind = materials.getByRole("checkbox", { name: /imported source/i });
+  const importedKind = materials.getByRole("checkbox", { name: /imported markdown/i });
   await expect(sourceAuthor).toHaveAccessibleName(/1\s*$/);
   await expect(importedKind).toHaveAccessibleName(/1\s*$/);
   for (const name of [/you/i, /^ai\b/i]) await expect(authors.getByRole("checkbox", { name })).toBeVisible();
@@ -273,7 +273,7 @@ export async function checkExploreBrowser(page: Page, daemon: Fixture, options: 
     await fresh.goto(importedBookmark.toString(), { waitUntil: "networkidle" });
     if (options.narrow) await fresh.getByRole("button", { name: /^filters/i }).click();
     await expect(fresh.getByRole("group", { name: "Authorship" }).getByRole("checkbox", { name: /imported source/i })).toBeChecked();
-    await expect(fresh.getByRole("group", { name: "Kind of material" }).getByRole("checkbox", { name: /imported source/i })).toBeChecked();
+    await expect(fresh.getByRole("group", { name: "Kind of material" }).getByRole("checkbox", { name: /imported markdown/i })).toBeChecked();
     await expect(fresh.locator("article").filter({ hasText: "Owned imported search result" })).toBeVisible();
   } finally { await importedContext.close(); }
   await page.getByRole("button", { name: /clear filters/i }).click();

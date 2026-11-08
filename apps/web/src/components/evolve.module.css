@@ -10,6 +10,7 @@
 .materialLabel { display: inline-flex; align-items: center; gap: 0.5rem; vertical-align: baseline; }
 .user { margin: 0 0 0.375rem; color: var(--brand-color-2); font-weight: 650; }
 .ai { margin: 0 0 0.375rem; color: var(--brand-color-13); font-weight: 650; }
+.source { color: var(--color-body); font-weight: 650; }
 .savedText, .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .savedText { margin-block: 0.5rem; }
 .message { max-inline-size: 72ch; margin: 0; color: var(--color-text); font-size: 1.375rem; line-height: 1.5; }

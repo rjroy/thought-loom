@@ -1,6 +1,7 @@
 import type { ContextConnection, ContextThought } from "../explore/results";
+import type { MediaIdeaThought } from "./media";
 
-export type IdeaThought = ContextThought & { readonly rejected?: boolean };
+export type IdeaThought = (ContextThought & { readonly rejected?: boolean }) | MediaIdeaThought;
 export type IdeaConnection = ContextConnection & { readonly rejected?: boolean };
 export interface SharedResponse { readonly id: string; readonly text: string; readonly role: "addendum" | "fallback"; readonly state: "complete" | "interrupted"; readonly thoughtIds: readonly string[]; }
 export interface IdeaView {

@@ -3,13 +3,22 @@
 .canopy { position: absolute; inset-block-start: -2rem; inset-inline-end: calc(-1 * var(--page-inset)); inline-size: min(196px, calc(13% + var(--page-inset) - 1rem)); block-size: 294px; overflow: hidden; pointer-events: none; }
 .canopyImage { position: absolute; inset-block-start: 0; inset-inline-end: 0; display: block; inline-size: 196px; block-size: 294px; max-inline-size: none; pointer-events: none; user-select: none; }
 .heading { max-inline-size: none; }
-.headingRow { display: flex; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; margin-block-end: .5rem; }
+.headingRow { position: relative; display: flex; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; margin-block-end: .5rem; }
 .headingRow h1 { display: flex; align-items: center; gap: .5rem; margin: 0; }
 .headingGlyph { flex: none; inline-size: 24px; block-size: 24px; pointer-events: none; }
 .importAction { display: inline-flex; align-items: center; justify-content: center; min-inline-size: 44px; min-block-size: 44px; padding: .375rem 0; border: 0; background: transparent; color: var(--color-link); font: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; cursor: pointer; }
 .importAction:enabled:hover { color: var(--color-text); text-decoration-thickness: 2px; }
 .importAction:enabled:active { text-decoration-thickness: 3px; }
 .importAction:disabled { color: var(--color-muted); cursor: not-allowed; }
+.importChoices { position: absolute; z-index: 2; inset-block-start: calc(100% + .5rem); inset-inline-end: 0; inline-size: min(22rem, calc(100vw - 2.5rem)); padding: .75rem 1.25rem; border: 1px solid var(--color-control-line); border-radius: .75rem; background: var(--color-card); }
+.importChoices[hidden] { display: none; }
+.importChoice { display: block; inline-size: 100%; min-inline-size: 0; padding: .5rem 0; border: 0; background: transparent; color: var(--color-body); font: inherit; text-align: start; cursor: pointer; }
+.importChoice strong { display: flex; align-items: center; min-block-size: 44px; color: var(--color-link); font-weight: 600; text-decoration: underline; text-underline-offset: .2em; }
+.importChoice span, .importChoices > p { display: block; margin: 0; color: var(--color-muted); font-size: 1rem; line-height: 1.5; }
+.importChoices > p { padding-block: .5rem; }
+.importChoice + .importChoice { border-block-start: 1px solid var(--color-line); }
+.importChoice:hover strong { color: var(--color-text); text-decoration-thickness: 2px; }
+.importChoice:active strong { text-decoration-thickness: 3px; }
 
 @media (max-width: 48rem) {
   .canopy { display: none; }

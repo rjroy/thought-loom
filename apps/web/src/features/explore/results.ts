@@ -1,22 +1,25 @@
 import type { SearchAuthor, SearchMaterialKind } from "./query";
+import { mediaDescriptor, mediaThought, type MediaDescriptor, type MediaIdeaThought } from "../idea/media";
 
-export interface ContextThought {
+export interface TextContextThought {
   readonly id: string; readonly text: string; readonly title: string | null; readonly titleAuthor?: "user" | "ai" | null;
-  readonly author: SearchAuthor; readonly kind: SearchMaterialKind; readonly createdAt: string;
+  readonly author: SearchAuthor; readonly kind: Exclude<SearchMaterialKind,"media-original">; readonly createdAt: string;
   readonly origin: string; readonly parentId: string | null; readonly sourceIds: readonly string[];
 }
+export type ContextThought = TextContextThought | MediaIdeaThought;
 export interface ContextConnection {
   readonly id: string; readonly fromId: string; readonly toId: string;
   readonly category: "supports" | "contradicts" | "extends" | "related";
   readonly proposedBy: "user" | "ai"; readonly explanation: string; readonly sourceIds: readonly string[];
 }
-export interface SearchResult {
-  readonly kind: "thought" | "response"; readonly id: string; readonly thoughtId: string;
-  readonly text: string; readonly snippet: string; readonly title: string; readonly author: SearchAuthor;
+export type SearchResult = ({readonly kind: "thought" | "response"; readonly text: string} |
+  {readonly kind: "thought"; readonly text: null; readonly mediaSource: MediaDescriptor}) & {
+  readonly id: string; readonly thoughtId: string;
+  readonly snippet: string; readonly title: string; readonly author: SearchAuthor;
   readonly materialKind: SearchMaterialKind; readonly createdAt: string;
   readonly context: null | { readonly kind: "predecessor"; readonly thought: ContextThought }
     | { readonly kind: "connection"; readonly thought: ContextThought; readonly connection: ContextConnection };
-}
+};
 export interface SearchPage {
   readonly results: readonly SearchResult[];
   readonly counts: { readonly authors: Readonly<Record<SearchAuthor, number>>; readonly kinds: Readonly<Record<SearchMaterialKind, number>> };
@@ -26,14 +29,15 @@ function object(value: unknown): value is Record<string, unknown> { return typeo
 function actor(value: unknown): value is "user" | "ai" { return value === "user" || value === "ai"; }
 function author(value: unknown): value is SearchAuthor { return actor(value) || value === "source"; }
 function material(value: unknown): value is SearchMaterialKind {
-  return value === "captured-original" || value === "user-contribution" || value === "ai-interpretation" || value === "developing-idea" || value === "imported-original";
+  return value === "captured-original" || value === "user-contribution" || value === "ai-interpretation" || value === "developing-idea" || value === "imported-original" || value === "media-original";
 }
 function strings(value: unknown): value is string[] { return Array.isArray(value) && value.every(item => typeof item === "string"); }
 function thought(value: unknown): value is ContextThought {
+  if (mediaThought(value)) return true;
   return object(value) && typeof value.id === "string" && typeof value.text === "string"
     && (typeof value.title === "string" || value.title === null)
     && (value.titleAuthor === undefined || value.titleAuthor === null || actor(value.titleAuthor))
-    && author(value.author) && material(value.kind) && typeof value.createdAt === "string"
+    && author(value.author) && material(value.kind) && value.kind !== "media-original" && typeof value.createdAt === "string"
     && typeof value.origin === "string" && (typeof value.parentId === "string" || value.parentId === null) && strings(value.sourceIds);
 }
 function connection(value: unknown): value is ContextConnection {
@@ -44,8 +48,15 @@ function connection(value: unknown): value is ContextConnection {
 function result(value: unknown): value is SearchResult {
   if (!object(value) || (value.kind !== "thought" && value.kind !== "response")
       || typeof value.id !== "string" || !value.id || typeof value.thoughtId !== "string" || !value.thoughtId
-      || typeof value.text !== "string" || typeof value.snippet !== "string" || typeof value.title !== "string"
+      || !(typeof value.text === "string" || (value.kind === "thought" && value.text === null && value.materialKind === "media-original"
+        && value.author === "source" && mediaDescriptor(value.mediaSource)
+        && Object.keys(value).every(k => ["kind","id","thoughtId","text","mediaSource","snippet","title","author","materialKind","createdAt","context"].includes(k))))
+      || typeof value.snippet !== "string" || typeof value.title !== "string"
       || !author(value.author) || !material(value.materialKind) || typeof value.createdAt !== "string") return false;
+  if (value.materialKind === "media-original") {
+    if (Object.keys(value).some(k => !["kind","id","thoughtId","text","mediaSource","snippet","title","author","materialKind","createdAt","context"].includes(k))) return false;
+    if (value.kind === "thought" ? value.text !== null : value.mediaSource !== undefined) return false;
+  }
   if (value.context === null) return true;
   if (!object(value.context) || !thought(value.context.thought)) return false;
   return value.context.kind === "predecessor" || (value.context.kind === "connection" && connection(value.context.connection));
@@ -56,7 +67,7 @@ export function decodeSearchPage(value: unknown): SearchPage | undefined {
       || !object(value.counts.authors) || !object(value.counts.kinds)) return undefined;
   const a = value.counts.authors, k = value.counts.kinds;
   if (!count(a.user) || !count(a.ai) || !count(a.source) || !count(k["captured-original"]) || !count(k["user-contribution"])
-      || !count(k["ai-interpretation"]) || !count(k["developing-idea"]) || !count(k["imported-original"])) return undefined;
+      || !count(k["ai-interpretation"]) || !count(k["developing-idea"]) || !count(k["imported-original"]) || !count(k["media-original"])) return undefined;
   return value as unknown as SearchPage;
 }
 export function decodeWebSearchPage(value: unknown): WebSearchPage | undefined {

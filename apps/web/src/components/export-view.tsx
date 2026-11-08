@@ -8,6 +8,12 @@ import { ExportMarkdown } from "./export-markdown";
 import { exportTerminal, useExportStore } from "./export-provider";
 import styles from "./export.module.css";
 import { useContextualBack } from "./contextual-back";
+import { MediaSourceDetails } from "./media-source-details";
+import type { IdeaThought } from "../features/idea/types";
+
+function titleOf(thought: IdeaThought) {
+  return thought.title || (thought.kind === "media-original" ? thought.mediaSource.name : "Untitled thought");
+}
 
 function download(artifact: MarkdownArtifact, filename: string) {
   const bytes = downloadBytes(artifact);
@@ -75,9 +81,12 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
             <div className={styles.field}>
               <h3>Starting idea</h3>
               {workspace.rootState === "loading" ? <p role="status">Loading starting idea…</p> : workspace.root ? <div className={styles.root}>
-                <strong>{workspace.root.title || "Untitled thought"}</strong>
-                <p>{workspace.root.text}</p>
-                <span>{workspace.root.author === "user" ? "You" : workspace.root.author === "ai" ? "AI" : "Imported source"} · {workspace.root.kind.replaceAll("-", " ")}</span>
+                <strong>{titleOf(workspace.root)}</strong>
+                {workspace.root.kind === "media-original" ? <>
+                  <p className={styles.rootByline}>Imported source · <span>Image or PDF</span></p>
+                  <MediaSourceDetails source={workspace.root.mediaSource} compact />
+                </> : <><p>{workspace.root.text}</p>
+                  <span>{workspace.root.author === "user" ? "You" : workspace.root.author === "ai" ? "AI" : "Imported source"} · {workspace.root.kind.replaceAll("-", " ")}</span></>}
               </div> : <p className={styles.warning}>Starting idea unavailable in this view. Simple export needs an available starting thought.</p>}
             </div>
             <div className={styles.field}>
@@ -96,6 +105,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
               </label>)}
             </fieldset>
             <p className={styles.help}>Includes the starting idea. Follows evolution branches, not discovered connections. Skips rejected thoughts and leaves out separate full replies.</p>
+            {workspace.root?.kind === "media-original" && <p className={styles.help}>A media source exports its descriptor and clarification, not binary or extracted file contents.</p>}
             <div role="status">
               {workspace.simplePending && <p>Preparing Markdown… Waiting for the export response.</p>}
               {workspace.simpleError && <p className={styles.warning}>Could not obtain this export. Your inputs are retained. You can deliberately create the export again.</p>}
@@ -124,6 +134,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
               </select>
             </div>
             <p className={styles.help}>Doesn’t change your thoughts. Not limited to the starting idea’s branch.</p>
+            <p className={styles.help}>The report can use eligible descriptors, clarification and recorded interpretations. It cannot open the original file.</p>
             {workspace.admission === "not-started" && <div className={styles.warning} role="status"><strong>Report was not started.</strong><p>The service could not start this request. Your inputs are retained.</p></div>}
             {!flow && workspace.admission === "unconfirmed" && <p className={styles.warning}>Admission unconfirmed. This frozen request may have started. No run ID is known, and it will not be submitted again automatically.</p>}
             {!flow && <button className={styles.primary} disabled={locked || !workspace.request.trim()}>Create report</button>}
@@ -162,7 +173,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
             <div className={styles.markdown}><ExportMarkdown markdown={workspace.report.text} /></div>
             {workspace.sources.length > 0 && <footer className={styles.sources}>
               <h3>Source thoughts</h3><p>Recorded identities and attribution, not endorsement. Links are available only for thoughts accessible in normal view.</p>
-              <ul>{workspace.sources.map(source => <li key={source.id}>{source.thought ? <Link href={`/ideas/${encodeURIComponent(source.id)}`} prefetch={false}>{source.thought.title || "Untitled thought"}</Link> : <span>Source unavailable in this view</span>}<span className={styles.sourceId}>{source.id}</span></li>)}</ul>
+              <ul>{workspace.sources.map(source => <li key={source.id}>{source.thought ? <Link href={`/ideas/${encodeURIComponent(source.id)}`} prefetch={false}>{titleOf(source.thought)}</Link> : <span>Source unavailable in this view</span>}<span className={styles.sourceId}>{source.id}</span></li>)}</ul>
             </footer>}
           </div>}
         </section>}

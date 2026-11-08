@@ -12,7 +12,7 @@ export function sourceCandidates(markdown: string): readonly string[] {
   if (!block.startsWith(prefix)) return [];
   const ids: string[] = [];
   for (const line of block.slice(prefix.length).split("\n")) {
-    const match = /^- (.+): ID: (`+)("(?:\\.|[^"\\])*")\2; thought author: (?:user|ai|source); kind: (?:captured-original|user-contribution|ai-interpretation|developing-idea|imported-original)\.$/.exec(line);
+    const match = /^- (.+): ID: (`+)("(?:\\.|[^"\\])*")\2; thought author: (?:user|ai|source); kind: (?:(?:captured-original|user-contribution|ai-interpretation|developing-idea|imported-original)\.|media-original\. Access to the descriptor or clarification does not imply binary file access\.)$/.exec(line);
     if (!match) return [];
     try {
       const id: unknown = JSON.parse(match[3]);
