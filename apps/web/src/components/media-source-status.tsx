@@ -16,13 +16,18 @@ function presentation(state: MediaSourceWorkspace, hasInterpretation: boolean, h
     : "The retry was not admitted by this request. Check the current state before deciding what to do next. Your original is retained.", tone: "warning" };
   if (state.rejected === true || state.retry?.reason === "source-rejected") return { title: "Interpretation unavailable for rejected source", copy: "Restore the source before requesting new work. Restoring does not restart the earlier run.", tone: "muted" };
   if (hasInterpretation) {
-    if (state.run?.status === "failed") return { title: "Interpretation saved · Processing failed", copy: "The saved interpretation remains available below even though the run failed. It will not be generated again. Use Evolve for further development.", tone: "warning" };
-    if (state.run?.status === "interrupted") return { title: "Interpretation saved · Processing interrupted", copy: "The saved interpretation remains available below. Stopping does not undo saved thoughts. Use Evolve for further development.", tone: "warning" };
+    if (state.run && ["queued", "submitting", "running", "uncertain"].includes(state.run.status)) return {
+      title: `Interpretation saved · Processing ${state.run.status === "uncertain" ? "uncertain" : state.run.status}`,
+      copy: "Recorded interpretations remain available below. Current processing is not confirmed complete; earlier output does not establish the outcome of this run.",
+      tone: state.run.status === "uncertain" ? "warning" : "normal",
+    };
+    if (state.run?.status === "failed") return { title: "Interpretation saved · Processing failed", copy: "The saved interpretation remains available below even though the run failed. Initial processing does not replace it. Use Reinterpret under More actions for a fresh interpretation, or Evolve for additional instructions.", tone: "warning" };
+    if (state.run?.status === "interrupted") return { title: "Interpretation saved · Processing interrupted", copy: "The saved interpretation remains available below. Stopping does not undo saved thoughts. Use Reinterpret under More actions for a fresh interpretation, or Evolve for additional instructions.", tone: "warning" };
     return { title: "Interpretation ready", copy: "A separate AI interpretation is available in Surrounding context below.", tone: "success" };
   }
   if (state.retry?.reason === "interpretation-exists") return { title: "Initial interpretation already recorded", copy: hasRejectedInterpretation
-    ? "The rejected interpretation is shown in Inspected context below. It will not be generated again. Use Evolve for further development of the active source."
-    : "The initial interpretation is unavailable in this normal view. It will not be generated again, even if rejected. Use Evolve for further development.", tone: "muted" };
+    ? "The rejected interpretation is shown in Inspected context below and remains unavailable to AI. Initial retry will not replace it. Use Reinterpret under More actions for a fresh interpretation of the active source, or Evolve for additional instructions."
+    : "The initial interpretation is unavailable in this normal view. Initial retry will not replace it, even if rejected. Use Reinterpret under More actions for a fresh interpretation, or Evolve for additional instructions.", tone: "muted" };
   if (state.phase === "idle") return { title: "Reading current processing…", copy: "The retained original and any recorded thoughts are separate from this status read.", tone: "muted" };
   if (!state.run) return { title: "No interpretation run found", copy: "Your original is retained. An interpretation can be requested when current eligibility permits.", tone: "muted" };
   switch (state.run.status) {

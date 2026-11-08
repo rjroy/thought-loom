@@ -91,10 +91,10 @@ class FixtureClient implements PublicClient {
       : job.kind === "evolve" && step === 1
         ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "Owned integrated development", sourceIds: [] } } }
         : job.kind === "weave" && step === 1
-          ? { version: 1, kind: "request", request: { capability: "interpretation", arguments: { text: "Owned integrated interpretation", sourceIds: [string(job.subjectId)] } } }
-        : job.kind === "weave" && step === 2 && !(Array.isArray(first.originals) && first.originals.length > 0)
+          ? { version: 1, kind: "request", request: { capability: "interpretation", arguments: { text: job.purpose === "reinterpretation" ? "Owned fresh integrated interpretation" : "Owned integrated interpretation", sourceIds: [string(job.subjectId)] } } }
+        : job.kind === "weave" && job.purpose !== "reinterpretation" && step === 2 && !(Array.isArray(first.originals) && first.originals.length > 0)
           ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Owned generated title" } } }
-        : { version: 1, kind: "complete", reply: job.kind === "evolve" ? "Owned integrated reply" : "No further findings" };
+        : { version: 1, kind: "complete", reply: job.kind === "evolve" ? "Owned integrated reply" : job.purpose === "reinterpretation" ? "Owned fresh reinterpretation reply" : "No further findings" };
     const messages = this.messages.get(input.sessionID); assert.ok(messages);
     const n = messages.length * 10 + 10;
     messages.push({ id: input.id, type: "user", time: { created: n }, text: input.text },
@@ -313,6 +313,46 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await previousIdea.click();
     await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(id)}`);
     await expect(page.getByText(content, { exact: true })).toBeVisible();
+
+    // Reinterpret through the real Next and daemon boundaries; preserve the selected earlier reply.
+    const priorReplies = await daemonCall(running, `/thoughts/${encodeURIComponent(id)}/responses?scope=normal`);
+    assert.equal(priorReplies.status, 200); assert.ok(Array.isArray(priorReplies.value));
+    const priorReply = priorReplies.value.map(record).find(item => item.text === "No further findings");
+    assert.ok(priorReply);
+    const priorReplyId = string(priorReply.id);
+    await page.goto(`${origin}/ideas/${encodeURIComponent(id)}?responseId=${encodeURIComponent(priorReplyId)}`, { waitUntil: "networkidle" });
+    await expect(page.getByText("No further findings", { exact: true })).toBeVisible();
+    const ideaUrl = page.url();
+    await page.getByRole("button", { name: "More actions" }).click();
+    const reinterpretResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/ideas/${encodeURIComponent(id)}/reinterpret` && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Reinterpret", exact: true }).click();
+    const reinterpreted = await reinterpretResponse;
+    assert.equal(reinterpreted.status(), 202);
+    const reinterpretControl = record(await reinterpreted.json()), reinterpretRunId = string(record(reinterpretControl.run).id);
+    assert.equal(record(reinterpretControl.receipt).subjectId, id);
+    await until("Reinterpretation completion", async () => {
+      const status = record((await daemonCall(running, `/runs/${encodeURIComponent(reinterpretRunId)}`)).value);
+      if (status.status === "failed" || status.status === "interrupted") throw new Error(`Reinterpretation ended ${String(status.status)}`);
+      return status.status === "completed";
+    }, pulse);
+    await settleKnowledge(dbPath, pulse);
+    await page.getByRole("region", { name: "Interpretation status" }).getByRole("button", { name: "Check interpretation" }).click();
+    await expect(page.getByRole("region", { name: "Surrounding context" }).locator("article").filter({ hasText: "Owned fresh integrated interpretation" })).toHaveCount(1);
+    await expect(page.getByText("No further findings", { exact: true })).toBeVisible();
+    assert.equal(page.url(), ideaUrl, "reinterpretation must stay on the selected Idea and reply");
+    const afterChildren = await daemonCall(running, `/thoughts/${encodeURIComponent(id)}/children?scope=normal`);
+    assert.equal(afterChildren.status, 200); assert.ok(Array.isArray(afterChildren.value));
+    const children = afterChildren.value.map(record), fresh = children.find(item => item.text === "Owned fresh integrated interpretation");
+    assert.ok(fresh); assert.equal(fresh.parentId, id); assert.notEqual(fresh.id, interpretationId);
+    assert.deepEqual(children.find(item => item.id === interpretationId), interpretation);
+    const runAfter = record((await daemonCall(running, `/runs/${encodeURIComponent(reinterpretRunId)}`)).value);
+    assert.deepEqual(runAfter.confirmedThoughtIds, [fresh.id]);
+    const afterReplies = await daemonCall(running, `/thoughts/${encodeURIComponent(id)}/responses?scope=normal`);
+    assert.equal(afterReplies.status, 200); assert.ok(Array.isArray(afterReplies.value));
+    const replies = afterReplies.value.map(record);
+    assert.deepEqual(replies.find(item => item.id === priorReplyId), priorReply);
+    assert.ok(replies.some(item => item.text === "Owned fresh reinterpretation reply" && Array.isArray(item.thoughtIds) && item.thoughtIds.includes(fresh.id)));
+
     await page.getByRole("button", { name: "Edit title" }).click();
     await page.getByRole("textbox", { name: "Title" }).fill("Owned edited title");
     await page.getByRole("button", { name: "Save title" }).click();

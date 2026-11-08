@@ -553,6 +553,42 @@ async function installSourceFixture(page: Page, initial: SourceFixtureState, com
   };
 }
 
+export async function checkMediaReinterpretStatusOwner(page: Page, origin: string): Promise<void> {
+  const run = currentRun("queued"), attempts: {method:string;key:string | null}[] = [];
+  let admittedKey: string | null = null;
+  const fixture = await installSourceFixture(page, {run:currentRun("completed",true),retry:{eligible:false,reason:"interpretation-exists"},outputs:true},
+    {stop:async route => { await route.fulfill({json:{...run,status:"interrupted"}}); }});
+  const pattern = `**/api/ideas/${source.id}/reinterpret**`;
+  const handler = async (route: Route) => {
+    const request = route.request(), url = new URL(request.url()), key = request.headers()["idempotency-key"] ?? null;
+    attempts.push({method:request.method(),key});
+    if (request.method() === "POST") {
+      if (!key) throw new Error("Expected a test-owned reinterpretation key");
+      admittedKey = key;
+      fixture.set({run,retry:{eligible:false,reason:"work-active"},outputs:true});
+      await route.fulfill({status:202,json:{receipt:{subjectId:source.id,requestKey:key,runId:run.id},run,
+        eligibility:{eligible:false,reason:"work-active",blockingRun:run}}}); return;
+    }
+    const requested = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+    await route.fulfill({json:admittedKey === requested ? {receipt:{subjectId:source.id,requestKey:requested,runId:run.id},run,
+      eligibility:{eligible:false,reason:"work-active",blockingRun:run}} : {receipt:null,run:null,eligibility:{eligible:true,reason:null,blockingRun:null}}});
+  };
+  await page.route(pattern,handler);
+  try {
+    await page.goto(origin,{waitUntil:"networkidle"}); await page.evaluate(() => sessionStorage.clear());
+    await page.goto(`${origin}/ideas/${source.id}`,{waitUntil:"networkidle"});
+    await expect(page.getByText(interpretationText,{exact:true})).toBeVisible();
+    await page.getByRole("button",{name:"More actions"}).click();
+    await page.getByRole("button",{name:/^reinterpret$/i}).click();
+    await expect.poll(() => attempts.filter(call => call.method === "POST").length).toBe(1);
+    await expect(page.getByRole("button",{name:/^stop(?: work| interpretation| processing)?$/i})).toHaveCount(1);
+    assert.equal(fixture.attempts.filter(call => call.method === "POST" && call.path.endsWith("/retry")).length,0);
+    await page.getByRole("button",{name:/^stop(?: work| interpretation| processing)?$/i}).click();
+    await expect.poll(() => fixture.attempts.filter(call => call.method === "POST" && call.path.endsWith("/stop")).length).toBe(1);
+    await expect(page.getByText(interpretationText,{exact:true})).toBeVisible();
+  } finally { await page.unroute(pattern,handler); await fixture.close(); }
+}
+
 /** Direct actual Idea rendering reaches the media title before asserting the missing source presentation. */
 export async function checkMediaSourceStatus(page: Page, origin: string): Promise<void> {
   const fixture = await installSourceFixture(page, { run: currentRun("completed", true), retry: { eligible: false, reason: "interpretation-exists" }, outputs: true });
