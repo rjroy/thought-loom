@@ -32,4 +32,6 @@ If a source is inaccessible, disclose that limitation and interpret the supplied
 
 Retain a concise Weaver outcome as a Full reply associated with the original capture, using the existing response model. This provides visible partial-success and access-failure feedback without changing interpretation ancestry.
 
-A user-triggered reinterpretation action for later recovery is separate follow-up work, not part of the initial URL-weaving change. Markdown segmentation remains a separate restricted process; URL-aware weaving does not redefine how it partitions a file.
+User-triggered reinterpretation is agreed follow-up work, not yet implemented: Idea's More actions will let a user weave any active thought afresh without new text. New interpretations remain children of that subject alongside earlier output; nothing is overwritten or automatically rejected. Existing interpretation work is shown rather than duplicated, and rejected subjects require restoration first. See the [reinterpretation design](../work/design/reinterpretation.md) and `thought-loom-xls` for the contract and implementation sequence.
+
+Markdown segmentation remains a separate restricted process; URL-aware weaving does not redefine how it partitions a file.

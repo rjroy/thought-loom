@@ -227,7 +227,7 @@ describe("import-only native terminal observations", () => {
   });
 });
 
-async function withPersistedSecondStep(action: (value: { client: FakeClient; adapter: OpenCodeAdapter; claim: Claim; binding: AgentBinding; first: { promptId: string; input: string }; next: { promptId: string; input: string }; runs: SqliteRunRepository }) => Promise<void>) {
+async function withPersistedSecondStep(action: (value: { client: FakeClient; adapter: OpenCodeAdapter; claim: Claim; binding: AgentBinding; first: { promptId: string; input: string }; next: { promptId: string; input: string }; runs: SqliteRunRepository; service: RunService; steps: SqliteRunProtocolRepository }) => Promise<void>, effect: "allow" | "deny" = "deny") {
   const dir = mkdtempSync(join("/tmp/opencode", "owned-adapter-history-"));
   const db = new Database(join(dir, "fixture.sqlite"));
   try {
@@ -242,7 +242,7 @@ async function withPersistedSecondStep(action: (value: { client: FakeClient; ada
     const bindings = new SqliteAgentBindings(db);
     const client = new FakeClient();
     const adapter = new OpenCodeAdapter(client, bindings, bindings.assertActive.bind(bindings));
-    const actualBinding = { ...binding, sessionId: run.sessionId };
+    const actualBinding: AgentBinding = { ...binding, sessionId: run.sessionId, permissions: [{ action: "*", resource: "*", effect }] };
     await adapter.ensureSession(actualClaim, actualBinding);
     const steps = new SqliteRunProtocolRepository(db);
     const first = { promptId: run.promptId, input: "owned first exact input" };
@@ -250,7 +250,7 @@ async function withPersistedSecondStep(action: (value: { client: FakeClient; ada
     steps.prepare(actualClaim, first);
     steps.completeStep(actualClaim, first.promptId, { version: 1, kind: "request", request: { capability: "inspectThought", arguments: { thoughtId: "fixture" } } });
     steps.advance(actualClaim, first.promptId, { found: "fixture" }, next);
-    await action({ client, adapter, claim: actualClaim, binding: actualBinding, first, next, runs });
+    await action({ client, adapter, claim: actualClaim, binding: actualBinding, first, next, runs, service, steps });
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -374,7 +374,7 @@ describe("public OpenCode adapter over typed facade", () => {
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
   });
 
-  test("cancels queued prompt and interrupts; late submission acknowledgement is fenced", async () => {
+  test("cancelling a queued prompt without terminal evidence remains pending", async () => {
     const client = new FakeClient();
     const bindings = new MemoryBindings();
     let active = true;
@@ -382,11 +382,102 @@ describe("public OpenCode adapter over typed facade", () => {
     await adapter.ensureSession(claim, binding);
     await adapter.submit(claim, binding, prompt);
     active = false;
-    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("settled");
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
     expect(client.calls.filter(call => call.method === "cancel").map(call => call.input)).toEqual([{ sessionID: binding.sessionId, inboxID: prompt.promptId }]);
     expect(client.calls.some(call => call.method === "interrupt")).toBe(true);
     await expect(adapter.submit(claim, binding, other)).rejects.toThrow(RunFenceError);
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(1);
+  });
+
+  test("ordinary cancellation proves every dispatched journal step, including a settled native-tool turn", async () => {
+    await withPersistedSecondStep(async ({ client, adapter, claim, binding, first, next, service, steps }) => {
+      steps.setStepState(claim, next.promptId, "submitting");
+      service.stop("user", claim.runId);
+      const firstUser = userMessage(first.promptId, first.input, 1);
+      const toolAssistant: NativeMessage = { id: "assistant-tools", type: "assistant", time: { created: 2, completed: 4 },
+        content: [], finish: "tool-calls", tools: [{ id: "tool-call", name: "shell", status: "completed", time: { created: 2, completed: 3 } }] };
+      const firstFinal = assistantMessage("assistant-first", "first response", 5);
+      const firstIdle = idle("idle-first", 7);
+      const secondTurn = [userMessage(next.promptId, next.input, 8), assistantMessage("assistant-second", "second response", 9), idle("idle-second", 11)];
+      client.pages.set("first", { data: [firstUser, toolAssistant, firstFinal], cursor: { next: "page-two" } });
+      client.pages.set("page-two", { data: [firstIdle, ...secondTurn], cursor: {} });
+      expect(await adapter.cancel(claim.runId, binding, next)).toBe("settled");
+      expect(client.calls.some(call => call.method === "history" && JSON.stringify(call.input).includes('"cursor":"page-two"'))).toBe(true);
+      expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+
+      // The current step is terminal, but the prior dispatched step lacks its terminal boundary.
+      client.pages.set("page-two", { data: secondTurn, cursor: {} });
+      expect(await adapter.cancel(claim.runId, binding, next)).toBe("pending");
+    }, "allow");
+  });
+
+  for (const outcome of ["failed", "interrupted"] as const) test(`ordinary cancellation settles a correlated ${outcome} turn without assistant prose`, async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1),
+      { id: `idle-${outcome}`, type: "idle", time: { created: 2 }, outcome }], cursor: {} });
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("settled");
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("empty snapshots after a timed-out submission do not settle before delayed admission", async () => {
+    const client = new FakeClient();
+    let active = true;
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => { if (!active) throw new RunFenceError(); });
+    await adapter.ensureSession(claim, binding);
+    let delayed: InboxItem | undefined;
+    client.prompt = async input => {
+      delayed = { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: 2 } };
+      throw new Error("test transport timeout before admission");
+    };
+    await expect(adapter.submit(claim, binding, prompt)).rejects.toThrow(AgentUncertainError);
+    active = false;
+    expect(client.queued).toEqual([]);
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+    if (!delayed) throw new Error("Expected delayed fixture admission");
+    client.queued.push(delayed);
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+    expect(client.queued).toEqual([]); // SDK cancellation can remove the only visible admission evidence.
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+  });
+
+  test("cancellation does not infer terminal proof from mismatched or incomplete native history", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    for (const messages of [
+      [userMessage(prompt.promptId, "different input", 1), idle("idle", 2)],
+      [userMessage(prompt.promptId, prompt.input, 1)],
+      [userMessage(other.promptId, other.input, 1), idle("idle", 2)],
+    ]) {
+      client.pages.set("first", { data: messages, cursor: {} });
+      const result = await adapter.cancel(claim.runId, binding, prompt).then(
+        state => ({ kind: "state" as const, state }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
+      // A conflicting identity may instead be quarantined at this boundary.
+      if (result.kind === "error") expect(result.error).toBeInstanceOf(AgentBindingError);
+      else expect(result.state).toBe("pending");
+    }
+  });
+
+  test("cancellation remains pending during native outage", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    client.history = async () => { throw new Error("fixture outage"); };
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+  });
+
+  test("cancellation refuses a foreign owner", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    const session = client.session;
+    if (!session) throw new Error("Expected owned session");
+    client.session = { ...session, metadata: { owner: "foreign" } };
+    await expect(adapter.cancel(claim.runId, binding, prompt)).rejects.toThrow(AgentBindingError);
   });
 
   test("an acknowledgement arriving after the claim is fenced cannot mark submission successful", async () => {

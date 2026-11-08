@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, type AgentBinding, type Observation, type PersistedPrompt } from "../src/agent/opencode-adapter";
+import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
@@ -273,6 +273,39 @@ test("prepared successor does not hide earlier submitted work from cancellation"
   expect(f.steps.cancellation(run.id)).toBe("settled");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
   expect(w.native.submitted).toHaveLength(1);
+}));
+
+test("a prepared successor cannot settle an earlier dispatched weave without native evidence, including after worker restart", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-prior-step" });
+  const w = worker(f, () => request("readThought", { id: "root" }));
+  for (let i = 0; i < 20 && f.steps.steps(run.id).length < 2; i++) await w.instance.tick(run.id);
+  expect(f.steps.steps(run.id).map(step => step.state)).toEqual(["processed", "prepared"]);
+  expect(w.native.submitted).toHaveLength(1);
+  const owned = binding(run);
+  const session = { id: owned.sessionId, location: owned.location, model: owned.model, permissions: owned.permissions,
+    metadata: { owner: "thoughtloom", runId: run.id, protocolVersion: "1" } };
+  const client: PublicClient = {
+    serverInfo: async () => ({ version: "fixture" }), sessionCreate: async () => session, sessionGet: async () => session,
+    prompt: async () => { throw new Error("Cancellation must not submit"); }, inbox: async () => [],
+    history: async () => ({ data: [], cursor: {} }), active: async () => ({}),
+    cancelInbox: async () => {}, interrupt: async () => ({ interrupted: false }),
+  };
+  const adapter = new OpenCodeAdapter(client, new SqliteAgentBindings(f.db), () => {});
+  w.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
+  f.service.stop("user", run.id);
+  await w.instance.tick(run.id);
+  expect(f.steps.cancellation(run.id)).toBe("pending");
+  w.instance.pause();
+  await w.instance.drain();
+  const restarted = worker(f, () => complete("must not publish"));
+  restarted.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
+  try {
+    await restarted.instance.tick(run.id);
+    expect(f.steps.cancellation(run.id)).toBe("pending");
+    expect(f.runs.get(run.id)?.status).toBe("interrupted");
+    expect(f.runs.reply(run.id)).toBeNull();
+    expect(restarted.native.submitted).toEqual([]);
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
 }));
 
 test("terminal pending cancellation retries until settled without reviving or resubmitting", async () => fixture(async f => {

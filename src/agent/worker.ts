@@ -2,7 +2,7 @@ import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { isAbsolute } from "node:path";
 import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
-import { parseEnvelope, type RunStep } from "../domain/run-protocol";
+import { parseEnvelope, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
 import type { Thought } from "../domain/thought";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../storage/capability";
@@ -63,6 +63,14 @@ class WorkerBindings extends SqliteAgentBindings {
     this.localFence(runId);
     super.bind(runId,binding,claim);
   }
+  override cancellationJournal(runId: string, prompt: PersistedPrompt): OrdinaryCancellationJournal {
+    this.localFence(runId);
+    return super.cancellationJournal(runId,prompt);
+  }
+  override assertCancellationJournal(journal: OrdinaryCancellationJournal): void {
+    this.localFence(journal.runId);
+    super.assertCancellationJournal(journal);
+  }
 }
 const terminal = (run: RunRecord): boolean => ["completed","interrupted","failed"].includes(run.status);
 interface RunFlight { readonly execution: Promise<void>; readonly cleanupTail: Promise<void>; retired: boolean }
@@ -118,8 +126,8 @@ export class RunWorker {
       }
     });
     // The tail is registered with execution, and runs only after that actual promise settles. Never await it from poll/cancel.
-    const cleanupTail = execution.then(() => this.cleanupSearch(runId),async error => {
-      await this.cleanupSearch(runId); throw error;
+    const cleanupTail = execution.then(() => this.cleanupRun(runId),async error => {
+      await this.cleanupRun(runId); throw error;
     }).finally(() => this.flights.delete(runId));
     this.flights.set(runId,{execution,cleanupTail,retired:false});
     return cleanupTail;
@@ -156,7 +164,7 @@ export class RunWorker {
       const run = this.runs.get(runId);
       if (!run) { this.searchClock.forget(runId); throw new RunConflictError("Worker run does not exist"); }
       if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return; // Import dispatch belongs to its separately authorized worker.
-      if (terminal(run)) { this.forget(runId); await this.cancel(run); return; }
+      if (terminal(run)) { this.forget(runId); return; }
       let binding = this.bindings.get(runId);
       if (!binding) {
         const selected = this.dependencies.bindingFor?.(Object.freeze({...run})) ?? null;
@@ -214,7 +222,7 @@ export class RunWorker {
       if (error instanceof RunFenceError) {
         this.searchClock.forget(runId);
         const run = this.runs.get(runId);
-        if (run && terminal(run)) { this.forget(runId); await this.cancel(run); }
+        if (run && terminal(run)) this.forget(runId);
         return; // A newer worker owns an active run. This worker never reclaims it on a later poll.
       }
       if (!claim) throw error;
@@ -300,7 +308,7 @@ export class RunWorker {
     }
   }
   private async cancel(run: RunRecord): Promise<void> {
-    // Search is appended as this lane's tail after execution joins, never self-joined from poll's fence handler.
+    // Called only by this run's registered cleanup tail after its actual execution promise has joined.
     if (run.kind === "search") return;
     if (this.paused || !["interrupted","failed"].includes(run.status) || this.steps.cancellation(run.id) !== "pending") return;
     if (this.state.settleUnsubmitted(run.id)) return;
@@ -310,11 +318,19 @@ export class RunWorker {
     if (!step || step.input === null) return; // Unknown legacy input/binding is never fabricated for cleanup.
     this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId});
     try {
+      const journal = this.bindings.cancellationJournal(run.id,{promptId:step.promptId,input:step.input});
       const result = await this.transport().cancel(run.id,binding,{promptId:step.promptId,input:step.input});
-      if (this.paused) return;
-      if (result === "settled") this.steps.settleCancellation(run.id);
+      this.localFence(run.id);
+      if (result === "settled") this.state.settleOrdinaryCancellation(journal);
       this.logger.verbose("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
     } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
+  }
+  private async cleanupRun(runId: string): Promise<void> {
+    if (this.paused || !this.dependencies.native) return;
+    this.dependencies.executionOwner?.assertHeld();
+    const run = this.runs.get(runId);
+    if (run?.kind === "search" || !run) { await this.cleanupSearch(runId); return; }
+    if (terminal(run)) { this.forget(runId); await this.cancel(run); }
   }
   private async cleanupSearch(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;

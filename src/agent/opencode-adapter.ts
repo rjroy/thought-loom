@@ -3,11 +3,12 @@ import type { SessionMessageAssistantTool } from "@opencode/client";
 import { RunFenceError, type Claim } from "../domain/run";
 import { AgentBindingError, assertNativeSessionBinding, assertNativeSessionOwner, normalizeBinding, sameBinding, type AgentBinding, type ModelRef } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError, AgentUnavailableError } from "./errors";
-import { authorizeSubmissionHistory, correlateHistory, correlateImportHistory, hasUntrackedInboxContext, readNativeHistory } from "./history";
+import { authorizeSubmissionHistory, cancellationHistorySettled, correlateHistory, correlateImportHistory, hasUntrackedInboxContext, readNativeHistory } from "./history";
 import { searchInputHash } from "./search-cleanup-history";
 import { reconcileSearchCancellation } from "./search-cancellation";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
 import type { ImportTerminalEvidence } from "../domain/markdown-import-contract";
+import type { OrdinaryCancellationJournal } from "../domain/run-protocol";
 export type { ImportTerminalEvidence } from "../domain/markdown-import-contract";
 export { AgentBindingError } from "./binding";
 export type { AgentBinding, ModelRef } from "./binding";
@@ -65,6 +66,9 @@ export interface ResolvedAgentService { readonly url: string; readonly headers?:
 export interface AgentBindings {
   bind(runId: string, binding: AgentBinding, claim?: Claim): void;
   get(runId: string): AgentBinding | null;
+  /** Concrete ordinary storage supplies the complete terminal journal and rechecks it around cleanup calls. */
+  cancellationJournal?(runId: string, prompt: PersistedPrompt): OrdinaryCancellationJournal;
+  assertCancellationJournal?(journal: OrdinaryCancellationJournal): void;
   /** Required by observeImport; ordinary-only bindings intentionally have no import authority. */
   assertImportOwnership?(claim: Claim, prompts: readonly PersistedPrompt[]): void;
   assertImportPreparation?(claim: Claim, prompts: readonly PersistedPrompt[]): void;
@@ -361,7 +365,51 @@ export class OpenCodeAdapter {
     }
   }
   async cancel(runId: string, requested: AgentBinding, input: PersistedPrompt): Promise<"pending" | "settled"> {
-    return this.cancelOwned(runId,requested,input,() => {});
+    this.runtimeFence();
+    const prompt = this.prompt(input), binding = this.bound(runId,requested);
+    const journal = this.bindings.cancellationJournal?.(runId,prompt);
+    const authority = this.bindings.assertCancellationJournal;
+    if (journal && !authority) throw new RunFenceError("Ordinary cancellation journal fence is required");
+    const guard = () => {
+      this.runtimeFence();
+      if (journal && authority) authority.call(this.bindings,journal);
+      this.bound(runId,requested);
+    };
+    // An injected single-prompt port has no authority to adopt other native inputs. Production always supplies the SQL journal.
+    const prompts = journal ? journal.steps.filter(step => step.state !== "prepared").map(step => this.prompt({promptId:step.promptId,input:step.input})) : [prompt];
+    const read = async <T>(action: () => Promise<T>): Promise<T> => { guard(); try { return await action(); } finally { guard(); } };
+    const observe = async () => {
+      this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+      const messages = await this.history(binding,input => read(() => this.client.history(input)));
+      const inbox = await read(() => this.client.inbox({sessionID:binding.sessionId}));
+      const active = await read(() => this.client.active());
+      this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+      const settled = cancellationHistorySettled(binding.sessionId,prompts,messages,inbox,active,binding);
+      return {messages,inbox,active,settled};
+    };
+    this.logger.verbose("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
+    try {
+      const before = await observe();
+      for (const item of before.inbox) {
+        this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+        await read(() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:item.id}));
+      }
+      const represented = new Set([...before.messages.filter(message => message.type === "user").map(message => message.id),...before.inbox.map(item => item.id)]);
+      // An active flag alone cannot identify missing input. Idle interrupt is harmless but is never settlement proof.
+      if (!Object.hasOwn(before.active,binding.sessionId) || (prompts.length > 0 && prompts.every(item => represented.has(item.promptId)))) {
+        this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+        await read(() => this.client.interrupt({sessionID:binding.sessionId}));
+      }
+      const after = await observe();
+      guard();
+      const state = after.settled ? "settled" : "pending";
+      this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state});
+      return state;
+    } catch (error) {
+      this.logger.verbose("[agent] native cancellation unresolved",{runId,promptId:prompt.promptId});
+      if (error instanceof AgentBindingError || error instanceof RunFenceError) throw error;
+      return "pending";
+    }
   }
   /** Search cancellation deliberately does not use active-run authority, retained prompt input or ordinary drift tolerance. */
   async cancelSearch(identity: SearchCleanupIdentity, authorize: () => void): Promise<SearchCleanupObservation> {

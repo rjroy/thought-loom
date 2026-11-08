@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { InitialRunContext } from "../domain/run-context";
 import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord, type RunSources } from "../domain/run";
-import type { CancellationState, RunStep } from "../domain/run-protocol";
+import type { CancellationState, OrdinaryCancellationJournal, RunStep } from "../domain/run-protocol";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import type { Thought } from "../domain/thought";
 import { nonEmpty } from "../domain/validation";
@@ -12,6 +12,7 @@ import { SqliteAgenticExports } from "./agentic-export";
 import { initialSearchContext } from "./search-initial-context";
 import { SqliteSearchPublication } from "./search-publication";
 import { SqliteSearchPromptClock } from "./search-prompt-clock";
+import { assertOrdinaryCancellationJournal } from "./run-cancellation";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
@@ -130,8 +131,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       if (run.kind === "search") return false; // Search settlement needs its later joined-flight and admission proof.
       if (!["interrupted","failed"].includes(run.status)) return false;
       const cancellation = this.db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(runId) as {state:CancellationState};
-      if (cancellation.state === "settled") return true;
-      if (cancellation.state !== "pending") return false;
+      if (cancellation.state !== "pending" && cancellation.state !== "settled") return false;
       // Inspect the whole durable history, not the current prepared successor or the presence of a binding.
       // Only one untouched initial step proves no prompt was dispatched; creating/binding a session is not a submission.
       // Legacy interrupted rows backfill as uncertain. Legacy failed rows can backfill as prepared with unknown input,
@@ -146,5 +146,14 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       this.logger.verbose("[run storage] unsubmitted cancellation settled locally",{runId});
       return true;
     });
+  }
+  /** The native port supplies positive proof; this commit may settle only its unchanged terminal journal. */
+  settleOrdinaryCancellation(journal: OrdinaryCancellationJournal): void {
+    const changed = this.transaction("settle ordinary worker cancellation",journal.runId,() => {
+      assertOrdinaryCancellationJournal(this.db,journal);
+      this.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=? AND cancellation_state='pending'",[journal.runId]);
+      return journal.cancellation === "pending";
+    });
+    if (changed) this.logger.info("[worker] native cancellation settled",{runId:journal.runId,generation:journal.generation});
   }
 }
