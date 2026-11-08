@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.4.3
+      - name: Prepare test prerequisites
+        run: |
+          mkdir -p /tmp/opencode
+          test -x /usr/bin/chromium
+          /usr/bin/chromium --version
+      - name: Install frozen dependencies
+        run: bun --no-env-file install --frozen-lockfile
+      - name: Build spellfix
+        run: bun --no-env-file run build:spellfix
+      - name: Root tests
+        run: bun --no-env-file test
+      - name: Root typecheck
+        run: bun --no-env-file run typecheck
+      - name: Web typecheck
+        run: bun --no-env-file run web:typecheck
+      - name: Web build
+        run: bun --no-env-file run web:build
+      - name: Browser foundation
+        run: bun --no-env-file run web:test:runtime
+      - name: Browser integration
+        run: bun --no-env-file run web:test:integration

@@ -82,6 +82,42 @@ test("invalidated delayed lookup and failed reads cannot overwrite last confirme
   expect(c.getSnapshot()).toMatchObject({request:"confirmed",run,notice:"read-error"});
 });
 
+test("unwatch or invalidation aborts a held run read and fences its late result", async () => {
+  for (const action of ["unwatch", "invalidate"] as const) {
+    const store = storage(), held = Promise.withResolvers<Awaited<ReturnType<ReinterpretationClient["readRun"]>>>();
+    let signal: AbortSignal | undefined;
+    const c = createReinterpretationController("subject", client({
+      lookup: async (_id,key) => ({kind:"found",snapshot:key === "probe" ? eligible : confirmed(key)}),
+      send: async (_id,key) => ({kind:"confirmed",snapshot:confirmed(key)}),
+      readRun: async (id, readSignal) => { expect(id).toBe(run.id); signal = readSignal; return held.promise; },
+    }), options(store));
+    await c.prepare(); await c.request();
+    const unwatch = c.watch(); await c.checkReceipt();
+    const revision = c.getSnapshot().outputRevision;
+    const read = c.checkRun();
+    if (action === "unwatch") unwatch(); else c.invalidate();
+    const aborted = signal?.aborted;
+    held.resolve({kind:"found",run:{...run,status:"completed",confirmedThoughtIds:["late-output"]}});
+    await read;
+    expect(aborted).toBe(true);
+    expect(c.getSnapshot()).toMatchObject({request:"confirmed",run,checking:false,fresh:false,outputRevision:revision});
+    if (action === "invalidate") unwatch();
+  }
+});
+
+test("unwatch leaves an admitted write running and preserves unknown-outcome recovery", async () => {
+  const store = storage(), held = Promise.withResolvers<Awaited<ReturnType<ReinterpretationClient["send"]>>>();
+  const sent: string[] = [];
+  const c = createReinterpretationController("subject",client({send:async (_id,key) => {sent.push(key); return held.promise;}}),options(store));
+  const unwatch = c.watch(); await c.checkReceipt();
+  const write = c.request();
+  unwatch();
+  held.resolve({kind:"uncertain"}); await write;
+  expect(sent).toEqual(["request-key"]);
+  expect(c.getSnapshot()).toMatchObject({request:"uncertain",requestKey:"request-key",notice:"request-uncertain",fresh:false});
+  expect(store.getItem(reinterpretationStorageKey)).toContain("request-key");
+});
+
 test("uncertain Stop is not repeated and a failed check retains confirmed work", async () => {
   const store = storage(); let stops = 0;
   const c = createReinterpretationController("subject",client({send:async (_id,key) => ({kind:"confirmed",snapshot:confirmed(key)}),
