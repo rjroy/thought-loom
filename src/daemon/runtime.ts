@@ -108,6 +108,10 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     executionOwner.assertHeld();
     db = new Database(executionOwner.databasePath, { readwrite: true, create: false });
     executionOwner.assertHeld();
+    diagnostics.info("[storage] enable WAL attempt");
+    const journalMode = db.query("PRAGMA journal_mode=WAL").get() as { journal_mode: string } | null;
+    if (journalMode?.journal_mode !== "wal") throw new Error("Knowledge database WAL mode unavailable");
+    diagnostics.info("[storage] enable WAL outcome");
     migrate(db, diagnostics);
     executionOwner.register(db);
     const owner = executionOwner, mediaMaxBytes = valid.mediaMaxBytes ?? 16*1024*1024;

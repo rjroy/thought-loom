@@ -1,0 +1,165 @@
+import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
+import type { RawCell, RawRow, TableShape } from "./format";
+import { validateSourceSchema } from "./schema";
+import { check, type Guard } from "./capture-files";
+
+export interface CapturedTable { readonly shape: TableShape; readonly rows: readonly RawRow[] }
+export interface SqlSnapshot {
+  readonly tables: readonly CapturedTable[];
+  readonly sequences: readonly { readonly name: string; readonly value: bigint }[];
+  readonly rowCount: string;
+}
+type SqlValue = string | bigint | number | Uint8Array | null;
+const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`;
+
+function noRows(db: Database, sql: string): void { check(db.query(sql).get() === null, "inconsistent-source"); }
+function ordered(db: Database, table: string, owner: string, position = "position", filter = ""): void {
+  noRows(db, `SELECT 1 FROM (SELECT count(*) AS n,min(${quote(position)}) AS lo,max(${quote(position)}) AS hi
+    FROM main.${quote(table)} ${filter} GROUP BY ${quote(owner)}) WHERE lo!=0 OR hi!=n-1 LIMIT 1`);
+}
+function polymorphic(db: Database, table: string, kind: string, id: string): void {
+  noRows(db, `SELECT 1 FROM main.${quote(table)} x WHERE
+    x.${quote(kind)} NOT IN ('thought','connection','response') OR
+    (x.${quote(kind)}='thought' AND NOT EXISTS(SELECT 1 FROM main.thoughts t WHERE t.id=x.${quote(id)})) OR
+    (x.${quote(kind)}='connection' AND NOT EXISTS(SELECT 1 FROM main.connections c WHERE c.id=x.${quote(id)})) OR
+    (x.${quote(kind)}='response' AND NOT EXISTS(SELECT 1 FROM main.responses r WHERE r.id=x.${quote(id)})) LIMIT 1`);
+}
+
+/** Read-only cross-row checks: no admission replay or initial-title assumptions. */
+function validateRecords(db: Database): void {
+  check(db.query<{ integrity_check: string }, []>("PRAGMA main.integrity_check(1)").get()?.integrity_check === "ok", "inconsistent-source");
+  noRows(db, "PRAGMA main.foreign_key_check");
+  for (const [table, owner] of [["thought_sources", "thought_id"], ["connection_sources", "connection_id"], ["response_thoughts", "response_id"],
+    ["run_steps", "run_id"], ["run_issued_thoughts", "run_id"], ["import_document_parts", "document_id"], ["markdown_import_files", "import_id"],
+    ["search_turns", "session_id"], ["search_messages", "session_id"], ["search_discoveries", "session_id"]]) ordered(db, table, owner);
+  ordered(db, "import_document_parts", "document_id", "thought_ordinal", "WHERE kind='thought'");
+  for (const [table, kind, id] of [["run_context", "kind", "ref_id"], ["search_content_dependencies", "ref_kind", "ref_id"],
+    ["search_composer_dependencies", "ref_kind", "ref_id"]]) polymorphic(db, table, kind, id);
+  noRows(db, `SELECT 1 FROM main.thoughts t WHERE
+    NOT EXISTS(SELECT 1 FROM main.thought_titles m WHERE m.thought_id=t.id) OR
+    NOT EXISTS(SELECT 1 FROM main.thought_source_seals s WHERE s.thought_id=t.id) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.responses r WHERE NOT EXISTS(SELECT 1 FROM main.response_seals s WHERE s.response_id=r.id) OR
+    (SELECT count(*) FROM main.response_thoughts a WHERE a.response_id=r.id)=0 OR
+    (r.role='fallback' AND (SELECT count(*) FROM main.response_thoughts a WHERE a.response_id=r.id)!=1) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.runs r WHERE NOT EXISTS(SELECT 1 FROM main.run_steps s WHERE s.run_id=r.id AND s.position=0 AND s.prompt_id=r.prompt_id) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.run_operation_receipts r WHERE r.format='step' AND NOT EXISTS(
+    SELECT 1 FROM main.run_steps s WHERE s.run_id=r.run_id AND s.prompt_id=r.operation_id) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.export_reports e WHERE NOT EXISTS(SELECT 1 FROM main.run_steps s WHERE s.run_id=e.run_id AND s.prompt_id=e.prompt_id) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.media_sources m JOIN main.thoughts t ON t.id=m.source_thought_id
+    WHERE t.kind!='media-original' OR t.created_at!=m.created_at LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.thoughts t WHERE (t.kind='media-original')!=EXISTS(SELECT 1 FROM main.media_sources m WHERE m.source_thought_id=t.id) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.thought_sources s JOIN main.thoughts t ON t.id=s.thought_id WHERE t.kind IN ('media-original','imported-original') LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.import_documents d WHERE NOT EXISTS(SELECT 1 FROM main.import_document_seals s WHERE s.document_id=d.id) OR
+    (d.byte_length=0 AND EXISTS(SELECT 1 FROM main.import_document_parts p WHERE p.document_id=d.id)) OR
+    (d.byte_length>0 AND (NOT EXISTS(SELECT 1 FROM main.import_document_parts p WHERE p.document_id=d.id AND p.position=0 AND p.start_byte=0) OR
+      d.byte_length IS NOT (SELECT p.end_byte FROM main.import_document_parts p WHERE p.document_id=d.id ORDER BY p.position DESC LIMIT 1))) OR
+    ((d.segmentation_method='not-needed')!=(NOT EXISTS(SELECT 1 FROM main.import_document_parts p WHERE p.document_id=d.id AND p.kind='thought'))) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.import_document_parts p JOIN main.import_documents d ON d.id=p.document_id
+    WHERE p.end_byte>d.byte_length OR (p.position>0 AND p.start_byte IS NOT
+      (SELECT q.end_byte FROM main.import_document_parts q WHERE q.document_id=p.document_id AND q.position=p.position-1)) OR
+    (p.kind='bom' AND (p.position!=0 OR p.start_byte!=0 OR p.end_byte!=3 OR substr(d.original_bytes,1,3)!=x'efbbbf')) OR
+    (p.kind='frontmatter' AND (p.start_byte!=CASE WHEN substr(d.original_bytes,1,3)=x'efbbbf' THEN 3 ELSE 0 END OR
+      (substr(d.original_bytes,p.start_byte+1,4)!=x'2d2d2d0a' AND substr(d.original_bytes,p.start_byte+1,4)!=x'2d2d2d0d'))) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.import_documents d WHERE
+    (substr(d.original_bytes,1,3)=x'efbbbf' AND NOT EXISTS(SELECT 1 FROM main.import_document_parts p WHERE p.document_id=d.id AND p.kind='bom')) OR
+    (SELECT count(*) FROM main.import_document_parts p WHERE p.document_id=d.id AND p.kind='frontmatter')>1 LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.import_document_parts p JOIN main.thoughts t ON t.id=p.thought_id
+    JOIN main.import_documents d ON d.id=p.document_id WHERE p.kind='thought' AND
+    (t.import_document_id IS NOT d.id OR t.kind!='imported-original' OR CAST(t.text AS BLOB)!=substr(d.original_bytes,p.start_byte+1,p.end_byte-p.start_byte)) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.thoughts t WHERE t.kind='imported-original' AND NOT EXISTS(
+    SELECT 1 FROM main.import_document_parts p WHERE p.document_id=t.import_document_id AND p.thought_id=t.id AND p.kind='thought') LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.import_documents d JOIN main.import_namespaces n ON n.id=d.original_namespace_id
+    WHERE n.kind!='loose-markdown' AND NOT EXISTS(SELECT 1 FROM main.import_locations l WHERE l.document_id=d.id AND l.namespace_id=n.id AND l.relative_path=d.original_path) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.markdown_import_files f LEFT JOIN main.runs r ON r.id=f.run_id
+    WHERE (f.run_id IS NOT NULL AND r.kind!='import') OR (f.outcome IS NULL AND NOT EXISTS(SELECT 1 FROM main.markdown_import_payloads p WHERE p.file_id=f.id)) OR
+    (f.waiting_on_file_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM main.markdown_import_files h WHERE h.id=f.waiting_on_file_id AND h.run_id IS NOT NULL AND h.waiting_on_file_id IS NULL)) LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.markdown_import_payloads p JOIN main.markdown_import_files f ON f.id=p.file_id WHERE length(p.bytes)!=f.byte_length LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.search_turns t JOIN main.runs r ON r.id=t.run_id WHERE r.kind!='search' OR
+    t.open_slot IS NOT (r.status IN ('queued','submitting','running','uncertain')) OR
+    NOT EXISTS(SELECT 1 FROM main.search_messages m WHERE m.run_id=t.run_id AND m.role='user') LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.search_discoveries d JOIN main.run_steps s ON s.prompt_id=d.added_prompt_id WHERE s.run_id!=d.added_run_id LIMIT 1`);
+}
+
+function readTable(db: Database, shape: TableShape): CapturedTable {
+  const columns = db.query<{ name: string; type: string; required: bigint }, [string]>(
+    `SELECT name,type,"notnull" AS required FROM pragma_table_xinfo(?,'main')`).all(shape.name);
+  const types = new Map(columns.map(column => [column.name, column]));
+  const projections = shape.columns.flatMap((column, position) => [`typeof(${quote(column)}) AS ${quote(`type_${position}`)}`,
+    `CASE WHEN typeof(${quote(column)})='text' THEN CAST(${quote(column)} AS BLOB) ELSE ${quote(column)} END AS ${quote(`value_${position}`)}`]);
+  const rows: RawRow[] = [];
+  for (const raw of db.query<Record<string, SqlValue>, []>(`SELECT ${shape.preserveRowid ? 'rowid AS preserved_rowid,' : ''}${projections.join(',')} FROM main.${quote(shape.name)}`).iterate()) {
+    const values: Record<string, RawCell> = Object.create(null);
+    for (const [position, column] of shape.columns.entries()) {
+      const storage = raw[`type_${position}`], value = raw[`value_${position}`], declared = types.get(column);
+      check(declared !== undefined && (storage === declared.type.toLowerCase() || (storage === "null" && declared.required === 0n)), "invalid-storage-class");
+      if (storage === "null") { check(value === null); values[column] = { storage: "null" }; }
+      else if (storage === "integer") { check(typeof value === "bigint"); values[column] = { storage, value }; }
+      else { check((storage === "text" || storage === "blob") && value instanceof Uint8Array); values[column] = { storage, bytes: new Uint8Array(value) }; }
+    }
+    const rowid = shape.preserveRowid ? raw.preserved_rowid : null;
+    check(rowid === null || typeof rowid === "bigint"); rows.push({ rowid, values });
+  }
+  check(db.query<{ n: bigint }, []>(`SELECT count(*) AS n FROM main.${quote(shape.name)}`).get()?.n === BigInt(rows.length), "inconsistent-source");
+  return { shape, rows };
+}
+
+/** The callback is the supervisor's bounded source-ready handshake, not a model/application callback. */
+export async function readSource(databasePath: string, guard: Guard, ready: () => Promise<void>): Promise<SqlSnapshot> {
+  guard(); const db = new Database(databasePath, { readonly: true, create: false, safeIntegers: true, strict: true });
+  try {
+    guard(); db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; PRAGMA read_uncommitted=OFF; PRAGMA busy_timeout=1000;");
+    check(db.query<{ journal_mode: string }, []>("PRAGMA main.journal_mode").get()?.journal_mode === "wal", "wal-required");
+    db.exec("BEGIN"); db.query("SELECT count(*) FROM main.sqlite_schema").get();
+    const inventory = validateSourceSchema(db);
+    await ready(); guard(); validateRecords(db);
+    const tables = inventory.map(shape => { guard(); return readTable(db, shape); });
+    const sequences = db.query<{ name: string; seq: bigint }, []>("SELECT name,seq FROM main.sqlite_sequence ORDER BY name").all().map(row => {
+      check(["import_documents", "markdown_imports", "search_sessions"].includes(row.name) && typeof row.seq === "bigint" && row.seq >= 0n);
+      const maximum = db.query<{ n: bigint }, []>(`SELECT coalesce(max(sequence),0) AS n FROM main.${quote(row.name)}`).get()?.n;
+      check(maximum !== undefined && row.seq >= maximum, "inconsistent-source");
+      return { name: row.name, value: row.seq };
+    });
+    guard(); db.exec("COMMIT");
+    return { tables, sequences, rowCount: tables.reduce((total, table) => total + BigInt(table.rows.length), 0n).toString() };
+  } finally { try { if (db.inTransaction) db.exec("ROLLBACK"); } finally { db.close(true); } }
+}
+
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+export function text(row: RawRow, column: string): string {
+  const cell = row.values[column]; check(cell?.storage === "text"); return decoder.decode(cell.bytes);
+}
+export function bytes(row: RawRow, column: string): Uint8Array {
+  const cell = row.values[column]; check(cell?.storage === "blob"); return cell.bytes;
+}
+export function integer(row: RawRow, column: string): bigint {
+  const cell = row.values[column]; check(cell?.storage === "integer"); return cell.value;
+}
+export function table(snapshot: SqlSnapshot, name: string): CapturedTable {
+  const result = snapshot.tables.find(value => value.shape.name === name); check(result !== undefined); return result;
+}
+/** Content hashing and forest validation happen only after the read transaction/connection has closed. */
+export function validateBytes(snapshot: SqlSnapshot): void {
+  const thoughts = table(snapshot, "thoughts"), parents = new Map<string, string | null>();
+  for (const row of thoughts.rows) parents.set(text(row, "id"), row.values.parent_id.storage === "null" ? null : text(row, "parent_id"));
+  const visited = new Set<string>();
+  for (const id of parents.keys()) {
+    const path = new Set<string>(); let current: string | null = id;
+    while (current !== null && !visited.has(current)) {
+      check(!path.has(current) && parents.has(current), "inconsistent-source"); path.add(current); current = parents.get(current) ?? null;
+    }
+    for (const item of path) visited.add(item);
+  }
+  const files = new Map(table(snapshot, "markdown_import_files").rows.map(row => [text(row, "id"), row]));
+  function payloads(rows: readonly RawRow[], dataColumn: string, lookup: (row: RawRow) => RawRow | undefined): void {
+    for (const row of rows) {
+      const metadata = lookup(row); check(metadata !== undefined);
+      const original = bytes(row, dataColumn), digest = bytes(metadata, "sha256");
+      check(integer(metadata, "byte_length") === BigInt(original.length) && digest.length === 32 &&
+        Buffer.compare(digest, createHash("sha256").update(original).digest()) === 0, "inconsistent-source");
+      check(!decoder.decode(original).includes("\0"), "inconsistent-source");
+    }
+  }
+  payloads(table(snapshot, "import_documents").rows, "original_bytes", row => row);
+  payloads(table(snapshot, "markdown_import_payloads").rows, "bytes", row => files.get(text(row, "file_id")));
+}

@@ -289,7 +289,7 @@ The daemon checks at most 64 entries for unreferenced orphan cleanup on startup 
 
 ### Paired media backup and restore
 
-**Current stopped-file procedure, not portable/inert disaster recovery.** The [planned portable backup contract](backup-restore.md) specifies online JSON/original-file capture, configured Git delivery and standalone empty-installation restore. Its commands, configuration, WAL setup and historical-work fences are not implemented yet. Do not use a raw file copy as evidence that restored work cannot resume.
+**Current stopped-file procedure, not portable/inert disaster recovery.** The [backup contract](backup-restore.md) now includes an explicit internal online-capture API with bounded owned-process execution and private content-addressed snapshots. WAL startup, encoding/inventory helpers and empty immutable fence storage also exist. There is no automatic capture, installed backup command, Git delivery/configuration or enforcement of restored-work isolation yet. Capture introduces no startup setting, daemon route or operator-service call. Do not use a raw file copy or fence-table presence as evidence that restored work cannot resume.
 
 1. Record the canonical SQLite path, effective media directory (explicit setting or the SQLite filename plus `.media`), release and private configuration. Keep credentials outside public backup metadata.
 2. Stop the web client and daemon normally; confirm successful shutdown and no process still writing either data location. The daemon joins handlers/workers and closes file/validator work before releasing the database lease. Do not replace files under a running daemon or stop/reconfigure the operator-managed OpenCode service implicitly.
@@ -325,7 +325,7 @@ Restart the daemon to change its configured level. Each daemon instance owns its
 
 ## Startup and readiness
 
-Startup validates configuration, resolves/creates the supported database file, acquires its execution-owner lease, then opens the knowledge database, runs the [schema migration](database-schema.md#migrations) and registers that lease's immutable owner record. Under that lease it constructs the validator, opens/checks the matching private media store, performs bounded orphan cleanup and installs the normal worker's path resolver, before wiring Hono and starting the listener/queues. The validator child is launched on validation, not merely by constructing startup services. Ownership and media-store checks apply even without agent configuration. Partial-startup failure closes entered resources before the knowledge database and lease.
+Startup validates configuration, resolves/creates the supported database file, acquires its execution-owner lease, then opens the knowledge database and enables and verifies WAL before running the [schema migration](database-schema.md#migrations) and registering that lease's immutable owner record. Failure to enable WAL fails startup. Under that lease it constructs the validator, opens/checks the matching private media store, performs bounded orphan cleanup and installs the normal worker's path resolver, before wiring Hono and starting the listener/queues. The validator child is launched on validation, not merely by constructing startup services. Ownership and media-store checks apply even without agent configuration. Partial-startup failure closes entered resources before the knowledge database and lease.
 
 ### Database execution ownership
 

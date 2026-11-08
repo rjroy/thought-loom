@@ -16,9 +16,25 @@ Database names use `snake_case`; the [API](daemon-api.md#response-records) uses 
 
 ## Backup and recovery boundary
 
+Daemon startup enables and verifies WAL on the knowledge database under its execution-owner lease before migration. The separate lease sidecar remains in DELETE journal mode. WAL alone is not an online backup implementation.
+
 The [planned portable format](backup-restore.md#application-schema-inventory) inventories all current durable tables, derived search data and transient exclusions. It includes rejected records, private SQL import payloads, complete native journals/cancellation evidence, historical owner attribution and original media files, not just ordinary scoped Thought projections. The actual execution-owner sidecar is never a recovery artifact.
 
-The planned [offline recovery policy](backup-restore.md#small-durable-guard-not-a-second-execution-engine) adds an internal `restore_fences` table and only the enumerated local interruption transitions, preserving immutable steps, receipts, bindings and cancellation facts. It is **not implemented** by current migration. Current configured restart can process retained jobs; copying the database to another path is not an execution fence. No schema/format compatibility ID or online-backup guarantee should be inferred from SQLite's schema counter.
+The internal [compiled backup inventory](../src/backup/schema.ts) validates supported table/column/type/nullability, primary/foreign/unique-key and derived-object metadata without changing the source. It is not a complete SQL-constraint/trigger or record-integrity validator. The [explicit capture service](backup-restore.md#coherent-online-capture) separately performs read-only integrity/reference/seal/map checks, copies raw rows from one owned-process WAL read transaction, then closes it before encoding and verifying original files. It never migrates/registers an owner or changes source rows. The [offline recovery policy](backup-restore.md#small-durable-guard-not-a-second-execution-engine) remains planned beyond the additive metadata table below. Current configured restart can process retained jobs; copying the database or inserting fence metadata is not an execution fence today. No schema/format compatibility ID or online-backup guarantee should be inferred from SQLite's schema counter.
+
+### `restore_fences`
+
+[`restore-fences-schema.ts`](../src/storage/restore-fences-schema.ts) adds this table within the existing core migration transaction, with no data backfill, existing-table rebuild or native call.
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `entity_kind` | `TEXT` | `run`, `import-batch`, `import-file` or `composer`; first component of the primary key. |
+| `entity_id` | `TEXT` | Nonempty historical identity; second primary-key component. |
+| `snapshot_sha256` | `TEXT` | Exactly 64 lowercase hexadecimal characters; selected manifest digest. |
+| `restored_at` | `TEXT` | Nonempty timestamp; the future loader must supply canonical UTC syntax. |
+| `original_state_json` | `TEXT` | Valid JSON object; future recovery retains exact before-values for explicitly changed local state. |
+
+All columns are `NOT NULL`. There are no FKs: historical run/composer identities can outlive deliberate search-content deletion. Update/delete and identity/rowid replacement triggers make rows immutable. Migration leaves the table empty and preserves populated records on repeat/reopen. It does **not** yet consult these rows to block workers or perform recovery transitions; those guards must accompany the standalone restore implementation.
 
 ## Tables
 
