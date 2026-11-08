@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Thoughtloom · Approved media-import design</title>
+  <link rel="stylesheet" href="comp.css">
+  <style>
+    .review-main { max-width:1600px; margin:auto; padding:2.5rem var(--inset); }
+    .review-main > p { max-width:80ch; }
+    .review-nav { display:flex; flex-wrap:wrap; gap:.5rem 1.5rem; margin:1.25rem 0 2rem; }
+    .review-nav a { display:inline-flex; align-items:center; min-height:44px; }
+    .review-section { padding-top:2rem; margin-top:2rem; border-top:1px solid var(--line); }
+    .review-section > p { max-width:85ch; }
+    .review-section .actions { margin:.5rem 0 1.5rem; }
+    .pair { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:1.5rem; align-items:start; }
+    figure { min-width:0; margin:0; }
+    figcaption { color:var(--muted); font-size:1rem; margin-bottom:.5rem; }
+    figure img { display:block; width:100%; border:1px solid var(--line); }
+    details { margin:1rem 0; }
+    details > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--link); text-decoration:underline; text-underline-offset:.2em; }
+    details[open] > summary { margin-bottom:1rem; }
+    .state-links { display:flex; flex-wrap:wrap; gap:.5rem 1.25rem; }
+    .state-links a { display:inline-flex; min-height:44px; align-items:center; }
+    @media(max-width:900px) { .pair { grid-template-columns:1fr; } .pair figure:last-child { max-width:390px; } }
+  </style>
+</head>
+<body><main class="review-main">
+  <h1>Approved media-import design</h1>
+  <p>One Capture Import button, a compact chooser, and file details beside clarification. This selected B design and its affected-view/state families are approved for implementation. Everything shown is illustrative; no service or model is connected.</p>
+  <nav class="review-nav" aria-label="Design sections"><a href="#import">Import</a><a href="#source">Source idea</a><a href="#recovery">Recovery and retry</a><a href="#history">User inspection</a><a href="#existing">Existing views</a><a href="workflow-contract.json">Implementation handoff</a><a href="decisions.json">Approval record</a></nav>
+  <details id="entry"><summary>Selected B entry in the current Capture context</summary><p>The existing approved canopy is retained on desktop Capture only and omitted on phones. No artwork is added to Import or the other working views. The root-only arrival and initial-only Explore clearing remain unchanged.</p><div class="actions"><a href="comp.html?state=entry">Open selected B entry</a></div><div class="pair"><figure><figcaption>Capture · desktop</figcaption><img src="b-entry-current-desktop.png" alt="Selected B anchored chooser with the incumbent desktop Capture canopy"></figure><figure><figcaption>Capture · narrow</figcaption><img src="b-entry-current-phone.png" alt="Selected B anchored chooser with no canopy on a phone"></figure></div></details>
+  <div id="review-content"></div>
+  <section class="review-section" id="markdown"><h2>Markdown stays separate</h2><p>The Markdown choice opens the existing Markdown import workflow. Its selection, batch reports and source inspection are unchanged; this packet adds no bulk media import.</p></section>
+  <section class="review-section"><h2>Approval and implementation boundary</h2><p>The user selected “Approve design” after reviewing the final variants and earlier state/view families. This packet is the selected-only handoff, not a production client or an accessibility certification. The comparison sheets show alternative states, never simultaneous UI.</p><p class="small">Reproduce the screenshots and comp-only checks from the repository root with <code>bun --no-env-file .impeccable/mocks/media-import/render-workflow.ts</code>. Existing repository Playwright, Chromium, font and approved artwork are required; nothing is installed or generated automatically. Exact source/screenshot hashes and results are in <a href="workflow-render-evidence.json">render evidence</a>.</p></section>
+</main><script>
+  const pair = (name,desktop,phone) => `<div class="pair"><figure><figcaption>Desktop · 1440 × 900 viewport, full page</figcaption><a href="${desktop}"><img src="${desktop}" alt="${name}, desktop specimen"></a></figure><figure><figcaption>Narrow · 390 × 844 viewport, full page</figcaption><a href="${phone}"><img src="${phone}" alt="${name}, narrow specimen"></a></figure></div>`;
+  const specimen = (view,state,title,description) => `<section class="review-section"><h2>${title}</h2><p>${description}</p><div class="actions"><a href="workflow.html?view=${view}&state=${state}">Open interactive design specimen</a></div>${pair(title,`next-${view}-${state}-desktop.png`,`next-${view}-${state}-phone.png`)}</section>`;
+  document.querySelector('#review-content').innerHTML = `
+    <section class="review-section" id="import"><h2>Selected B · file beside clarification</h2><p>One image or PDF, optional exact clarification, and an explicit Import action. Selection sends nothing.</p><div class="actions"><a href="comp.html?state=selected">Open import workspace</a></div>${pair('Selected B import workspace','b-selected-desktop.png','b-selected-phone.png')}<details><summary>Confirmed original · interpretation queued</summary><div class="actions"><a href="comp.html?state=queued">Open retained-source receipt</a></div>${pair('Original saved and queued interpretation','b-queued-desktop.png','b-queued-phone.png')}</details></section>
+    <div id="source"></div>
+    ${specimen('source','ready','The original and its AI reading stay distinct','The source uses filename fallback, its verified descriptor, unverified file authorship and separately attributed clarification. Download original joins existing Idea actions; the AI interpretation stays in Surrounding context.')}
+    <details><summary>Image without clarification, interpretation view, title metadata and download failure</summary>
+      ${specimen('source','image','Image · no clarification','No invented thought text or preview is required. The descriptor and default-summary request are explicit.')}
+      ${specimen('interpretation','ready','The separate AI interpretation','Actual AI text remains focal. Its retained source is a separate parent/context reference with its filename and descriptor, not extracted file text.')}
+      ${specimen('source','title','Title and Full reply disclosures','Title metadata alone changes; filename fallback and title-only regeneration remain separate from interpretation.')}
+      ${specimen('source','download-error','Original temporarily unavailable','Keep the source metadata and recorded interpretation. A failed original read does not delete the source or create substitute content.')}
+    </details>
+    <div id="recovery"></div>
+    ${specimen('source','failed','Retry uses the retained original','Only current eligible states offer a fresh attempt. The daemon checks again on submission; no second upload is required.')}
+    ${specimen('source','retry-unknown','An uncertain retry is not a read-only resend','Check current processing only reads. Send same retry request is a separate, deliberate write and may start the attempt if the first request never arrived.')}
+    ${specimen('upload','uncertain','Keep an uncertain upload intact','Freeze the original file and exact clarification. Check this upload key; never recover by silently creating another source.')}
+    <details><summary>All interpretation/retry and admission state specimens</summary>
+      <p class="small">These are alternative states of shared regions, not additional product screens.</p>
+      ${pair('Interpretation status board','next-statuses-ready-desktop.png','next-statuses-ready-phone.png')}
+      <div class="actions"><a href="workflow.html?view=statuses">Open status board</a></div>
+      ${pair('Upload admission board','next-admission-states-ready-desktop.png','next-admission-states-ready-phone.png')}
+      <div class="actions"><a href="workflow.html?view=admission-states">Open admission board</a><a href="workflow.html?view=upload&state=absent">No upload receipt found yet</a><a href="workflow.html?view=source&state=unsettled">Unsettled cancellation</a><a href="workflow.html?view=source&state=completed">Completed without interpretation</a><a href="workflow.html?view=source&state=read-error">Read failure</a></div>
+    </details>
+    <div id="history"></div>
+    ${specimen('source','rejected','Rejected original · deliberate user inspection','Rejection retains the original. History is explicitly labelled; Evolve and fresh retry stay unavailable. Download does not restore or share the file with AI.')}
+    <details><summary>Unavailable source and rejected-interpretation inspection</summary>
+      ${specimen('source','unavailable','Normal source unavailable','Do not infer rejection or silently broaden scope. Inspection is a deliberate action.')}
+      ${specimen('source','rejected-child','An initial interpretation is not regenerated after rejection','Explicit history can show the rejected child. Normal source reads report interpretation-exists without exposing the hidden child.')}
+      ${specimen('interpretation','rejected','Inspecting the rejected AI child','Opening the child from user inspection preserves inspection scope. It has no Evolve action until restored and is not recreated by retry.')}
+    </details>
+    <div id="existing"></div>
+    ${specimen('explore','ready','Explore · same compact results','Add the media kind and render its clarification as matching text. Actual filename fallback identifies the destination; binary content is not made searchable.')}
+    ${specimen('evolve','ready','Evolve · same rail and inline composer','The starting source is a descriptor and exact clarification. A new contribution changes the request without editing the original. The source disclosure is shown open here on narrow screens.')}
+    <details><summary>Conversational-search preview and Export root adaptations</summary>
+      ${specimen('ask','ready','Ask your library · descriptor-only preview','A media discovery retains the existing actions. Its preview reads descriptor/clarification only; the search agent cannot open the original.')}
+      ${specimen('export','ready','Export · media-aware starting idea','Existing methods remain independent. The source summary and Simple output identify media honestly, without binary or extracted contents.')}
+    </details>`;
+</script></body>
+</html>

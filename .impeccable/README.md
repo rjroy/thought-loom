@@ -2,7 +2,7 @@
 
 **The agreed visual design gate is complete. No visual question remains.** This does not authorize client/daemon implementation or represent a shipping, accessibility or runtime verdict. Tracker closure and commits belong to the parent session.
 
-This minimum packet has **44 files**: 39 distinct selected PNGs, this current handoff, the [conversational-search handoff](mocks/agentic-search/README.md), one [identity/approval/provenance/palette manifest](selected-assets.json), and the [Source Sans 3 font](brand/fonts/SourceSans3-VariableFont_wght.ttf) with its [OFL license](brand/fonts/OFL.txt). Unselected comparison boards, duplicate sidecars/prompts, producing briefs, review history, design fixtures and workflow scaffolding are unnecessary once their current decisions and essential provenance are consolidated here. Selected multi-view boards remain when they carry approved composition/state evidence. No approved main PNG has been repainted, resized or discarded.
+The original core packet has **44 files**: 39 distinct selected PNGs, this current handoff, the [conversational-search handoff](mocks/agentic-search/README.md), one [identity/approval/provenance/palette manifest](selected-assets.json), and the [Source Sans 3 font](brand/fonts/SourceSans3-VariableFont_wght.ttf) with its [OFL license](brand/fonts/OFL.txt). Later approved additions are linked below. Unselected comparison boards, duplicate sidecars/prompts, producing briefs, review history, design fixtures and workflow scaffolding are unnecessary once their current decisions and essential provenance are consolidated here. Selected multi-view boards remain when they carry approved composition/state evidence. No approved main PNG has been repainted, resized or discarded.
 
 ## Selected visual references
 
@@ -21,6 +21,7 @@ The direction is a browser-rendered study; the other 38 PNGs are generated explo
 | Export output | [Simple preview](mocks/export-output/simple.png) · [Running](mocks/export-output/running.png) · [Report ready](mocks/export-output/completed.png) · [Uncertain](mocks/export-output/uncertain.png) · [Interrupted](mocks/export-output/interrupted.png) | “yes” — exact five compositions **with the copy overrides below** |
 | Remaining narrow adaptations | [Explore](mocks/narrow/explore.png) · [Idea](mocks/narrow/idea.png) · [Evolve](mocks/narrow/evolve.png) · [Export](mocks/narrow/export.png) | “yes” — exact four **approximate** compositions **and shared rules/exceptions below** |
 | Conversational search | [Focused workspace](mocks/agentic-search/focused.png) · [Session sheet/Delete/status specimens](mocks/agentic-search/states.png) · [State/behavior handoff](mocks/agentic-search/README.md) | “Approve B” — refined desktop/narrow/Explore-entry composition, original B supporting specimens and explicit corrections; existing header/session actions retained; **reference-only PNGs, client implemented separately** |
+| Retained media import | [Selected design gallery](mocks/media-import/review.html) · [Approval record](mocks/media-import/decisions.json) · [State/API handoff](mocks/media-import/workflow-contract.json) | “Approve design” — one Capture Import button, selected B side-by-side workspace, source/interpretation separation, recovery, rejection, affected existing views and responsive treatment; **design only, client implementation separate** |
 
 ## Shared world, brand and interaction rules
 
@@ -57,7 +58,11 @@ The user separately approved the [nine content/relationship production assets](c
 
 ## Surface behavior and content boundaries
 
-Current [architecture](../.lore/context/architecture.md), [daemon API](../docs/daemon-api.md) and screen context remain authoritative. Browser → Next.js server → Hono; credentials stay server-side. Apart from the separately approved conversational-search design below, no attachments, rich-text editor, tags/folders, graph, editable thought text, versions, additional agent mode, model/budget settings, extra endpoints or Settings features are authorized.
+Current [architecture](../.lore/context/architecture.md), [daemon API](../docs/daemon-api.md) and screen context remain authoritative. Browser → Next.js server → Hono; credentials stay server-side. Apart from the separately approved conversational-search and retained-media designs below, no attachments, rich-text editor, tags/folders, graph, editable thought text, versions, additional agent mode, model/budget settings, extra endpoints or Settings features are authorized.
+
+### Retained image and PDF import
+
+The [selected-only handoff](mocks/media-import/review.html) and [state/API contract](mocks/media-import/workflow-contract.json) cover one Capture Import chooser for Image or PDF versus existing Markdown. Selected B places file details beside optional clarification on desktop and stacks them on phones. Preserve current Capture atmosphere only on Capture, not Import or Idea. Original files remain separate from their searchable AI interpretations; clarification and title metadata do not rewrite the file. Source inspection uses the latest non-title interpretation run and daemon-computed fresh-retry eligibility. Upload receipts continue to identify the original admission. Checks read state; deliberate same-request resends may admit work and must never masquerade as read-only checks. Rejected content is unavailable to AI. Search and Agentic Export do not open original files. These are approved design artifacts, not production UI or runtime acceptance; implementation remains the separate `thought-loom-1kx.2` task.
 
 ### Capture
 
