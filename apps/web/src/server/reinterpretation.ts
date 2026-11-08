@@ -5,6 +5,10 @@ export interface ReinterpretationDependencies { readonly callDaemon: (request: D
 const headers = {"cache-control":"private, no-store"};
 const problem = (status: number) => Response.json({message:status === 400 ? "Invalid request." : status === 404 ? "Idea unavailable." : "Unable to confirm outcome."},{status,headers});
 const record = (value: unknown): value is Record<string,unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+// Cleanup must not delay or change the safe response, even if cancellation fails.
+function discard(response: Response): void {
+  try { void response.body?.cancel().catch(() => {}); } catch { /* Best effort. */ }
+}
 
 async function bounded(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string | null> {
   if (!body) return "";
@@ -40,8 +44,8 @@ export async function handleReinterpretation(request: Request, subjectId: string
     : {method:"GET",path:`${path}/by-key/${encodeURIComponent(key)}`,preserveErrorBody:true};
   try {
     const response = await deps.callDaemon(operation);
-    if ([400,401,403,404,413,415].includes(response.status)) return problem(response.status);
-    if (!(request.method === "POST" ? [200,202,409].includes(response.status) : response.status === 200)) return problem(502);
+    if ([400,401,403,404,413,415].includes(response.status)) { discard(response); return problem(response.status); }
+    if (!(request.method === "POST" ? [200,202,409].includes(response.status) : response.status === 200)) { discard(response); return problem(502); }
     const text = await bounded(response.body,1024*1024);
     if (text === null) return problem(502);
     const value: unknown = JSON.parse(text);

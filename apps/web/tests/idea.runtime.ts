@@ -4,6 +4,8 @@ import { expect, type Page } from "@playwright/test";
 import { expectGlyph } from "./explore.runtime";
 
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string; key: string | undefined };
+type CheckProbe = { receipts: number; canonical: number; held: boolean; aborted: boolean; release?: () => void; restore?: () => void };
+declare global { interface Window { checkProbe?: CheckProbe } }
 const original = "Owned original idea wording, unchanged by title edits.";
 const thought = { id: "idea-root", text: original, title: "Owned original title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "idea-parent", sourceIds: ["idea-source", "idea-hidden", "idea-child"] };
 const source = { ...thought, id: "idea-source", text: "Owned supporting source", title: "Owned source", parentId: null, sourceIds: [] };
@@ -294,6 +296,79 @@ export async function checkIdeaReinterpretBrowser(page: Page, daemon: Fixture, o
     await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
     await expect(page).toHaveURL(url => url.pathname === "/ideas/idea-root" && url.searchParams.get("responseId") === "idea-reply");
     assert.equal(writes().length, start + 1);
+  }
+
+  if (selected === "all" || selected === "core") {
+    daemon.resetReinterpret(); await visit();
+    await (await open()).click();
+    const status = page.getByRole("region", { name: "Interpretation status" });
+    const check = status.getByRole("button", { name: "Check interpretation" });
+    await expect(check).toBeEnabled();
+    await page.evaluate(() => { sessionStorage.setItem("owned-check-probe", "enabled"); });
+    await page.addInitScript((fixtureOrigin: string) => {
+      if (window.location.origin !== fixtureOrigin || sessionStorage.getItem("owned-check-probe") !== "enabled") return;
+      const probe: CheckProbe = {receipts:0, canonical:0, held:false, aborted:false};
+      window.checkProbe = probe;
+      const originalFetch = window.fetch;
+      probe.restore = () => { window.fetch = originalFetch; };
+      window.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), window.location.href);
+        if (url.pathname.includes("/reinterpret/by-key/")) probe.receipts++;
+        if (url.pathname === "/api/ideas/idea-root") probe.canonical++;
+        if (url.pathname === "/api/imports/media-runs/owned-weave-run" && probe.held) {
+          init?.signal?.addEventListener("abort", () => { probe.aborted = true; }, {once:true});
+          // Deliberately deliver a late result even after cancellation to exercise the stale fence.
+          return new Promise<Response>(resolve => { probe.release = () => resolve(Response.json({
+            id:"owned-weave-run",kind:"weave",status:"completed",confirmedThoughtIds:["idea-new-child"],responseId:null,
+          })); });
+        }
+        return originalFetch(input, init);
+      }, originalFetch);
+    }, origin);
+    const probe = () => page.evaluate(() => {
+      const p = window.checkProbe;
+      if (!p) throw new Error("Check probe was not installed");
+      return {receipts:p.receipts,canonical:p.canonical,aborted:p.aborted,waiting:!!p.release};
+    });
+    try {
+      // Construct the controller only after the instrumented fetch is installed.
+      await page.reload({waitUntil:"networkidle"});
+      await expect(check).toBeEnabled();
+      const beforeLive = await probe();
+      await check.click();
+      await expect.poll(async () => (await probe()).receipts).toBeGreaterThan(beforeLive.receipts);
+      await expect(check).toBeEnabled();
+      await page.waitForLoadState("networkidle");
+      await page.evaluate(() => {
+        if (!window.checkProbe) throw new Error("Check probe was not installed");
+        window.checkProbe.held = true;
+      });
+      await check.click();
+      await expect.poll(async () => (await probe()).waiting).toBe(true);
+      const beforeHide = await probe();
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", {configurable:true,value:"hidden"});
+        document.dispatchEvent(new Event("visibilitychange"));
+        if (!window.checkProbe) throw new Error("Check probe was not installed");
+        window.checkProbe.release?.();
+      });
+      await expect.poll(async () => (await probe()).aborted).toBe(true);
+      // Let the actual Check continuation and any resulting fetches run before asserting absence.
+      await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 100)));
+      const afterHide = await probe();
+      assert.equal(afterHide.receipts, beforeHide.receipts, "a cancelled Check must not start receipt reconciliation");
+      assert.equal(afterHide.canonical, beforeHide.canonical, "a cancelled Check must not start canonical publication");
+      await expect(status.getByRole("heading", { name: /queued/i })).toBeVisible();
+      await expect(page.getByText(newChild.text, { exact: true })).toHaveCount(0);
+    } finally {
+      await page.evaluate(() => {
+        const probe = window.checkProbe;
+        probe?.release?.();
+        probe?.restore?.();
+        sessionStorage.removeItem("owned-check-probe");
+        Reflect.deleteProperty(document, "visibilityState");
+      });
+    }
   }
 
   if (selected === "all" || selected === "recovery") for (const mode of ["unknown-before", "unknown-after"] as const) {

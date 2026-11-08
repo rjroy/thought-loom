@@ -132,6 +132,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const alive = useRef(false);
   const readGeneration = useRef(0);
+  const reinterpretationWatchGeneration = useRef(0);
   const canonicalRead = useRef<CanonicalRead | null>(null);
   const previewGeneration = useRef(0);
   const admittedPreview = useRef<BranchPreview | null>(null);
@@ -253,9 +254,12 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   useEffect(() => {
     if (!reinterpretation) return;
     let stopWatching: (() => void) | undefined;
-    const visibility = () => { stopWatching?.(); stopWatching = document.visibilityState === "visible" ? reinterpretation.watch() : undefined; };
+    const visibility = () => {
+      reinterpretationWatchGeneration.current++;
+      stopWatching?.(); stopWatching = document.visibilityState === "visible" ? reinterpretation.watch() : undefined;
+    };
     visibility(); document.addEventListener("visibilitychange", visibility);
-    return () => { stopWatching?.(); document.removeEventListener("visibilitychange", visibility); };
+    return () => { reinterpretationWatchGeneration.current++; stopWatching?.(); document.removeEventListener("visibilitychange", visibility); };
   }, [reinterpretation]);
 
   const observedRuns = new Map<string, MediaRun>();
@@ -502,12 +506,16 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   async function checkInterpretation() {
     if (!reinterpretation) return;
     const generation = readGeneration.current;
+    const watchGeneration = reinterpretationWatchGeneration.current;
+    const current = () => alive.current && generation === readGeneration.current
+      && watchGeneration === reinterpretationWatchGeneration.current;
     const state = reinterpretation.getSnapshot();
     if (state.request !== "uncertain" && reinterpretationRunToShow(state)) {
       await reinterpretation.checkRun();
+      if (!current()) return;
       if (reinterpretation.getSnapshot().notice !== "read-error") await reinterpretation.checkReceipt();
     } else await reinterpretation.checkReceipt();
-    if (!alive.current || generation !== readGeneration.current) return;
+    if (!current()) return;
     // Check also retries a failed or scoped-out canonical publication, never a command.
     await refreshRunContext(null, true);
   }

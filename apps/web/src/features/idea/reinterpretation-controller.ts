@@ -114,6 +114,7 @@ export function createReinterpretationController(subjectId:string, client:Reinte
       if (!selected) throw new Error("Missing key");
       key = selected;
     } catch { update({phase:"storage-error",notice:"storage-error",fresh:false}); return Promise.resolve(); }
+    abort?.abort();
     const epoch = ++generation, controller = new AbortController(); abort = controller;
     const current = () => epoch === generation && !controller.signal.aborted;
     update({checking:true,fresh:false,...(pending ? {request:"uncertain" as const,requestKey:key} : {})});
@@ -167,16 +168,18 @@ export function createReinterpretationController(subjectId:string, client:Reinte
   async function checkRun() {
     const run = currentRun();
     if (!run || state.checking || state.stopping || state.request === "pending") return;
-    const epoch = ++generation; update({checking:true,fresh:false});
+    const epoch = ++generation, controller = new AbortController(); abort = controller;
+    const current = () => epoch === generation && !controller.signal.aborted;
+    update({checking:true,fresh:false});
     try {
-      const result = await client.readRun(run.id);
-      if (epoch !== generation) return;
+      const result = await client.readRun(run.id,controller.signal);
+      if (!current()) return;
       if (result.kind !== "found") {update({notice:"read-error"}); return;}
       const observed = result.run;
       if (state.run?.id === observed.id) update({run:observed,outputRevision:refreshOutput(observed),unconfirmedStop:terminal(observed) ? null : state.unconfirmedStop,notice:"none"});
       else if (state.eligibility?.eligible === false && state.eligibility.reason !== "subject-rejected" && state.eligibility.blockingRun.id === observed.id) update({eligibility:{...state.eligibility,blockingRun:observed},unconfirmedStop:terminal(observed) ? null : state.unconfirmedStop,notice:"none"});
-    } catch { if (epoch === generation) update({notice:"read-error"}); }
-    finally { if (epoch === generation) {update({checking:false}); poll();} }
+    } catch { if (current()) update({notice:"read-error"}); }
+    finally { if (current()) {abort = null; update({checking:false}); poll();} }
   }
   async function stop() {
     const run = currentRun();
