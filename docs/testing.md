@@ -42,6 +42,10 @@ Successful-upgrade comparisons retain historical step bytes and original index/t
 
 These persistence tests do not establish file access, format validation, HTTP media import or model behavior. The separate worker/file/validator groups below cover their own boundaries. The current Next.js decoders remain text-only; existing web checks protect text/Markdown behavior, not media rendering. Commands and coverage descriptions are not a claim that a particular working-tree revision has passed verification.
 
+### Normal worker diagnostics
+
+`bun --no-env-file test tests/worker.test.ts --test-name-pattern 'default-level worker diagnostics'` exercises controlled initial-preparation and invalid-envelope failures using owned SQLite fixtures and an injected native client. It checks default-level run/generation correlation, stage and category, and redaction of private fixture text. It does not reproduce or establish the cause of the original Evolve failure, or exercise a live service or provider.
+
 ### Shared-file media worker checks
 
 ```sh

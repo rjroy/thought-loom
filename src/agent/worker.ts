@@ -2,7 +2,7 @@ import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { isAbsolute } from "node:path";
 import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
-import { parseEnvelope, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
+import { parseEnvelope, ProtocolValidationError, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
 import type { Thought } from "../domain/thought";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../storage/capability";
@@ -160,6 +160,7 @@ export class RunWorker {
   private async poll(runId: string): Promise<void> {
     if (this.paused) return;
     let claim = this.owners.get(runId);
+    let stage = "load-run";
     try {
       const run = this.runs.get(runId);
       if (!run) { this.searchClock.forget(runId); throw new RunConflictError("Worker run does not exist"); }
@@ -169,6 +170,7 @@ export class RunWorker {
         this.logger.verbose("[worker] subject weave waiting",{runId});
         return;
       }
+      stage = "select-binding";
       let binding = this.bindings.get(runId);
       if (!binding) {
         const selected = this.dependencies.bindingFor?.(Object.freeze({...run})) ?? null;
@@ -176,32 +178,40 @@ export class RunWorker {
         binding = normalizeBinding(selected);
       }
       assertBindingPermissions(run.kind,binding);
+      stage = "claim-run";
       if (!claim) { claim = this.runs.claim(runId); this.owners.set(runId,claim); }
       const owner = claim;
+      stage = "load-step";
       this.active(owner);
       if (run.kind === "export" && this.exports.intent(run.id) === null) throw new RunConflictError("Legacy export request is unavailable; cannot resume safely");
       const step = this.steps.steps(runId).at(-1);
       if (!step) throw new RunConflictError("Run has no current step");
       if (step.input === null) {
+        stage = "prepare-initial";
         const context = run.kind === "search" ? null : this.state.initialContext(owner);
         const paths = context === null || (context.job.kind === "weave" && context.job.purpose === "media-title-only")
           ? [] : await this.mediaPaths(owner,run.kind,binding,context.thoughts);
         this.active(owner);
         this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths));
+        stage = "bind-session";
         this.bindings.bind(runId,binding,owner);
         return;
       }
+      stage = "bind-session";
       if (!this.bindings.get(runId)) { this.bindings.bind(runId,binding,owner); return; }
       const prompt = {promptId:step.promptId,input:step.input};
       this.active(owner,prompt);
-      if (step.envelope !== null) { await this.process(owner,step,run.kind,binding); return; }
+      if (step.envelope !== null) { stage = "process-envelope"; await this.process(owner,step,run.kind,binding); return; }
       if (!this.ensured.has(runId)) {
+        stage = "ensure-session";
         if ((await this.call(owner,prompt,"ensure session",() => this.transport().ensureSession(owner,binding))).ok) this.ensured.add(runId);
         return;
       }
+      stage = "load-step";
       const current = this.runs.get(runId);
       if (!current) throw new RunConflictError();
       if (current.status === "queued" && step.state === "prepared") {
+        stage = "submit";
         const submitted = await this.call(owner,prompt,"submit",() => this.transport().submit(owner,binding,prompt,
           run.kind !== "search" ? undefined : fact => {
             try { this.cleanup.recordAdmission(fact); }
@@ -215,12 +225,18 @@ export class RunWorker {
         return;
       }
       // Recorded submission/native uncertainty is observation-only, even when native history is empty.
+      stage = "observe";
       const prompts = this.prompts(runId);
       const observed = await this.call(owner,prompt,"observe",() => this.transport().observe(owner,binding,prompts));
       if (!observed.ok) return;
       const observation = observed.value;
       this.bindings.assertActive(owner,prompt,observation.state);
-      if (observation.state === "completed") this.steps.completeStep(owner,prompt.promptId,parseEnvelope(observation.output));
+      if (observation.state === "completed") {
+        stage = "parse-envelope";
+        const envelope = parseEnvelope(observation.output);
+        stage = "complete-step";
+        this.steps.completeStep(owner,prompt.promptId,envelope);
+      }
     } catch (error) {
       if (this.paused) return;
       if (error instanceof RunFenceError) {
@@ -230,7 +246,10 @@ export class RunWorker {
         return; // A newer worker owns an active run. This worker never reclaims it on a later poll.
       }
       if (!claim) throw error;
-      this.logger.error("[worker] local processing failed",{runId,generation:claim.generation});
+      const category = error instanceof ProtocolValidationError ? "protocol-validation"
+        : error instanceof AgentBindingError ? "binding"
+        : error instanceof RunConflictError ? "run-conflict" : "unexpected";
+      this.logger.error("[worker] local processing failed",{runId,generation:claim.generation,stage,category});
       try { this.active(claim); this.operations.fail(claim); this.forget(runId); }
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
