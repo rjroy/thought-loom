@@ -235,11 +235,15 @@ All routes here are **user-only**. Missing/invalid authentication returns `401`;
 | --- | --- | --- |
 | `POST /imports/media` | `Idempotency-Key`; multipart `metadata` JSON text and exactly one named, typed `file` | Fresh `202 {thought,run}`; matching replay `200 {thought,run}`. Retention/admission has finished, not interpretation. |
 | `GET /imports/media/by-key/:key` | No body/query; the upload's request key | `200 {thought,run}` for the original admission; unknown key `404`. |
-| `GET /media-sources/:id` | Optional `scope=normal` (default) or `scope=history`, once | `200 {thought}`; missing or normally hidden source `404`. |
+| `GET /media-sources/:id` | Optional `scope=normal` (default) or `scope=history`, once | `200 {thought,run,retry}`; missing or normally hidden source `404`. |
 | `GET /media-sources/:id/raw` | Same scope rules | `200` exact verified original bytes. |
 | `POST /media-sources/:id/retry` | `Idempotency-Key`; `Content-Type: application/json` with exactly `{}`; no query | Fresh `202 {run}`; same source/retry-key replay `200 {run}`. |
 
 `thought` is the media Thought above. `run` is the ordinary [status projection](#status-get-runsid): `{id,kind:'weave',status,confirmedThoughtIds,responseId}`. Poll `GET /runs/:id`; the normal response/Thought routes expose confirmed interpretations and Full replies. No native IDs, file paths, digests or private inputs are returned. History inspection includes rejection state, with `rejected: true` for a rejected source. Both normal and history inspection/download are forbidden to AI credentials.
+
+Source inspection returns the latest source-interpretation weave in `run`, or `null` if none exists. Later retries replace that selection; title-clear work does not. This differs from an upload receipt, whose run remains the original admission. A queued status does not identify why processing has not started.
+
+`retry` describes eligibility for a **fresh** retry: `{eligible:true,reason:null}` or `{eligible:false,reason}`. Reasons are `source-rejected`, `interpretation-exists` (including a rejected interpretation), `work-active`, `work-unsettled` (failed/interrupted work whose cancellation has not settled), and `work-completed`. The read and retry admission share the same eligibility rules. This snapshot is advisory: admission rechecks the current state and can return `409` after a race. Replaying an existing retry key is a receipt lookup through the POST, not a fresh retry, and may succeed even when fresh retry eligibility is false.
 
 ### Media upload and replay
 

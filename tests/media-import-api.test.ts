@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { copyFile, cp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { body, bounded, mediaApiCredentials, mediaApiFixture, mediaApiMaxBytes, mediaClarification, object, originalPath, receipt, retry, text, upload } from "./fixtures/media-import-api";
 import { classicPdf } from "./fixtures/media-pdfs";
 import { corruptPngPixels, independentPng } from "./fixtures/media-rasters";
 import { pathComplete, pathRequest, promptStrings } from "./fixtures/media-path-worker";
+import { admitWeave } from "../src/storage/weave-admission";
+import { SqliteStore } from "../src/storage/sqlite";
 
 test("owned media upload retains its original and queues normal weaving without agent configuration", async () => mediaApiFixture(async f => {
   expect((await f.request("/thoughts")).status).toBe(200);
@@ -19,7 +22,7 @@ test("owned media upload retains its original and queues normal weaving without 
   expect(lookup).toEqual(result);
   const inspection = await f.request(`/media-sources/${result.thought.mediaSource.id}`);
   expect(inspection.status).toBe(200);
-  expect(await body(inspection)).toEqual({thought:result.thought});
+  expect(await body(inspection)).toEqual({thought:result.thought,run:result.run,retry:{eligible:false,reason:"work-active"}});
   const retained = await realpath(join(f.mediaDirectory,"objects",result.thought.mediaSource.id));
   expect(isAbsolute(retained)).toBe(true);
   expect((await stat(retained)).mode & 0o777).toBe(0o600);
@@ -111,7 +114,8 @@ test("media source inspection and exact downloads respect normal history and rej
   expect((await f.request(`${base}/raw`)).status).toBe(404);
   const history = await f.request(`${base}?scope=history`);
   expect(history.status).toBe(200);
-  expect(await body(history)).toEqual({thought:{...admitted.thought,rejected:true}});
+  expect(await body(history)).toEqual({thought:{...admitted.thought,rejected:true},run:{...admitted.run,status:"interrupted"},
+    retry:{eligible:false,reason:"source-rejected"}});
   const original = await f.request(`${base}/raw?scope=history`);
   expect(original.status).toBe(200);
   expect(Array.from(new Uint8Array(await original.arrayBuffer()))).toEqual(Array.from(bytes));
@@ -119,6 +123,56 @@ test("media source inspection and exact downloads respect normal history and rej
   expect((await f.request(`${base}?scope=normal&scope=history`)).status).toBe(400);
   expect((await f.request(`${base}/raw?unexpected=1`)).status).toBe(400);
   expect((await f.request(`/media-sources/missing-source/raw?scope=history`)).status).toBe(404);
+}),20000);
+
+test("source status and retry admission agree across active, uncertain and settled work", async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media",upload(independentPng(),"status-gate")));
+  const base = `/media-sources/${first.thought.mediaSource.id}`, db = new Database(f.dbPath);
+  try {
+    const states = [
+      {status:"queued",cancellation:"none",reason:"work-active"},
+      {status:"uncertain",cancellation:"none",reason:"work-unsettled"},
+      {status:"failed",cancellation:"pending",reason:"work-unsettled"},
+    ];
+    for (const state of states) {
+      db.query("UPDATE runs SET status=?,cancellation_state=? WHERE id=?").run(state.status,state.cancellation,first.runId);
+      const inspection = await body(await f.request(base));
+      expect(inspection).toEqual({thought:first.thought,run:await body(await f.request(`/runs/${first.runId}`)),
+        retry:{eligible:false,reason:state.reason}});
+      expect((await f.request(`${base}/retry`,retry(`blocked-${state.status}`))).status).toBe(409);
+    }
+    db.query("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?").run(first.runId);
+    expect(await body(await f.request(base))).toEqual({thought:first.thought,run:await body(await f.request(`/runs/${first.runId}`)),
+      retry:{eligible:true,reason:null}});
+    const accepted = await f.request(`${base}/retry`,retry("settled-retry"));
+    expect(accepted.status).toBe(202);
+    const retriedRun = object((await body(accepted)).run), retryId = text(retriedRun.id);
+    expect(retryId).not.toBe(first.runId);
+
+    let sequence = 0;
+    const titleRun = admitWeave(db,{id:() => `fixture-title-${++sequence}`,now:() => "2026-01-01T00:00:00.000Z"},
+      {subjectId:first.thought.id,triggerId:"title-clear:fixture-invitation"});
+    expect(titleRun.id).not.toBe(retryId);
+    expect(await body(await f.request(base))).toEqual({thought:first.thought,run:retriedRun,
+      retry:{eligible:false,reason:"work-active"}});
+    expect((await receipt(await f.request("/imports/media/by-key/status-gate"),200)).runId).toBe(first.runId);
+  } finally { db.close(); }
+}),20000);
+
+test("a confirmed interpretation blocks retry even after the child is rejected", async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media",upload(independentPng(),"status-child")));
+  const base = `/media-sources/${first.thought.mediaSource.id}`, db = new Database(f.dbPath);
+  try {
+    db.query("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?").run(first.runId);
+    new SqliteStore(db).saveThought({id:"fixture-confirmed-interpretation",text:"Owned source interpretation",title:null,titleAuthor:null,
+      author:"ai",kind:"ai-interpretation",createdAt:"2026-01-01T00:00:00.000Z",origin:"weave",parentId:first.thought.id,sourceIds:[]});
+    for (const rejected of [false,true]) {
+      if (rejected) expect((await f.request("/thoughts/fixture-confirmed-interpretation/reject",{method:"POST"})).status).toBe(204);
+      expect(await body(await f.request(base))).toEqual({thought:first.thought,run:await body(await f.request(`/runs/${first.runId}`)),
+        retry:{eligible:false,reason:"interpretation-exists"}});
+      expect((await f.request(`${base}/retry`,retry(`child-${rejected}`))).status).toBe(409);
+    }
+  } finally { db.close(); }
 }),20000);
 
 test("configured media admission gives the normal worker real PNG and PDF paths and saves canonical replies", async () => mediaApiFixture(async f => {

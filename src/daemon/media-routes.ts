@@ -57,9 +57,9 @@ export function createMediaRoutes(media: MediaImports, maxBytes: number, notify:
     return c.json({thought:result.thought,run:result.run});
   });
   app.get("/media-sources/:id",user,c => {
-    const thought = media.source(scope(c),c.req.param("id"));
-    if (!thought) throw new ImportHttpError(404,"not-found");
-    return c.json({thought});
+    const result = media.inspect(scope(c),c.req.param("id"));
+    if (!result) throw new ImportHttpError(404,"not-found");
+    return c.json(result);
   });
   app.get("/media-sources/:id/raw",user,async c => {
     const result = await media.raw(scope(c),c.req.param("id"));

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { MediaImportError, type MediaImportAdmission, type MediaImports, type MediaUpload } from "../domain/media-import";
+import { MediaImportError, type MediaImportAdmission, type MediaImports, type MediaSourceInspection, type MediaUpload } from "../domain/media-import";
 import type { OrdinaryAgentRunView } from "../domain/agent";
 import { importRequestKey } from "../domain/markdown-import-contract";
 import type { Actor, ReadScope, RejectionService } from "../domain/rejection";
@@ -11,6 +11,7 @@ import { createLogger, type Logger } from "../logging";
 import { SqliteAgentRuns } from "./agent";
 import { SqliteMediaAdmissions, type MediaSourceAdmission } from "./media-admission";
 import { MediaFilesError, type MediaFiles } from "./media-files";
+import { sourceWeaveEligibility } from "./weave-admission";
 
 /** File-first publication and the existing SQLite admission, with user-scoped inspection. */
 export class SqliteMediaImports implements MediaImports {
@@ -93,6 +94,15 @@ export class SqliteMediaImports implements MediaImports {
     if (!row) return null;
     const thought = this.rejection.listThoughts(scope).find(thought => thought.id === row.thoughtId);
     return thought?.kind === "media-original" ? thought : null;
+  }
+  inspect(scope: ReadScope, sourceId: string): MediaSourceInspection | null {
+    return this.db.transaction((): MediaSourceInspection | null => {
+      const thought = this.source(scope,sourceId);
+      if (!thought) return null;
+      const status = sourceWeaveEligibility(this.db,thought.id);
+      return {thought,run:status.runId === null ? null : this.run(status.runId),
+        retry:"rejected" in thought && thought.rejected === true ? {eligible:false,reason:"source-rejected"} : status.retry};
+    })();
   }
   async raw(scope: ReadScope, sourceId: string): Promise<{readonly mimeType: string; readonly bytes: Uint8Array} | null> {
     const thought = this.source(scope,sourceId);
