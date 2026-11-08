@@ -1,6 +1,6 @@
 # Database schema
 
-[Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md)
+[Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md) · [Backup contract](backup-restore.md)
 
 Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative migration starts in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts); Markdown import definitions and its predecessor FK-closure rebuild live in [`import-schema.ts`](../src/storage/import-schema.ts) and [`import-migration.ts`](../src/storage/import-migration.ts). The [media metadata foundation](#media-source-storage-foundation) has its own thought/FK migration. The separate [agentic-search storage](#agentic-search-storage-foundation) supports user-only saved sessions and configured search execution through the [daemon API](daemon-api.md#agentic-search-sessions). Public Markdown import access is documented in the [daemon API](daemon-api.md#markdown-import-and-source-inspection).
 
@@ -13,6 +13,12 @@ Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative m
 - Rejection is presence in a separate state table, not deletion or modification of the recorded thought.
 
 Database names use `snake_case`; the [API](daemon-api.md#response-records) uses `camelCase`.
+
+## Backup and recovery boundary
+
+The [planned portable format](backup-restore.md#application-schema-inventory) inventories all current durable tables, derived search data and transient exclusions. It includes rejected records, private SQL import payloads, complete native journals/cancellation evidence, historical owner attribution and original media files, not just ordinary scoped Thought projections. The actual execution-owner sidecar is never a recovery artifact.
+
+The planned [offline recovery policy](backup-restore.md#small-durable-guard-not-a-second-execution-engine) adds an internal `restore_fences` table and only the enumerated local interruption transitions, preserving immutable steps, receipts, bindings and cancellation facts. It is **not implemented** by current migration. Current configured restart can process retained jobs; copying the database to another path is not an execution fence. No schema/format compatibility ID or online-backup guarantee should be inferred from SQLite's schema counter.
 
 ## Tables
 

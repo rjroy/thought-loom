@@ -30,6 +30,14 @@ The [GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests
 
 The job creates `/tmp/opencode` and checks for the image's preinstalled `/usr/bin/chromium`, the path required by the browser harnesses. The runner image and its Chromium version can change; the workflow does not install or pin the browser. It also relies on the hosted image's compiler and SQLite development headers for spellfix, and network access for dependency installs. Browser bootstraps install the frozen lock in their own source copies; the integration bootstrap builds its own spellfix. A workflow run must pass on GitHub before hosted compatibility is established.
 
+### Backup and recovery validation
+
+The [portable backup/recovery contract](backup-restore.md) is currently **design only**. Its [inventory](backup-restore.md#application-schema-inventory), versioned encoding, online snapshot boundary, Git configuration and offline historical-work policy are not evidence that backup commands or tests exist. No runtime checks are claimed for this documentation-only phase.
+
+Document validation must compare table/column and media-lifecycle claims against current migrations/readers, check local links and distinguish official SQLite semantics from owned runtime proof. In particular, `VACUUM INTO` is not a source write operation but may renumber implicit rowids; a current DB reference check protects a historical snapshot only while source rows remain immutable and undeletable.
+
+Follow-on capture, delivery and restore implementations must add their focused tests alongside their code, then document exact commands here. Required cases are [listed in the contract](backup-restore.md#required-evidence-before-shipping): exact scalar/order/history preservation, coherent WAL capture during writes/media publication, cleanup/file faults, owned local Git failures/divergence and standalone restore validation/rollback/publication. Use freshly migrated or frozen legacy owned SQLite fixtures, private files and fake native ports, never personal data, credentials, an operator service or a provider. A final owned Hono/SQLite/media → local bare Git → selected-revision restore walkthrough must prove normal configured/configless startup makes no native call for restored runs, imports or cleanup while fresh independent work still functions. Existing stopped-pair media checks do not establish that guarantee.
+
 ### Media-source domain and persistence checks
 
 ```sh
