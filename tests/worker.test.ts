@@ -9,6 +9,7 @@ import { RejectionService } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
 import { TitleService } from "../src/domain/title";
 import { RunFenceError, RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
+import { createLogger, type LogRecord } from "../src/logging";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
 import { SqliteRejectionRepository } from "../src/storage/rejection";
@@ -82,6 +83,45 @@ async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: st
   // Test harness bound only; the worker must not impose an effort quota.
   for (let i = 0; i < 20 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
 }
+
+test("default-level worker diagnostics classify initial preparation failures without exposing private data", async () => fixture(async f => {
+  const records: LogRecord[] = [];
+  const logger = createLogger(undefined, record => records.push(record));
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "diagnostic-preparation" });
+  const native = new OwnedNative(new SqliteAgentBindings(f.db), () => complete("unused"));
+  const instance = new RunWorker({ db:f.db, id:f.id, now, logger, bindingFor:binding, native:() => native });
+  f.db.exec(`CREATE TRIGGER test_worker_prepare_fault BEFORE UPDATE OF input ON run_steps
+    BEGIN SELECT RAISE(ABORT,'private exception credential-secret'); END;`);
+  try {
+    await instance.tick(run.id);
+    expect(f.runs.get(run.id)?.status).toBe("failed");
+    const failure = records.find(record => record.level === "error" && record.message === "[worker] local processing failed");
+    expect(failure?.context).toMatchObject({runId:run.id, generation:1, stage:"prepare-initial", category:"unexpected"});
+    const output = JSON.stringify(records);
+    for (const secret of ["owned subject", "credential-secret", "private exception"]) expect(output).not.toContain(secret);
+    expect(native.submitted).toEqual([]);
+  } finally {
+    f.db.exec("DROP TRIGGER test_worker_prepare_fault");
+    instance.pause(); await instance.drain();
+  }
+}));
+
+test("default-level worker diagnostics distinguish invalid observed protocol output and redact it", async () => fixture(async f => {
+  const records: LogRecord[] = [];
+  const logger = createLogger(undefined, record => records.push(record));
+  const run = f.ops.admitWeave("user", { subjectId:"root", triggerId:"diagnostic-protocol" });
+  const native = new OwnedNative(new SqliteAgentBindings(f.db), () => "private model output credential-secret");
+  const instance = new RunWorker({ db:f.db, id:f.id, now, logger, bindingFor:binding, native:() => native });
+  try {
+    await drive(instance,f,run.id);
+    expect(f.runs.get(run.id)?.status).toBe("failed");
+    expect(native.observed).toHaveLength(1);
+    const failure = records.find(record => record.level === "error" && record.message === "[worker] local processing failed");
+    expect(failure?.context).toMatchObject({runId:run.id, generation:1, stage:"parse-envelope", category:"protocol-validation"});
+    const output = JSON.stringify(records);
+    for (const secret of ["owned subject", "credential-secret", "private model output", "Expected one strict"]) expect(output).not.toContain(secret);
+  } finally { instance.pause(); await instance.drain(); }
+}));
 
 async function provenInterruptedWeave(f: ReturnType<typeof setup>) {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "settlement-proof" });

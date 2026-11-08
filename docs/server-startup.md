@@ -311,6 +311,8 @@ See [production upgrades/recovery](production-deployment.md#5-back-up-upgrade-an
 
 Successful idle polling does not produce Info messages. Invalid configured levels fail startup with a sanitized configuration error. Thought contents, credentials and raw sensitive exceptions are not diagnostic payloads, even at Verbose.
 
+The normal worker's local-processing failure is an Error diagnostic visible at the default level. It includes the run ID, claim generation, a fixed operation stage and a safe category (`protocol-validation`, `binding`, `run-conflict` or `unexpected`). These identify where processing failed and the recognized error type, not the underlying cause; exception messages, stacks, payloads and model output are not logged. Native service unavailability and cancellation retain their separate diagnostics and behavior. The cause of the previously reported first-question Evolve failure remains unknown; its non-recurrence does not establish a fix.
+
 ```sh
 THOUGHTLOOM_LOG_LEVEL=verbose bun run daemon
 # Or, with a generated test launcher:
