@@ -92,12 +92,20 @@ describe("connection client save outcomes", () => {
   }
   test("accepts only the canonical 201 and never sends credentials from the browser", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const result = await commandIdea(clientCommand(intent), { fetch: fakeFetch(async (input, init) => { calls.push({ url: String(input), init }); return Response.json(canonical, { status: 201 }); }) });
+    const response = Response.json(canonical, { status: 201 });
+    const result = await commandIdea(clientCommand(intent), { fetch: fakeFetch(async (input, init) => { calls.push({ url: String(input), init }); return response; }) });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("/api/ideas/root-1");
     expect(new Headers(calls[0]?.init?.headers).has("authorization")).toBe(false);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(intent);
     expect(result.kind).toBe("applied");
+    expect(response.bodyUsed).toBe(true);
+  });
+  test("malformed 201 JSON is consumed and remains uncertain", async () => {
+    const response = new Response("{", { status: 201 });
+    const result = await commandIdea(clientCommand(intent), { fetch: fakeFetch(async () => response) });
+    expect(result).toEqual({ kind: "uncertain", message: "Outcome unconfirmed.", command: intent });
+    expect(response.bodyUsed).toBe(true);
   });
   test("retains an independent submitted snapshot after a dropped request", async () => {
     const mutable = { ...intent, sourceIds: ["source-1"] };
