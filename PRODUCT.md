@@ -21,14 +21,14 @@ Capture and Explore are the primary entry modes. Idea and Evolve are contextual 
 ## Capabilities and Constraints
 
 - The current daemon is the feature boundary; [Daemon API](docs/daemon-api.md) describes implementation. Product-context drafts are intent, not evidence of additional API support.
-- Thoughts, authorship, creation time, and evolution ancestry are immutable. Editable titles are separate metadata. Missing titles display the first five words.
+- Thoughts, authorship, creation time, and evolution ancestry are immutable. Editable titles are separate metadata. Missing text titles use the first five words; media sources use their filename.
 - Development creates distinct thoughts with one evolution parent. Discovered connections are separate. AI contributions stay attributed; reading is not agreement.
 - Rejection/restoration are user-only. Rejected material remains deliberately inspectable by the user but is excluded from AI use.
 - Search supports text retrieval, filters, sorting, and deliberate inclusion of rejected material. Simple export and read-only Agentic export produce Markdown.
 - Saving a capture and background weaving are separate facts. Evolve and Agentic export require server-side agent configuration.
 - Shared navigation is Explore, Capture, and a reserved Settings destination. Settings contents remain undecided.
-- Attachments, Journal, notifications, profiles, an additional agentic Explore mode, and note-text editing are not authorized by the old mockups.
-- Planned client: Next.js/React. Browser → Next.js server → Hono daemon; credentials stay server-side. This design phase does not implement that client or change the daemon.
+- Old mockups do not authorize Journal, notifications, profiles, arbitrary attachments or note-text editing. Separately approved media import and conversational search are implemented within their documented scope.
+- The client uses Next.js/React. Browser → Next.js server → Hono daemon; credentials stay server-side. Unsupported daemon capabilities require discussion rather than visual-driven model rewrites.
 
 ## Brand Commitments
 
@@ -38,7 +38,7 @@ The user requires Ronald Roy's personal brand as the base color influence, inclu
 
 - [README](README.md), [architecture and working agreement](.lore/context/architecture.md), and screen-specific documents in `.lore/context/`.
 - Existing layout references: `.lore/mockups/search-mockup.webp`, `idea-mockup.webp`, and `evolve-mockup.webp`.
-- Current implementation contracts in `docs/daemon-api.md`; no production web client exists yet.
+- Current implementation contracts in `docs/daemon-api.md` and the implemented client system in `apps/web/DESIGN.md`.
 - Mock data used in design options must be labeled illustrative, not read from a personal database.
 
 ## Product Principles
@@ -51,6 +51,6 @@ The user requires Ronald Roy's personal brand as the base color influence, inclu
 
 ## Record Status
 
-The agreed visual design gate is complete: Quiet Night, five desktop compositions, their essential state families, approximate phone adaptations and shared focus/validation/readable-flow rules are approved. No visual question remains for this scope. The minimum [selected handoff](.impeccable/README.md) owns current rules/copy exceptions; the [manifest](.impeccable/selected-assets.json) owns exact image approvals, provenance and the full palette. Individual-use framing and other unconfirmed product details remain revisable.
+The approved direction is implemented and documented in the [client design system](apps/web/DESIGN.md). A small [selected reference set](.impeccable/README.md) preserves visual direction; its [manifest](.impeccable/selected-assets.json) retains exact identities, provenance and the full palette. Git and Beads retain earlier approval history without requiring every state mockup to remain in the working tree.
 
-Phone sketches are approximate, not exact-viewport, touch, keyboard, responsive or accessibility validation. Approved readable-flow rules override tiny scaled raster text and incidental formatting/header variations; Settings remains reserved/undefined and excluded. Actual capability gaps still require discussion. Consumer verification and final implementation-derived design documentation belong to separately authorized client work; this design approval does not authorize implementation or a shipping UI.
+References are not runtime or accessibility certification. Current source, API contracts and controlled tests establish implementation behavior. Readable CSS type and accessible targets override scaled raster text and incidental formatting. Settings remains reserved; individual-use framing and other unconfirmed product details remain revisable. Actual capability gaps still require discussion.

@@ -2,7 +2,7 @@
 
 The user approved the corrected lantern and sprout (including the sprout’s separated gold leaf), their placements, four initial content keepers, revised capture/contribution/evolution, and the two PNG relationship artworks. The user approved production preparation, the exact nine derivatives with “go”, integration with “yes approved you can integrate”, and the in-app placements with “yup”. Integration received independent verification and review before acceptance. Rejected relationship SVGs are not approved. No new artwork or redesign is implied.
 
-[Approved dark family board](production/review/family-dark.png) shows the eleven at actual 16/20/24px; [representative in-app Explore capture](integration-review/content-after-explore-1440.png) is evidence, not an accessibility or performance certification.
+The source/output map below preserves approved identities. Historical family boards and in-app screenshots are unnecessary after implementation; current placements are documented in [DESIGN.md](../../../../apps/web/DESIGN.md) and covered by controlled browser byte/geometry checks, not an accessibility certification.
 
 ## Asset map
 
