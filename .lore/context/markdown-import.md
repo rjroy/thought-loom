@@ -30,7 +30,7 @@ The agreed entry point is an **Import** action to the right of the [Capture](cap
 
 The daemon HTTP workflow and separate web import workspace are implemented. Browser integration keeps the browser → Next.js server → Hono daemon boundary; imported thoughts also open in the existing client views.
 
-URL, media and Obsidian-style vault import remain separate future work. This flow does not authorize filesystem crawling, media attachments or inferred cross-file connections.
+Obsidian-style vault import is no longer a goal (thought-loom-4ca). Vaults often mix thinking with milestones and other time-bound material; Thoughtloom is intended for more timeless thinking, not as a medium for an entire vault. Deliberate Markdown import remains supported. This flow does not authorize filesystem crawling, media attachments or inferred cross-file connections.
 
 ## Current contracts
 
