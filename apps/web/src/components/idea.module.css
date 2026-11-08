@@ -10,6 +10,29 @@
 .relationLabel { display: inline-flex; align-items: center; gap: 0.375rem; }
 .user { color: var(--brand-color-2); font-weight: 650; }
 .ai { color: var(--brand-color-13); font-weight: 650; }
+.source { color: var(--color-body); }
+.sourceDescription { margin: 0; color: var(--color-body); font-size: 1.125rem; overflow-wrap: anywhere; }
+.sourceClarification { max-inline-size: 72ch; margin-block-start: 1.5rem; }
+.view .sourceClarification h2, .clarificationLabel { margin: 0 0 .375rem; color: var(--brand-color-2); font-size: 1rem; font-weight: 650; }
+.clarificationText { margin: 0; color: var(--color-text); font-size: 1.375rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sourceDetails > .metadata { margin-block-start: 1rem; }
+.compactSource { margin-block-end: .75rem; }
+.compactSource .sourceDescription { color: var(--color-muted); font-size: 1rem; }
+.compactSource .sourceClarification { margin-block-start: .5rem; }
+.compactSource .clarificationText { font-size: 1.125rem; }
+.sourceStatus { margin-block-start: 1.5rem; padding-block: 1rem; border-block: 1px solid var(--color-line); overflow-wrap: anywhere; }
+.sourceStatusHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .25rem 1rem; }
+.view .sourceStatus h2 { margin: 0; font-size: 1.25rem; }
+.sourceStatusHeading p { margin: 0; }
+.sourceStatusCopy { max-inline-size: 75ch; margin: .375rem 0 0; }
+.sourceStatusActions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1.5rem; margin-block-start: .5rem; }
+.sourceStatusActions > a { display: inline-flex; align-items: center; min-block-size: 44px; }
+.sourceStatus > .metadata { max-inline-size: 75ch; margin: .375rem 0 0; }
+.sourceLifetime { max-inline-size: 75ch; margin: .5rem 0 0; color: var(--color-muted); font-size: 1rem; }
+.sourceStatus[data-tone="warning"] h2 { color: var(--brand-color-11); }
+.sourceStatus[data-tone="failed"] h2 { color: var(--brand-color-9); }
+.sourceStatus[data-tone="success"] h2 { color: var(--brand-color-10); }
+.sourceStatus[data-tone="muted"] h2 { color: var(--color-body); }
 .rejected { padding-inline: 0.375rem; border: 1px solid var(--color-control-line); border-radius: 0.25rem; color: var(--brand-color-9); }
 .button { display: inline-flex; align-items: center; justify-content: center; min-block-size: 3rem; padding: 0.625rem 1.25rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-ground); color: var(--color-text); font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
 .button:hover { border-color: var(--color-text); }
@@ -76,6 +99,8 @@
   .focus > .primary { inline-size: 100%; margin: 0; }
   .view h1 { font-size: 2rem; }
   .original { font-size: 1.25rem; }
+  .clarificationText { font-size: 1.25rem; }
+  .compactSource .clarificationText { font-size: 1.125rem; }
   .tools { gap: 0.25rem 1.25rem; }
   .more { position: static; }
   .actions { position: static; min-inline-size: 0; margin-block: 0.5rem; }

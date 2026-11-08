@@ -8,6 +8,7 @@ import { createConnection } from "../domain/connection";
 import { createSharedResponse } from "../domain/shared-response";
 import { TitleConflictError, TitleNotFoundError, TitleService } from "../domain/title";
 import { record } from "../domain/validation";
+import { assertWeaveCapability } from "../domain/weave-scheduling";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteTitleRepository } from "./title";
 import { admitWeave } from "./weave-admission";
@@ -45,6 +46,7 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
     const result = this.guarded("execute step",claim,(run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       const operation = parseStepOperation(input);
+      this.requireWeaveCapability(run,operation.type);
       const step = this.readStep(run.id,promptId);
       if (!step || !["completed","processed"].includes(step.state) ||
           protocolJson(step.envelope) !== protocolJson(stepOperationEnvelope(operation))) throw new RunConflictError("Operation differs from the completed prompt request");
@@ -56,6 +58,11 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
         return existing.result;
       }
       if (step.promptId !== run.promptId || step.state !== "completed") throw new RunFenceError("Prompt is no longer current");
+      if (operation.type === "interpretation" && subjectId !== null &&
+          this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(subjectId) &&
+          this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
+        throw new RunConflictError("Source already has an initial interpretation; use Evolve");
+      }
       const effect = this.apply(operation,subjectId);
       const thoughtId = effect.type === "development" || effect.type === "interpretation" ? effect.thought.id : null;
       this.db.run(`INSERT INTO run_operation_receipts (run_id,operation_id,operation_json,thought_id,result_json,format) VALUES (?,?,?,?,?,'step')`,
@@ -98,11 +105,28 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       // Associate the subject and every issued thought: a rejected summary must not
       // expose an outcome that may describe it to AI through another association.
       const issued = this.issued(run.id);
+      if (this.weavePurpose(run) === "media-title-only") {
+        if (issued.length) throw new RunForbiddenError("Media title-only work cannot publish issued knowledge");
+        // A later complete envelope cannot launder a retained forbidden request or a legacy receipt.
+        for (const earlier of this.readSteps(run.id)) {
+          if (earlier.envelope?.kind === "request") assertWeaveCapability("media-title-only",earlier.envelope.request.capability);
+        }
+        const receipts = this.db.query<{ format: string; operation: string }, [string]>(
+          "SELECT format,operation_json AS operation FROM run_operation_receipts WHERE run_id=?").all(run.id);
+        for (const receipt of receipts) {
+          if (receipt.format !== "step") throw new RunForbiddenError("Media title-only work cannot publish legacy operations");
+          assertWeaveCapability("media-title-only",parseStepOperation(JSON.parse(receipt.operation)).type);
+        }
+      }
       const response = createSharedResponse({ id: this.sources.id(), text: step.envelope.reply, state: "complete",
         role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
       new SqliteSharedResponses(this.db,this.logger).save(response);
       this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
-      this.db.run("UPDATE runs SET status='completed',generation=generation+1 WHERE id=?",[run.id]);
+      const missingInterpretation = this.weavePurpose(run) === "ordinary" &&
+        this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(intent.subjectId) !== null &&
+        this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId) === null;
+      this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=? WHERE id=?",
+        [missingInterpretation ? "failed" : "completed",missingInterpretation ? "pending" : "none",run.id]);
     });
   }
   fail(claim: Claim): void {

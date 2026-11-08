@@ -10,12 +10,13 @@ import {
 import styles from "./evolve.module.css";
 import { useContextualBack } from "./contextual-back";
 import { ContentGlyph } from "./content-glyph";
+import { MediaSourceDetails } from "./media-source-details";
 
-const titleOf = (thought: IdeaThought) => thought.title ?? thought.text.trim().split(/\s+/).slice(0, 5).join(" ");
+const titleOf = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
 const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
 const kinds = {
   "captured-original": "Original capture", "user-contribution": "Contribution",
-  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source",
+  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Image or PDF",
 };
 
 export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
@@ -60,7 +61,9 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   const composerHelp = frozen
     ? "The submitted words are preserved. They will not be sent again automatically."
     : blocked ? "You can keep a next draft. Send is paused while this run is active or being checked."
-      : workspace.draft.trim() ? "Send records a new contribution. Saved thoughts are not edited." : null;
+      : workspace.draft.trim() ? workspace.root?.kind === "media-original"
+        ? "Send records a new contribution. The original file and clarification are not edited."
+        : "Send records a new contribution. Saved thoughts are not edited." : null;
   function submit(event: FormEvent) {
     event.preventDefault();
     if (key && canSend) void store.send(key);
@@ -80,7 +83,7 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
           {workspace.rootState === "loading" ? <p role="status">Reading the starting thought…</p>
             : workspace.root ? <>
               <h3>{titleOf(workspace.root)}</h3><Byline thought={workspace.root} />
-              <p className={styles.savedText}>{workspace.root.text}</p>
+              {workspace.root.kind === "media-original" ? <MediaSourceDetails source={workspace.root.mediaSource} compact /> : <p className={styles.savedText}>{workspace.root.text}</p>}
               <Link href={hrefOf(workspace.root.id)} prefetch={false}>Open idea</Link>
             </> : <><p>Starting thought unavailable.</p><p className={styles.muted}>No history scope will be opened automatically.</p></>}
         </aside>
@@ -187,16 +190,16 @@ function Exchange({ value, latest, workspace }: {
 }
 
 function Byline({ thought }: { thought: IdeaThought }) {
-  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : styles.ai}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · <span className={styles.materialLabel}><ContentGlyph kind={thought.kind} size={20} />{kinds[thought.kind]}</span></p>;
+  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : thought.author === "ai" ? styles.ai : styles.source}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · <span className={styles.materialLabel}><ContentGlyph kind={thought.kind === "media-original" ? "imported-original" : thought.kind} size={20} />{kinds[thought.kind]}</span></p>;
 }
 
 function Development({ thought, unconfirmed = false }: { thought: IdeaThought; unconfirmed?: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const abbreviated = thought.text.length > 240;
+  const abbreviated = thought.text !== null && thought.text.length > 240;
   return <article className={styles.development}>
     <Byline thought={thought} /><h3>{titleOf(thought)}</h3>
     {unconfirmed && <p className={styles.muted}>Last confirmed text · this idea could not be refreshed.</p>}
-    <p className={styles.savedText}>{abbreviated && !expanded ? thought.text.slice(0, 240) : thought.text}
+    <p className={styles.savedText}>{abbreviated && !expanded ? thought.text?.slice(0, 240) : thought.text}
       {abbreviated && <> <button className={styles.textButton} type="button" aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} saved development ${titleOf(thought)}`}
         onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "…"}</button></>}

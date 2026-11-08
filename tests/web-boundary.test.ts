@@ -12,6 +12,34 @@ const logger = (records: LogRecord[]) => createLogger("verbose", record => recor
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
 
 describe("web server configuration", () => {
+  test("Next upload proxy accommodates both bounded Markdown and media requests", async () => {
+    const allowance = 4096 + 65536, nextMinimum = 10 * 1024 * 1024;
+    const cases = [
+      {env:{},markdown:1048576,media:16777216},
+      {env:{THOUGHTLOOM_IMPORT_MAX_BYTES:"25165824",THOUGHTLOOM_MEDIA_MAX_BYTES:"20971520"},markdown:25165824,media:20971520},
+      {env:{THOUGHTLOOM_IMPORT_MAX_BYTES:"1048576",THOUGHTLOOM_MEDIA_MAX_BYTES:"31457280"},markdown:1048576,media:31457280},
+      {env:{THOUGHTLOOM_IMPORT_MAX_BYTES:"1024",THOUGHTLOOM_MEDIA_MAX_BYTES:"2048"},markdown:1024,media:2048},
+    ];
+    for (const item of cases) {
+      const env: Record<string,string | undefined> = {PATH:process.env.PATH,...item.env};
+      const proc = Bun.spawn([process.execPath,"--no-env-file","-e",'import config from "./apps/web/next.config.ts"; console.log(JSON.stringify(config.experimental?.proxyClientMaxBodySize))'],
+        {env,stdout:"pipe",stderr:"pipe"});
+      const [stdout,stderr,exitCode] = await Promise.all([new Response(proc.stdout).text(),new Response(proc.stderr).text(),proc.exited]);
+      expect({exitCode,stderr}).toEqual({exitCode:0,stderr:""});
+      expect(JSON.parse(stdout)).toBe(Math.max(nextMinimum,item.markdown + allowance,item.media + allowance));
+    }
+  });
+
+  test("Next rejects invalid configured media upload limits", async () => {
+    for (const value of ["0","-1","1.5","not-a-number","9007199254740991"]) {
+      const proc = Bun.spawn([process.execPath,"--no-env-file","-e",'import "./apps/web/next.config.ts"'],
+        {env:{PATH:process.env.PATH,THOUGHTLOOM_MEDIA_MAX_BYTES:value},stdout:"pipe",stderr:"pipe"});
+      const [stderr,exitCode] = await Promise.all([new Response(proc.stderr).text(),proc.exited]);
+      expect(exitCode).not.toBe(0);
+      expect(stderr).toContain("THOUGHTLOOM_MEDIA_MAX_BYTES");
+    }
+  });
+
   test("Next dev allows only the configured web hostname and rejects invalid origins", async () => {
     const load = async (webOrigin?: string) => {
       const proc = Bun.spawn([process.execPath, "--no-env-file", "-e", 'import config from "./apps/web/next.config.ts"; console.log(JSON.stringify(config.allowedDevOrigins))'], {

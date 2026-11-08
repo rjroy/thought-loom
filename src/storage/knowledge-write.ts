@@ -17,7 +17,7 @@ export class SqliteKnowledgeWriter {
   saveThought(input: Thought): void {
     this.boundary("save thought", () => {
       const thought = createThought(input);
-      if (thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
+      if (thought.kind === "media-original" || thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
       this.db.transaction(() => {
         // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
         this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",

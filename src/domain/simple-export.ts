@@ -28,7 +28,13 @@ export class SimpleExportService {
       `- Origin: ${JSON.stringify(thought.origin)}`,
       `- Sources: ${JSON.stringify(thought.sourceIds)}`,
       "",
-      thought.text,
+      ...(thought.kind === "media-original" ? [
+        `- File: ${JSON.stringify(thought.mediaSource.name)}`,
+        `- Media type: ${JSON.stringify(thought.mediaSource.mimeType)}`,
+        `- Byte length: ${thought.mediaSource.byteLength}`,
+        `- File authorship: ${thought.mediaSource.fileAuthorship}`,
+        ...(thought.mediaSource.clarification === null ? [] : ["", "### User clarification", "", thought.mediaSource.clarification]),
+      ] : [thought.text]),
     ].join("\n")).join("\n\n") + "\n";
   }
 }

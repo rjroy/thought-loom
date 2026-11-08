@@ -24,6 +24,8 @@ export interface ConfiguredWorkerDependencies extends RunSources {
   readonly searchClock?: SearchClockDependencies;
   /** Runtime-owned capability. Direct isolated worker fixtures do not acquire a deployed daemon lease. */
   readonly executionOwner?: ExecutionOwnerLease;
+  /** Resolve originals from the daemon-owned store shared with OpenCode. */
+  readonly mediaPath?: (sourceId: string) => Promise<string>;
 }
 
 /** One worker and one lazy attachment snapshot; no SDK/service work at construction or daemon readiness. */

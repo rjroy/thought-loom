@@ -22,7 +22,10 @@ export interface RunStep {
   /** Confirmed capability output may be retained before processing binds it to the next exact input. */
   readonly result: unknown | null;
 }
-export interface NextStep { readonly promptId: string; readonly input: string }
+export interface NextStep {
+  readonly promptId: string;
+  readonly input: string;
+}
 export type CancellationState = "none" | "pending" | "settled";
 export class ProtocolValidationError extends Error {}
 

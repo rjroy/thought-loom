@@ -3,6 +3,7 @@ import type { WebConfig } from "./config";
 import { isTrustedRequest } from "./request-guard";
 import { clientClock, validClock } from "./search-clock";
 import { headers, problem, safeId, record, exact, id, nonnegative, nonempty, timestamp, session, run, readBounded } from "./search-sessions";
+import { mediaThought } from "../features/idea/media";
 
 type Dependencies = DaemonDependencies & {readonly config: WebConfig};
 type Operation = {readonly path: string; readonly kind: "messages" | "discoveries" | "preview" | "remove" | "turn" | "by-key" | "check" | "stop";
@@ -12,13 +13,14 @@ const ids = (v: unknown): v is string[] => Array.isArray(v) && v.every(id) && ne
 const keyPattern = /^[A-Za-z0-9._:-]{1,128}$/;
 const titleAuthor = (v: unknown) => v === null || v === "user" || v === "ai";
 const author = (v: unknown) => v === "user" || v === "ai" || v === "source";
-const material = (v: unknown) => typeof v === "string" && ["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original"].includes(v);
+const material = (v: unknown) => typeof v === "string" && ["captured-original","user-contribution","ai-interpretation","developing-idea","imported-original","media-original"].includes(v);
 function thoughtSummary(v: unknown): boolean {
-  return record(v) && exact(v,["id","title","titleAuthor","author","kind","createdAt"]) && id(v.id) && nonempty(v.title) && titleAuthor(v.titleAuthor) && author(v.author) && material(v.kind) && timestamp(v.createdAt);
+  return record(v) && exact(v,["id","title","titleAuthor","author","kind","createdAt"]) && id(v.id) && nonempty(v.title) && titleAuthor(v.titleAuthor) && author(v.author) && material(v.kind) && (v.kind !== "media-original" || v.author === "source") && timestamp(v.createdAt);
 }
 function thought(v: unknown, expected: string): boolean {
+  if (mediaThought(v)) return v.id === expected && v.rejected === undefined && v.titleAuthor !== undefined && timestamp(v.createdAt);
   return record(v) && exact(v,["id","text","title","titleAuthor","author","kind","createdAt","origin","parentId","sourceIds"]) && v.id === expected &&
-    nonempty(v.text) && (v.title === null || nonempty(v.title)) && titleAuthor(v.titleAuthor) && author(v.author) && material(v.kind) && timestamp(v.createdAt) && nonempty(v.origin) && (v.parentId === null || id(v.parentId)) && ids(v.sourceIds);
+    nonempty(v.text) && (v.title === null || nonempty(v.title)) && titleAuthor(v.titleAuthor) && author(v.author) && material(v.kind) && v.kind !== "media-original" && timestamp(v.createdAt) && nonempty(v.origin) && (v.parentId === null || id(v.parentId)) && ids(v.sourceIds);
 }
 function message(v: unknown, history: boolean): boolean {
   return record(v) && exact(v,["id","runId","position","role","text","createdAt","disposition","evidenceThoughtIds","availability"]) && id(v.id) && id(v.runId) && nonnegative(v.position) &&

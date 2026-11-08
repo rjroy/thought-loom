@@ -27,7 +27,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       const clock = run.kind === "search" ? this.searchClock.prepare(run,step,step.promptId) : null;
       if (clock && clock.context === null) throw new RunConflictError("Initial search clock attachment required");
       const search = clock?.context ? initialSearchContext(this.db,run,clock.context) : null;
-      const context = search?.context ?? this.initialContext(run);
+      const context = search?.context ?? this.selectInitialContext(run);
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
       const input = nonEmpty(render(context),"initial input");
       if (search) for (const ref of search.dependencies) this.track(run.id,ref);
@@ -40,7 +40,17 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     prepared.clock?.committed();
     return prepared.step;
   }
-  private initialContext(run: RunRecord): InitialRunContext {
+  /** Commit normal context before asynchronous path resolution, so rejection fences an entered read. */
+  initialContext(claim: Claim): InitialRunContext {
+    return this.guarded("select worker context",claim,run => {
+      const context = this.selectInitialContext(run);
+      for (const thought of context.thoughts) this.trackThought(run.id,thought);
+      for (const connection of context.connections) this.trackConnection(run.id,connection);
+      for (const response of context.responses) this.trackResponse(run.id,response);
+      return context;
+    });
+  }
+  private selectInitialContext(run: RunRecord): InitialRunContext {
     requireOrdinaryRun(run);
     if (run.kind === "export") {
       const intent = new SqliteAgenticExports(this.db,this.sources).intent(run.id);
@@ -54,6 +64,10 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     const subjectId = run.kind === "weave" ? this.readWeaveIntent(run.id)?.subjectId : run.inputThoughtId;
     const subject = subjectId === null || subjectId === undefined ? undefined : visible.get(subjectId);
     if (!subject) throw new RunConflictError("Run subject identity is unavailable");
+    const purpose = this.weavePurpose(run);
+    if (purpose === "media-title-only") {
+      return {job:{kind:"weave",subjectId:subject.id,purpose},thoughts:[subject],connections:[],responses:[]};
+    }
     const thoughts: Thought[] = [];
     const selected = new Set<string>();
     let thought: Thought | undefined = subject;

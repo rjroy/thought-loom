@@ -6,10 +6,11 @@ import type { Discovery, Message, Page, Workspace } from "../features/agentic-se
 import { searchHistoryHref, searchSessionHref } from "../features/agentic-search/location";
 import { useAgenticSearchController } from "./agentic-search-provider";
 import styles from "./agentic-search.module.css";
+import { MediaSourceDetails } from "./media-source-details";
 
 const kinds = {
   "captured-original": "Original capture", "user-contribution": "Contribution", "ai-interpretation": "Interpretation",
-  "developing-idea": "Developing idea", "imported-original": "Imported source",
+  "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Image or PDF",
 } as const;
 
 export function SearchConversation({ page, more, busy }: { readonly page: Page<Message>; readonly more: () => void; readonly busy: boolean }) {
@@ -60,7 +61,11 @@ export function SearchDiscoveries({ id, workspace, history, rememberPosition }: 
         {!history && <button className={`${styles.textButton} ${styles.dangerText}`} type="button" disabled={removing !== null || workspace.busy} onClick={() => void remove(entry.id)}>{removing === entry.id ? "Removing…" : "Remove from search"}</button>}
       </div>}
       {!history && preview && preview.thought.id === entry.thought?.id && <section className={styles.preview} aria-label="Idea preview">
-        <h4>{preview.thought.title ?? preview.thought.text.trim().split(/\s+/).slice(0, 5).join(" ")}</h4><p className={styles.message}>{preview.thought.text}</p>
+        <h4>{preview.thought.title ?? (preview.thought.kind === "media-original" ? preview.thought.mediaSource.name : preview.thought.text.trim().split(/\s+/).slice(0, 5).join(" "))}</h4>
+        {preview.thought.kind === "media-original" ? <>
+          <MediaSourceDetails source={preview.thought.mediaSource} compact />
+          <p className={styles.metadata}>Search can read this descriptor, clarification and recorded interpretations. It cannot open the original file.</p>
+        </> : <p className={styles.message}>{preview.thought.text}</p>}
       </section>}
     </li>)}</ol>
     {notice && <p role="status" className={styles.metadata}>{notice}</p>}
@@ -76,6 +81,6 @@ function DiscoveryHeading({ entry }: { readonly entry: Discovery }) {
   const thought = entry.thought;
   if (!thought) return <h3>Idea unavailable</h3>;
   return <><h3>{thought.title ?? "Untitled idea"}</h3><p className={styles.byline}>
-    <span className={thought.author === "user" ? styles.user : thought.author === "ai" ? styles.ai : styles.source}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · {kinds[thought.kind]}
+    <span className={thought.author === "user" ? styles.user : thought.author === "ai" ? styles.ai : styles.source}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · <span>{kinds[thought.kind]}</span>
   </p></>;
 }

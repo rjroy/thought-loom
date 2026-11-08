@@ -16,6 +16,7 @@ import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser, checkIdeaGlyphs } from ".
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
+import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface } from "./media-import.runtime";
 import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
@@ -56,7 +57,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
     "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
     "apps/web/src/app/api/ideas/[id]/route.ts", "apps/web/src/server/idea.ts",
-    "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts",
+    "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts", "apps/web/src/features/idea/media.ts",
     "apps/web/src/app/api/evolve/thoughts/[id]/route.ts", "apps/web/src/app/api/evolve/thoughts/[id]/responses/[responseId]/route.ts",
     "apps/web/src/app/api/evolve/runs/[id]/route.ts", "apps/web/src/server/evolve.ts",
     "apps/web/src/features/evolve/location.ts", "apps/web/src/features/evolve/types.ts", "apps/web/src/features/evolve/validation.ts", "apps/web/src/features/evolve/request.ts",
@@ -65,12 +66,16 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/features/export/types.ts", "apps/web/src/features/export/request.ts", "apps/web/src/features/export/sources.ts",
     "apps/web/src/components/export-markdown.ts",
     "apps/web/src/app/import/page.tsx", "apps/web/src/components/capture-provider.tsx", "apps/web/src/components/capture.module.css",
+    "apps/web/src/app/import/media/page.tsx", "apps/web/src/components/media-import-provider.tsx", "apps/web/src/components/media-import-view.tsx", "apps/web/src/components/media-import.module.css",
+    "apps/web/src/components/media-source-details.tsx", "apps/web/src/components/media-source-status.tsx",
+    "apps/web/src/features/media/types.ts", "apps/web/src/features/media/request.ts", "apps/web/src/features/media/controller.ts", "apps/web/src/features/media/source-controller.ts",
     "apps/web/src/components/import-view.tsx", "apps/web/src/components/import-provider.tsx", "apps/web/src/components/import-inspection.tsx", "apps/web/src/components/import.module.css",
     "apps/web/src/features/import/types.ts", "apps/web/src/features/import/request.ts",
     "apps/web/src/server/capture.ts",
     "apps/web/src/server/client.ts", "apps/web/src/server/config.ts",
     "apps/web/src/server/daemon.ts", "apps/web/src/server/request-guard.ts",
     "apps/web/src/server/import.ts",
+    "apps/web/src/server/media-import-route.ts",
     "apps/web/src/server/search-sessions.ts", "apps/web/src/server/search-session-handler.ts",
     "apps/web/src/server/search-clock.ts", "apps/web/src/server/search-workspace.ts", "apps/web/src/server/search-workspace-handler.ts",
     "apps/web/src/app/api/search-sessions/[id]/messages/route.ts", "apps/web/src/app/api/search-sessions/[id]/discoveries/route.ts", "apps/web/src/app/api/search-sessions/[id]/discoveries/[entryId]/route.ts",
@@ -82,6 +87,9 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/imports/markdown/[id]/files/route.ts", "apps/web/src/app/api/imports/markdown/[id]/files/[fileId]/route.ts", "apps/web/src/app/api/imports/markdown/[id]/seal/route.ts",
     "apps/web/src/app/api/imports/namespaces/route.ts", "apps/web/src/app/api/imports/runs/[id]/route.ts", "apps/web/src/app/api/imports/runs/[id]/stop/route.ts",
     "apps/web/src/app/api/imports/sources/route.ts", "apps/web/src/app/api/imports/sources/[id]/route.ts", "apps/web/src/app/api/imports/sources/[id]/parts/route.ts", "apps/web/src/app/api/imports/sources/[id]/raw/route.ts",
+    "apps/web/src/app/api/imports/media/route.ts", "apps/web/src/app/api/imports/media/by-key/[key]/route.ts",
+    "apps/web/src/app/api/imports/media-sources/[id]/route.ts", "apps/web/src/app/api/imports/media-sources/[id]/raw/route.ts", "apps/web/src/app/api/imports/media-sources/[id]/retry/route.ts",
+    "apps/web/src/app/api/imports/media-runs/[id]/route.ts", "apps/web/src/app/api/imports/media-runs/[id]/stop/route.ts",
   ];
   const fixture = resolve(temp, "workspace");
   for (const input of inputs) {
@@ -272,6 +280,32 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    const mediaCase = process.env.THOUGHTLOOM_TEST_MEDIA_CASE;
+    if (mediaCase) {
+      const checks = new Map([
+        ["entry", [checkMediaImportEntry]], ["upload-recovery", [checkMediaUploadRecovery]],
+        ["source-status", [checkMediaSourceStatus]], ["source-gates", [checkMediaSourceGates]],
+        ["source-retry", [checkMediaSourceRetry]], ["source-rejected", [checkMediaSourceRejected]],
+        ["source-restore", [checkMediaSourceRestore]], ["source-title-race", [checkMediaSourceTitleRace]],
+        ["source-command-race", [checkMediaSourceCommandRace]],
+        ["surface-explore", [checkMediaExploreSurface]], ["surface-evolve", [checkMediaEvolveSurface]],
+        ["surface-ask", [checkMediaAskSurface]], ["surface-export", [checkMediaExportSurface]],
+        ["media-surfaces", [checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface]],
+      ]).get(mediaCase);
+      assert.ok(checks, "Unknown focused media case");
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+          for (const check of checks) {
+            const page = await browser.newPage({ viewport });
+            try { await check(page, origin); }
+            finally { await page.close(); }
+          }
+        }
+      } finally { await browser.close(); }
+      console.log(`Media ${mediaCase} browser checks passed`);
+      return;
+    }
     if (process.env.THOUGHTLOOM_TEST_ROOT_SPLASH === "1") {
       const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
       try {
@@ -428,6 +462,7 @@ async function main(): Promise<void> {
           assert.equal(await page.getByRole("heading", { name: "Capture" }).count(), 1);
           await checkImportEntry(page, { origin });
           await checkImportBrowser(page, fixtureImport, { origin });
+          await checkMediaImportEntry(page, origin);
           await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
           await checkCaptureBrowser(page, fixtureDaemon);
           await page.getByRole("link", { name: "Explore", exact: true }).click();
@@ -468,6 +503,11 @@ async function main(): Promise<void> {
           const companion = await browser.newPage({ viewport });
           try { await check(companion, fixtureAgenticSearch, { origin, narrow: viewport.width < 500 }); }
           finally { await companion.close(); }
+        }
+        for (const check of [checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface]) {
+          const mediaPage = await browser.newPage({ viewport });
+          try { await check(mediaPage, origin); }
+          finally { await mediaPage.close(); }
         }
       }
     } finally { await browser.close(); }

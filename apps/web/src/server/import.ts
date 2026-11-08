@@ -1,6 +1,7 @@
 import { requestDaemon, type DaemonDependencies, type DaemonRequest } from "./daemon";
 import type { WebConfig } from "./config";
 import { isTrustedRequest } from "./request-guard";
+import { mediaThought } from "../features/idea/media";
 
 type Dependencies = DaemonDependencies & { readonly config: WebConfig; readonly maxFileBytes: number };
 const headers = { "cache-control": "private, no-store" };
@@ -85,7 +86,19 @@ async function boundedBody(request: Request, limit: number): Promise<Uint8Array<
   return result;
 }
 
-type Operation = { path: string; method: "GET" | "POST"; kind: "json" | "upload" | "raw"; batchId?: string; key?: boolean };
+type Operation = { path: string; method: "GET" | "POST"; kind: "json" | "upload" | "raw"; batchId?: string; key?: boolean; media?: "upload" | "receipt" | "source" | "raw" | "retry" | "run"; sourceId?: string };
+
+function weaveRun(value: unknown, expectedId?: string): boolean {
+  return record(value) && Object.keys(value).every(k => ["id","kind","status","confirmedThoughtIds","responseId"].includes(k))
+    && id(value.id) && (expectedId === undefined || value.id === expectedId) && value.kind === "weave"
+    && typeof value.status === "string" && ["queued","submitting","running","uncertain","completed","interrupted","failed"].includes(value.status)
+    && Array.isArray(value.confirmedThoughtIds) && value.confirmedThoughtIds.every(id) && new Set(value.confirmedThoughtIds).size === value.confirmedThoughtIds.length
+    && (value.responseId === null || id(value.responseId));
+}
+function retryEligibility(value: unknown): boolean {
+  return record(value) && Object.keys(value).length === 2 && (value.eligible === true && value.reason === null ||
+    value.eligible === false && typeof value.reason === "string" && ["source-rejected","interpretation-exists","work-active","work-unsettled","work-completed"].includes(value.reason));
+}
 
 function operation(request: Request): Operation | null {
   const url = new URL(request.url);
@@ -99,7 +112,23 @@ function operation(request: Request): Operation | null {
   let key = false;
   let list = false;
   let history = false;
-  if (p[0] === "markdown") {
+  let media: Operation["media"];
+  let sourceId: string | undefined;
+  if (p[0] === "media" && p.length === 1 && method === "POST") { path = "/imports/media"; kind = "upload"; key = true; media = "upload"; }
+  else if (p[0] === "media" && p[1] === "by-key" && p.length === 3 && p[2] && method === "GET") {
+    let decoded: string;
+    try { decoded = decodeURIComponent(p[2]); } catch { return null; }
+    if (!keyPattern.test(decoded)) return null;
+    path = `/imports/media/by-key/${p[2].includes("%") ? encodeURIComponent(decoded) : decoded}`; media = "receipt";
+  } else if (p[0] === "media-sources" && p[1] && safeId(p[1])) {
+    sourceId = p[1]; path = `/media-sources/${sourceId}`;
+    if (p.length === 2 && method === "GET") media = "source";
+    else if (p.length === 3 && p[2] === "raw" && method === "GET") { path += "/raw"; kind = "raw"; media = "raw"; }
+    else if (p.length === 3 && p[2] === "retry" && method === "POST") { path += "/retry"; key = true; media = "retry"; }
+    else return null;
+  } else if (p[0] === "media-runs" && p[1] && safeId(p[1]) && ((p.length === 2 && method === "GET") || (p.length === 3 && p[2] === "stop" && method === "POST"))) {
+    path = `/runs/${p[1]}${method === "POST" ? "/stop" : ""}`; media = "run";
+  } else if (p[0] === "markdown") {
     if (p.length === 1 && (method === "GET" || method === "POST")) { path = "/imports/markdown"; list = method === "GET"; key = method === "POST"; }
     else if (p[1] && safeId(p[1])) {
       batchId = p[1]; path = `/imports/markdown/${batchId}`;
@@ -124,11 +153,12 @@ function operation(request: Request): Operation | null {
   const query = new URLSearchParams();
   if (history) query.set("scope", "history");
   for (const [name, value] of url.searchParams) {
+    if ((media === "source" || media === "raw") && name === "scope" && (value === "normal" || value === "history") && !query.has(name)) { query.set(name,value); continue; }
     if (!list || !["limit", "cursor"].includes(name) || query.has(name)) return null;
     query.set(name, value);
   }
   if (query.size) path += `?${query}`;
-  return { path, method: method as "GET" | "POST", kind, batchId, key };
+  return { path, method: method as "GET" | "POST", kind, batchId, key, media, sourceId };
 }
 
 export function createImportBoundary(deps: Dependencies): (request: Request) => Promise<Response> {
@@ -155,7 +185,10 @@ export function createImportBoundary(deps: Dependencies): (request: Request) => 
           if (new TextEncoder().encode(metadata).byteLength > metadataLimit) return problem(400);
           if (file.size > deps.maxFileBytes) return problem(413);
           const parsed: unknown = JSON.parse(metadata);
-          if (!record(parsed) || Object.keys(parsed).length !== 1 || typeof parsed.relativePath !== "string") return problem(400);
+          if (!record(parsed)) return problem(400);
+          if (op.media === "upload") {
+            if (Object.keys(parsed).some(name => name !== "clarification") || !(parsed.clarification === undefined || parsed.clarification === null || (typeof parsed.clarification === "string" && !!parsed.clarification.trim()))) return problem(400);
+          } else if (Object.keys(parsed).length !== 1 || typeof parsed.relativePath !== "string") return problem(400);
           body = new FormData();
           body.set("metadata", metadata); body.set("file", file);
         } else {
@@ -166,7 +199,7 @@ export function createImportBoundary(deps: Dependencies): (request: Request) => 
           const parsed: unknown = JSON.parse(body);
           if (!record(parsed)) return problem(400);
           const names = Object.keys(parsed);
-          if (op.key ? names.some(name => name !== "namespaceId") || ("namespaceId" in parsed && typeof parsed.namespaceId !== "string") : names.length !== 0) return problem(400);
+          if (op.media === "retry" ? names.length !== 0 : op.key ? names.some(name => name !== "namespaceId") || ("namespaceId" in parsed && typeof parsed.namespaceId !== "string") : names.length !== 0) return problem(400);
         }
       }
     } catch { return problem(400); }
@@ -176,17 +209,50 @@ export function createImportBoundary(deps: Dependencies): (request: Request) => 
         const expectedId = runPath.split("/")[2];
         if (!expectedId) return problem(400);
         const classification = await requestDaemon(deps.config, { path: runPath, method: "GET" }, deps);
-        if (classification.status !== 200 || !importRun(await classification.json(), expectedId)) return problem(502);
+        const classified: unknown = await classification.json();
+        if (classification.status !== 200 || !(op.media === "run" ? weaveRun(classified,expectedId) : importRun(classified, expectedId))) return problem(502);
       }
-      const daemonRequest: DaemonRequest = { path: op.path, method: op.method, body, ...(op.key && key ? { idempotencyKey: key } : {}) };
+      const daemonRequest: DaemonRequest = { path: op.path, method: op.method, body, ...(op.key && key ? { idempotencyKey: key } : {}), ...(op.media ? {preserveErrorBody:true} : {}) };
       const upstream = await requestDaemon(deps.config, daemonRequest, deps);
-      if (!upstream.ok) return problem([400, 404, 409, 413, 415, 422, 503].includes(upstream.status) ? upstream.status : 502);
+      if (!upstream.ok) {
+        const status = [400, 401, 403, 404, 409, 413, 415, 422, 503].includes(upstream.status) ? upstream.status : 502;
+        if (op.media && status !== 502) {
+          let value: unknown;
+          try { value = await upstream.json(); } catch { return problem(status); }
+          const codes: Record<number,readonly string[]> = {400:["invalid-media-request"],403:["forbidden"],404:["not-found"],
+            409:["idempotency-conflict","media-processing-conflict"],413:["source-too-large"],415:["unsupported-media-type"],
+            422:["unsupported-source-content"],503:["receiver-busy","storage-unavailable","original-unavailable"]};
+          if (record(value) && typeof value.code === "string" && codes[status]?.includes(value.code)) {
+            return Response.json({message:"Unable to confirm outcome.",code:value.code},{status,headers});
+          }
+        }
+        return problem(status);
+      }
       if (op.kind === "raw") {
         if (upstream.status !== 200) return problem(502);
+        if (op.media === "raw") {
+          const mime = upstream.headers.get("content-type"), extensions: Record<string,string> = {"image/png":"png","image/jpeg":"jpg","image/gif":"gif","image/webp":"webp","application/pdf":"pdf"};
+          const extension = mime === null ? undefined : extensions[mime];
+          if (!mime || !extension) return problem(502);
+          return new Response(upstream.body,{status:200,headers:{...headers,"content-type":mime,"content-disposition":`attachment; filename="source.${extension}"`,"x-content-type-options":"nosniff"}});
+        }
         return new Response(upstream.body, { status: 200, headers: { ...headers, "content-type": "text/markdown; charset=utf-8", "content-disposition": "attachment; filename=source.md", "x-content-type-options": "nosniff" } });
       }
       const value: unknown = await upstream.json();
       if (!record(value)) return problem(502);
+      if (op.media) {
+        if (op.media === "upload" || op.media === "receipt") {
+          if (!(op.media === "upload" ? [200,202].includes(upstream.status) : upstream.status === 200) || Object.keys(value).some(k => !["thought","run"].includes(k)) || !mediaThought(value.thought) || !weaveRun(value.run)) return problem(502);
+        } else if (op.media === "source") {
+          if (upstream.status !== 200 || Object.keys(value).some(k => !["thought","run","retry"].includes(k)) || !mediaThought(value.thought) || value.thought.mediaSource.id !== op.sourceId || !(value.run === null || weaveRun(value.run)) || !retryEligibility(value.retry)) return problem(502);
+        } else if (op.media === "retry") {
+          if (![200,202].includes(upstream.status) || Object.keys(value).some(k => k !== "run") || !weaveRun(value.run)) return problem(502);
+        } else if (op.media === "run") {
+          const runId = op.path.split("/")[2];
+          if (!runId || upstream.status !== 200 || !weaveRun(value,runId)) return problem(502);
+        }
+        return Response.json(value,{status:upstream.status,headers});
+      }
       if (op.kind === "upload" && (![200, 202].includes(upstream.status) || !importFile(value.file, op.batchId))) return problem(502);
       const [pathname] = op.path.split("?");
       const parts = pathname?.split("/") ?? [];

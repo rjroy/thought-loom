@@ -10,6 +10,7 @@ import { ExportProvider } from "../components/export-provider";
 import { ContextualBack, ContextualBackProvider } from "../components/contextual-back";
 import { CaptureProvider } from "../components/capture-provider";
 import { ImportProvider } from "../components/import-provider";
+import { MediaImportProvider } from "../components/media-import-provider";
 import { AgenticSearchProvider } from "../components/agentic-search-provider";
 import { RootSplashShell } from "../components/root-splash-shell";
 import "./globals.css";
@@ -43,7 +44,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
            <ExportProvider>
            <ContextualBackProvider>
            <CaptureProvider>
-            <ImportProvider>
+             <ImportProvider>
+             <MediaImportProvider>
            <AgenticSearchProvider>
           <RootSplashShell>
             <div className="site-header-inner">
@@ -62,7 +64,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main-content" className="workspace" tabIndex={-1}>
             {children}
           </main>
-           </AgenticSearchProvider>
+            </AgenticSearchProvider>
+            </MediaImportProvider>
            </ImportProvider>
            </CaptureProvider>
            </ContextualBackProvider>

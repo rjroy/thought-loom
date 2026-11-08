@@ -1,24 +1,25 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import type { Thought } from "../domain/thought";
+import type { MaterialKind, Thought } from "../domain/thought";
 import type { Connection } from "../domain/connection";
 import { RejectionService } from "../domain/rejection";
 import { CreationService } from "../domain/creation";
-import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
-import { parseEnvelope, type RunStep } from "../domain/run-protocol";
-import { record } from "../domain/validation";
-import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type ContextRef, type ContextValue, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
-import type { WeaveIntent } from "../domain/run-operations";
+import type { SharedResponse } from "../domain/shared-response";
+import { parseEnvelope, protocolJson, type RunStep } from "../domain/run-protocol";
+import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type ContextRef, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
+import { isStepOperationCapability, type WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
-import { SqliteSharedResponses } from "./shared-response";
 import { SqliteKnowledgeWriter } from "./knowledge-write";
 import { insertRun, readRun } from "./run-record";
 import { immediate } from "./transaction";
 import { requireSearchExecutionOwner, searchExecutionContextValid } from "./search-run-authority";
 import { searchRevision } from "../domain/search-session-guards";
+import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose } from "../domain/weave-scheduling";
+import { isReadCapability } from "../domain/capability";
+import { interruptOrdinaryRun, issuedRunThoughts, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type RunVisibility } from "./run-fences";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
-type Visible = (ref: ContextRef) => ContextValue | null;
+type Visible = RunVisibility;
 interface StepRow {
   readonly runId: string;
   readonly position: number;
@@ -57,6 +58,9 @@ export class SqliteRunAggregate {
     if (run.generation !== claim.generation || !["queued","submitting","running","uncertain"].includes(run.status)) throw new RunFenceError();
     if (run.kind === "evolve" && run.inputThoughtId === null) throw new RunFenceError("Legacy evolve input identity unavailable; cannot resume safely");
     if (run.kind === "search") requireSearchExecutionOwner(this.db,run);
+    // Also fences native binding/submission and already-prepared/replayed media jobs.
+    const purpose = this.weavePurpose(run);
+    this.requireWeaveHistory(run,purpose);
     return run;
   }
   /** Persist the interruption before throwing: throwing inside the transaction would undo the fence. */
@@ -114,6 +118,41 @@ export class SqliteRunAggregate {
     if (!row || row.subjectId === null || row.triggerId === null) return null;
     return { subjectId: row.subjectId, triggerId: row.triggerId };
   }
+  private weaveSubject(run: RunRecord): { readonly kind: MaterialKind; readonly triggerId: string } | null {
+    if (run.kind !== "weave") return null;
+    const intent = this.readWeaveIntent(run.id);
+    if (!intent) return null; // Legacy unknown input keeps its existing, limited operation checks.
+    const subject = this.db.query<{ kind: MaterialKind }, [string]>("SELECT kind FROM thoughts WHERE id=?").get(intent.subjectId);
+    if (!subject) throw new RunNotFoundError();
+    return { kind: subject.kind, triggerId: intent.triggerId };
+  }
+  protected weavePurpose(run: RunRecord): WeavePurpose {
+    const subject = this.weaveSubject(run);
+    return subject === null ? "ordinary" : resolveWeavePurpose(subject.kind,subject.triggerId);
+  }
+  protected requireWeaveCapability(run: RunRecord, capability: string): void {
+    assertWeaveCapability(this.weavePurpose(run),capability);
+  }
+  private requireWeaveHistory(run: RunRecord, purpose: WeavePurpose): void {
+    if (purpose !== "media-title-only") return;
+    // Check retained protocol, not prompt wording. A prepared successor may already contain a forbidden cached read.
+    // Do not load or rewrite input/result bytes merely to establish execution eligibility.
+    const history = this.db.query<{ promptId: string; state: RunStep["state"]; envelope: string | null; hasResult: number }, [string]>(
+      `SELECT prompt_id AS promptId,state,envelope_json AS envelope,result_json IS NOT NULL AS hasResult
+       FROM run_steps WHERE run_id=? ORDER BY position`).all(run.id);
+    for (const step of history) {
+      const predecessor = step.promptId !== run.promptId;
+      if (predecessor && (step.state !== "processed" || step.hasResult === 0)) {
+        throw new RunForbiddenError("Media title-only history has an unconfirmed predecessor");
+      }
+      // A current, unprocessed request may be recorded for audit, then denied by dispatch and retired by failure.
+      // Once it has a result, was processed, or has a successor, it must have been an authorized title-only request.
+      if (!predecessor && step.state !== "processed" && step.hasResult === 0) continue;
+      const envelope = step.envelope === null ? null : parseEnvelope(step.envelope);
+      if (envelope?.kind !== "request") throw new RunForbiddenError("Media title-only history has no authorized predecessor request");
+      assertWeaveCapability(purpose,envelope.request.capability);
+    }
+  }
   protected readReceipt(runId: string, operationId: string): ReceiptRow | null {
     return this.db.query(`SELECT operation_json AS operation,result_json AS result,thought_id AS thoughtId,format
       FROM run_operation_receipts WHERE run_id=? AND operation_id=?`).get(runId,operationId) as ReceiptRow | null;
@@ -135,14 +174,26 @@ export class SqliteRunAggregate {
     if (!row) throw new RunConflictError("Run has no current prompt");
     return decodeStep(row);
   }
+  /** A successor uses the exact result already confirmed by its canonical dispatcher. */
+  protected confirmedStepResult(step: RunStep, result: unknown): string {
+    const resultJson = protocolJson(result);
+    if (step.result !== null && protocolJson(step.result) !== resultJson) throw new RunConflictError("Result differs from the dispatched step result");
+    if (step.envelope?.kind === "request" && isReadCapability(step.envelope.request.capability) && step.result === null) {
+      throw new RunConflictError("Read result must be committed with its context witnesses before advancing");
+    }
+    if (step.envelope?.kind === "request" && isStepOperationCapability(step.envelope.request.capability)) {
+      const receipt = this.readReceipt(step.runId,step.promptId);
+      if (!receipt || receipt.format !== "step" || protocolJson(JSON.parse(receipt.result)) !== resultJson) {
+        throw new RunConflictError("Write result must match its committed step receipt");
+      }
+    }
+    return resultJson;
+  }
   protected issued(id: string): readonly string[] {
-    const rows = this.db.query("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position").all(id) as { id: string }[];
-    return rows.map(row => row.id);
+    return issuedRunThoughts(this.db,id);
   }
   protected associations(run: RunRecord): Associations | null {
-    const thoughtIds = this.issued(run.id);
-    if (thoughtIds.length) return { role: "addendum", thoughtIds };
-    return run.kind === "evolve" && run.inputThoughtId !== null ? { role: "fallback", thoughtIds: [run.inputThoughtId] } : null;
+    return runAssociations(this.db,run);
   }
   protected checkAssociations(run: RunRecord, response: SharedResponse, visible: Visible): void {
     const expected = this.associations(run);
@@ -163,44 +214,18 @@ export class SqliteRunAggregate {
       this.db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);
       return;
     }
-    const row = this.db.query("SELECT draft_json AS draft, response_id AS responseId FROM run_replies WHERE run_id=?").get(run.id) as { draft: string | null; responseId: string | null } | null;
-    const associations = this.associations(run);
-    if (row?.draft && !row.responseId && associations) {
-      const response = createSharedResponse({ ...record(JSON.parse(row.draft)), ...associations, state: "interrupted" });
-      new SqliteSharedResponses(this.db,this.logger).save(response);
-      this.db.run("UPDATE run_replies SET draft_json=NULL,response_id=? WHERE run_id=?", [response.id,run.id]);
-    }
-    // Unmapped legacy input is retained, never guessed. Native settlement must outlive this local authority fence.
-    this.db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?", [run.id]);
+    interruptOrdinaryRun(this.db,run,reason,this.logger);
   }
   /** Scoped reads cached only for this synchronous transaction, not across rejection changes. */
   protected visibility(): Visible {
-    const service = this.rejection(); const scope = { actor: "ai", mode: "normal" } as const;
-    let thoughts: ReadonlyMap<string, Thought> | undefined;
-    let connections: ReadonlyMap<string, Connection> | undefined;
-    const responses = new Map<string, SharedResponse | null>();
-    return ref => {
-      if (ref.kind === "thought") {
-        thoughts ??= new Map(service.listThoughts(scope).map(item => [item.id,item]));
-        return thoughts.get(ref.id) ?? null;
-      }
-      if (ref.kind === "connection") {
-        connections ??= new Map(service.listConnections(scope).map(item => [item.id,item]));
-        return connections.get(ref.id) ?? null;
-      }
-      if (ref.kind !== "response") throw new RunConflictError();
-      if (!responses.has(ref.id)) responses.set(ref.id,service.getResponse(scope,ref.id));
-      return responses.get(ref.id) ?? null;
-    };
+    return scopedRunVisibility(this.rejection());
   }
   contextRefs(runId: string): readonly ContextRef[] {
     return this.db.query("SELECT kind,ref_id AS id FROM run_context WHERE run_id=? ORDER BY rowid").all(runId) as ContextRef[];
   }
   protected contextValid(run: RunRecord, visible: Visible): boolean {
     if (run.kind === "search") return searchExecutionContextValid(this.db,run.id);
-    const subject = this.readWeaveIntent(run.id)?.subjectId;
-    const thoughtIds = [...this.issued(run.id), ...(run.inputThoughtId === null ? [] : [run.inputThoughtId]), ...(subject === undefined ? [] : [subject])];
-    return thoughtIds.every(id => visible({kind:"thought",id}) !== null) && this.contextRefs(run.id).every(ref => visible(ref) !== null);
+    return ordinaryRunContextValid(this.db,run,visible);
   }
   protected track(id: string, ref: ContextRef, fullRead = false): void {
     // The retained-search INSERT guard deliberately rejects duplicate insertion, even an UPSERT's pre-update path.

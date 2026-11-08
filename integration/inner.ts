@@ -9,6 +9,7 @@ import type { Browser, Page, Download } from "@playwright/test";
 import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import type { InboxItem, NativeMessage, NativeSession, PublicClient } from "../src/agent/opencode-adapter";
 import { AgentSessionMissingError } from "../src/agent/errors";
+import { independentPng } from "../tests/fixtures/media-rasters";
 const ownedRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
 const { chromium, expect } = ownedRequire("@playwright/test") as typeof import("@playwright/test");
 
@@ -91,7 +92,7 @@ class FixtureClient implements PublicClient {
         ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "Owned integrated development", sourceIds: [] } } }
         : job.kind === "weave" && step === 1
           ? { version: 1, kind: "request", request: { capability: "interpretation", arguments: { text: "Owned integrated interpretation", sourceIds: [string(job.subjectId)] } } }
-        : job.kind === "weave" && step === 2
+        : job.kind === "weave" && step === 2 && !(Array.isArray(first.originals) && first.originals.length > 0)
           ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Owned generated title" } } }
         : { version: 1, kind: "complete", reply: job.kind === "evolve" ? "Owned integrated reply" : "No further findings" };
     const messages = this.messages.get(input.sessionID); assert.ok(messages);
@@ -453,6 +454,7 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     });
     await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
     await page.getByRole("link", { name: /^import$/i }).or(page.getByRole("button", { name: /^import$/i })).click();
+    await page.getByRole("button", { name: /^Markdown\b/i }).click();
     await expect(page.getByRole("heading", { name: "Import Markdown" })).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({ name: "owned.md", mimeType: "text/markdown", buffer: Buffer.from(importedText) });
     const batchReceived = page.waitForResponse(response => new URL(response.url()).pathname === "/api/imports/markdown" && response.request().method() === "POST", { timeout: 10000 });
@@ -529,6 +531,109 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     assert.ok(importedReportText.includes(importedId) && importedReportText.includes("thought author: source; kind: imported-original"));
     await settleKnowledge(dbPath, pulse);
     assert.deepEqual(knowledge(dbPath), importedBeforeExport, "imported source exports must not mutate knowledge");
+
+    // One test-owned PNG crosses the browser, Next, real format validator and private store.
+    const imageBytes = Buffer.from(independentPng()), imageName = "owned-shared-image.png";
+    const imageClarification = `  Compare cobalt regions ${viewport.width}.\nKeep this exact wording.  `;
+    await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Import", exact: true }).click();
+    await page.getByRole("button", { name: /^Image or PDF\b/i }).click();
+    await expect(page.getByRole("heading", { name: "Import image or PDF" })).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({name:imageName,mimeType:"image/png",buffer:imageBytes});
+    await page.getByRole("textbox", { name: /^Clarification/i }).fill(imageClarification);
+    const imageUpload = page.waitForResponse(response => new URL(response.url()).pathname === "/api/imports/media" && response.request().method() === "POST", {timeout:10000});
+    await page.getByRole("button", { name: "Import file", exact: true }).click();
+    const imageResponse = await imageUpload;
+    assert.equal(imageResponse.status(), 202);
+    const imageReceipt = record(await imageResponse.json()), imageThought = record(imageReceipt.thought), imageSource = record(imageThought.mediaSource);
+    const imageThoughtId = string(imageThought.id), imageSourceId = string(imageSource.id), imageRunId = string(record(imageReceipt.run).id);
+    assert.notEqual(imageThoughtId,imageSourceId);
+    assert.equal(imageThought.kind,"media-original"); assert.equal(imageThought.author,"source"); assert.equal(imageThought.text,null);
+    assert.equal(imageThought.title,null); assert.equal(imageThought.parentId,null); assert.deepEqual(imageThought.sourceIds,[]);
+    assert.equal(imageSource.name,imageName); assert.equal(imageSource.fileAuthorship,"unverified");
+    assert.equal(imageSource.clarification,imageClarification); assert.equal(imageSource.clarificationAuthor,"user");
+    assert.equal(imageSource.byteLength,imageBytes.length); assert.equal(imageSource.mimeType,"image/png");
+    await expect(page.getByRole("heading", { name: "Original saved" })).toBeVisible();
+    await until("Media interpretation", async () => {
+      const status = record((await daemonCall(running,`/runs/${encodeURIComponent(imageRunId)}`)).value);
+      if (status.status === "failed" || status.status === "interrupted") throw new Error(`Media weave ended ${String(status.status)}`);
+      return status.status === "completed";
+    },pulse);
+    await settleKnowledge(dbPath,pulse);
+    const imageChildren = await daemonCall(running,`/thoughts/${encodeURIComponent(imageThoughtId)}/children?scope=normal`);
+    assert.equal(imageChildren.status,200); assert.ok(Array.isArray(imageChildren.value));
+    const imageInterpretation = imageChildren.value.map(record).find(child => child.kind === "ai-interpretation");
+    assert.ok(imageInterpretation); assert.equal(imageInterpretation.parentId,imageThoughtId);
+    assert.equal(imageInterpretation.text,"Owned integrated interpretation");
+    const canonicalMedia = record((await daemonCall(running,`/thoughts/${encodeURIComponent(imageThoughtId)}?scope=normal`)).value);
+    assert.equal(canonicalMedia.text,null); assert.equal(canonicalMedia.title,null);
+    assert.equal(record(canonicalMedia.mediaSource).clarification,imageClarification);
+    fake.sourceId = imageThoughtId;
+
+    await page.goto(`${origin}/explore?q=cobalt&author=source&kind=media-original`, {waitUntil:"networkidle"});
+    const imageCard = page.locator("article").filter({has:page.locator(`a[href^="/ideas/${encodeURIComponent(imageThoughtId)}"]`)});
+    await expect(imageCard).toBeVisible(); await expect(imageCard).toContainText(imageName);
+    await imageCard.locator(`a[href^="/ideas/${encodeURIComponent(imageThoughtId)}"]`).first().click();
+    await expect(page.getByRole("heading",{level:1,name:imageName})).toBeVisible();
+    await expect(page.getByText(imageClarification,{exact:true})).toBeVisible();
+    await expect(page.getByText(/original authorship unverified/i).first()).toBeVisible();
+    await expect(page.locator(`a[href^="/ideas/${encodeURIComponent(string(imageInterpretation.id))}"]`).first()).toBeVisible();
+    const imageDownload = page.waitForEvent("download");
+    await page.getByRole("button",{name:"Download original",exact:true}).click();
+    assert.deepEqual(await bytes(await imageDownload),imageBytes);
+
+    await page.getByRole("link",{name:/evolve this idea/i}).click();
+    await expect(page.getByRole("textbox",{name:"Your contribution"})).toBeVisible();
+    if (viewport.width < 500) await page.getByRole("button",{name:/^Starting thought/}).click();
+    const imageRail = page.locator("#evolve-starting-context");
+    await expect(imageRail.getByRole("heading",{name:imageName,exact:true})).toBeVisible();
+    await expect(imageRail.getByText(/PNG image.*original authorship unverified/i)).toBeVisible();
+    const railClarification = imageRail.getByText(imageClarification,{exact:true});
+    await expect(railClarification).toBeVisible();
+    await expect(railClarification).toHaveJSProperty("textContent",imageClarification);
+    await searchWalkthrough(page,origin,running,dbPath,imageThoughtId,"cobalt",viewport.width < 600,pulse);
+
+    await page.goto(`${origin}/export?thoughtId=${encodeURIComponent(imageThoughtId)}`,{waitUntil:"networkidle"});
+    await expect(page.getByText(imageName,{exact:true}).first()).toBeVisible();
+    const mediaBeforeExport = knowledge(dbPath);
+    await page.getByRole("button",{name:/create simple export/i}).click();
+    const mediaSimple = page.getByRole("region",{name:"Simple Markdown preview"});
+    await expect(mediaSimple).toContainText(imageName); await expect(mediaSimple).toContainText("cobalt");
+    await page.getByRole("textbox",{name:"Request"}).fill("Report on the retained cobalt source");
+    const mediaReport = await captureResponse(page,"/api/export/agentic",() => page.getByRole("button",{name:"Create report"}).click());
+    const mediaReportId = string(record(mediaReport.run).id);
+    await until("Media source report",async () => record((await daemonCall(running,`/runs/${mediaReportId}`)).value).status === "completed",pulse);
+    await page.getByRole("button",{name:"Check this run"}).click();
+    await expect(page.getByRole("heading",{name:"Report ready"})).toBeVisible();
+    await expect(page.locator(`a[href="/ideas/${encodeURIComponent(imageThoughtId)}"]`).last()).toBeVisible();
+    const mediaArtifact = await request(`/exports/agentic/${mediaReportId}`);
+    assert.equal(mediaArtifact.status,200);
+    const mediaReportText = await mediaArtifact.text();
+    assert.ok(mediaReportText.includes(imageThoughtId) && mediaReportText.includes("thought author: source; kind: media-original."));
+    assert.ok(mediaReportText.includes("Access to the descriptor or clarification does not imply binary file access."));
+    await settleKnowledge(dbPath,pulse);
+    assert.deepEqual(knowledge(dbPath),mediaBeforeExport,"media source exports must not mutate knowledge");
+
+    await page.goto(`${origin}/ideas/${encodeURIComponent(imageThoughtId)}`,{waitUntil:"networkidle"});
+    await page.getByRole("button",{name:"More actions"}).click();
+    await page.getByRole("button",{name:/reject idea/i}).click();
+    await page.getByRole("dialog").getByRole("button",{name:"Reject this idea"}).click();
+    await expect(page.getByRole("heading",{name:"Idea rejected"})).toBeVisible();
+    assert.equal((await request(`/media-sources/${imageSourceId}`)).status,404);
+    assert.equal((await request(`/media-sources/${imageSourceId}/raw`)).status,404);
+    const deniedMedia = await fetch(new URL(`/media-sources/${imageSourceId}/raw?scope=history`,running.url),
+      {headers:{authorization:`Bearer ${ai}`},signal:AbortSignal.timeout(3000)});
+    assert.equal(deniedMedia.status,403);
+    const deniedThought = await fetch(new URL(`/thoughts/${imageThoughtId}`,running.url),
+      {headers:{authorization:`Bearer ${ai}`},signal:AbortSignal.timeout(3000)});
+    assert.equal(deniedThought.status,404);
+    await page.goto(`${origin}/explore?q=cobalt&author=source&kind=media-original`,{waitUntil:"networkidle"});
+    await expect(page.locator(`a[href^="/ideas/${encodeURIComponent(imageThoughtId)}"]`)).toHaveCount(0);
+    await page.goto(`${origin}/ideas/${encodeURIComponent(imageThoughtId)}?scope=history`,{waitUntil:"networkidle"});
+    await expect(page.getByText(/rejected/i).first()).toBeVisible();
+    const historyDownload = page.waitForEvent("download");
+    await page.getByRole("button",{name:"Download original",exact:true}).click();
+    assert.deepEqual(await bytes(await historyDownload),imageBytes);
     assert.deepEqual(leaked, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     console.log(`Shared-record integration passed: ${viewport.width}x${viewport.height}`);

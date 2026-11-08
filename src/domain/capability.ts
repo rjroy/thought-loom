@@ -7,8 +7,7 @@ import { protocolJson } from "./run-protocol";
 import { nonEmpty, oneOf, record } from "./validation";
 
 /** Model controls only the capability and its strictly validated arguments. */
-export type ReadCapabilityRequest =
-  | { readonly capability: "search"; readonly arguments: { readonly query: string } }
+export type ReadCapabilityRequest = { readonly capability: "search"; readonly arguments: { readonly query: string } }
   | { readonly capability: "readThought" | "readConnection" | "readResponse"; readonly arguments: { readonly id: string } };
 export type CapabilityRequest = ReadCapabilityRequest
   | { readonly capability: "development"; readonly arguments: { readonly parentId: string; readonly text: string; readonly sourceIds: readonly string[] } }

@@ -24,6 +24,129 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Media-source domain and persistence checks
+
+```sh
+bun --no-env-file test tests/domain.test.ts tests/simple-export.test.ts tests/agentic-export.test.ts
+bun --no-env-file test tests/media-source-migration.test.ts tests/media-source-projections.test.ts tests/search-capability-media-result.test.ts
+bun --no-env-file test tests/media-source-migration.test.ts tests/capability-migration.test.ts tests/agentic-search-migration.test.ts tests/markdown-import-foundation.test.ts
+```
+
+Controlled domain values cover the null-text `media-original` source, separately attributed exact user clarification, filename display fallback and honest export descriptors. Existing textual kinds must still reject null or blank text.
+
+The focused three-file persistence group uses the real migration and in-memory or uniquely owned `/tmp/opencode` SQLite databases, explicit IDs/clocks/digests and controlled clarification with BOM, whitespace, CRLF and non-ASCII text. Metadata bytes are sentinel inputs, not image/PDF decoding fixtures. It checks the initially empty store identity, explicit idempotent initialization, source-first atomic writer rollback, immutable associations, null-text/source-authorship guards, hydrated raw/scoped/search/context/capability/saved-search/export projections, rejection exclusion and clarification/title-only FTS/vocabulary. Projection/vocabulary checks need the [native spelling extension](server-startup.md#native-spelling-extension) built as described above. Retained-result decoder controls cover valid media projections and malformed/extra descriptor fields.
+
+`media-source-migration` uses [`fixtures/pre-media-schema.sql`](../tests/fixtures/pre-media-schema.sql), a frozen selected predecessor schema populated with Markdown document/seal membership, exact bytes, rowids, source seals, execution/search history and an additional incoming FK/index/trigger. It compares preservation through repeat migration and file reopen, checks FK integrity, and injects a failure immediately after real destructive closure DDL to check complete schema/data rollback and clean retry. The broader migration command retains older predecessor and Markdown-preservation checks rather than replacing them with empty-database setup.
+
+Successful-upgrade comparisons retain historical step bytes and original index/trigger definitions. [`sqlite-foreign-keys`](../tests/fixtures/sqlite-foreign-keys.ts) normalizes only SQLite's FK-group ordinals: composite grouping, component sequence, referenced columns and all action/match semantics remain compared. Destructive-failure rollback compares the complete schema, every row column and raw FK ordinals; the frozen SQL fixture is not regenerated through current migration. A separate owned development-schema fixture checks file-run cleanup: core records survive, affected active runs become interrupted with pending cancellation, and a fault after real DDL restores both schema and data before a successful retry/reopen. No personal database is used.
+
+These persistence tests do not establish file access, format validation, HTTP media import or model behavior. The separate worker/file/validator groups below cover their own boundaries. The current Next.js decoders remain text-only; existing web checks protect text/Markdown behavior, not media rendering. Commands and coverage descriptions are not a claim that a particular working-tree revision has passed verification.
+
+### Shared-file media worker checks
+
+```sh
+bun --no-env-file test tests/media-path-worker.test.ts
+bun --no-env-file test tests/media-path-worker.test.ts --test-name-pattern '^normal Weaver reopens a retained source by its shared absolute file path$'
+```
+
+[`media-path-worker`](../tests/media-path-worker.test.ts) uses a real retained test-owned PNG, the private file service and SQLite, plus the normal `RunWorker`/`OpenCodeAdapter` with a scripted decoded native client. Its injected resolver accepts only the daemon-owned source ID and returns the verified actual absolute original path. Neither the operator service nor a model provider is a fixture.
+
+The checks cover normal Weaver `readThought` continuation, initial media summary instructions and canonical searchable interpretation/Full reply, Evolve ancestor and independently read supporting-source paths, rejection→restoration during a held path read, restricted Search/Export/Markdown segmentation, and title-clear without file reopening or another interpretation. A failed-source case exercises ordinary worker cancellation followed by deliberate retry using the same retained original, including pending-cancellation denial, idempotence and duplicate-interpretation prevention. Ordinary Thought records and capability results must not contain filesystem paths. The held-read control checks committed context, immediate generation fencing and no late continuation/publication while retaining the file.
+
+These tests establish managed path delivery through normal text prompts and application persistence, not actual OpenCode filesystem-tool execution or model understanding. The fixture's injected validator checks owned bytes, not image/PDF format validation. The daemon and OpenCode must share filesystem access. The separate [HTTP workflow suite](#media-import-http-workflow-checks) covers daemon wiring and actual validation; neither suite provides a browser media flow.
+
+### Media admission and lifecycle checks
+
+```sh
+bun --no-env-file test tests/media-admission.test.ts tests/media-weave-purpose.test.ts
+bun --no-env-file test tests/media-path-worker.test.ts tests/media-admission.test.ts tests/media-source-migration.test.ts tests/media-source-projections.test.ts tests/media-weave-purpose.test.ts tests/media-files.test.ts tests/media-files-faults.test.ts
+```
+
+[`media-admission`](../tests/media-admission.test.ts) checks the [internal source-plus-normal-weave command](database-schema.md#source-admission-and-lifecycle) with two connections to owned SQLite and controlled metadata. Source/root/title/seal and initial run/step commit together. A real SQL fault after initial-step insertion must leave both connections unchanged before clean retry. Controls cover exact replay with newly allocated daemon identities, payload conflicts, independent equal-byte imports, metadata-only source non-adoption, user-only admission/retry, repeat migration/reopen and deliberate retry only after failed/interrupted work has settled cancellation. An existing interpretation prevents another initial summary.
+
+[`media-weave-purpose`](../tests/media-weave-purpose.test.ts) checks conditional title fill/completion, prohibited title-only reads/writes, receipt/cache and legacy-write bypasses, and late user-title protection. Prepared successors with forbidden title-only history are refused before native submission without rewriting retained input; a valid title-fill successor remains replayable. Normal Evolve contribution/development behavior remains available. Ordinary Stop, recovery, cancellation and knowledge-operation coverage stays in `worker`, `run-protocol-sqlite` and `run-operations`; no separate media execution lifecycle is used.
+
+### Media import HTTP workflow checks
+
+```sh
+bun --no-env-file test tests/media-import-api.test.ts
+bun --no-env-file test tests/media-import-api.test.ts --test-name-pattern '^owned media upload retains its original and queues normal weaving without agent configuration$'
+bun --no-env-file test tests/media-import-api.test.ts tests/media-path-worker.test.ts tests/media-admission.test.ts tests/markdown-import-api.test.ts tests/worker.test.ts tests/opencode-adapter.test.ts
+```
+
+The nine cases in [`media-import-api`](../tests/media-import-api.test.ts) use an actual loopback Hono daemon, owned file-backed SQLite/private media directories, synthetic valid PNG/PDF bytes and the real bounded validator child. [`fixtures/media-import-api.ts`](../tests/fixtures/media-import-api.ts) supplies explicit test credentials/configuration, a 4096-byte file limit, a controlled polling callback and a deterministic decoded native client. It never attaches to the operator service or a provider. SQL inspection uses read-only connections, not fabricated execution records.
+
+Coverage includes authenticated upload/configless queuing; auth/role denial while the entire body is withheld; closed multipart fields, size/type and corrupt-pixel refusal without admission; same-key replay/conflicts/by-key recovery and independent equal-byte imports; exact download headers/bytes and normal/history rejection scopes; configured normal-worker PNG/PDF path delivery, clarification/default instructions and canonical child/Full reply; HTTP failed-source retry after actual normal cancellation; orderly restart/paired copies/marker-mismatch refusal with clean startup retry; and held normal native work joined during shutdown before agentless reopen without resend. Public receipts/Thoughts contain no filesystem paths, and controlled diagnostic checks exclude private input.
+
+The suite covers the current [backend contract](daemon-api.md#retained-media-import-and-source-inspection), not actual OpenCode filesystem/MCP tools, model understanding, provider compatibility, a browser media workflow, arbitrary OS-crash/power-loss recovery or every backup utility. Restore checks use stopped owned data and agentless inspection, not moved-path native-session recovery. Broader file faults, format/resource/race and ordinary lifecycle controls remain in their focused suites below; the HTTP suite does not duplicate all of them. Coverage descriptions are not a claim that checks were rerun for a docs-only change.
+
+### Manual media import walkthrough
+
+Use an **owned test daemon** with a fresh temporary database/media directory, test-only credentials and no agent configuration. Start it with explicit test settings and `bun --no-env-file src/daemon/main.ts`, with `THOUGHTLOOM_AGENT_CONFIG` absent from that process environment; do not use a persistent launcher or personal library. Set `DAEMON` to its actual loopback readiness URL and `USER_TOKEN` to its test user credential. Without agents this walkthrough makes no model call; positive interpretation/failure/retry uses the deterministic HTTP suite above.
+
+From the repository root, create a test-owned PNG using the existing independent fixture:
+
+```sh
+WORK="$(mktemp -d /tmp/opencode/thoughtloom-media-manual.XXXXXXXX)"
+MEDIA_TEST_FILE="$WORK/owned.png" bun --no-env-file -e 'import { independentPng } from "./tests/fixtures/media-rasters.ts"; const file = process.env.MEDIA_TEST_FILE; if (!file) throw new Error("Missing owned output path"); await Bun.write(file, independentPng());'
+curl -sS -D "$WORK/upload.headers" -o "$WORK/admission.json" \
+  -H "Authorization: Bearer $USER_TOKEN" -H 'Idempotency-Key: owned-image-1' \
+  --form-string 'metadata={"clarification":"Describe the two colored regions."}' \
+  -F "file=@$WORK/owned.png;type=image/png;filename=owned.png" "$DAEMON/imports/media"
+```
+
+Check the response is `202`, then copy `thought.mediaSource.id`, `thought.id` and `run.id` from `admission.json` into `SOURCE_ID`, `THOUGHT_ID` and `RUN_ID`. They are distinct identities. Use that same upload key to recover its receipt, inspect the queued run and compare the exact original:
+
+```sh
+curl -sS -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/imports/media/by-key/owned-image-1"
+curl -sS -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/runs/$RUN_ID"
+curl -sS -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/media-sources/$SOURCE_ID"
+curl --fail -sS -D "$WORK/download.headers" -H "Authorization: Bearer $USER_TOKEN" \
+  "$DAEMON/media-sources/$SOURCE_ID/raw" -o "$WORK/download.png"
+cmp -- "$WORK/owned.png" "$WORK/download.png"
+# Expected 409: the configless initial run is queued, not a safely failed interpretation.
+curl -i -sS -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: owned-retry-1' -d '{}' "$DAEMON/media-sources/$SOURCE_ID/retry"
+```
+
+The download headers must include `image/png`, the safe download filename, `nosniff` and `no-store`. Repeat the identical upload command for `200` with the same identities, not another queued run. To exercise deliberate rejected-source inspection:
+
+```sh
+curl -i -sS -X POST -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/thoughts/$THOUGHT_ID/reject"
+# Expected 404 under normal scope; the retained original is not deleted.
+curl -i -sS -H "Authorization: Bearer $USER_TOKEN" "$DAEMON/media-sources/$SOURCE_ID"
+curl --fail -sS -H "Authorization: Bearer $USER_TOKEN" \
+  "$DAEMON/media-sources/$SOURCE_ID/raw?scope=history" -o "$WORK/history.png"
+cmp -- "$WORK/owned.png" "$WORK/history.png"
+```
+
+Do not edit SQL status or cancellation fields to manufacture a retry. Stop the owned daemon cleanly before removing only its known test database/media directory and the workspace created here. See [paired backup/restore](server-startup.md#paired-media-backup-and-restore); this walkthrough does not use or reset personal data.
+
+### Private media-file service checks
+
+```sh
+bun --no-env-file test tests/media-files.test.ts tests/media-files-faults.test.ts
+```
+
+These tests use owned Linux directories and SQLite fixtures, explicit identities/clocks, and an injected validator that accepts sentinel bytes. They exercise private marker/identity initialization, publication without overwriting, fingerprint-verified reads and stable absolute `originalPath`, corruption/link refusal, cancellation, reference-aware cleanup, active staging, joined close and lifetime fencing. The service requires a synchronous trusted admission callback that owns its SQL transaction; filesystem work stays outside that transaction.
+
+The fault suite supplies instance-local filesystem delegates for `sync`, `link` and `unlink`, performing real owned I/O and injecting failures or held completion at selected publication boundaries. It checks that failed publication does not falsely admit a source or destroy an existing original, that ambiguous SQL/link outcomes preserve referenced bytes, that unsafe layouts are refused, and that shutdown joins held I/O before releasing descriptors. No global filesystem mock is installed.
+
+This is not evidence of image/PDF decoding, parser subprocess containment, arbitrary process-crash recovery, daemon media integration or power-loss durability. No original from a personal directory, operator service or provider is a fixture. The sentinel validator in these tests is not the separate bounded format validator.
+
+### Bounded media validation checks
+
+```sh
+bun --no-env-file test tests/media-validation-rasters.test.ts tests/media-validation-pdf.test.ts
+bun --no-env-file test tests/media-validator.test.ts tests/media-validator-races.test.ts
+```
+
+These isolated checks exercise the [internal validator](server-startup.md#internal-media-validation), not a daemon upload or a browser flow. They use synthetic, test-owned bytes and explicit test-owned budgets. Raster controls include independently framed PNG/GIF data, JPEG/WebP fixtures, corrupt and truncated pixels, later animation frames, APNG refusal, unsupported content and byte/dimension/pixel/frame boundaries. PDF controls use synthetic classic and library-written documents, public parser objects, page/object/depth limits, active or embedded content, encrypted inputs and a dangling trailer `Encrypt` reference. They do not use a personal file or a provider.
+
+The Cantoo 2.11.1 classic writer encrypts streams but does not encrypt Info strings in the encryption fixture. The controlled encrypted documents therefore omit `Info` and contain a known page-content stream. Tests check the security dictionary and permissions, ciphertext, wrong-password refusal and exact plaintext recovery with the test-owned password. Unencrypted metadata coverage remains separate. Production validation supplies no password and rejects encryption, not a decryption feature.
+
+Supervisor tests launch an owned Bun child through the real `prlimit` command with explicit test limits, check inherited DATA/CPU/core limits via `/proc/self/limits`, and exercise genuine PNG/PDF worker inputs. Controlled child substitutions cover strict result shape, bad MIME, extra output, crashes, nonzero exits, output flooding, CPU/wall termination, environment isolation, cancellation and borrowed descriptors. Instance-local gates exercise same-size file mutation during feeding, abort or early child exit while pumping, and delayed stdout/stderr EOF after child exit before the next lane may start. These checks do not establish containment for every native allocation, format or race, actual daemon integration, or real service/provider behavior. Commands describe coverage, not a claim that the current working tree has passed them.
+
 ### Runtime execution-owner checks
 
 ```sh
@@ -38,7 +161,7 @@ File-backed daemon checks require the [supported Linux/local path boundary](serv
 
 Configured preflight registers inside the existing run-flight map; runtime shutdown seals/joins application handlers, then takes final run/cleanup-tail/shared-resolver and import-driver drains before closing the knowledge DB and lease. Native adapter lifetime fences do not widen native permissions or replace claim/context checks. Existing held-SDK and import lifecycle cases remain important; expand controlled coverage for held service resolution, direct non-supervisor ticks, listener error with admitted handlers, path/inode replacement, sidecar permissions/hard links and unsupported mounts/filesystems. Lease acquisition alone is not remote cancellation settlement or delayed-admission absence. Retained cleanup and explicit internal retention/purged cleanup have separate focused checks below; the default no-controller facet still refuses bound-session purge.
 
-`agent-execution-provenance` uses real migration, file-backed runtime leases and the injected decoded native client. Its frozen legacy fixture checks preserved rowids/bytes/index/trigger definitions, nullable binding FK/null old rows, reopen/repeated migration and invalid owner FK rejection. Injection immediately after actual registry-table creation checks complete schema/data rollback with FKs enabled. A real search turn checks setup attribution before `sessionCreate`, submission under the same registered runtime ID, immutability and actual completion. Expanded controls preserve populated pre-provenance submission strings, reject registration against copied/released lease boundaries, and keep isolated workers honestly unqualified. Config-less restart records fresh immutable owner IDs with the same canonical DB identity/protocol; bare acquisition adds no registry row. Fixture INSERTs must name columns; preservation comparisons must project historical columns and assert additive nullable attribution separately. No PID/heartbeat or legacy string infers an owner. These tests alone do not establish cleanup predecessor-drain/restart or held native races; the separate retained-cleanup cases cover their stated boundaries. Registry membership alone settles no remote work or bound Delete. Source-copy inputs include `storage/execution-owner-schema.ts` and the lease/path modules; maintain the actual runtime import closure.
+`agent-execution-provenance` uses real migration, file-backed runtime leases and the injected decoded native client. Its isolated legacy fixture and [frozen selected pre-provenance Search closure](../tests/fixtures/pre-execution-provenance.sql) check preserved rowids/bytes/index/trigger definitions, nullable binding FK/null old rows, reopen/repeated migration and invalid owner FK rejection. Injection immediately after actual registry-table creation checks complete schema/data rollback with FKs enabled. A real search turn checks setup attribution before `sessionCreate`, submission under the same registered runtime ID, immutability and actual completion. Expanded controls preserve populated pre-provenance submission strings, reject registration against copied/released lease boundaries, and keep isolated workers honestly unqualified. Config-less restart records fresh immutable owner IDs with the same canonical DB identity/protocol; bare acquisition adds no registry row. Fixture INSERTs must name columns; preservation comparisons must project historical columns and assert additive nullable attribution separately. No PID/heartbeat or legacy string infers an owner. These tests alone do not establish cleanup predecessor-drain/restart or held native races; the separate retained-cleanup cases cover their stated boundaries. Registry membership alone settles no remote work or bound Delete. Source-copy inputs include `storage/execution-owner-schema.ts` and the lease/path modules; maintain the actual runtime import closure.
 
 The focused `bun --no-env-file test tests/markdown-import-parser.test.ts` checks the pure Markdown import parser's UTF-8 byte coverage, opaque frontmatter, complete blocks and dependency-safe grouping, strict selection envelope, and structural fallback. Test-owned wrappers around the real parser also check one AST pass across preparation and partitioning. Genuine preparations are deeply frozen and registered privately to their parser instance; partitioning rechecks source-byte fingerprints and coverage without reparsing. Cloned, forged, cross-instance, or byte-mismatched preparations are rejected. These tests make no import, daemon, or provider calls. Import workers use this parser.
 
@@ -208,6 +331,16 @@ The Idea metadata check requires About to share the existing desktop action row 
 
 For a focused Explore browser check, run `THOUGHTLOOM_TEST_EXPLORE=1 bun --no-env-file run web:test:runtime`. It includes imported-source authorship and material filters, their counts, query forwarding and bookmark restoration, using test-owned search results. This focused mode does not replace the complete runtime check.
 
+### Media client boundary and browser checks
+
+`tests/web-import-boundary.test.ts` covers fixed Next media upload, original-key receipt lookup, scoped source reads, retry, weave status/Stop and private download. It checks trust, bounded requests, strict receipts, sanitized errors and safe encoded keys. `tests/web-boundary.test.ts` covers the shared transport and both upload limits in Next's proxy configuration. `tests/web-media-client.test.ts` exercises actual multipart serialization through the client and Next boundary, including quoted versus literal-percent filenames and release of local file references only after confirmed receipts.
+
+The foundation companion `apps/web/tests/media-import.runtime.ts` uses test-owned files and controlled same-origin responses at desktop and phone widths. It covers the single Capture chooser and draft return, explicit upload, frozen inputs/key, uncertain admission and deliberate same-key replay, source/interpretation separation, exact-byte download, latest source status, retry/Stop uncertainty and explicit rejected inspection. Controlled held reads reproduce restore, title-save/output, and ordinary-command/output refresh races; canonical content and source status must settle without manual recovery or extra writes.
+
+The default `web:test:runtime` includes these cases. For focused investigation, use `THOUGHTLOOM_TEST_MEDIA_CASE=entry` with that command, or select `upload-recovery`, `source-status`, `source-gates`, `source-retry`, `source-rejected`, `source-restore`, `source-title-race`, or `source-command-race`. Prefer one default run for combined verification rather than repeatedly installing/building a fixture for each case. Both browser allowlists explicitly include the media client and route inputs. An outer fixture running the harness must also retain the tracked artwork references used by existing Capture, Explore and glyph byte-comparison checks; production public copies alone do not replace those test inputs.
+
+These controlled browser checks do not establish provider understanding, actual OpenCode tool access, shared-record media continuity, physical-device behavior or screen-reader certification. Use the backend HTTP suite for owned media persistence/worker contracts; shared-record browser coverage is described separately below. No operator service or personal media is a fixture.
+
 ### Root splash checks
 
 The user-approved root intro has a [source-preserving package](../.impeccable/candidates/root-splash/README.md). Its two public WebPs are byte-identical extractions from the immutable approved study; no image encoder, generator, heavy tracing or screenshot is used in the runtime. Explicit mechanical checks are:
@@ -247,9 +380,13 @@ These selected modes are focused checks, not replacements for the complete runti
 
 `web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.
 
+The allowlist in [`integration.bootstrap.ts`](../apps/web/tests/integration.bootstrap.ts) follows the daemon's runtime imports and the media client workflow. It includes daemon `import-body.ts`/`media-routes.ts`, domain `media-import.ts`, and storage `media-import.ts`, `media-admission.ts`, `media-files.ts`, `media-file-paths.ts`, `media-validator.ts`, its child entry `media-validator-worker.ts`, `media-validation.ts` and `media-pdf-validation.ts`, alongside `run-fences.ts` and the media metadata/migration modules. The child entry is a file input even though launched by URL rather than a static import. Worker modules still receive a resolver function; the daemon owns construction. Keep the copied closure aligned with actual imports/child entries. Source inspection alone is not a harness rerun.
+
 Unlike the per-screen fake-daemon runtime, this walkthrough connects the browser and production Next server to a real owned Hono daemon backed by temporary SQLite and injected deterministic fake-agent callbacks. Desktop and narrow paths follow the same Capture-created identity through Explore, Idea, Evolve and both exports, including the actual persisted AI interpretation, its parent/provenance, title changes, rejection/restoration and mounted known-run return. Non-export work settles by explicit state predicates before knowledge-table snapshots, and the intended Evolve follow-up weave must publicly complete rather than merely reach any terminal status. Fake interpretations cite their own job's fully read subject. Run/report bookkeeping may change without implying a knowledge mutation. Held fake responses are released before daemon drain, and cleanup attempts all owned resources even if an earlier release fails.
 
 A separate imported-record path selects and uploads test-owned Markdown in the browser through the Next import workspace, then opens its report, retained original and imported Idea against the real owned daemon. The fixture supplies strict fake-SDK segmentation using the submitted manifest. It checks exact source bytes, imported attribution, user-only original access and completed weaving, then follows that actual imported record through filtered Explore, Idea, Evolve, Simple export and an Agentic report with a source citation. Browser requests go through Next.js, never directly to the daemon. Both desktop and narrow viewports exercise this path.
+
+The media path uploads an independently generated valid PNG through the same browser boundary, retains its actual source/run identities, and waits for a canonical fake-agent interpretation. It verifies exact clarification, unverified file authorship, filename fallback and original download bytes, then follows the persisted source through media-filtered Explore, Idea, Evolve, Ask preview, and both exports. Rejection checks distinguish normal exclusion, explicit user-history download and denied AI access. The fake agent exercises the recording contract; it does not establish image understanding or actual OpenCode filesystem access.
 
 The conversational-search path uses the real owned Hono/SQLite runtime and a deterministic decoded fake agent to find/read/discover existing thoughts. Both viewports exercise explicit New/Resume, bookmarked reload without writes, recorded conversation, eligible discovery/preview, Idea return, fixed-occurrence removal and fresh rediscovery, user-only History, and local session Delete preserving library records and another session. It does not exercise Stop or rejection during that search journey; controlled per-screen and backend tests cover their separate boundaries.
 
@@ -266,7 +403,9 @@ This proves controlled shared-record continuity, not real provider behavior, cro
 | Simple export | Evolution-only breadth/depth traversal, count semantics, traversal through rejected intermediates, addendum exclusion, Markdown attribution, read-only behavior and user-only HTTP authorization. | `simple-export` |
 | Agent protocol kernel | Strict whole-envelope parsing, ordered prompt migration and exact input, per-step completion, atomic advancement/replay, reopen and durable cancellation settlement. | `run-protocol-domain`, `run-protocol-sqlite` |
 | Typed agent operations | Step-owned receipts, title-fill no-op replay, interpretation/connection writes, effect rollback, export write denial, weave intent and no-findings/failure outcomes. | `run-operations` |
-| Agent configuration and adapter | Optional/malformed configuration, Basic discovery headers and Bearer transport, immutable session binding, paginated history correlation, uncertain admission, quarantine and cancellation using controlled facades and owned HTTP fixtures. | `agent-config`, `opencode-adapter` |
+| Agent configuration and adapter | Optional/malformed configuration, Basic discovery headers and Bearer transport, immutable session binding, paginated history correlation, settled permissive tool turns, uncertain admission, quarantine and cancellation using controlled facades and owned HTTP fixtures. | `agent-config`, `opencode-adapter` |
+| Shared-file media execution | Real retained original with normal worker/native fake, scoped initial/readThought path context, canonical searchable interpretation and Full reply, Evolve supporting reads, held rejection/restoration fencing, restricted roles and title-only behavior. Atomic source/weave admission, replay, deliberate retry and file integrity use owned fixtures. No real filesystem-tool/model claim. | `media-path-worker`, `media-admission`, `media-weave-purpose`, `media-source-migration`, `media-source-projections`, `media-files`, `media-files-faults` |
+| Media HTTP/runtime | Actual owned Hono/SQLite/private files and validator, user-only bounded upload, receipts/replay, scoped exact downloads, configless queuing, normal fake-agent interpretation/retry, held shutdown/reopen and paired restore/mismatch refusal. No provider, native filesystem-tool, browser or arbitrary-crash claim. | `media-import-api` |
 | Scoped capabilities | Narrow AI search/read projections, exposure tracking versus full-read witnesses, connection/source prerequisites, malformed authority, replay and Stop/rejection fences, witness/final-cache rollback, populated predecessor migration and export write denial. | `capabilities`, `capability-migration` |
 | Agentic search persistence | Separate session schema, actual run-kind CHECK upgrade and incoming-FK preservation/rollback, same-session ownership, retained-content/composer guards, occurrence uniqueness and narrow tombstoned purge/cleanup constraints. Raw SQL fixtures do not establish dispatcher/full-read authority. | `agentic-search-migration` |
 | Agentic search lifecycle | User-only metadata/history facet with test-owned IDs/clocks, create replay, revision rename, bounded catalog/history continuations, tombstones, local-only purge and fail-closed bound/possible-dispatch deletion. No search-session HTTP or agent runtime is exercised. | `agentic-search-sessions` |

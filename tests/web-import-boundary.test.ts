@@ -4,6 +4,7 @@ import { requestDaemon, type DaemonRequest } from "../apps/web/src/server/daemon
 import { createImportBoundary } from "../apps/web/src/server/import";
 import { createLogger } from "../src/logging";
 import type { ImportBatch, ImportFile } from "../src/domain/markdown-import-contract";
+import { thought as ideaThought } from "../apps/web/src/features/idea/validation";
 
 const token = "owned-server-token";
 const config = readWebConfig({ THOUGHTLOOM_USER_TOKEN: token });
@@ -338,6 +339,160 @@ describe("fixed-purpose Markdown import server boundary", () => {
       expect((await h.handle(browser(path))).status).not.toBe(200);
     }
     expect(h.calls).toHaveLength(0);
+  });
+});
+
+describe("fixed-purpose media import server boundary", () => {
+  const clarification = "  Compare red and blue.\r\nKeep exact wording.  ";
+  const media = {id:"thought-1",text:null,title:null,titleAuthor:null,author:"source",kind:"media-original",origin:"media-import",
+    parentId:null,sourceIds:[],createdAt:"2032-01-01T00:00:00Z",mediaSource:{id:"source-1",name:"picture.png",mimeType:"image/png",
+      byteLength:bytes.length,fileAuthorship:"unverified",clarification,clarificationAuthor:"user"}};
+  const original = {id:"run-original",kind:"weave",status:"failed",confirmedThoughtIds:[],responseId:null};
+  const latest = {id:"run-retry",kind:"weave",status:"queued",confirmedThoughtIds:[],responseId:null};
+  const active = {eligible:false,reason:"work-active"};
+  const path = "/api/imports/media-sources/source-1";
+  function mediaUpload(change?: (form: FormData) => void, key = "upload:1") {
+    const form = new FormData();
+    form.set("metadata",JSON.stringify({clarification}));
+    form.set("file",new File([bytes],"picture.png",{type:"image/png"}));
+    change?.(form);
+    return browser("/api/imports/media",{method:"POST",headers:{"idempotency-key":key,authorization:"Bearer browser-token",cookie:"browser-cookie"},body:form});
+  }
+  const retryRequest = () => browser(`${path}/retry`,{method:"POST",headers:{"content-type":"application/json","idempotency-key":"retry:1"},body:"{}"});
+
+  test("uploads exact file and clarification, and keeps original receipt distinct from latest source run", async () => {
+    const h = harness(async (url, init) => {
+      if (url.pathname === "/imports/media") return json({thought:media,run:original},202);
+      if (url.pathname === "/imports/media/by-key/upload:1") return json({thought:media,run:original});
+      if (url.pathname === "/media-sources/source-1") return json({thought:media,run:latest,retry:active});
+      if (url.pathname === "/media-sources/source-1/retry" && init.method === "POST") return json({run:latest},202);
+      return new Response(null,{status:404});
+    });
+    const admitted = await h.handle(mediaUpload());
+    expect(admitted.status).toBe(202); expect(await admitted.json()).toEqual({thought:media,run:original});
+    const receipt = await h.handle(browser("/api/imports/media/by-key/upload:1"));
+    expect(receipt.status).toBe(200); expect(await receipt.json()).toEqual({thought:media,run:original});
+    const inspection = await h.handle(browser(path));
+    expect(inspection.status).toBe(200); expect(await inspection.json()).toEqual({thought:media,run:latest,retry:active});
+    const retried = await h.handle(retryRequest());
+    expect(retried.status).toBe(202); expect(await retried.json()).toEqual({run:latest});
+    expect(h.calls.map(({url,init}) => `${init.method} ${url.pathname}${url.search}`)).toEqual([
+      "POST /imports/media","GET /imports/media/by-key/upload:1","GET /media-sources/source-1","POST /media-sources/source-1/retry"]);
+    const first = h.calls[0];
+    const outbound = new Headers(first?.init.headers);
+    expect(outbound.get("authorization")).toBe(`Bearer ${token}`); expect(outbound.get("idempotency-key")).toBe("upload:1");
+    expect(outbound.has("cookie")).toBe(false);
+    expect(first?.init.redirect).toBe("error");
+    const form = await new Request("http://daemon.invalid",first?.init).formData();
+    expect(JSON.parse(String(form.get("metadata")))).toEqual({clarification});
+    const part = form.get("file"); expect(part).toBeInstanceOf(File);
+    expect((part as File).name).toBe("picture.png"); expect(new Uint8Array(await (part as File).arrayBuffer())).toEqual(bytes);
+    expect(new Headers(h.calls[3]?.init.headers).get("idempotency-key")).toBe("retry:1");
+    expect(h.calls[3]?.init.body).toBe("{}");
+    for (const response of [admitted,receipt,inspection,retried]) expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  test("receipt lookup decodes a browser-encoded key once and forwards the same safe identity", async () => {
+    const h = harness(async () => json({thought:media,run:original}));
+    const response = await h.handle(browser("/api/imports/media/by-key/upload%3A1"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({thought:media,run:original});
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]?.init.method).toBe("GET");
+    expect(h.calls[0]?.url.pathname).toBe("/imports/media/by-key/upload%3A1");
+    expect(new Headers(h.calls[0]?.init.headers).get("authorization")).toBe(`Bearer ${token}`);
+    for (const key of ["bad%2Fkey","bad%252Fkey","bad%ZZkey"]) {
+      expect((await h.handle(browser(`/api/imports/media/by-key/${key}`))).status).toBe(400);
+    }
+    expect(h.calls).toHaveLength(1);
+  });
+
+  test("requires trusted origin and host, bounded single-part upload and fixed paths", async () => {
+    const h = harness(async () => json({thought:media,run:original},202));
+    const untrustedHeaders: HeadersInit[] = [{host:"evil.test",origin:"http://127.0.0.1:3000"},{host:"127.0.0.1:3000",origin:"http://evil.test"},{host:"127.0.0.1:3000"}];
+    for (const headers of untrustedHeaders) {
+      const request = new Request("http://127.0.0.1:3000/api/imports/media",{method:"POST",headers,body:"untrusted"});
+      expect((await h.handle(request)).status).toBe(403);
+    }
+    for (const request of [mediaUpload(f => f.append("file",new File([bytes],"second.png"))),
+      mediaUpload(f => f.set("metadata",JSON.stringify({clarification,path:"/private"}))),mediaUpload(undefined,"bad key"),
+      browser(`${path}?scope=history&scope=normal`),browser(`${path}?scope=show-rejected`),
+      browser(`${path}/retry`,{method:"POST",headers:{"content-type":"application/json","idempotency-key":"key"},body:'{"path":"/private"}'})]) {
+      expect((await h.handle(request)).status).toBe(400);
+    }
+    const limited = harness(async () => json({thought:media,run:original},202),bytes.length-1);
+    expect((await limited.handle(mediaUpload())).status).toBe(413);
+    expect(h.calls).toHaveLength(0); expect(limited.calls).toHaveLength(0);
+  });
+
+  test("history is explicit and original bytes use safe private attachment headers", async () => {
+    const h = harness(async url => url.pathname.endsWith("/raw")
+      ? new Response(bytes,{headers:{"content-type":"image/png","content-disposition":"attachment; filename=source.png","x-upstream-secret":token}})
+      : json({thought:{...media,rejected:true},run:latest,retry:{eligible:false,reason:"source-rejected"}}));
+    const history = await h.handle(browser(`${path}?scope=history`));
+    expect(history.status).toBe(200);
+    expect(await history.json()).toEqual({thought:{...media,rejected:true},run:latest,retry:{eligible:false,reason:"source-rejected"}});
+    for (const suffix of ["/raw","/raw?scope=history"]) {
+      const response = await h.handle(browser(`${path}${suffix}`));
+      expect(response.status).toBe(200); expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expect(response.headers.get("content-disposition")).toMatch(/^attachment;\s*filename="?source\.png"?$/);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("cache-control")).toContain("no-store"); expect(response.headers.has("x-upstream-secret")).toBe(false);
+    }
+    expect(h.calls.map(({url}) => `${url.pathname}${url.search}`)).toEqual([
+      "/media-sources/source-1?scope=history","/media-sources/source-1/raw","/media-sources/source-1/raw?scope=history"]);
+  });
+
+  test("observes and stops only a verified media weave through its fixed run boundary", async () => {
+    const h = harness(async url => url.pathname === "/runs/run-retry/stop" ? json({...latest,status:"interrupted"}) : json(latest));
+    const runPath = "/api/imports/media-runs/run-retry";
+    const read = await h.handle(browser(runPath));
+    expect(read.status).toBe(200); expect(await read.json()).toEqual(latest);
+    const stop = await h.handle(browser(`${runPath}/stop`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"}));
+    expect(stop.status).toBe(200); expect(await stop.json()).toEqual({...latest,status:"interrupted"});
+    expect(h.calls.map(({url,init}) => `${init.method} ${url.pathname}`)).toEqual([
+      "GET /runs/run-retry","GET /runs/run-retry","POST /runs/run-retry/stop"]);
+    for (const kind of ["evolve","export","import"]) {
+      const other = harness(async () => json({...latest,kind}));
+      const denied = await other.handle(browser(`${runPath}/stop`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"}));
+      expect(denied.status).not.toBe(200);
+      expect(other.calls.map(({url,init}) => `${init.method} ${url.pathname}`)).toEqual(["GET /runs/run-retry"]);
+    }
+  });
+
+  test("validates descriptor, ordinary run and closed retry union before confirming a source", async () => {
+    expect(ideaThought(media)).toBe(true);
+    const validRetry = [{eligible:true,reason:null},...(["source-rejected","interpretation-exists","work-active","work-unsettled","work-completed"] as const).map(reason => ({eligible:false,reason}))];
+    for (const retry of validRetry) {
+      const h = harness(async () => json({thought:media,run:null,retry}));
+      expect((await h.handle(browser(path))).status).toBe(200);
+    }
+    const malformed = [
+      {thought:{...media,text:"invented"},run:latest,retry:active},
+      {thought:{...media,mediaSource:{...media.mediaSource,id:"other"}},run:latest,retry:active},
+      {thought:{...media,mediaSource:{...media.mediaSource,clarificationAuthor:null}},run:latest,retry:active},
+      {thought:media,run:{...latest,kind:"evolve"},retry:active},
+      {thought:media,run:{...latest,status:"unknown"},retry:active},
+      {thought:media,run:latest,retry:{eligible:true,reason:"work-active"}},
+      {thought:media,run:latest,retry:{eligible:false,reason:"invented"}},
+    ];
+    for (const value of malformed) {
+      const h = harness(async () => json(value));
+      expect((await h.handle(browser(path))).status).toBe(502);
+      expect(h.calls).toHaveLength(1);
+    }
+  });
+
+  test("never returns upstream errors, redirects or private diagnostics", async () => {
+    for (const response of [new Response(`${token} private-path`,{status:500}),new Response(null,{status:302,headers:{location:"http://evil.test"}})]) {
+      const h = harness(async () => response);
+      const result = await h.handle(mediaUpload());
+      expect(result.status).toBe(502); expect(result.headers.get("cache-control")).toContain("no-store");
+      expect(result.headers.has("location")).toBe(false);
+      const body = await result.text(); expect(body).not.toContain(token); expect(body).not.toContain("private-path");
+      expect(h.calls).toHaveLength(1); expect(h.calls[0]?.init.redirect).toBe("error");
+    }
   });
 });
 

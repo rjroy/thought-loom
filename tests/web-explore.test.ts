@@ -7,19 +7,27 @@ import type { DaemonRequest } from "../apps/web/src/server/daemon";
 import { requestDaemon } from "../apps/web/src/server/daemon";
 import { readWebConfig } from "../apps/web/src/server/config";
 import { createLogger, type LogRecord } from "../src/logging";
+import { ownedMedia } from "./fixtures/web-media";
 
 const query: SearchQuery = { q: "  thinking + words  ", author: ["user", "ai"], kind: ["captured-original", "developing-idea"], from: "2032-02-01", to: "2032-02-29", sort: "newest", scope: "show-rejected" };
 const contextThought = { id: "context-1", text: "Context original text", title: null, titleAuthor: null, author: "user", kind: "captured-original", createdAt: "2031-01-01T12:00:00.000Z", origin: "capture", parentId: null, sourceIds: [] } as const;
 const connection = { id: "connection-1", fromId: "t-1", toId: "context-1", category: "supports", proposedBy: "ai", explanation: "original explanation", sourceIds: [] } as const;
 const first = { kind: "response", id: "response-1", thoughtId: "t-1", text: "Full response original words", snippet: "response snippet", title: "Destination title", author: "ai", materialKind: "user-contribution", createdAt: "2032-02-01T00:00:00.000Z", context: { kind: "connection", thought: contextThought, connection } } as const;
 const second = { kind: "thought", id: "t-2", thoughtId: "t-2", text: "Full thought original words", snippet: "thought snippet", title: "Thought title", author: "user", materialKind: "captured-original", createdAt: "2032-02-02T00:00:00.000Z", context: { kind: "predecessor", thought: contextThought } } as const;
-const page = { results: [first, second], counts: { authors: { user: 7, ai: 12, source: 0 }, kinds: { "captured-original": 3, "user-contribution": 5, "ai-interpretation": 0, "developing-idea": 9, "imported-original": 0 } } };
+const page = { results: [first, second], counts: { authors: { user: 7, ai: 12, source: 0 }, kinds: { "captured-original": 3, "user-contribution": 5, "ai-interpretation": 0, "developing-idea": 9, "imported-original": 0, "media-original": 0 } } };
 const webPage = { ...page, rejectionStatus: { "t-2": false } };
 const request = (params: string) => new Request(`http://127.0.0.1:3000/api/search${params}`);
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
 
 describe("Explore query contract", () => {
+  test("round-trips the media kind with existing source facets", () => {
+    const decoded = decodeSearchQuery(new URLSearchParams("q=Compare&author=source&kind=media-original&kind=imported-original"));
+    expect(decoded).toBeDefined();
+    if (!decoded) throw new Error("Expected media filter");
+    expect<unknown>(decoded.kind).toEqual(["media-original","imported-original"]);
+    expect(decodeSearchQuery(encodeSearchQuery(decoded))).toEqual(decoded);
+  });
   test("round-trips source author and imported-original filters", () => {
     const params = new URLSearchParams("q=owned&author=user&author=source&kind=captured-original&kind=imported-original");
     const decoded = decodeSearchQuery(params);
@@ -68,6 +76,20 @@ describe("Explore query contract", () => {
 });
 
 describe("canonical search DTO", () => {
+  test("decodes media hit and nested media context with exact clarification and filename fallback", () => {
+    const hit = {kind:"thought",id:ownedMedia.id,thoughtId:ownedMedia.id,text:null,mediaSource:ownedMedia.mediaSource,
+      snippet:ownedMedia.mediaSource.clarification,title:ownedMedia.mediaSource.name,author:"source",materialKind:"media-original",
+      createdAt:ownedMedia.createdAt,context:{kind:"predecessor",thought:ownedMedia}};
+    const data = {results:[hit],counts:{authors:{user:0,ai:0,source:1},kinds:{...page.counts.kinds,"media-original":1}}};
+    expect<unknown>(decodeSearchPage(data)).toEqual(data);
+    expect<unknown>(decodeWebSearchPage({...data,rejectionStatus:{}})).toEqual({...data,rejectionStatus:{}});
+    expect(decodeSearchPage({...data,counts:{...data.counts,kinds:{...data.counts.kinds,"media-original":-1}}})).toBeUndefined();
+    const {"media-original": _media, ...withoutMedia} = data.counts.kinds;
+    expect(decodeSearchPage({...data,counts:{...data.counts,kinds:withoutMedia}})).toBeUndefined();
+    expect(decodeSearchPage({...data,results:[{...hit,mediaSource:{...ownedMedia.mediaSource,clarificationAuthor:null}}]})).toBeUndefined();
+    expect(decodeSearchPage({...data,results:[{...hit,context:{kind:"predecessor",thought:{...ownedMedia,text:"invented"}}}]})).toBeUndefined();
+    expect(decodeSearchPage({...data,results:[{...hit,mediaSource:{...ownedMedia.mediaSource,path:"/private/sentinel"}}]})).toBeUndefined();
+  });
   test("decodes source result, context and facet counts while keeping metadata actors restricted", () => {
     const imported = { ...contextThought, author: "source", kind: "imported-original", origin: "markdown-import" } as const;
     const data = { results: [{ ...second, author: "source", materialKind: "imported-original", context: { kind: "connection", thought: imported, connection } }], counts: { authors: { ...page.counts.authors, source: 2 }, kinds: { ...page.counts.kinds, "imported-original": 2 } } } as const;
@@ -94,6 +116,17 @@ describe("canonical search DTO", () => {
 });
 
 describe("fixed search server handler", () => {
+  test("forwards media filter and returns canonical media results without paths", async () => {
+    const hit = {kind:"thought",id:ownedMedia.id,thoughtId:ownedMedia.id,text:null,mediaSource:ownedMedia.mediaSource,
+      snippet:ownedMedia.mediaSource.clarification,title:ownedMedia.mediaSource.name,author:"source",materialKind:"media-original",createdAt:ownedMedia.createdAt,context:null};
+    const data = {results:[hit],counts:{authors:{user:0,ai:0,source:1},kinds:{...page.counts.kinds,"media-original":1}}};
+    const calls: DaemonRequest[] = [];
+    const response = await handleSearch(request("?q=Compare&kind=media-original"),{callDaemon:async command => { calls.push(command); return json(data); }});
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0]?.path ?? "","http://daemon.invalid").searchParams.get("kind")).toBe("media-original");
+    expect(await response.json()).toEqual({...data,rejectionStatus:{}});
+  });
   for (const suffix of ["", "?q=", "?q=%20%20", "?q=x&q=y", "?q=x&scope=history", "?q=x&path=/thoughts", "?q=x&author=other", "?q=x&kind=other", "?q=x&from=2031-02-29", "?q=x&from=2032-03-01&to=2032-02-01"]) {
     test(`rejects ${suffix} before calling daemon`, async () => {
       let count = 0;

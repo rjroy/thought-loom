@@ -27,6 +27,10 @@ import { createLogger, type Logger, type LogSink } from "../logging";
 import { ExecutionOwnerHeldError, ExecutionOwnerLease } from "../storage/execution-owner";
 import { SearchClockReceipts } from "./search-clock-receipts";
 import type { SearchClockDependencies } from "../domain/search-time";
+import { openMediaFiles, type MediaFiles } from "../storage/media-files";
+import { createMediaValidator, type MediaValidator } from "../storage/media-validator";
+import { mediaStoreId } from "../storage/media-source";
+import { SqliteMediaImports } from "../storage/media-import";
 
 /** Optional test-owned transport and technical timer seams; default runtime uses the maintained SDK. */
 export interface RuntimeDependencies {
@@ -59,6 +63,8 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let executionOwner: ExecutionOwnerLease | undefined;
   let failureLogger: Logger | undefined;
   let searchClockReceipts: SearchClockReceipts | undefined;
+  let mediaFiles: MediaFiles | undefined;
+  let mediaValidator: MediaValidator | undefined;
   let acceptingRequests = true;
   const requestFlights = new Set<Promise<Response>>();
   async function close(force: boolean): Promise<boolean> {
@@ -84,6 +90,9 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     // A stop error does not skip the real handler/lane joins. Any still-open listener is sealed from application work.
     if (!drained) return true;
     searchClockReceipts?.clear();
+    // Handlers and normal worker callbacks can still use originals until their actual flights have joined.
+    try { await mediaFiles?.close(); } catch { failed = true; }
+    try { await mediaValidator?.close(); } catch { failed = true; }
     try { db?.close(); } catch { return true; }
     try { executionOwner?.release(); } catch { failed = true; }
     return failed;
@@ -99,16 +108,28 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     executionOwner.assertHeld();
     migrate(db, diagnostics);
     executionOwner.register(db);
+    const owner = executionOwner, mediaMaxBytes = valid.mediaMaxBytes ?? 16*1024*1024;
+    diagnostics.info("[media import] limits configured",{maxBytes:mediaMaxBytes});
+    mediaValidator = createMediaValidator({
+      raster:{maxBytes:mediaMaxBytes,maxDimension:16384,maxTotalPixels:64*1024*1024,maxFrames:256},
+      pdf:{maxBytes:mediaMaxBytes,maxPages:1024,maxObjects:100000,maxDepth:128},
+      process:{dataBytes:1024*1024*1024,cpuSeconds:8,wallMs:10000,outputBytes:8192},logger:diagnostics,
+    });
+    mediaFiles = await openMediaFiles({db,directory:valid.mediaDir ?? `${owner.databasePath}.media`,storeId:mediaStoreId(db) ?? randomUUID(),
+      id:randomUUID,now:Date.now,assertHeld:() => owner.assertHeld(),logger:diagnostics,validate:mediaValidator.validate,
+      limits:{maxBytes:mediaMaxBytes,orphanGraceMs:24*60*60*1000,cleanupBatchSize:64}});
+    const files = mediaFiles, mediaPath = (sourceId: string) => files.originalPath(sourceId);
+    await files.cleanup();
     const scheduling = { id: randomUUID, now: () => new Date().toISOString(), logger: diagnostics,
       // Public SDK schemas require these prefixes. Existing persisted identities are never rewritten.
       sessionId: () => `ses_${randomUUID()}`, promptId: () => `msg_${randomUUID()}` };
     const store = new SqliteStore(db, scheduling);
     // Receipt lookup is invoked only at a later execution boundary, after this root has wired the session service.
     const searchClock: SearchClockDependencies = { latestObservation: owner => searchClockReceipts?.latest(owner) ?? null };
-    const configuredWorker = valid.agent ? new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,searchClock,
+    const configuredWorker = valid.agent ? new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,searchClock,mediaPath,
       resolve:dependencies.resolveAgentService ?? resolveAgentService,client:dependencies.createPublicClient ?? createPublicClient}) : undefined;
     // The same lane owner explicitly has no native producer when unconfigured; do not invent a model or transport.
-    worker = configuredWorker ?? new RunWorker({db,...scheduling,executionOwner});
+    worker = configuredWorker ?? new RunWorker({db,...scheduling,executionOwner,mediaPath});
     const retention = worker.searchRetention();
     if (!retention) throw new Error("Runtime search retention ownership is unavailable");
     const searchSessions = store.searchSessions(scheduling,retention);
@@ -145,7 +166,8 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
     const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
-      imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576} });
+      imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576},
+      media:{commands:new SqliteMediaImports(db,scheduling,files,rejection),maxBytes:mediaMaxBytes,notify:() => supervisor?.notifyWork()} });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: request => {
       if (!acceptingRequests) return new Response("Daemon stopping",{ status: 503 });
       // Register before running any handler/await, including handlers admitted just before shutdown.
@@ -153,7 +175,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       requestFlights.add(flight);
       return flight;
     },
-      maxRequestBodySize:Math.max(128*1024*1024,Math.min(Number.MAX_SAFE_INTEGER,(valid.importMaxBytes ?? 1048576)+4096+65536)) });
+      maxRequestBodySize:Math.max(128*1024*1024,Math.min(Number.MAX_SAFE_INTEGER,Math.max(valid.importMaxBytes ?? 1048576,mediaMaxBytes)+4096+65536)) });
     supervisor?.start();
     imports?.start();
     const url = server.url.toString();

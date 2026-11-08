@@ -4,13 +4,14 @@ import type { Database } from "bun:sqlite";
 import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/opencode-adapter";
 import { AgentBindingError, allowsNativeTools, assertBindingPermissions, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
-import { requireExecutionRun, RunFenceError, type Claim, type RunKind, type RunRecord } from "../domain/run";
+import { requireExecutionRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
 import { protocolJson, ProtocolValidationError } from "../domain/run-protocol";
 import { ImportPreservationError } from "../domain/markdown-import-contract";
 import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 import { ExecutionOwnerLease } from "./execution-owner";
+import { readAgentBinding } from "./run-record";
 
 // Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
 const processSubmitOwner = randomUUID();
@@ -45,23 +46,14 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       if (run.status !== "queued" || step.position !== 0 || step.state !== "prepared" || run.nativeState !== "unknown") throw new AgentBindingError("Cannot infer a new binding for an already submitted run");
       this.db.run(`INSERT INTO agent_bindings (run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version,execution_owner_id)
         VALUES (?,?,?,?,?,?,?,?)`,[runId,binding.sessionId,binding.serviceUrl,binding.location.directory,protocolJson(binding.model),protocolJson(binding.permissions),binding.protocolVersion,
-          run.kind === "search" ? this.executionOwner?.id ?? null : null]);
+           run.kind === "search" ? this.executionOwner?.id ?? null : null]);
       this.logger.info("[agent] native binding applied in transaction",{runId,kind:run.kind,nativeTools:allowsNativeTools(binding)});
       return true;
     });
     if (!valid) throw new RunFenceError();
   }
   get(runId: string): AgentBinding | null {
-    const row = this.db.query(`SELECT b.session_id AS sessionId,b.service_url AS serviceUrl,b.directory,b.model_json AS model,
-      b.permissions_json AS permissions,b.protocol_version AS protocolVersion,r.kind
-      FROM agent_bindings b JOIN runs r ON r.id=b.run_id WHERE b.run_id=?`).get(runId) as {
-      sessionId:string; serviceUrl:string; directory:string; model:string; permissions:string; protocolVersion:number; kind:RunKind;
-    } | null;
-    if (row === null) return null;
-    const binding = normalizeBinding({sessionId:row.sessionId,serviceUrl:row.serviceUrl,location:{directory:row.directory},
-      model:JSON.parse(row.model),permissions:JSON.parse(row.permissions),protocolVersion:row.protocolVersion});
-    assertBindingPermissions(row.kind,binding);
-    return binding;
+    return readAgentBinding(this.db,runId);
   }
   private importStep(claim: Claim): {readonly run:RunRecord;readonly step:ImportOwnedStep} {
     const run=this.active(claim);

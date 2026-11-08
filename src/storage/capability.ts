@@ -22,6 +22,7 @@ export class SqliteCapabilityDispatcher extends SqliteRunAggregate implements Ca
   dispatch(claim: Claim, promptId: string, input: unknown): CapabilityResult {
     return this.guarded("dispatch capability",claim,run => {
       const request = parseCapabilityRequest(input);
+      this.requireWeaveCapability(run,request.capability);
       if (run.promptId !== promptId) throw new RunFenceError("Capability belongs to an earlier prompt");
       const step = this.currentStep(run.id);
       if (step.input === null || step.state !== "completed" || step.envelope?.kind !== "request" || protocolJson(step.envelope.request) !== protocolJson(request)) {

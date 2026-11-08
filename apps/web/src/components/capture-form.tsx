@@ -19,14 +19,27 @@ export function CaptureForm() {
   const thoughtField = useRef<HTMLTextAreaElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const focusNewDraft = useRef(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const importButton = useRef<HTMLButtonElement>(null);
+  const importChoices = useRef<HTMLDivElement>(null);
 
   useEffect(() => { memory.current = null; }, [memory]);
 
-  function openImport() {
+  function openImport(destination: string) {
     if (inFlight.current) return;
     memory.current = { text, title, state, validation };
-    router.push("/import");
+    setImportOpen(false);
+    router.push(destination);
   }
+
+  useEffect(() => {
+    if (!importOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !importChoices.current?.contains(event.target)) setImportOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
+  }, [importOpen]);
 
   useEffect(() => {
     if (state.kind === "saving" && thoughtField.current) {
@@ -52,6 +65,7 @@ export function CaptureForm() {
 
     const submitted = Object.freeze({ ...snapshot });
     inFlight.current = true;
+    setImportOpen(false);
     setValidation(null);
     setState({ kind: "saving", snapshot: submitted });
     try {
@@ -82,9 +96,21 @@ export function CaptureForm() {
   return (
     <>
     <header className={`workspace-intro capture-heading ${styles.heading}`}>
-      <div className={styles.headingRow}>
+      <div className={styles.headingRow} ref={importChoices} onKeyDown={event => {
+        if (event.key === "Escape" && importOpen) { event.preventDefault(); setImportOpen(false); importButton.current?.focus(); }
+      }}>
         <h1 id="capture-heading"><Image src="/glyphs/sprout.svg" alt="" aria-hidden="true" width={24} height={24} unoptimized className={styles.headingGlyph} />Capture</h1>
-        <button className={styles.importAction} type="button" disabled={pending} onClick={openImport}>Import</button>
+        <button ref={importButton} className={styles.importAction} type="button" disabled={pending}
+          aria-expanded={importOpen} aria-controls="capture-import-choices" onClick={() => { if (!inFlight.current) setImportOpen(open => !open); }}>Import</button>
+        <div id="capture-import-choices" className={styles.importChoices} hidden={!importOpen}>
+          <button className={styles.importChoice} type="button" onClick={() => openImport("/import/media")}>
+            <strong>Image or PDF</strong><span>Keep one original file and request an AI interpretation.</span>
+          </button>
+          <button className={styles.importChoice} type="button" onClick={() => openImport("/import")}>
+            <strong>Markdown</strong><span>Bring in original words without rewriting them.</span>
+          </button>
+          <p>Your Capture draft stays here.</p>
+        </div>
       </div>
       <p>Write or paste a thought.</p>
     </header>

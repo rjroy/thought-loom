@@ -6,24 +6,26 @@ import type { SearchResult } from "../features/explore/results";
 import { readIdea } from "../features/idea/request";
 import type { IdeaThought } from "../features/idea/types";
 import { ContentGlyph } from "./content-glyph";
+import { MediaSourceDetails } from "./media-source-details";
 import idea from "./idea.module.css";
 import styles from "./connection-editor.module.css";
 
-export const connectionTitle = (thought: IdeaThought) => thought.title ?? thought.text.trim().split(/\s+/).slice(0, 5).join(" ");
+export const connectionTitle = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
 const materials = {
   "captured-original": "Original capture", "user-contribution": "Contribution",
-  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source",
+  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Imported source",
 };
 const actor = (author: string) => author === "user" ? "You" : author === "ai" ? "AI" : "Imported source";
 
 export function ConnectionThought({ thought }: { thought: IdeaThought }) {
   const [expanded, setExpanded] = useState(false);
-  const long = thought.text.length > 320;
+  const long = thought.text !== null && thought.text.length > 320;
   return <div className={styles.thought}>
     <strong>{connectionTitle(thought)}</strong>
-    <p className={idea.byline}><span className={thought.author === "user" ? idea.user : idea.ai}>{actor(thought.author)}</span>
+    <p className={idea.byline}><span className={thought.author === "user" ? idea.user : thought.author === "ai" ? idea.ai : idea.source}>{actor(thought.author)}</span>
       <span className={idea.materialLabel}><ContentGlyph kind={thought.kind} size={20} />{materials[thought.kind]}</span></p>
-    <p className={styles.words}>{long && !expanded ? `${thought.text.slice(0, 320)}…` : thought.text}</p>
+    {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} compact />
+      : <p className={styles.words}>{long && !expanded ? `${thought.text.slice(0, 320)}…` : thought.text}</p>}
     {long && <button type="button" className={idea.textButton} aria-expanded={expanded}
       onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Show full thought"}</button>}
   </div>;

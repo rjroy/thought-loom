@@ -2,7 +2,7 @@
 
 [Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md)
 
-Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative migration starts in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts); import definitions and the FK-closure rebuild live in [`import-schema.ts`](../src/storage/import-schema.ts) and [`import-migration.ts`](../src/storage/import-migration.ts). The separate [agentic-search storage](#agentic-search-storage-foundation) supports user-only saved sessions and configured search execution through the [daemon API](daemon-api.md#agentic-search-sessions). Public import access is documented in the [daemon API](daemon-api.md#markdown-import-and-source-inspection).
+Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative migration starts in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts); Markdown import definitions and its predecessor FK-closure rebuild live in [`import-schema.ts`](../src/storage/import-schema.ts) and [`import-migration.ts`](../src/storage/import-migration.ts). The [media metadata foundation](#media-source-storage-foundation) has its own thought/FK migration. The separate [agentic-search storage](#agentic-search-storage-foundation) supports user-only saved sessions and configured search execution through the [daemon API](daemon-api.md#agentic-search-sessions). Public Markdown import access is documented in the [daemon API](daemon-api.md#markdown-import-and-source-inspection).
 
 ## Model and relationships
 
@@ -23,9 +23,9 @@ Unless marked nullable, columns below are `NOT NULL`. Every listed foreign key r
 | Column | Type | Constraint / meaning |
 | --- | --- | --- |
 | `id` | `TEXT` | Primary key; assigned by the daemon's creation command. |
-| `text` | `TEXT` | Recorded wording. |
-| `author` | `TEXT` | Check: `user`, `ai`, or `source` (imported wording; original author unverified). |
-| `kind` | `TEXT` | Check: `captured-original`, `user-contribution`, `ai-interpretation`, `developing-idea`, or `imported-original`. |
+| `text` | `TEXT`, nullable | Recorded wording for textual kinds; null exactly for `media-original`. Domain validation keeps textual wording nonempty. |
+| `author` | `TEXT` | Check: `user`, `ai`, or `source` (Markdown/media original with unverified original authorship). |
+| `kind` | `TEXT` | Check: `captured-original`, `user-contribution`, `ai-interpretation`, `developing-idea`, `imported-original`, or `media-original`. |
 | `created_at` | `TEXT` | Daemon-generated UTC ISO timestamp. SQLite itself stores text rather than enforcing timestamp syntax. |
 | `origin` | `TEXT` | Provenance label. Current HTTP creation commands use `capture`, `contribution`, or `development`; this column is not a SQL enum. |
 | `parent_id` | `TEXT`, nullable | Foreign key to `thoughts.id`; a check forbids self-parenting. |
@@ -33,7 +33,9 @@ Unless marked nullable, columns below are `NOT NULL`. Every listed foreign key r
 
 There is no title column in the current table. `BEFORE UPDATE` and `BEFORE DELETE` triggers abort mutations with an immutability error. Further development creates another thought rather than a revision of this row.
 
-`source` and `imported-original` must occur together, with `origin='markdown-import'` and a null evolution parent. Supporting-source inserts are forbidden for imported originals; source membership is not `sourceIds`. All existing user/AI and non-import kind combinations remain valid. Ordinary `saveThought()` refuses imports instead of inferring a title author from `source`; the dedicated import writer owns their mapping and initial null titles. Later user/AI title edits and fills remain valid.
+`author='source'` occurs exactly for `imported-original` or `media-original`. Markdown originals require `origin='markdown-import'` and a null evolution parent. The unique `(import_document_id,id)` key supports exact document/thought membership. Media originals require `origin='media-import'`, null text, a null parent and null import membership. Supporting-source inserts are forbidden for both original kinds; source membership is not `sourceIds`. Existing user/AI combinations for the other kinds remain valid. Ordinary `saveThought()` refuses both source kinds instead of inferring a title author from `source`; dedicated writers create their initial null titles. Later user/AI title edits and fills remain valid.
+
+The media writer and [metadata tables](#media-source-storage-foundation) persist the null-text source variant. Backend scoped reads, search results/context, investigative retrieval, saved-search previews and exports handle its descriptor. Daemon startup wires validated private-file retention, [media HTTP admission/inspection/retry](daemon-api.md#retained-media-import-and-source-inspection) and managed original paths into the normal Weaver/Evolve worker on the required shared filesystem. Next.js media decoding/UI is not implemented. See the [media agreement](../.lore/context/media-import.md).
 
 Thought writers bind UTF-8 bytes with `CAST(? AS TEXT)` rather than passing text directly as a Bun string parameter, which consumes an initial U+FEFF. This preserves recorded text even when a segment begins with U+FEFF somewhere other than the original file's initial BOM. Stored BLOB bytes and returned JavaScript text are separate validation boundaries. Migration preserves actual legacy stored bytes; it cannot infer characters already lost by an older write.
 
@@ -66,6 +68,8 @@ Composite primary key: `(thought_id, position)`. Sources do not create extra evo
 | `thought_id` | `TEXT` | Primary key and foreign key to `thoughts.id`; marks its source set complete. |
 
 `saveThought()` inserts a thought, its title, its source rows, and its seal in one transaction. After sealing, triggers reject new source rows. Updates and deletion of source rows or seals are also rejected. This protects recorded provenance without preventing initial assembly.
+
+Media-source interpretations use the ordinary run-owned interpretation operation: the source is the evolution parent, and the AI child's text is independently searchable. A source receives one initial interpretation; subsequent development uses Evolve. See [source admission and lifecycle](#source-admission-and-lifecycle).
 
 ### `connections`
 
@@ -231,7 +235,7 @@ Adapter authorization checks ownership, context visibility and exact persisted p
 
 Composite primary key: `(run_id, kind, ref_id)`. The repository checks AI visibility before recording exposed context and revalidates it when authorizing submissions, reads, writes and cached-result delivery. A shared reply becomes ineligible if any associated thought is rejected. Full-read evidence is monotonic; a candidate snippet or a referenced ID alone does not prove that the model read the thought's full text.
 
-The scoped capability dispatcher returns narrow search candidates and AI-scoped thought, connection or response reads. It records every exposed reference, but does not upgrade indirectly referenced IDs to full-read witnesses. Connections and supporting sources require the appropriate full reads before a write. Model requests cannot select user authority, run/operation identity, authorship or timestamps, and cannot reject/restore notes or access raw SQL/files. Capability effects, exposure evidence, typed receipts, issued membership and the confirmed step result share the aggregate transaction. A Stop or rejected exposed reference fences replay as well as new work.
+The scoped capability dispatcher returns narrow search candidates and AI-scoped thought, connection or response reads. A media `readThought` returns its descriptor/clarification and records full-record context before the normal Weaver/Evolve worker resolves an eligible original path outside SQL. That private prompt context is not part of the capability result. The dispatcher records every exposed reference, but does not upgrade indirectly referenced IDs to full-read witnesses. Connections and supporting sources require the appropriate full reads before a write. Model requests cannot select user authority, run/operation identity, authorship or timestamps, and cannot reject/restore notes or access raw SQL/files through these application capabilities. Capability effects, exposure evidence, typed receipts, issued membership and the confirmed step result share the aggregate transaction. A Stop or rejected exposed reference fences replay as well as new work. Permissive native tools have their separate [trusted filesystem access](server-startup.md#retained-media-and-shared-filesystem).
 
 ### `run_operation_receipts`
 
@@ -277,6 +281,8 @@ Stop retains confirmed developments and can persist an existing draft as an inte
 
 A title-only or no-findings weave still retains its completed outcome as a response associated with the subject; it need not create an interpretation. Failure retains confirmed knowledge changes and eligible interrupted drafts, fences later callbacks, and keeps pending remote cancellation settlement available.
 
+For media roots, title-clear purpose is derived from the persisted subject and trigger, not caller-supplied capabilities. It permits conditional title fill and completion only, with metadata-only context and no original path; it cannot read other thoughts or publish an interpretation or connection. Incompatible retained request history is denied before native submission, including already-prepared successors, without rewriting historical inputs. Ordinary initial source weaving instead uses the normal capabilities, interpretation operation and Full reply finalizer. Completion without a saved interpretation retains the limitation reply but marks source processing failed. Confirmed children remain saved if later work fails.
+
 ### Durable weave scheduling
 
 When the scheduling port is enabled, capture, an explicit user title-clear on an eligible active note, and successful Evolve finalization admit a follow-up weave inside the triggering transaction. Capture uses `capture:<thought-id>`; each eligible title-clear has a daemon-generated invitation ID; Evolve uses `evolve:<run-id>` and selects its last issued development or contribution fallback. Clearing an already absent title on an eligible note is still a new regeneration invitation; clearing a rejected note's title is not. Worker finalization uses the same scheduling path as direct run finalization.
@@ -320,6 +326,63 @@ Admission validates literal relative paths without opening them and compares act
 Finalization revalidates ownership, staged bytes, the durable manifest/partition and reservations. Document, imported thoughts and title/source metadata, complete parts, any non-loose original locator, document seal, weave admissions, file result, completed run and staged-byte deletion commit together. The shared immediate-transaction helper explicitly rolls back a failed deferred-FK commit before releasing the connection. Stop similarly fences a pending import, settles its file as interrupted and removes staging atomically; it never reverses a committed source or its independent weave jobs.
 
 Source detail/raw/parts require a user `history` inspection scope even when all segments are active. Thought provenance requires a user and respects the target thought's current read scope. Reports/lists never include document bodies. Internal lists use bounded keyset pages (default 50, maximum 200) with route/parent/scope/limit-bound typed continuations and a fixed membership high-water mark; opaque authenticated HTTP cursor encoding remains a future route responsibility. Source metadata, filenames, raw bytes, staging and partition journals never enter thought/response search, ordinary AI context or export membership traversal. Rejection/restoration follows evolution, not document membership.
+
+## Media-source storage foundation
+
+[`media-schema.ts`](../src/storage/media-schema.ts) defines immutable source metadata. Original files live outside SQLite in private storage; there is no original-byte or extracted-text column. Daemon startup connects validation, private-file retention, user-only HTTP admission/inspection/retry and the normal worker's path resolver. Weaver/Evolve receives a managed absolute path and instructions for OpenCode's permitted tools. **The daemon and OpenCode must share filesystem access.** No browser media workflow is implemented. See the [API](daemon-api.md#retained-media-import-and-source-inspection) and [filesystem requirements](server-startup.md#retained-media-and-shared-filesystem).
+
+### `media_store`
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `singleton` | `INTEGER` | Primary key, check `singleton=1`. |
+| `store_id` | `TEXT` | Unique store identity; SQL check `length(trim(store_id))>0`. Not a directory path. |
+
+Migration leaves this table empty. Internal `SqliteStore.mediaStoreId()` returns its ID or null. `initializeMediaStore(storeId)` persists a supplied nonempty ID, returns it on an exact repeat, and refuses replacement. Update/delete/replacement triggers protect the identity. Daemon startup supplies the retained ID or a new UUID to the private file service, which checks/creates its matching directory marker before initializing SQL identity. Opening an already initialized store never replaces that identity.
+
+### `media_sources`
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `id` | `TEXT` | Nonempty primary key identifying the source. |
+| `source_thought_id` | `TEXT` | Unique; three `DEFERRABLE INITIALLY DEFERRED` FKs to `thoughts.id`, `thought_titles.thought_id` and `thought_source_seals.thought_id`. |
+| `request_key` | `TEXT` | Unique; 1–128 ASCII letters, digits, `.`, `_`, `:`, `-`. |
+| `display_name` | `TEXT` | Nonempty display filename, not an opened path or search term. |
+| `mime_type` | `TEXT` | Check: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`. |
+| `byte_length` | `INTEGER` | SQLite integer; `0<byte_length<=9007199254740991`. |
+| `sha256` | `BLOB` | Exactly 32 bytes; **not unique**. |
+| `clarification` | `TEXT`, nullable | Exact user wording; nonblank when present. The SQL check excludes the ECMAScript trim whitespace set without modifying stored text. |
+| `created_at` | `TEXT` | Nonempty; must equal the new root's creation time. |
+
+All source columns reject update, deletion and identity/request-key replacement. Source insertion requires an initialized store and a target thought that does not yet exist. A thought-insert trigger requires the source-first association exactly for media roots and matches creation time; thought checks enforce source authorship, null text and root/origin fields. Deferred FKs prevent committing a source without its root, title row and empty supporting-source seal. Supporting-source inserts are forbidden even before sealing. Clarification authorship is derived as `user` when present, otherwise null; file authorship is always `unverified` in the descriptor.
+
+Internal `SqliteStore.saveMediaSource({thought,requestKey,sha256})` in [`media-source.ts`](../src/storage/media-source.ts) validates the domain media variant, an initially absent title and a 32-byte supplied digest. One immediate transaction inserts source metadata **before** the root, then its null title metadata and empty source seal. It requires prior explicit store initialization, copies the supplied digest, and admits no run. Equal digests may belong to distinct sources. This metadata seam neither verifies actual file bytes nor implements an HTTP idempotency/retry contract. UTF-8 byte binding preserves exact clarification, including a leading U+FEFF.
+
+Full Thought projections include the scoped `mediaSource` descriptor described in the [API](daemon-api.md#response-records). Search and investigative snippets use clarification only; saved-search discovery/history summaries use the filename only as a title fallback. Existing rejection/provenance rules apply to these projections. A thought full read proves descriptor/clarification exposure, not a binary read. Search and Agentic Export gain no file-open or native-tool capability; Markdown whole-document artifacts remain user-only.
+
+### Normal media weaving and scoped file paths
+
+The existing [`RunWorker`](../src/agent/worker.ts) accepts an optional trusted `mediaPath(sourceId): Promise<string>` dependency. It selects source IDs only from scoped eligible media Thoughts in initial Weaver/Evolve context or a confirmed `readThought` result. Context/full-read references commit first; asynchronous path resolution then runs outside SQL. Current claim, local lifetime and context checks run around that boundary and before saving the next prompt. The resolver receives a source ID, not a caller-selected path. Returned paths must be absolute.
+
+The exact text prompt contains the ordinary Thought descriptor and separate private `originals:[{thoughtId,path}]` context. Initial source weaving follows the exact user clarification or asks for a summary when absent. OpenCode uses its normal native tools to read the original for the configured model. No path is added to public Thought projections or canonical capability results. Search and Agentic Export retain descriptor-only reads and denied native tools; import segmentation receives only its own Markdown input. Existing deny-bound Weaver/Evolve sessions are not silently upgraded to permissive tools.
+
+### Source admission and lifecycle
+
+After file publication, [`SqliteMediaAdmissions.admit("user",input)`](../src/storage/media-admission.ts) commits source metadata, root/title/source seal, an ordinary weave and its initial step together. It returns `{thought,run,replayed}`. The initial trigger is `media-import:<source-id>`. Request-key replay compares immutable filename, MIME, byte length, digest and exact clarification, then returns the original source/run identities without rescheduling. Independently allocated IDs/times and later title edits do not change that payload comparison. A metadata-only source without an initial admission is not adopted by replay.
+
+The daemon's [`SqliteMediaImports`](../src/storage/media-import.ts) coordinates this command with real file publication and scoped user reads. Its bounded upload lane checks retained request keys before publishing, and compares uploaded byte length/SHA-256 plus exact name/clarification for replay. Fresh records use the validator's detected MIME. `byKey` resolves `media_sources.request_key` to that source's initial `media-import:<source-id>` run; `retryAdmission` resolves the source-specific `media-retry:<source-id>:<key>` intent and reports whether it already exists inside the admission transaction. Public replies use the existing ordinary run projection, not internal native identities. There are no additional tables or schema changes for these routes/lookups.
+
+Normal run operations save one initial searchable AI interpretation child and the outcome's Full reply. Title-clear on a media root schedules only title regeneration, without reopening the file or creating another interpretation. The internal user-only `retry(actor,sourceId,requestKey)` reuses the original through ordinary weave admission with a `media-retry:<source-id>:<request-key>` trigger. A fresh admission requires no existing interpretation child; if a previous non-title source run exists, it must be failed/interrupted with settled cancellation. Active or unresolved work is not duplicated. Matching intent replay returns its existing run. Once any initial interpretation exists, further work uses Evolve, even if that child is later rejected.
+
+Media-source rejection uses the existing user rejection transaction and scoped eligibility rules. It immediately interrupts affected active Weaver/Evolve runs, increments their generations and marks cancellation pending, including runs exposed through supporting context. The confirmed `readThought` context is already durable while a first supporting-file path read is held, so rejection followed by restoration cannot revive that callback. Stop/failure/rejection retains source metadata, original files and confirmed knowledge; restoration does not resume the terminal run or schedule replacement work. Application fences cannot withdraw a path already sent to trusted native tools. See the [worker](testing.md#shared-file-media-worker-checks) and [admission/lifecycle checks](testing.md#media-admission-and-lifecycle-checks).
+
+### Internal private-file service
+
+[`media-files.ts`](../src/storage/media-files.ts) receives an explicit private directory, store identity, instance logger, lifetime fence and validator. Its `store.json` marker records `{version:1,storeId}` and must match SQLite. The owned layout has `objects`, `staging` and private scratch `prepared` subdirectories; filenames supplied with thoughts never select storage paths. Linux directory handles anchor operations through `/proc/self/fd`, with same-UID ownership, `0700` directory/`0600` file modes, no-follow and hard-link checks in [`media-file-paths.ts`](../src/storage/media-file-paths.ts).
+
+Publication bounds and hashes the actual stream, validates staged bytes, syncs the file and publishes without replacing an existing object. Only then does it call the trusted synchronous SQL admission callback, outside a SQL transaction; that callback owns its short transaction. The service checks the resulting immutable source fingerprint. There is no atomic transaction spanning SQLite and the filesystem: failures can leave unreferenced files, while an ambiguous callback failure must preserve a committed original. No filesystem I/O belongs inside the callback's SQL transaction.
+
+`readOriginal(sourceId)` verifies the stored reference and actual original fingerprint before returning bytes. `originalPath(sourceId)` performs the same verification and returns the stable real absolute object path, not a process-local descriptor path. Path-only verification hashes the file without retaining its full contents in memory. Cleanup is bounded and reference-aware, never removes referenced originals merely because they are rejected or failed, and excludes active publication. Unknown scratch files and unexpected multi-link leftovers are conservatively retained. The daemon performs bounded cleanup at startup and after admission, with a 24-hour orphan grace and 64-entry batches. Closing joins entered work before releasing owned handles; it does not close the caller's database. Scoped HTTP reads and normal worker claims supply consumer authorization separately. See the [owned filesystem checks](testing.md#private-media-file-service-checks) and [paired backup/restore procedure](server-startup.md#paired-media-backup-and-restore).
 
 ## Agentic search storage foundation
 
@@ -541,6 +604,8 @@ Core migration creates these derived FTS5 virtual tables:
 
 Title metadata insert/update/delete triggers maintain thought index entries. Every supported thought creation includes its title metadata row, even when untitled. A response-insert trigger indexes retained reply text. Migration rebuilds both indexes from canonical records on each open; existing thoughts and replies are backfilled without changing their content.
 
+For media roots, the thought index's `text` column contains exact clarification or an empty indexed body when absent, not `thoughts.text`. Only clarification and explicit title metadata enter FTS/spelling vocabulary. Filename fallback, MIME, IDs, request keys, digest, binary content and extraction output do not enter the corpus unless wording is deliberately recorded as a title. This does not create an empty or invented thought body. Title updates/clears and migration reindexing retain this rule.
+
 Indexes include rejected records. Scoped retrieval applies rejection rules in SQL before returning text or selecting a reply's latest eligible association. AI access excludes an entire shared reply if any associated thought is rejected. Retained interrupted fallback replies remain searchable through their eligible associated input; this does not promote unfinished output to a completed development.
 
 `search_revision(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL)` contains one row, initially `(1,0)`. Triggers increment it transactionally for title metadata insert/update/delete, response insert, response-association insert/update/delete, and thought rejection/restoration. Thought text is immutable; connections are not part of this search corpus.
@@ -553,7 +618,7 @@ Migration enables `PRAGMA foreign_keys = ON` and verifies it, and also enables `
 
 SQL constraints and triggers protect persistence invariants; they do not replace service authorization or scoped reads. Raw storage access is internal. Future agents and routes must use the domain services to exclude rejected thought content, ancestry, sources, connections and responses appropriately.
 
-Direct SQL creation is not the supported write boundary. In particular, bypassing `saveThought()` can omit title metadata or leave a source set unsealed. Do not populate application data by inserting partial rows manually.
+Direct SQL creation is not the supported write boundary. For ordinary textual thoughts, bypassing `saveThought()` can omit title metadata or leave a source set unsealed; media sources additionally have the deferred title/seal requirements above. Do not populate application data by inserting partial rows manually.
 
 ## Migrations
 
@@ -583,3 +648,7 @@ Search migration runs afterward in the same authoritative transaction. It captur
 Execution-owner migration follows those predecessor upgrades in the same transaction. It creates the immutable registry and adds `agent_bindings.execution_owner_id TEXT REFERENCES execution_owners(id)` only when absent, with its null default and a separate owner-update guard. This addition uses `ALTER TABLE ADD COLUMN`, not another run/knowledge closure rebuild, and retains existing rows/rowids, submission strings, indexes and unrelated trigger definitions. `foreign_key_check` must remain empty; failure after registry creation rolls the entire migration back. Schema inspection, rather than a numeric migration version, determines the upgrade. Migration itself creates no owner records and does not qualify any legacy binding/submission; only subsequent actual held-lease registration supplies new runtime provenance.
 
 Cleanup journal migration then runs through [`search-cleanup-migration.ts`](../src/storage/search-cleanup-migration.ts) in that same transaction. To make `submit_owner` nullable and add `prompt_manifest_json`, it stages/rebuilds **only** the leaf cleanup control table, preserving original rowids and every old field; new manifest values for old rows remain null. It restores unrelated cleanup indexes/triggers verbatim and deliberately replaces only its named cleanup guards. Other tables, incoming run/knowledge closures and their guards are not rebuilt for this addition. Unexpected incoming cleanup FKs or unknown cleanup columns fail closed rather than silently expanding or discarding data. FKs remain enabled and are checked before commit; an injected failure after actual manifest-table creation rolls back schema, rows and guards. No cleanup/native evidence is inferred during migration.
+
+Media migration follows through [`media-migration.ts`](../src/storage/media-migration.ts). When `thoughts.text` is still `NOT NULL`, it stages the complete incoming thought-FK closure, including unknown referencing tables, with original rowids/data, captured table/index/trigger SQL and AUTOINCREMENT high-water values. Backedges are visited rather than rejected. FK enforcement stays ON; `PRAGMA defer_foreign_keys=ON` defers row checks until the outer transaction commits. Cross-table triggers are temporarily removed, tables are rebuilt with the widened thought constraints, and all table definitions and explicit key indexes exist before row restoration. Original triggers and sequence values are restored afterward. Existing Markdown document membership, source seals, bytes and execution/search histories are not rewritten into media records. The migration neither edits `sqlite_schema` nor disables FKs.
+
+The same transaction creates missing media metadata tables, installs association/immutability guards and rebuilds clarification/title FTS projections. A development-schema cleanup preserves core thoughts, runs, exact step inputs/envelopes/results, bindings and source/file metadata while removing unused media-specific execution structures. Affected active runs are interrupted with a generation increment and pending cancellation; saved prompts are not reinterpreted or resumed, and unresolved native work is not marked settled. `foreign_key_check` must be empty; failed DDL/copy/commit rolls back the enclosing migration. Repeated migration/reopen preserves retained data. Migration never allocates a media identity, backfills source associations, touches the filesystem or submits agent work. See the [controlled preservation checks](testing.md#media-source-domain-and-persistence-checks) and [admission checks](testing.md#media-admission-and-lifecycle-checks).

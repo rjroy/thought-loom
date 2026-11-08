@@ -1,12 +1,12 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import type { ExportTreeNode, RejectionRepository, RejectionSnapshot, RejectionState, RejectionTarget, RejectionTransaction } from "../domain/rejection";
-import { createThought } from "../domain/thought";
+import { RejectionService, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
 import { immediate } from "./transaction";
 import { readRejectionState } from "./rejection-state";
-import { recordSearchEligibilityChange } from "./search-invalidation";
+import { recordMediaSourceRejection, recordSearchEligibilityChange } from "./search-invalidation";
+import { storedThoughts } from "./media-source";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[rejection storage] ${operation} attempt`);
@@ -53,8 +53,10 @@ export class SqliteRejectionRepository implements RejectionRepository {
           r.thought_id IS NOT NULL AS rejected
         FROM tree JOIN thoughts t ON t.id=tree.id JOIN thought_titles m ON m.thought_id=t.id
         LEFT JOIN rejected_thoughts r ON r.thought_id=t.id`).all(rootId) as { id: string; parentId: string | null; createdAt: string; rejected: number }[];
+      const visible = new Map(storedThoughts(this.db, rows.filter(row => !row.rejected)
+        .map(row => ({ ...row, sourceIds: sources.get(row.id) ?? [] }))).map(thought => [thought.id, thought]));
       return rows.map(row => ({ id: row.id, parentId: row.parentId, createdAt: row.createdAt,
-        thought: row.rejected ? null : createThought({ ...row, sourceIds: sources.get(row.id) ?? [] }) }));
+        thought: visible.get(row.id) ?? null }));
     })());
   }
 
@@ -68,7 +70,7 @@ export class SqliteRejectionRepository implements RejectionRepository {
     const rejectedThoughts = this.db.query("SELECT thought_id AS id FROM rejected_thoughts").all() as { id: string }[];
     const rejectedConnections = this.db.query("SELECT connection_id AS id FROM rejected_connections").all() as { id: string }[];
     return {
-      thoughts: thoughts.map(row => createThought({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] })),
+      thoughts: storedThoughts(this.db, thoughts.map(row => ({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] }))),
       connections: connections.map(row => createConnection({ ...row, sourceIds: connectionSources.get(row.id) ?? [] })),
       responses: responses.map(response => createResponse({ ...response, thoughtIds: responseThoughts.get(response.id) ?? [] })),
       rejectedThoughtIds: rejectedThoughts.map(row => row.id),
@@ -97,7 +99,9 @@ export class SqliteRejectionRepository implements RejectionRepository {
       return;
     }
     const invalidated = recordSearchEligibilityChange(this.db, kind, id, rejected);
-    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated });
+    const interruptedMediaRuns = rejected && kind === "thought"
+      ? recordMediaSourceRejection(this.db,id,new RejectionService(this),this.logger) : 0;
+    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns });
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {

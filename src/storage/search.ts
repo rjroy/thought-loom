@@ -3,11 +3,20 @@ import type { Database } from "bun:sqlite";
 import { fileURLToPath } from "node:url";
 import type { ReadScope } from "../domain/rejection";
 import { searchContexts, type SearchContext, type SearchHit, type SearchOptions, type SearchPage, type SearchRepository, type SearchResult } from "../domain/search";
-import { createThought, displayTitle, type ThoughtAuthor, type MaterialKind } from "../domain/thought";
+import { displayTitle, type ThoughtAuthor, type MaterialKind, type MediaSource } from "../domain/thought";
 import { createConnection } from "../domain/connection";
+import { requiredMediaSource, storedMediaSources, storedThoughts } from "./media-source";
 
 let nextRepository = 0;
 type Vocabulary = { readonly documents: string; readonly terms: string; readonly spelling: string; readonly version: string };
+type HitRow = { kind: "thought" | "response"; id: string; thoughtId: string; text: string | null };
+
+function searchHit(row: HitRow, sources: ReadonlyMap<string, MediaSource>): SearchHit {
+  const identity = { id: row.id, thoughtId: row.thoughtId };
+  if (row.text !== null) return { ...identity, kind: row.kind, text: row.text };
+  if (row.kind !== "thought") throw new Error("A response cannot have a null body");
+  return { ...identity, kind: "thought", text: null, mediaSource: requiredMediaSource(sources,row.thoughtId) };
+}
 
 /** Internal SQLite adapter; consumer access requires an explicit scope. */
 export class SqliteSearchRepository implements SearchRepository {
@@ -49,7 +58,7 @@ export class SqliteSearchRepository implements SearchRepository {
         const thoughts = this.db.query(`SELECT 'thought' AS kind,t.id AS id,t.id AS thoughtId,t.text AS text
           FROM thought_search_fts f JOIN thoughts t ON t.id=f.thought_id
           LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=t.id
-          WHERE thought_search_fts MATCH ? AND (?=1 OR rejected.thought_id IS NULL)`).all(match,inspect) as SearchHit[];
+          WHERE thought_search_fts MATCH ? AND (?=1 OR rejected.thought_id IS NULL)`).all(match,inspect) as HitRow[];
         const responses = this.db.query(`SELECT 'response' AS kind,r.id AS id,r.text AS text,
           (SELECT rt.thought_id FROM response_thoughts rt
             LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=rt.thought_id
@@ -59,8 +68,9 @@ export class SqliteSearchRepository implements SearchRepository {
           WHERE response_search_fts MATCH ?
             AND EXISTS (SELECT 1 FROM response_thoughts rt LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=rt.thought_id
               WHERE rt.response_id=r.id AND (?=1 OR rejected.thought_id IS NULL))
-            AND (?=0 OR NOT EXISTS (SELECT 1 FROM response_thoughts rt JOIN rejected_thoughts rejected ON rejected.thought_id=rt.thought_id WHERE rt.response_id=r.id))`).all(inspect,match,inspect,ai) as SearchHit[];
-        return [...thoughts, ...responses];
+            AND (?=0 OR NOT EXISTS (SELECT 1 FROM response_thoughts rt JOIN rejected_thoughts rejected ON rejected.thought_id=rt.thought_id WHERE rt.response_id=r.id))`).all(inspect,match,inspect,ai) as HitRow[];
+        const sources = storedMediaSources(this.db,thoughts.filter(row => row.text === null).map(row => row.thoughtId));
+        return [...thoughts, ...responses].map(row => searchHit(row,sources));
       })();
       this.logger.verbose("[search storage] search succeeded");
       return result;
@@ -98,18 +108,24 @@ export class SqliteSearchRepository implements SearchRepository {
         const authorFilter = `(json_array_length($authors)=0 OR author IN (SELECT value FROM json_each($authors)))`;
         const kindFilter = `(json_array_length($kinds)=0 OR materialKind IN (SELECT value FROM json_each($kinds)))`;
         const ordering = options.sort === "newest" ? "julianday(createdAt) DESC, id, kind" : options.sort === "oldest" ? "julianday(createdAt) ASC, id, kind" : "score ASC, id, kind";
-        type Row = SearchHit & { author: ThoughtAuthor; materialKind: MaterialKind; createdAt: string; thoughtText: string; title: string | null };
+        type Row = HitRow & { author: ThoughtAuthor; materialKind: MaterialKind; createdAt: string; thoughtText: string | null; title: string | null };
         const rows = this.db.query(`${cte} SELECT * FROM candidates WHERE ${authorFilter} AND ${kindFilter} ORDER BY ${ordering}`).all(params) as Row[];
         const authorRows = this.db.query(`${cte} SELECT author AS value, count(*) AS n FROM candidates WHERE ${kindFilter} GROUP BY author`).all(params) as { value: ThoughtAuthor; n: number }[];
         const kindRows = this.db.query(`${cte} SELECT materialKind AS value, count(*) AS n FROM candidates WHERE ${authorFilter} GROUP BY materialKind`).all(params) as { value: MaterialKind; n: number }[];
         const authors: Record<ThoughtAuthor, number> = { user: 0, ai: 0, source: 0 };
-        const kinds: Record<MaterialKind, number> = { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0 };
+        const kinds: Record<MaterialKind, number> = { "captured-original": 0, "user-contribution": 0, "ai-interpretation": 0, "developing-idea": 0, "imported-original": 0, "media-original": 0 };
         for (const row of authorRows) authors[row.value] = row.n;
         for (const row of kindRows) kinds[row.value] = row.n;
         const contexts = this.contexts(scope, match, rows.map(row => row.thoughtId));
-        const results: SearchResult[] = rows.map(row => ({ kind: row.kind, id: row.id, thoughtId: row.thoughtId,
-          text: row.text, title: displayTitle({ text: row.thoughtText, title: row.title }), author: row.author,
-          materialKind: row.materialKind, createdAt: row.createdAt, snippet: row.text.slice(0, 160), context: contexts.get(row.thoughtId) ?? null }));
+        const sources = storedMediaSources(this.db,rows.filter(row => row.thoughtText === null).map(row => row.thoughtId));
+        const results: SearchResult[] = rows.map(row => {
+          const hit = searchHit(row,sources);
+          const title = row.thoughtText === null ? row.title ?? requiredMediaSource(sources,row.thoughtId).name
+            : displayTitle({ text: row.thoughtText, title: row.title });
+          const snippet = (hit.text === null ? hit.mediaSource.clarification ?? "" : hit.text).slice(0,160);
+          return { ...hit, title, author: row.author, materialKind: row.materialKind, createdAt: row.createdAt,
+            snippet, context: contexts.get(row.thoughtId) ?? null };
+        });
         return { results, counts: { authors, kinds } };
       })();
       this.logger.verbose("[search storage] query succeeded");
@@ -151,7 +167,8 @@ export class SqliteSearchRepository implements SearchRepository {
       FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id WHERE t.id IN (SELECT value FROM json_each(?))`).all(thoughtIds) as { id: string }[];
     const connectionRows = this.db.query(`SELECT id,from_id AS fromId,to_id AS toId,category,proposed_by AS proposedBy,explanation FROM connections
       WHERE id IN (SELECT value FROM json_each(?))`).all(connectionIds) as { id: string }[];
-    const thoughts = new Map(thoughtRows.map(row => [row.id, createThought({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] })]));
+    const thoughts = new Map(storedThoughts(this.db,thoughtRows.map(row => ({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] })))
+      .map(thought => [thought.id,thought]));
     const connections = new Map(connectionRows.map(row => [row.id, createConnection({ ...row, sourceIds: connectionSources.get(row.id) ?? [] })]));
     const rejected = new Set((this.db.query("SELECT thought_id AS id FROM rejected_thoughts").all() as { id: string }[]).map(row => row.id));
     const rejectedConnections = new Set((this.db.query("SELECT connection_id AS id FROM rejected_connections").all() as { id: string }[]).map(row => row.id));
@@ -196,7 +213,9 @@ export class SqliteSearchRepository implements SearchRepository {
         if (cached.revision !== version.revision) {
           this.db.exec(`DELETE FROM temp.${vocabulary.documents}; DELETE FROM temp.${vocabulary.spelling};`);
           this.db.query(`INSERT INTO temp.${vocabulary.documents}(text)
-            SELECT t.text FROM thoughts t LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=t.id
+            SELECT CASE WHEN t.kind='media-original' THEN coalesce(s.clarification,'') ELSE t.text END
+            FROM thoughts t LEFT JOIN media_sources s ON s.source_thought_id=t.id
+            LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=t.id
             WHERE ?=1 OR rejected.thought_id IS NULL`).run(inspect);
           this.db.query(`INSERT INTO temp.${vocabulary.documents}(text)
             SELECT m.title FROM thought_titles m LEFT JOIN rejected_thoughts rejected ON rejected.thought_id=m.thought_id

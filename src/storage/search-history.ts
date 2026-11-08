@@ -3,6 +3,7 @@ import type { SearchHistoryContent, SearchHistoryCursor, SearchHistoryDiscovery,
   SearchHistoryPage, SearchHistoryQueries, SearchHistoryQuery, SearchThoughtSummary } from "../domain/agentic-search";
 import { displayTitle } from "../domain/thought";
 import { searchEligibilitySql as eligible, searchContentEligibilitySql as available, searchEvidence as evidence } from "./search-eligibility";
+import { requiredMediaSource, storedMediaSources } from "./media-source";
 
 interface MessageRow extends Omit<SearchHistoryMessage, "evidenceThoughtIds" | "availability"> {
   readonly evidenceJson: string;
@@ -11,7 +12,7 @@ interface MessageRow extends Omit<SearchHistoryMessage, "evidenceThoughtIds" | "
 interface DiscoveryRow {
   readonly id: string; readonly position: number; readonly addedAt: string; readonly removedAt: string | null;
   readonly why: string; readonly evidenceJson: string; readonly available: number; readonly targetAvailable: number;
-  readonly thoughtId: string; readonly title: string | null; readonly text: string; readonly titleAuthor: SearchThoughtSummary["titleAuthor"];
+  readonly thoughtId: string; readonly title: string | null; readonly text: string | null; readonly titleAuthor: SearchThoughtSummary["titleAuthor"];
   readonly author: SearchThoughtSummary["author"]; readonly kind: SearchThoughtSummary["kind"]; readonly createdAt: string;
 }
 
@@ -48,8 +49,10 @@ export function readSearchHistory(db: Database, sessionId: string, query: Search
       FROM search_discoveries d JOIN thoughts t ON t.id=d.thought_id JOIN thought_titles m ON m.thought_id=t.id
       WHERE d.session_id=CAST(? AS TEXT) AND d.position>? AND d.position<=? ORDER BY d.position LIMIT ?`)
       .all(id, after, highWater, limit) as DiscoveryRow[];
+    const sources = storedMediaSources(db,rows.filter(row => row.text === null).map(row => row.thoughtId));
     return rows.map(row => Object.freeze({ id: row.id, position: row.position, addedAt: row.addedAt, removedAt: row.removedAt,
-      thought: Object.freeze({ id: row.thoughtId, title: displayTitle(row), titleAuthor: row.titleAuthor, author: row.author, kind: row.kind, createdAt: row.createdAt }),
+      thought: Object.freeze({ id: row.thoughtId, title: row.text === null ? row.title ?? requiredMediaSource(sources,row.thoughtId).name : displayTitle({text:row.text,title:row.title}),
+        titleAuthor: row.titleAuthor, author: row.author, kind: row.kind, createdAt: row.createdAt }),
       why: row.why, evidenceThoughtIds: evidence(row.evidenceJson), availability: row.targetAvailable === 1 ? "available" : "thought-unavailable",
       reasonStatus: row.available === 1 && row.targetAvailable === 1 ? "available" : "context-unavailable" } satisfies SearchHistoryDiscovery));
   });

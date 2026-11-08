@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
+import { requireMediaSchema } from "./fixtures/media-source";
 
 // Frozen predecessor schema: completed steps could not yet retain staged results,
 // and exposure rows had no evidence of a full read. Do not derive this from current DDL.
@@ -86,6 +87,8 @@ test("populated predecessor closure and native journal bytes survive failure, re
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     db.exec("DROP TABLE temp.import_migration_0");
     migrate(db);
+    requireMediaSchema(db);
+    expect(db.query("SELECT * FROM media_store").all()).toEqual([]);
     expect(closureSnapshot(db)).toEqual(before);
     expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
@@ -94,6 +97,7 @@ test("populated predecessor closure and native journal bytes survive failure, re
     const reopened = new Database(path);
     try {
       migrate(reopened); migrate(reopened);
+      requireMediaSchema(reopened);
       expect(closureSnapshot(reopened)).toEqual(before);
       expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);

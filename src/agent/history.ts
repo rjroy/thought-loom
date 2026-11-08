@@ -1,13 +1,33 @@
-import type { InboxItem, NativeMessage, Observation, PersistedPrompt, ImportObservation, ImportTerminalEvidence } from "./opencode-adapter";
+import type { InboxItem, NativeMessage, Observation, PersistedPrompt, ImportObservation, ImportTerminalEvidence, PublicClient } from "./opencode-adapter";
 import { createHash } from "node:crypto";
 import { AgentBindingError, allowsNativeTools, type AgentBinding } from "./binding";
 import { AgentUncertainError } from "./errors";
+
+/** Shared SDK pagination; callers supply their existing authority/lifetime-fenced read around every page. */
+export async function readNativeHistory(sessionId: string, read: PublicClient["history"]): Promise<readonly NativeMessage[]> {
+  const messages: NativeMessage[] = [], cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const input: Parameters<PublicClient["history"]>[0] = cursor === undefined ? {sessionID:sessionId,order:"asc"} : {sessionID:sessionId,cursor};
+    const page = await read(input);
+    for (const message of page.data) messages.push(message);
+    cursor = page.cursor.next;
+    if (cursor !== undefined && (typeof cursor !== "string" || !cursor || cursors.has(cursor))) throw new AgentUncertainError("Native history cursor made no progress");
+    if (cursor !== undefined) cursors.add(cursor);
+  } while (cursor !== undefined);
+  return messages;
+}
 
 /** Restricted protocols and cleanup use the deny-tools default, regardless of any other caller's binding. */
 export function hasUntrackedNativeContext(message: NativeMessage, nativeTools = false): boolean {
   if (message.type === "other") return true;
   if (message.type === "user") return Boolean(message.unsafe);
   return message.type === "assistant" && (Boolean(message.unsafe) || (!nativeTools && (message.tools?.length ?? 0) > 0));
+}
+
+/** Unexpected pending context cannot be admitted by text matching alone. */
+export function hasUntrackedInboxContext(item: InboxItem): boolean {
+  return Boolean(item.unsafe);
 }
 
 /** Native has no assistant-to-user parent field. Only a closed, contiguous owned turn supplies output. */
@@ -93,7 +113,7 @@ function correlateTurn(sessionId: string, prompts: readonly PersistedPrompt[], m
   }
   const queued = new Set<string>();
   for (const item of inbox) {
-    if (item.sessionID !== sessionId || item.type !== "user" || !known.has(item.id) || known.get(item.id)?.input !== item.payload.text || queued.has(item.id)) return {state:"quarantined"};
+    if (hasUntrackedInboxContext(item) || item.sessionID !== sessionId || item.type !== "user" || !known.has(item.id) || known.get(item.id)?.input !== item.payload.text || queued.has(item.id)) return {state:"quarantined"};
     queued.add(item.id);
     // Earlier prompts cannot still be pending while this later daemon step is outstanding.
     if (item.id !== current.promptId) return {state:"uncertain"};

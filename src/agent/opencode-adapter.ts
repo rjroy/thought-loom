@@ -1,10 +1,9 @@
 import { createLogger, type Logger } from "../logging";
 import type { SessionMessageAssistantTool } from "@opencode/client";
 import { RunFenceError, type Claim } from "../domain/run";
-import { protocolJson } from "../domain/run-protocol";
-import { AgentBindingError, normalizeBinding, sameBinding, sameModel, type AgentBinding, type ModelRef } from "./binding";
+import { AgentBindingError, assertNativeSessionBinding, assertNativeSessionOwner, normalizeBinding, sameBinding, type AgentBinding, type ModelRef } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError, AgentUnavailableError } from "./errors";
-import { authorizeSubmissionHistory, correlateHistory, correlateImportHistory } from "./history";
+import { authorizeSubmissionHistory, correlateHistory, correlateImportHistory, hasUntrackedInboxContext, readNativeHistory } from "./history";
 import { searchInputHash } from "./search-cleanup-history";
 import { reconcileSearchCancellation } from "./search-cancellation";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
@@ -37,7 +36,15 @@ export interface NativeSession {
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly unsafe?: boolean;
 }
-export interface InboxItem { readonly id: string; readonly sessionID: string; readonly type: "user"; readonly payload: { readonly text: string }; readonly delivery: "queue" | "steer"; readonly time: { readonly created: number } }
+export interface InboxItem {
+  readonly id: string;
+  readonly sessionID: string;
+  readonly type: "user";
+  readonly payload: { readonly text: string };
+  readonly delivery: "queue" | "steer";
+  readonly time: { readonly created: number };
+  readonly unsafe?: boolean;
+}
 
 /** Narrow injected facade over the maintained promise client's decoded values. */
 export interface PublicClient {
@@ -101,13 +108,10 @@ export class OpenCodeAdapter {
     return normalizeBinding(saved);
   }
   private verifyOwner(runId: string, binding: AgentBinding, session: NativeSession): void {
-    if (session.id !== binding.sessionId || session.metadata.owner !== "thoughtloom" || session.metadata.runId !== runId || session.metadata.protocolVersion !== "1") throw new AgentBindingError("Native session ownership differs");
+    assertNativeSessionOwner(runId,binding,session);
   }
   private verify(runId: string, binding: AgentBinding, session: NativeSession): void {
-    this.verifyOwner(runId,binding,session);
-    const metadata = {owner:"thoughtloom",runId,protocolVersion:"1"};
-    if (session.unsafe || session.location.directory !== binding.location.directory || !sameModel(binding.model,session.model) ||
-        protocolJson(session.permissions) !== protocolJson(binding.permissions) || protocolJson(session.metadata) !== protocolJson(metadata)) throw new AgentBindingError("Native session does not match its owned binding");
+    assertNativeSessionBinding(runId,binding,session);
   }
   private async call<T>(claim: Claim, operation: string, action: () => Promise<T>, prompt?: PersistedPrompt, onTransportFailure?: () => void,
     onValue?: (value: T) => void): Promise<T> {
@@ -171,18 +175,7 @@ export class OpenCodeAdapter {
     }
   }
   private async history(binding: AgentBinding, read: (input: Parameters<PublicClient["history"]>[0]) => ReturnType<PublicClient["history"]>): Promise<readonly NativeMessage[]> {
-    const messages: NativeMessage[] = [];
-    const cursors = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const input: Parameters<PublicClient["history"]>[0] = cursor === undefined ? {sessionID:binding.sessionId,order:"asc"} : {sessionID:binding.sessionId,cursor};
-      const page = await read(input);
-      for (const message of page.data) messages.push(message);
-      cursor = page.cursor.next;
-      if (cursor !== undefined && (typeof cursor !== "string" || !cursor || cursors.has(cursor))) throw new AgentUncertainError("Native history cursor made no progress");
-      if (cursor !== undefined) cursors.add(cursor);
-    } while (cursor !== undefined);
-    return messages;
+    return readNativeHistory(binding.sessionId,read);
   }
   async submit(claim: Claim, requested: AgentBinding, input: PersistedPrompt, onAdmission?: (fact: SearchAdmissionFact) => void): Promise<void> {
     const prompt = this.prompt(input);
@@ -198,7 +191,7 @@ export class OpenCodeAdapter {
       const messages = await this.history(binding,input => this.call(claim,"message.list",() => this.client.history(input),prompt));
       authorizeSubmissionHistory(known,messages,binding);
       const inbox = await this.call(claim,"inbox.list",() => this.client.inbox({sessionID:binding.sessionId}),prompt);
-      if (inbox.some(item => item.id !== prompt.promptId || item.sessionID !== binding.sessionId || item.payload.text !== prompt.input)) throw new AgentBindingError("Unexpected native pending input");
+      if (inbox.some(item => hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.sessionID !== binding.sessionId || item.payload.text !== prompt.input)) throw new AgentBindingError("Unexpected native pending input");
       if (inbox.length || Object.hasOwn(await this.call(claim,"session.active",() => this.client.active(),prompt),binding.sessionId)) throw new AgentUncertainError("Existing native work must be observed before submission");
       this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),prompt));
       // The concrete storage callback records submitting in the existing run/step transaction before dispatch.
@@ -206,11 +199,11 @@ export class OpenCodeAdapter {
       try {
         const receipt = await this.call(claim,"session.prompt",() => this.client.prompt({sessionID:binding.sessionId,id:prompt.promptId,text:prompt.input}),prompt,undefined,
           onAdmission === undefined ? undefined : receipt => {
-            if (receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
+            if (hasUntrackedInboxContext(receipt) || receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
             // Persist only a matching sealed cleanup fact before the post-await active fence can discard this ACK.
             onAdmission({runId:claim.runId,nativeSessionId:binding.sessionId,promptId:prompt.promptId,inputSha256:searchInputHash(prompt.input)});
           });
-        if (receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
+        if (hasUntrackedInboxContext(receipt) || receipt.id !== prompt.promptId || receipt.sessionID !== binding.sessionId || receipt.type !== "user" || receipt.payload.text !== prompt.input) throw new AgentBindingError("Native admission identity differs");
         this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),prompt));
       } catch (error) {
         if (!(error instanceof AgentBindingError)) this.assertActive(claim,prompt,"uncertain");
@@ -313,14 +306,14 @@ export class OpenCodeAdapter {
       authorizeSubmissionHistory([],messages);
       if (messages.length) throw new AgentBindingError("Initial import session contains unexpected native history");
       const inbox=await read("inbox.list",() => this.client.inbox({sessionID:binding.sessionId}));
-      if (inbox.some(item => item.id!==prompt.promptId || item.sessionID!==binding.sessionId || item.payload.text!==prompt.input)) throw new AgentBindingError("Unexpected import pending input");
+      if (inbox.some(item => hasUntrackedInboxContext(item) || item.id!==prompt.promptId || item.sessionID!==binding.sessionId || item.payload.text!==prompt.input)) throw new AgentBindingError("Unexpected import pending input");
       if (inbox.length || Object.hasOwn(await read("session.active",() => this.client.active()),binding.sessionId)) throw new AgentUncertainError("Existing native work must settle before import submission");
       this.verify(claim.runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
       authorize();
       record.call(this.bindings,claim,prompt);
       submitted=true;
       const receipt=await read("session.prompt",() => this.client.prompt({sessionID:binding.sessionId,id:prompt.promptId,text:prompt.input}));
-      if (receipt.id!==prompt.promptId || receipt.sessionID!==binding.sessionId || receipt.type!=="user" || receipt.payload.text!==prompt.input) throw new AgentBindingError("Import admission identity differs");
+      if (hasUntrackedInboxContext(receipt) || receipt.id!==prompt.promptId || receipt.sessionID!==binding.sessionId || receipt.type!=="user" || receipt.payload.text!==prompt.input) throw new AgentBindingError("Import admission identity differs");
       this.verify(claim.runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
     } catch (error) {
       authorize();
@@ -395,6 +388,7 @@ export class OpenCodeAdapter {
       await read(() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:prompt.promptId}));
       await read(() => this.client.interrupt({sessionID:binding.sessionId}));
       const inbox = await read(() => this.client.inbox({sessionID:binding.sessionId}));
+      if (inbox.some(hasUntrackedInboxContext)) throw new AgentBindingError("Unexpected native cancellation context");
       const active = await read(() => this.client.active());
       this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
       const state = inbox.length === 0 && !Object.hasOwn(active,binding.sessionId) ? "settled" : "pending";

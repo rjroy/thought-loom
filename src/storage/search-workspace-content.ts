@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { ContextRef } from "../domain/run";
 import type { SearchConversationMessage } from "../domain/search-capability";
-import { createThought, displayTitle, type Thought } from "../domain/thought";
+import { displayTitle, type Thought } from "../domain/thought";
 import { SearchNotFoundError, type SearchDiscoveryView, type SearchMessageView, type SearchThoughtSummary } from "../domain/agentic-search";
 import { mergeSearchReferences, searchContentEligibilitySql, searchEligibilitySql, searchEvidence } from "./search-eligibility";
+import { requiredMediaSource, storedMediaSources, storedThought } from "./media-source";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 export interface SearchOfferedContent<T> { readonly value: T; readonly dependencies: readonly ContextRef[] }
@@ -11,7 +12,7 @@ interface ContentPage<T> { readonly items: readonly T[]; readonly hasMore: boole
 interface MessageRow extends Omit<SearchMessageView, "availability" | "evidenceThoughtIds"> { readonly evidenceJson: string; readonly available: number }
 interface DiscoveryRow {
   readonly id: string; readonly position: number; readonly addedAt: string; readonly why: string; readonly evidenceJson: string;
-  readonly available: number; readonly targetAvailable: number; readonly thoughtId: string; readonly text: string; readonly title: string | null;
+  readonly available: number; readonly targetAvailable: number; readonly thoughtId: string; readonly text: string | null; readonly title: string | null;
   readonly titleAuthor: SearchThoughtSummary["titleAuthor"]; readonly author: SearchThoughtSummary["author"];
   readonly kind: SearchThoughtSummary["kind"]; readonly createdAt: string;
 }
@@ -84,9 +85,11 @@ export function readSearchDiscoveries(db: Database, sessionId: string, after: nu
       ${eligibleTargetsOnly ? `AND ${searchEligibilitySql("'thought'","d.thought_id")}` : ""} ORDER BY d.position LIMIT ?`)
     .all(text(sessionId), after, highWater, limit + 1) as DiscoveryRow[];
   const selected = rows.slice(0, limit), exposed: ContextRef[] = [];
+  const sources = storedMediaSources(db,selected.filter(row => row.targetAvailable === 1 && row.text === null).map(row => row.thoughtId));
   const items = selected.map(row => {
     const targetAvailable = row.targetAvailable === 1, rationaleAvailable = targetAvailable && row.available === 1;
-    const thought = targetAvailable ? Object.freeze({ id: row.thoughtId, title: displayTitle(row), titleAuthor: row.titleAuthor,
+    const thought = targetAvailable ? Object.freeze({ id: row.thoughtId,
+      title: row.text === null ? row.title ?? requiredMediaSource(sources,row.thoughtId).name : displayTitle({text:row.text,title:row.title}), titleAuthor: row.titleAuthor,
       author: row.author, kind: row.kind, createdAt: row.createdAt }) : null;
     const evidence = rationaleAvailable ? searchEvidence(row.evidenceJson) : Object.freeze([]);
     if (targetAvailable) exposed.push({ kind: "thought", id: row.thoughtId });
@@ -107,7 +110,7 @@ export function readSearchThoughtPreview(db: Database, thoughtId: string): Searc
   if (!row) throw new SearchNotFoundError("search-thought-not-found");
   const sources = db.query(`SELECT s.source_id AS id FROM thought_sources s WHERE s.thought_id=CAST(? AS TEXT)
     AND ${searchEligibilitySql("'thought'", "s.source_id")} ORDER BY s.position`).all(text(thoughtId)) as { id: string }[];
-  const thought = createThought({ ...row, sourceIds: sources.map(source => source.id) });
+  const thought = storedThought(db,{ ...row, sourceIds: sources.map(source => source.id) });
   const ids = [thought.id, ...(thought.parentId === null ? [] : [thought.parentId]), ...thought.sourceIds];
   return { value: { thought }, dependencies: mergeSearchReferences(ids.map(id => ({ kind: "thought", id }))) };
 }

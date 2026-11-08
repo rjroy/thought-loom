@@ -16,6 +16,7 @@ import { searchEntryHref, searchCatalogHref } from "../features/agentic-search/l
 import { useExploreMemory, type ExploreState } from "./explore-provider";
 import styles from "./explore.module.css";
 import { ContentGlyph } from "./content-glyph";
+import { MediaSourceDetails } from "./media-source-details";
 
 const authorOptions = [
   { value: "user", label: "You" },
@@ -27,7 +28,8 @@ const kindOptions = [
   { value: "user-contribution", label: "Contributions", singular: "Contribution" },
   { value: "ai-interpretation", label: "AI interpretations", singular: "Interpretation" },
   { value: "developing-idea", label: "Developing ideas", singular: "Developing idea" },
-  { value: "imported-original", label: "Imported source", singular: "Imported source" },
+  { value: "imported-original", label: "Imported Markdown", singular: "Imported Markdown" },
+  { value: "media-original", label: "Images and PDFs", singular: "Image or PDF" },
 ] as const;
 
 function emptyState(): ExploreState {
@@ -448,6 +450,9 @@ export function ExploreView({ presentationOnly = false }: { presentationOnly?: b
               );
             })}
           </div>
+          {view.phase === "success" && page?.results.some(result => result.materialKind === "media-original" || result.context?.thought.kind === "media-original") && (
+            <p className={styles.mediaPolicy}>Media sources match their clarification or recorded titles, not original file contents or fallback filenames. Recorded interpretations and full replies are searchable separately.</p>
+          )}
         </div>
       </div>
     </section>
@@ -462,7 +467,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
   rejected: boolean | null | undefined;
   onToggle: () => void;
 }) {
-  const classification = result.materialKind === "imported-original" ? "Imported source" : kindOptions.find(option => option.value === result.materialKind)!.singular;
+  const classification = kindOptions.find(option => option.value === result.materialKind)!.singular;
   const date = createdDate(result.createdAt);
   const context = result.context?.thought;
 
@@ -470,7 +475,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
     <article className={styles.card}>
       <div className={styles.cardBody}>
         <div className={styles.byline}>
-          <span className={result.author === "user" ? styles.user : styles.ai}>
+          <span className={result.author === "user" ? styles.user : result.author === "ai" ? styles.ai : styles.source}>
             {result.author === "user" ? "You" : result.author === "ai" ? "AI" : "Imported source"}
           </span>
           <span className={styles.materialLabel}><ContentGlyph kind={result.kind === "response" ? "full-reply" : result.materialKind} size={20} />{result.kind === "response" ? `Full reply · ${classification}` : classification}</span>
@@ -481,21 +486,21 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
           {date && <time dateTime={result.createdAt}>{date}</time>}
         </div>
         <h3><Link href={ideaHref(result, returnTo)} prefetch={false}>{result.title}</Link></h3>
-        <p className={styles.excerpt}>
-          {expanded ? result.text : result.snippet}
-          {result.text.length > result.snippet.length && (
+        {result.text === null ? <div className={styles.mediaDetails}><MediaSourceDetails source={result.mediaSource} compact /></div> : <p className={styles.excerpt}>
+          {expanded && result.text !== null ? result.text : result.snippet}
+          {result.text !== null && result.text.length > result.snippet.length && (
             <> <button className={styles.expandButton} type="button" aria-expanded={expanded}
               aria-label={`${expanded ? "Collapse" : "Expand"} original text for ${result.title}`}
               onClick={onToggle}>{expanded ? "Show less" : "…"}</button></>
           )}
-        </p>
+        </p>}
       </div>
       {context && (
         <div className={styles.context}>
           <strong className={styles.relationLabel}><ContentGlyph kind={result.context?.kind === "connection" ? "connection" : "evolution"} size={16} />{relationship(result)}:</strong>{" "}
           <Link href={ideaHref({ kind: "thought", id: context.id, thoughtId: context.id }, returnTo)}
             prefetch={false}>
-            {context.title ?? context.text.trim().split(/\s+/).slice(0, 5).join(" ")}
+            {context.title ?? (context.kind === "media-original" ? context.mediaSource.name : context.text.trim().split(/\s+/).slice(0, 5).join(" "))}
           </Link>
           {result.context?.kind === "connection" && (
             <> — {result.context.connection.explanation}
@@ -505,6 +510,7 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
               </span>
             </>
           )}
+          {context.kind === "media-original" && <div className={styles.contextMedia}><MediaSourceDetails source={context.mediaSource} compact /></div>}
         </div>
       )}
     </article>

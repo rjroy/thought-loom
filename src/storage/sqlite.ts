@@ -1,6 +1,6 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { createThought, type Thought } from "../domain/thought";
+import type { Thought } from "../domain/thought";
 import { createConnection, type Connection } from "../domain/connection";
 import type { ResponseRecord } from "../domain/response";
 import { SqliteSharedResponses } from "./shared-response";
@@ -22,6 +22,8 @@ import { SqliteSearchInvestigation } from "./investigative-retrieval";
 import { SqliteSearchRepository } from "./search";
 import type { SqliteSearchRetention } from "./search-retention";
 import { SqliteKnowledgeWriter } from "./knowledge-write";
+import { migrateMediaFoundation } from "./media-migration";
+import { initializeMediaStore, mediaStoreId, saveMediaSource, storedThought, type MediaSourceWrite } from "./media-source";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -151,6 +153,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         CREATE TRIGGER IF NOT EXISTS response_seals_immutable_delete BEFORE DELETE ON response_seals
         BEGIN SELECT RAISE(ABORT, 'response seals are immutable'); END;
       `);
+      // Thought FTS content is rebuilt once by migrateMediaFoundation, after media metadata exists.
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS thought_search_fts USING fts5(thought_id UNINDEXED, text, title);
         CREATE VIRTUAL TABLE IF NOT EXISTS response_search_fts USING fts5(response_id UNINDEXED, text);
@@ -169,9 +172,6 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         CREATE TRIGGER IF NOT EXISTS response_search_insert AFTER INSERT ON responses BEGIN
           INSERT INTO response_search_fts(response_id,text) VALUES (NEW.id,NEW.text);
         END;
-        DELETE FROM thought_search_fts;
-        INSERT INTO thought_search_fts(thought_id,text,title)
-          SELECT t.id,t.text,m.title FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id;
         DELETE FROM response_search_fts;
         INSERT INTO response_search_fts(response_id,text) SELECT id,text FROM responses;
         CREATE TABLE IF NOT EXISTS search_revision (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
@@ -191,6 +191,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       migrateSearchFoundation(db);
       migrateExecutionOwners(db);
       migrateSearchCleanup(db);
+      migrateMediaFoundation(db, logger);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
@@ -233,6 +234,26 @@ export class SqliteStore {
     new SqliteKnowledgeWriter(this.db,this.logger,this.scheduling).saveThought(input);
   }
 
+  mediaStoreId(): string | null {
+    return boundary(this.logger, "read media store identity", () => mediaStoreId(this.db));
+  }
+
+  initializeMediaStore(storeId: string): string {
+    return boundary(this.logger, "initialize media store identity", () => {
+      const previous = mediaStoreId(this.db), id = initializeMediaStore(this.db, storeId);
+      if (previous === null) this.logger.info("[storage] media store identity initialized");
+      return id;
+    });
+  }
+
+  /** Internal source-first admission; neither publishes files nor schedules interpretation. */
+  saveMediaSource(input: MediaSourceWrite): void {
+    boundary(this.logger, "save media source", () => {
+      saveMediaSource(this.db, input);
+      this.logger.info("[storage] media source applied in transaction", { thoughtId: input.thought.id, sourceId: input.thought.mediaSource.id });
+    });
+  }
+
   getThought(id: string): Thought | null {
     return boundary(this.logger, "get thought", () => {
       nonEmpty(id, "id");
@@ -240,7 +261,7 @@ export class SqliteStore {
         t.origin, t.parent_id AS parentId FROM thoughts t JOIN thought_titles m ON m.thought_id = t.id WHERE t.id = ?`).get(id);
       if (!row) return null;
       const sources = this.db.query("SELECT source_id AS id FROM thought_sources WHERE thought_id = ? ORDER BY position").all(id) as { id: string }[];
-      return createThought({ ...row, sourceIds: sources.map(source => source.id) });
+      return storedThought(this.db, { ...row, sourceIds: sources.map(source => source.id) });
     });
   }
 

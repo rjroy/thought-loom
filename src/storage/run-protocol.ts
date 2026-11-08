@@ -3,8 +3,6 @@ import type { Database } from "bun:sqlite";
 import { requireExecutionRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord } from "../domain/run";
 import { parseEnvelope, protocolJson, type CancellationState, type NextStep, type ProtocolEnvelope, type RunProtocolRepository, type RunStep } from "../domain/run-protocol";
 import { nonEmpty } from "../domain/validation";
-import { isStepOperationCapability } from "../domain/run-operations";
-import { isReadCapability } from "../domain/capability";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { isSearchOnlyCapability, parseSearchCapabilityRequest, searchCapabilityResultInput } from "../domain/search-capability";
 import { readSearchCapabilityResult } from "../domain/search-capability-result";
@@ -57,10 +55,13 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       if (run.kind === "search") {
         if (value.kind === "request") parseSearchCapabilityRequest(value.request);
         else if (value.kind !== "search-reply") throw new RunForbiddenError("Search envelope authority required");
-      } else if (value.kind === "search-reply" || (value.kind === "request" && isSearchOnlyCapability(value.request.capability))) {
+      } else if (value.kind === "search-reply" ||
+          (value.kind === "request" && isSearchOnlyCapability(value.request.capability))) {
         throw new RunForbiddenError("Search run authority required");
       }
-      if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) throw new RunForbiddenError("Final envelope does not match the run kind");
+      if ((value.kind === "report" && run.kind !== "export") || (value.kind === "complete" && run.kind === "export")) {
+        throw new RunForbiddenError("Final envelope does not match the run kind");
+      }
       const encoded = protocolJson(value);
       if (step.envelope !== null) {
         if (protocolJson(step.envelope) !== encoded) throw new RunConflictError("Completed prompt envelope differs");
@@ -77,17 +78,10 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     const successor = this.guarded<RunStep>("advance prompt",claim,run => {
       const step = this.readStep(run.id,promptId);
       if (!step) throw new RunConflictError("Prompt does not belong to this run");
-      const resultJson = protocolJson(result);
+      if (step.envelope?.kind === "request") this.requireWeaveCapability(run,step.envelope.request.capability);
+      const resultJson = this.confirmedStepResult(step,result);
       const nextPromptId = nonEmpty(next.promptId,"promptId");
       const nextInput = nonEmpty(next.input,"input");
-      if (step.result !== null && protocolJson(step.result) !== resultJson) throw new RunConflictError("Result differs from the dispatched step result");
-      if (step.envelope?.kind === "request" && isReadCapability(step.envelope.request.capability) && step.result === null) {
-        throw new RunConflictError("Read result must be committed with its context witnesses before advancing");
-      }
-      if (step.envelope?.kind === "request" && isStepOperationCapability(step.envelope.request.capability)) {
-        const receipt = this.readReceipt(run.id,step.promptId);
-        if (!receipt || receipt.format !== "step" || protocolJson(JSON.parse(receipt.result)) !== resultJson) throw new RunConflictError("Write result must match its committed step receipt");
-      }
       if (step.state === "processed") {
         const successor = this.readStep(run.id,nextPromptId);
         if (protocolJson(step.result) !== resultJson || !successor || successor.position !== step.position+1 || successor.input !== nextInput) {
@@ -97,7 +91,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       }
       this.current(run,promptId);
       if (step.state !== "completed" || step.envelope?.kind !== "request") throw new RunConflictError("Only a completed capability request can advance");
-      return this.appendSuccessor(run,step,resultJson,{promptId:nextPromptId,input:nextInput});
+      return this.appendSuccessor(run,step,resultJson,nextPromptId,nextInput);
     });
     this.logger.verbose("[run storage] prompt successor confirmed", { runId: claim.runId, from: promptId, to: successor.promptId, position: successor.position, generation: claim.generation });
     return successor;
@@ -126,20 +120,20 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
       const identity = searchString(nextPromptId(),"prompt ID");
       if (!identity.startsWith("msg_")) throw new RunConflictError("Search prompt requires its native message prefix");
       const clock = this.searchClock.prepare(run,step,identity), input = searchCapabilityResultInput(request,result,clock.context ?? undefined);
-      return { step: this.appendSuccessor(run,step,resultJson,{promptId:identity,input}), clock };
+      return { step: this.appendSuccessor(run,step,resultJson,identity,input), clock };
     });
     prepared.clock?.committed();
     const successor = prepared.step;
     this.logger.verbose("[run storage] search prompt successor confirmed",{runId:claim.runId,from:promptId,to:successor.promptId,position:successor.position,generation:claim.generation});
     return successor;
   }
-  private appendSuccessor(run: RunRecord, step: RunStep, resultJson: string, next: NextStep): RunStep {
-    if (this.db.query("SELECT 1 FROM run_steps WHERE prompt_id=?").get(next.promptId)) throw new RunConflictError("Prompt identity already issued");
+  private appendSuccessor(run: RunRecord, step: RunStep, resultJson: string, promptId: string, input: string): RunStep {
+    if (this.db.query("SELECT 1 FROM run_steps WHERE prompt_id=?").get(promptId)) throw new RunConflictError("Prompt identity already issued");
     this.db.run("UPDATE run_steps SET state='processed',result_json=? WHERE run_id=? AND prompt_id=?",[resultJson,run.id,step.promptId]);
     this.db.run("INSERT INTO run_steps (run_id,position,prompt_id,input,state,native_state) VALUES (?,?,?,?,'prepared','unknown')",
-      [run.id,step.position+1,next.promptId,next.input]);
+      [run.id,step.position+1,promptId,input]);
     this.db.run("UPDATE runs SET status='queued' WHERE id=?",[run.id]);
-    return { runId: run.id, position: step.position+1, promptId: next.promptId, input: next.input, state: "prepared", envelope: null, result: null };
+    return { runId: run.id, position: step.position+1, promptId, input, state: "prepared", envelope: null, result: null };
   }
   cancellation(runId: string): CancellationState {
     this.require(runId);
