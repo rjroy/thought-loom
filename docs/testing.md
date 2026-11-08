@@ -24,6 +24,12 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Continuous integration
+
+The [GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests and pushes to `master`. On GitHub-hosted Ubuntu 24.04 it uses Bun 1.4.3 and frozen dependencies, builds spellfix, runs the root tests and typecheck, builds and typechecks the web app, and runs both full browser foundation and shared-record integration suites. Commands use `--no-env-file`; the fixtures use owned data and deterministic fake agents, not repository secrets, an operator service, or a model provider. Native acceptance remains separate.
+
+The job creates `/tmp/opencode` and checks for the image's preinstalled `/usr/bin/chromium`, the path required by the browser harnesses. The runner image and its Chromium version can change; the workflow does not install or pin the browser. It also relies on the hosted image's compiler and SQLite development headers for spellfix, and network access for dependency installs. Browser bootstraps install the frozen lock in their own source copies; the integration bootstrap builds its own spellfix. A workflow run must pass on GitHub before hosted compatibility is established.
+
 ### Media-source domain and persistence checks
 
 ```sh
