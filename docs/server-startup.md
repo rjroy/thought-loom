@@ -142,9 +142,19 @@ Thought text, authorship and ancestry are not editable. Edit title and Clear tit
 
 Connection drafts stay intact between wizard steps, but leaving the Idea page or refreshing clears them. Cancel asks before discarding entered work; navigation is not blocked and there is no browser-storage recovery. If a save cannot be confirmed, the submitted details remain readonly and copyable while the editor is open, with a warning that creation may have completed. Leaving does not cancel a sent request, and the client does not automatically resend it.
 
-More actions contains contextual export and rejection/restoration controls. Evolve is unavailable for rejected ideas. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
+More actions contains Reinterpret, contextual export and rejection/restoration controls. Evolve and fresh reinterpretation are unavailable for rejected ideas. Individual idea rejection leaves descendants active. Connection restoration applies only to explicitly rejected connections, not links merely hidden because an endpoint is rejected. Restoring an idea or branch does not restore independently rejected connections.
 
 Branch rejection uses the daemon's exact preview and affected count. If confirmation returns `409`, the dialog invalidates the old confirmation, loads a fresh preview, and requires another explicit confirmation. It never automatically repeats the destructive request. Branch restoration uses the existing bodyless operation, without an invented count/preview. Only confirmed command responses show success. Pending changes prevent duplicate submissions and keep their original target; unknown write outcomes stay unconfirmed without automatic replay or false success.
+
+### Reinterpret an idea
+
+Choose **More actions → Reinterpret** to request fresh weaving of the selected active thought, including an AI-created thought or retained media source. No new contribution is required; use Evolve to supply instructions or develop the thought. Reinterpretation preserves earlier thoughts, branches and Full replies. New interpretations appear as direct children in Surrounding Context without navigating away or changing the selected Full reply.
+
+The status area shows queued/running work, **Check interpretation** and **Stop**. Existing interpretation work is shown instead of duplicated. Rejected subjects require restoration, and unresolved or unverified earlier native work blocks a new attempt. Failure to check status preserves the last confirmed display; Stop is not proof that remote work ended. Initial media-processing recovery stays distinct, with one visible status owner rather than duplicate controls for the same run.
+
+Before sending, the browser saves and verifies only subject/request-key identity and recovery classification in `sessionStorage`. If that storage is unavailable, it does not send. This is recovery for the current browser tab session, not an offline queue, cross-device history or a durable saved draft; no thought text or credentials are stored there. Reload checks the existing receipt and never resends automatically. If admission is unconfirmed, **Check request** reads the same identity and **Send same request** explicitly resends that same key; the resend may start work if the first request never arrived. A missing receipt or failed read cannot authorize an automatic replacement request.
+
+The browser uses fixed Next.js routes under `/api/ideas/:id/reinterpret`; credentials stay server-side. Reinterpretation uses normal daemon weaving and its model configuration. Without agent configuration it remains queued. See the [daemon admission and recovery contract](daemon-api.md#reinterpret-post-thoughtsidreinterpret).
 
 ### Evolve workspace
 
@@ -258,6 +268,8 @@ If you create a launcher, have it change to the project root before calling `bun
 The maintained published `@opencode/client` package is pinned to **2.2.5**. The [compatibility agreement](../.lore/context/architecture.md#opencode-integration-and-compatibility) permits newer operator-service versions: do not reject one solely for its version or implicitly start, stop or upgrade it. Validate the API capabilities actually needed; a pinned SDK or synthetic fixture version is not proof of every service's compatibility.
 
 The normal adapter submits retained text prompts and correlates replies with their saved session/prompt identities and complete paginated history. Settled native tool turns are permitted for Weaver/Evolve; restricted sessions retain their deny policy. Unsupported or foreign input remains unsafe for recovery. An uncertain acknowledgement is not a reason to resend. See the [adapter and native-tool checks](testing.md#business-behavior-protected) and separate opt-in acceptance fixture; synthetic SDK responses do not establish compatibility with every service or model.
+
+Ordinary run cancellation requires positive terminal evidence for potentially submitted prompts across the retained step journal. An empty inbox, an inactive session, or a cancellation acknowledgement alone cannot prove that a delayed submission will never arrive. Cleanup joins local execution before reconciling; genuinely never-submitted initial work can still settle locally. Missing or contradictory native evidence leaves cancellation pending, potentially indefinitely. Stop still fences local publication immediately, but does not certify remote termination or undo external effects. This ordinary adapter path is shared by Weave, Evolve and Agentic export; Markdown import and conversational-search cleanup retain their separate contracts. Historical `settled` flags alone are not a certificate for future replacement work.
 
 ### Retained media and shared filesystem
 

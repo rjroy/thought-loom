@@ -31,7 +31,17 @@ export async function requestDaemon(config: WebConfig, request: DaemonRequest, d
     } catch { /* Malformed encoding is not an allowed path. */ }
   }
   const mediaUploadKeyPath = pathname !== undefined && (/^\/imports\/media\/by-key\/[A-Za-z0-9._:-]{1,128}$/.test(pathname) || encodedMediaKeyPath);
-  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !mediaUploadKeyPath)
+  const reinterpretKey = pathname?.match(/^\/thoughts\/([A-Za-z0-9_~.-]+)\/reinterpret\/by-key\/([^/]+)$/);
+  let reinterpretKeyPath = false;
+  if (reinterpretKey?.[1] && reinterpretKey[2] && request.method === "GET" && reinterpretKey[1] !== "." && reinterpretKey[1] !== "..") {
+    try {
+      const key = decodeURIComponent(reinterpretKey[2]);
+      reinterpretKeyPath = /^[A-Za-z0-9._:-]{1,128}$/.test(key) && encodeURIComponent(key) === reinterpretKey[2];
+    } catch { /* Malformed encoding is not an allowed path. */ }
+  }
+  // Receipt paths are GET-only, including keys that happen not to require escaping.
+  if (pathname && /^\/thoughts\/[^/]+\/reinterpret\/by-key\//.test(pathname) && !reinterpretKeyPath) throw new Error("Invalid daemon path");
+  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !mediaUploadKeyPath && !reinterpretKeyPath)
       || pathname.split("/").some(segment => segment === "." || segment === "..")
       || /[\\#\x00-\x1f\x7f]/.test(request.path)) {
     throw new Error("Invalid daemon path");

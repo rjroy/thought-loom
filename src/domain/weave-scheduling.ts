@@ -3,12 +3,14 @@ import type { WeaveIntent } from "./run-operations";
 import type { SharedResponse } from "./shared-response";
 import type { MaterialKind, Thought } from "./thought";
 import { nonEmpty } from "./validation";
+import { isReinterpretationTrigger } from "./reinterpretation";
 
-export type WeavePurpose = "ordinary" | "media-title-only";
+export type WeavePurpose = "ordinary" | "media-title-only" | "reinterpretation";
 const titleClearPrefix = "title-clear:";
 
 /** An explicit title clear never schedules a new source interpretation. */
 export function resolveWeavePurpose(kind: MaterialKind, triggerId: string): WeavePurpose {
+  if (isReinterpretationTrigger(triggerId)) return "reinterpretation";
   if (kind !== "media-original") return "ordinary";
   if (triggerId.startsWith(titleClearPrefix) && triggerId.slice(titleClearPrefix.length).trim().length > 0) return "media-title-only";
   return "ordinary";

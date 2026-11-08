@@ -20,12 +20,17 @@ async function fixture(action: (f: ReturnType<typeof setup>) => Promise<void>) {
 function setup(db: Database) {
   let sequence = 0;
   const id = () => `fixture-${++sequence}`;
-  new SqliteStore(db).saveThought({ id: "subject", text: "owned subject", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  const store = new SqliteStore(db);
   const runs = new SqliteRunRepository(db, { id, now });
   const service = new RunService({ repository: runs, dispatcher: native, id, now });
   const ops = new SqliteRunOperations(db, { id, now });
   const steps = new SqliteRunProtocolRepository(db);
-  const admit = (triggerId: string) => ops.admitWeave("user", { subjectId: "subject", triggerId });
+  let subjectSequence = 0;
+  const admit = (triggerId: string) => {
+    const subjectId = `subject-${++subjectSequence}`;
+    store.saveThought({ id: subjectId, text: "owned subject", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+    return ops.admitWeave("user", { subjectId, triggerId });
+  };
   return { db, runs, service, ops, steps, admit };
 }
 function gate() {

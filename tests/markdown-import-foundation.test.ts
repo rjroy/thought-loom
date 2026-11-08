@@ -382,10 +382,11 @@ describe("Markdown import foundation", () => {
     expect(search.query(ai, "secretfrontmattertoken").results).toEqual([]);
     expect(search.query(ai, "secretpathtoken").results).toEqual([]);
     const sources = { id: (() => { let n = 0; return () => `projection-${++n}`; })(), now: () => "2030" };
-    new SqliteStore(db).saveThought({ id: "subject", text: "separate subject", title: null, author: "user", kind: "captured-original", createdAt: "2030", origin: "fixture", parentId: null, sourceIds: [] });
+    const store = new SqliteStore(db);
+    for (const id of ["subject-active", "subject-rejected"]) store.saveThought({ id, text: "separate subject", title: null, author: "user", kind: "captured-original", createdAt: "2030", origin: "fixture", parentId: null, sourceIds: [] });
     const ops = new SqliteRunOperations(db, sources), runs = new SqliteRunRepository(db, sources), steps = new SqliteRunProtocolRepository(db), dispatcher = new SqliteCapabilityDispatcher(db, sources);
     const candidates = (triggerId: string) => {
-      const run = ops.admitWeave("user", { subjectId: "subject", triggerId }), claim = runs.claim(run.id);
+      const run = ops.admitWeave("user", { subjectId: `subject-${triggerId}`, triggerId }), claim = runs.claim(run.id);
       steps.prepare(claim, { promptId: run.promptId, input: "test context" });
       const request = { capability: "search", arguments: { query: "zircon" } } as const;
       steps.completeStep(claim, run.promptId, { version: 1, kind: "request", request });

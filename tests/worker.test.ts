@@ -2,19 +2,22 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, type AgentBinding, type Observation, type PersistedPrompt } from "../src/agent/opencode-adapter";
+import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
-import { RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
+import { TitleService } from "../src/domain/title";
+import { RunFenceError, RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
 import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteRunWorkerState } from "../src/storage/run-worker";
 import { SqliteSearchRepository } from "../src/storage/search";
+import { SqliteTitleRepository } from "../src/storage/title";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 
 const now = () => "2031-01-01T00:00:00Z";
@@ -78,6 +81,36 @@ function worker(f: ReturnType<typeof setup>, output: (index: number) => string, 
 async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: string) {
   // Test harness bound only; the worker must not impose an effort quota.
   for (let i = 0; i < 20 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
+}
+
+async function provenInterruptedWeave(f: ReturnType<typeof setup>) {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "settlement-proof" });
+  const w = worker(f, () => complete("not published"));
+  for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(run.id);
+  const prompt = w.native.submitted[0];
+  if (!prompt) throw new Error("Expected submitted owned prompt");
+  w.instance.pause(); await w.instance.drain();
+  f.service.stop("user", run.id);
+  const bindings = new SqliteAgentBindings(f.db), saved = bindings.get(run.id);
+  if (!saved) throw new Error("Expected owned native binding");
+  const session = { id:saved.sessionId, location:saved.location, model:saved.model, permissions:saved.permissions,
+    metadata:{owner:"thoughtloom",runId:run.id,protocolVersion:"1"} };
+  const client: PublicClient = {
+    serverInfo:async () => ({version:"fixture"}), sessionCreate:async () => session, sessionGet:async () => session,
+    prompt:async () => { throw new Error("Cleanup must not submit"); }, inbox:async () => [], active:async () => ({}),
+    history:async () => ({data:[{id:prompt.promptId,type:"user",time:{created:1},text:prompt.input},
+      {id:"owned-interrupted",type:"idle",time:{created:2},outcome:"interrupted"}],cursor:{}}),
+    cancelInbox:async () => {}, interrupt:async () => ({interrupted:true}),
+  };
+  const adapter = new OpenCodeAdapter(client,bindings,bindings.assertActive.bind(bindings));
+  const journal = bindings.cancellationJournal(run.id,prompt);
+  expect(await adapter.cancel(run.id,saved,prompt)).toBe("settled");
+  expect(f.steps.cancellation(run.id)).toBe("pending");
+  const state = new SqliteRunWorkerState(f.db,{id:f.id,now});
+  const snapshot = () => ({run:f.db.query("SELECT * FROM runs WHERE id=?").get(run.id),
+    steps:f.db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(run.id),
+    binding:f.db.query("SELECT * FROM agent_bindings WHERE run_id=?").get(run.id)});
+  return {run,prompt,bindings,saved,adapter,journal,state,snapshot};
 }
 
 test("weave alone renders discovery guidance alongside the shared evidence fences", () => {
@@ -273,6 +306,132 @@ test("prepared successor does not hide earlier submitted work from cancellation"
   expect(f.steps.cancellation(run.id)).toBe("settled");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
   expect(w.native.submitted).toHaveLength(1);
+}));
+
+test("positive cancellation cannot commit against a stale journal or a different binding", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  // A new terminal generation invalidates the previously observed native proof's journal identity.
+  f.db.query("UPDATE runs SET generation=generation+1 WHERE id=?").run(owned.run.id);
+  const before = owned.snapshot();
+  expect(() => owned.state.settleOrdinaryCancellation(owned.journal,owned.saved)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  const current = owned.bindings.cancellationJournal(owned.run.id,owned.prompt);
+  const foreign = {...owned.saved,model:{...owned.saved.model,id:"foreign-model"}};
+  expect(() => owned.state.settleOrdinaryCancellation(current,foreign)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  expect(await owned.adapter.cancel(owned.run.id,owned.saved,owned.prompt)).toBe("settled");
+  owned.state.settleOrdinaryCancellation(current,owned.saved);
+  expect(f.steps.cancellation(owned.run.id)).toBe("settled");
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
+}));
+
+test("settlement transaction rolls back native-terminal bookkeeping on a later SQL failure", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  const before = owned.snapshot();
+  f.db.exec(`CREATE TRIGGER test_cancel_settlement_fault BEFORE UPDATE OF cancellation_state ON runs
+    WHEN NEW.cancellation_state='settled' BEGIN SELECT RAISE(ABORT,'owned settlement fault'); END;`);
+  try {
+    expect(() => owned.state.settleOrdinaryCancellation(owned.journal,owned.saved)).toThrow(/owned settlement fault/);
+    expect(owned.snapshot()).toEqual(before);
+    expect(f.steps.cancellation(owned.run.id)).toBe("pending");
+  } finally { f.db.exec("DROP TRIGGER test_cancel_settlement_fault"); }
+  owned.state.settleOrdinaryCancellation(owned.journal,owned.saved);
+  expect(f.steps.cancellation(owned.run.id)).toBe("settled");
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
+}));
+
+test("title-clear waits behind a started weave across successor preparation and worker restart", async () => fixture(async f => {
+  const titles = new TitleService(new SqliteTitleRepository(f.db, { id: f.id, now }));
+  titles.setUser("user", "root", "Existing title");
+  const first = f.ops.admitWeave("user", { subjectId: "root", triggerId: "started-interpretation" });
+  const w = worker(f, () => request("readThought", { id: "root" }));
+  for (let i = 0; i < 20 && f.steps.steps(first.id).length < 2; i++) await w.instance.tick(first.id);
+  const successor = f.steps.steps(first.id)[1];
+  if (!successor || successor.input === null) throw new Error("Expected a prepared successor");
+  expect(successor.state).toBe("prepared");
+  expect(w.native.submitted).toHaveLength(1);
+  expect(titles.setUser("user", "root", null)).toEqual({ title: null, titleAuthor: null });
+  const waiting = f.db.query<{id:string}, []>("SELECT id FROM runs WHERE weave_subject_id='root' AND weave_trigger_id LIKE 'title-clear:%'").get();
+  if (!waiting) throw new Error("Expected a durable title-clear invitation");
+  const before = f.runs.get(waiting.id);
+  if (!before) throw new Error("Expected the queued title-clear run");
+  expect(before).toMatchObject({ status: "queued", generation: 0 });
+  w.instance.pause(); await w.instance.drain();
+  const restarted = worker(f, () => complete("done"));
+  try {
+    for (let i = 0; i < 3; i++) await restarted.instance.tick(waiting.id);
+    expect(restarted.native.submitted).toEqual([]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+    for (let i = 0; i < 8 && restarted.native.submitted.length === 0; i++) await restarted.instance.tick(first.id);
+    expect(restarted.native.submitted).toEqual([{ promptId: successor.promptId, input: successor.input }]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+    await drive(restarted.instance, f, first.id);
+    expect(f.runs.get(first.id)?.status).toBe("completed");
+    for (let i = 0; i < 8 && restarted.native.submitted.length < 2; i++) await restarted.instance.tick(waiting.id);
+    expect(restarted.native.submitted.map(item => item.promptId)).toEqual([successor.promptId, before.promptId]);
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
+}));
+
+test("newer queued interpretation cannot dispatch before the oldest queued invitation", async () => fixture(async f => {
+  const first = f.ops.admitWeave("user", { subjectId: "root", triggerId: "oldest" });
+  const second = f.ops.admitWeave("user", { subjectId: "root", triggerId: "newer" });
+  const w = worker(f, () => complete("done"));
+  try {
+    const before = f.runs.get(second.id);
+    for (let i = 0; i < 4; i++) await w.instance.tick(second.id);
+    expect(w.native.submitted).toEqual([]);
+    expect(f.runs.get(second.id)).toEqual(before);
+    for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(first.id);
+    expect(w.native.submitted.map(item => item.promptId)).toEqual([first.promptId]);
+    expect(f.runs.get(second.id)).toEqual(before);
+  } finally { w.instance.pause(); await w.instance.drain(); }
+}));
+
+test("an unverified historical cancellation blocks a later queued weave from native dispatch", async () => fixture(async f => {
+  const old = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-old" });
+  f.db.query("UPDATE run_steps SET input=?,state='uncertain' WHERE run_id=?").run("old exact input", old.id);
+  f.db.query("UPDATE runs SET status='interrupted',cancellation_state='settled' WHERE id=?").run(old.id);
+  const waiting = f.ops.admitWeave("user", { subjectId: "root", triggerId: "waiting" });
+  const w = worker(f, () => complete("must not run"));
+  try {
+    const before = f.runs.get(waiting.id);
+    for (let i = 0; i < 4; i++) await w.instance.tick(waiting.id);
+    expect(w.native.submitted).toEqual([]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+  } finally { w.instance.pause(); await w.instance.drain(); }
+}));
+
+test("a prepared successor cannot settle an earlier dispatched weave without native evidence, including after worker restart", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-prior-step" });
+  const w = worker(f, () => request("readThought", { id: "root" }));
+  for (let i = 0; i < 20 && f.steps.steps(run.id).length < 2; i++) await w.instance.tick(run.id);
+  expect(f.steps.steps(run.id).map(step => step.state)).toEqual(["processed", "prepared"]);
+  expect(w.native.submitted).toHaveLength(1);
+  const owned = binding(run);
+  const session = { id: owned.sessionId, location: owned.location, model: owned.model, permissions: owned.permissions,
+    metadata: { owner: "thoughtloom", runId: run.id, protocolVersion: "1" } };
+  const client: PublicClient = {
+    serverInfo: async () => ({ version: "fixture" }), sessionCreate: async () => session, sessionGet: async () => session,
+    prompt: async () => { throw new Error("Cancellation must not submit"); }, inbox: async () => [],
+    history: async () => ({ data: [], cursor: {} }), active: async () => ({}),
+    cancelInbox: async () => {}, interrupt: async () => ({ interrupted: false }),
+  };
+  const adapter = new OpenCodeAdapter(client, new SqliteAgentBindings(f.db), () => {});
+  w.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
+  f.service.stop("user", run.id);
+  await w.instance.tick(run.id);
+  expect(f.steps.cancellation(run.id)).toBe("pending");
+  w.instance.pause();
+  await w.instance.drain();
+  const restarted = worker(f, () => complete("must not publish"));
+  restarted.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
+  try {
+    await restarted.instance.tick(run.id);
+    expect(f.steps.cancellation(run.id)).toBe("pending");
+    expect(f.runs.get(run.id)?.status).toBe("interrupted");
+    expect(f.runs.reply(run.id)).toBeNull();
+    expect(restarted.native.submitted).toEqual([]);
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
 }));
 
 test("terminal pending cancellation retries until settled without reviving or resubmitting", async () => fixture(async f => {

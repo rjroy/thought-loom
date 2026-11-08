@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ideaActionHref, type IdeaLocation, type IdeaScope } from "../features/idea/location";
 import { commandIdea, readIdea } from "../features/idea/request";
 import type {
@@ -19,6 +19,10 @@ import { sourceController, useMediaSourceMemory } from "./media-import-provider"
 import { MediaSourceDetails } from "./media-source-details";
 import { MediaSourceStatus } from "./media-source-status";
 import type { MediaRun, MediaScope } from "../features/media/types";
+import { createReinterpretationController } from "../features/idea/reinterpretation-controller";
+import { createReinterpretationClient } from "../features/idea/reinterpretation-request";
+import { reinterpretationId } from "../features/idea/reinterpretation";
+import { ReinterpretationStatus, reinterpretationRunToShow } from "./reinterpretation-status";
 
 const noSource = () => null;
 const noSubscription = () => () => {};
@@ -31,7 +35,7 @@ type CanonicalRead = {
   mode: "foreground" | "background" | "connection";
   readonly publication: Promise<IdeaRecord | null>;
 };
-type MediaContentIntent = { readonly token: string; readonly run: MediaRun };
+type RunContentIntent = { readonly token: string; readonly runs: readonly MediaRun[] };
 
 const materials = {
   "captured-original": "Original capture", "user-contribution": "Contribution",
@@ -90,9 +94,9 @@ function contextItems(view: IdeaRecord): ContextItem[] {
   return [...items.values()];
 }
 
-function containsMediaOutput(view: IdeaRecord, run: MediaRun) {
-  return run.confirmedThoughtIds.every(id => view.children.some(child => child.id === id))
-    && (run.responseId === null || view.responses.some(reply => reply.id === run.responseId));
+function containsRunOutput(view: IdeaRecord, runs: readonly MediaRun[]) {
+  return runs.every(run => run.confirmedThoughtIds.every(id => view.children.some(child => child.id === id))
+    && (run.responseId === null || view.responses.some(reply => reply.id === run.responseId)));
 }
 
 /** A location-keyed reader: late responses cannot replace another focused idea. */
@@ -101,6 +105,12 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const exploreMemory = useExploreMemory();
   const evolve = useEvolveStore();
   const mediaMemory = useMediaSourceMemory();
+  const subjectId = location?.id;
+  const reinterpretation = useMemo(() => reinterpretationId(subjectId)
+    ? createReinterpretationController(subjectId, createReinterpretationClient()) : null, [subjectId]);
+  const reinterpretationState = useSyncExternalStore(reinterpretation?.subscribe ?? noSubscription,
+    reinterpretation?.getSnapshot ?? noSource, noSource);
+  const [showInterpretation, setShowInterpretation] = useState(false);
   const [previous, setPrevious] = useState<PreviousIdea | null>(null);
   const [view, setView] = useState<IdeaRecord | null>(null);
   const [readState, setReadState] = useState<"loading" | "ready" | "error" | "unavailable">("loading");
@@ -135,16 +145,22 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const dialogReturn = useRef<HTMLElement | null>(null);
   const [downloadPending, setDownloadPending] = useState(false), [downloadError, setDownloadError] = useState(false);
   const downloading = useRef(false);
-  const [mediaContextError, setMediaContextError] = useState(false);
+  const [contextError, setContextError] = useState(false);
   // A token is satisfied by canonical publication, not by starting a read.
-  const lastMediaContent = useRef<string | null>(null);
-  const mediaContentAttempt = useRef<{ token: string; generation: number } | null>(null);
+  const lastRunContent = useRef<string | null>(null);
+  const runContentAttempt = useRef<{ token: string; generation: number } | null>(null);
   const mediaThought = view?.thought.kind === "media-original" ? view.thought : null;
   const mediaScope: MediaScope = location?.scope === "normal" ? "normal" : "history";
   const media = mediaThought ? sourceController(mediaMemory, mediaThought.id, mediaThought.mediaSource.id, mediaScope) : null;
   const mediaState = useSyncExternalStore(media?.subscribe ?? noSubscription, media?.getSnapshot ?? noSource, media?.getSnapshot ?? noSource);
   const mediaCommandPending = !!mediaState && (mediaState.retryRequest.kind === "pending" || mediaState.stopping);
-  const disabled = pending || unconfirmed || connecting || connectionLocked || mediaCommandPending;
+  // Initial recovery retains its own pending retry and unconfirmed Stop controls.
+  const initialRetryUnresolved = !!mediaState && (mediaState.retryRequest.kind !== "idle" || mediaState.stopping || mediaState.unconfirmedStop !== null);
+  const reinterpretationCommandPending = reinterpretationState?.request === "pending" || reinterpretationState?.stopping === true;
+  const disabled = pending || unconfirmed || connecting || connectionLocked || mediaCommandPending || reinterpretationCommandPending;
+  const reinterpretationRun = reinterpretationState ? reinterpretationRunToShow(reinterpretationState) : null;
+  const reinterpretationOwnsStatus = !initialRetryUnresolved && !!reinterpretationState && (showInterpretation
+    || reinterpretationState.request !== "idle" || reinterpretationRun !== null);
 
   /** One current flight owns canonical publication; commands fence any older flight. */
   const readCanonical = useCallback((mode: CanonicalRead["mode"]): CanonicalRead | null => {
@@ -168,7 +184,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         setView(result.value);
         setReadState("ready");
         setRemoved(false);
-        setMediaContextError(false);
+        setContextError(false);
         // Background publication must not reopen a reply the user closed.
         if (flight.mode === "foreground" && result.value.focusedResponse) {
           setReplyId(result.value.focusedResponse.id);
@@ -182,7 +198,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         setReadState(result.kind === "unavailable" ? "unavailable" : "error");
       } else {
         if (flight.mode === "connection") setNotice("Connection created, but surrounding context could not be refreshed. Reopen this idea to read its current context.");
-        if (currentView.current?.thought.kind === "media-original") setMediaContextError(true);
+        const observed = reinterpretation?.getSnapshot();
+        if (currentView.current?.thought.kind === "media-original" || observed?.run || observed?.eligibility?.blockingRun) setContextError(true);
       }
       return null;
     }).finally(() => {
@@ -191,14 +208,14 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     const flight: CanonicalRead = { generation, mode, publication };
     canonicalRead.current = flight;
     return flight;
-  }, [location]);
+  }, [location, reinterpretation]);
 
   const load = useCallback(async () => !!(await readCanonical("foreground")?.publication), [readCanonical]);
 
   /** Observation requests canonical reconciliation; it never supersedes a current reader. */
-  const refreshMediaContext = useCallback(async (intent: MediaContentIntent | null = null, force = false) => {
+  const refreshRunContext = useCallback(async (intent: RunContentIntent | null = null, force = false) => {
     if (!alive.current || writing.current || unconfirmed || connectionLocked) return;
-    const attempt = mediaContentAttempt.current;
+    const attempt = runContentAttempt.current;
     const attempted = intent !== null && attempt?.token === intent.token && attempt.generation === readGeneration.current;
     // Failed and scoped-out attempts stay latched until Check, changed intent, or a fence.
     if (attempted && !force) return;
@@ -207,22 +224,22 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       const published = await active.publication;
       if (!alive.current || writing.current || active.generation !== readGeneration.current) return;
       if (!published) {
-        if (intent) mediaContentAttempt.current = { token: intent.token, generation: active.generation };
+        if (intent) runContentAttempt.current = { token: intent.token, generation: active.generation };
         return;
       }
       // A read begun before this observation can satisfy it only with actual output.
       // Otherwise make one follow-up attempt after that reader has published.
-      if (!intent || attempted || containsMediaOutput(published, intent.run)) {
-        if (intent) lastMediaContent.current = intent.token;
+      if (!intent || attempted || containsRunOutput(published, intent.runs)) {
+        if (intent) lastRunContent.current = intent.token;
         return;
       }
     }
     const flight = readCanonical("background");
     if (!flight) return;
-    if (intent) mediaContentAttempt.current = { token: intent.token, generation: flight.generation };
+    if (intent) runContentAttempt.current = { token: intent.token, generation: flight.generation };
     const published = await flight.publication;
     if (!alive.current || writing.current || flight.generation !== readGeneration.current) return;
-    if (published && intent) lastMediaContent.current = intent.token;
+    if (published && intent) lastRunContent.current = intent.token;
   }, [readCanonical, unconfirmed, connectionLocked]);
 
   useEffect(() => {
@@ -233,14 +250,26 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     return () => { stopWatching?.(); document.removeEventListener("visibilitychange", visibility); };
   }, [media]);
 
-  const mediaContent = mediaState?.phase === "ready" && mediaState.run
-    ? JSON.stringify([mediaThought?.id, mediaScope, mediaState.run.id, mediaState.run.confirmedThoughtIds, mediaState.run.responseId]) : null;
   useEffect(() => {
-    if (pending || unconfirmed || connectionLocked || !mediaContent || mediaContent === lastMediaContent.current || !mediaState?.run || !currentView.current) return;
-    const canonical = currentView.current, run = mediaState.run;
-    if (!containsMediaOutput(canonical, run)) void refreshMediaContext({ token: mediaContent, run });
-    else lastMediaContent.current = mediaContent; // The existing scoped publication already contains this output.
-  }, [mediaContent, mediaState, view, pending, unconfirmed, connectionLocked, refreshMediaContext]);
+    if (!reinterpretation) return;
+    let stopWatching: (() => void) | undefined;
+    const visibility = () => { stopWatching?.(); stopWatching = document.visibilityState === "visible" ? reinterpretation.watch() : undefined; };
+    visibility(); document.addEventListener("visibilitychange", visibility);
+    return () => { stopWatching?.(); document.removeEventListener("visibilitychange", visibility); };
+  }, [reinterpretation]);
+
+  const observedRuns = new Map<string, MediaRun>();
+  if (mediaState?.phase === "ready" && mediaState.run) observedRuns.set(mediaState.run.id, mediaState.run);
+  if (reinterpretationState?.run) observedRuns.set(reinterpretationState.run.id, reinterpretationState.run);
+  if (reinterpretationState?.eligibility?.blockingRun) observedRuns.set(reinterpretationState.eligibility.blockingRun.id, reinterpretationState.eligibility.blockingRun);
+  const contentRuns = [...observedRuns.values()];
+  const runContent = contentRuns.length
+    ? JSON.stringify([location?.id, location?.scope, contentRuns.map(run => [run.id, run.confirmedThoughtIds, run.responseId])]) : null;
+  useEffect(() => {
+    if (pending || unconfirmed || connectionLocked || reinterpretationCommandPending || !runContent || runContent === lastRunContent.current || !currentView.current) return;
+    if (!containsRunOutput(currentView.current, contentRuns)) void refreshRunContext({ token: runContent, runs: contentRuns });
+    else lastRunContent.current = runContent; // The existing scoped publication already contains this output.
+  }, [runContent, mediaState, reinterpretationState, view, pending, unconfirmed, connectionLocked, reinterpretationCommandPending, refreshRunContext]);
 
   useEffect(() => {
     alive.current = true;
@@ -313,10 +342,13 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
 
   async function submitCommand(command: IdeaCommand) {
     const sourceCommand = media?.getSnapshot();
-    if (writing.current || disabled || !location || sourceCommand?.stopping || sourceCommand?.retryRequest.kind === "pending") return;
+    const reinterpretationCommand = reinterpretation?.getSnapshot();
+    if (writing.current || disabled || !location || sourceCommand?.stopping || sourceCommand?.retryRequest.kind === "pending"
+      || reinterpretationCommand?.request === "pending" || reinterpretationCommand?.stopping) return;
     writing.current = true;
     readGeneration.current++;
     media?.invalidate();
+    reinterpretation?.invalidate();
     setPending(true);
     setNotice(null);
     // A write may change titles or eligibility. Reread on return, keeping the
@@ -333,6 +365,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     if (result.kind === "conflict") {
       setNotice("The branch changed. Nothing was rejected. Review the fresh preview and confirm again.");
       void loadPreview(true);
+      void reinterpretation?.prepare();
       return;
     }
     if (result.kind !== "applied") {
@@ -341,6 +374,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         : "The change was not applied. Your inputs are still here.");
       setUnconfirmed(result.kind === "uncertain");
       if (result.kind === "uncertain") setUnconfirmedCommand(result.command);
+      else void reinterpretation?.prepare();
       closeConfirmation();
       return;
     }
@@ -361,6 +395,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         ? mediaThought ? "Title cleared. A new title may be generated later; the file and clarification stay unchanged. This does not request another interpretation." : "Title cleared. A new title may be generated later. The original words are unchanged."
         : mediaThought ? "Title saved. The file and clarification stay unchanged." : "Title saved. The original words are unchanged.");
       if (media) void media.check();
+      void reinterpretation?.prepare();
       return;
     }
     setReplyOpen(false); setReplyId(null);
@@ -374,6 +409,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       setNotice(command.action === "reject-thought"
         ? "Idea rejected. Its descendants remain active."
         : "Idea branch rejected. Discovered connections were not included.");
+      void reinterpretation?.checkReceipt();
     } else {
       setNotice(command.action === "restore-branch" || command.action === "restore-thought"
         ? "Restored. Independently rejected connections stay rejected."
@@ -381,7 +417,9 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       const published = await load();
       // A successful mutation invalidated observation even if its controller identity
       // stayed mounted. Resume only after publishing this route's canonical Idea.
-      if (published && alive.current && currentView.current?.thought.id === command.thoughtId) void media?.check();
+      if (published && alive.current && currentView.current?.thought.id === command.thoughtId) {
+        void media?.check(); void reinterpretation?.prepare();
+      }
     }
   }
 
@@ -390,12 +428,15 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     // Never join a read begun before the confirmed connection existed.
     readGeneration.current++;
     media?.invalidate();
+    reinterpretation?.invalidate();
     const explored = exploreMemory.current;
     if (explored?.state.query.q.trim()) exploreMemory.current = {
       ...explored, state: { ...explored.state, phase: "loading", page: null, message: null },
     };
     const published = await readCanonical("connection")?.publication;
-    if (published && alive.current && currentView.current?.thought.id === published.thought.id) void media?.check();
+    if (published && alive.current && currentView.current?.thought.id === published.thought.id) {
+      void media?.check(); void reinterpretation?.prepare();
+    }
   }
 
   function saveTitle(event: FormEvent) {
@@ -419,9 +460,10 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function beforeMediaWrite() {
-    if (writing.current || disabled || mediaContextError || mediaThought?.rejected === true) return false;
+    if (writing.current || disabled || contextError || mediaThought?.rejected === true) return false;
     // An older knowledge read must not publish over a command-associated refresh.
     readGeneration.current++;
+    reinterpretation?.invalidate();
     return true;
   }
   async function checkMedia() {
@@ -432,16 +474,67 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     const state = media.getSnapshot();
     if (state.phase === "ready") {
       const intent = mediaThought && state.run ? {
-        token: JSON.stringify([mediaThought.id, mediaScope, state.run.id, state.run.confirmedThoughtIds, state.run.responseId]), run: state.run,
+        token: JSON.stringify([mediaThought.id, mediaScope, state.run.id, state.run.confirmedThoughtIds, state.run.responseId]), runs: [state.run],
       } : null;
-      await refreshMediaContext(intent, true);
+      await refreshRunContext(intent, true);
     }
+  }
+
+  function subjectIsActive() {
+    const current = currentView.current?.thought;
+    return !!current && current.id === location?.id && current.rejected !== true
+      && (location?.scope === "normal" || current.rejected === false)
+      && mediaState?.rejected !== true && mediaState?.phase !== "unavailable";
+  }
+  async function activateReinterpret(requestFresh: boolean) {
+    if (!reinterpretation || writing.current || disabled || initialRetryUnresolved) return;
+    setShowInterpretation(true); setMenuOpen(false); menuButton.current?.focus();
+    if (!requestFresh) { await reinterpretation.prepare(); return; }
+    if (!subjectIsActive()) return;
+    if (!reinterpretation.getSnapshot().fresh) await reinterpretation.prepare();
+    if (!alive.current || !subjectIsActive() || writing.current) return;
+    const state = reinterpretation.getSnapshot();
+    if (!state.fresh || state.eligibility?.eligible !== true || state.request === "uncertain" || state.request === "pending"
+      || state.checking || state.stopping || state.unconfirmedStop) return;
+    readGeneration.current++;
+    await reinterpretation.request();
+  }
+  async function checkInterpretation() {
+    if (!reinterpretation) return;
+    const generation = readGeneration.current;
+    const state = reinterpretation.getSnapshot();
+    if (state.request !== "uncertain" && reinterpretationRunToShow(state)) {
+      await reinterpretation.checkRun();
+      if (reinterpretation.getSnapshot().notice !== "read-error") await reinterpretation.checkReceipt();
+    } else await reinterpretation.checkReceipt();
+    if (!alive.current || generation !== readGeneration.current) return;
+    // Check also retries a failed or scoped-out canonical publication, never a command.
+    await refreshRunContext(null, true);
+  }
+  async function resendInterpretation() {
+    if (!reinterpretation || !subjectIsActive() || writing.current || disabled || initialRetryUnresolved) return;
+    readGeneration.current++;
+    await reinterpretation.resend();
+  }
+  async function stopInterpretation() {
+    if (!reinterpretation || writing.current || disabled || initialRetryUnresolved) return;
+    readGeneration.current++;
+    await reinterpretation.stop();
   }
   const back = location?.returnTo ?? "/explore";
   const inspection = location?.scope !== "normal";
   const thought = view?.thought;
   const reply = view?.responses.find(value => value.id === replyId) ?? null;
   const context = view ? contextItems(view) : [];
+  const showExistingInterpretation = !!reinterpretationState && (reinterpretationState.request === "uncertain"
+    || reinterpretationState.unconfirmedStop !== null || reinterpretationState.eligibility?.eligible === false
+      && reinterpretationState.eligibility.reason !== "subject-rejected"
+    || !!reinterpretationRun && !["completed", "failed", "interrupted"].includes(reinterpretationRun.status));
+  const interpretationStatus = reinterpretationOwnsStatus && reinterpretationState ? <ReinterpretationStatus
+    state={reinterpretationState} rejected={removed || thought?.rejected === true || inspection && thought?.rejected !== false}
+    disabled={pending || unconfirmed || connecting || connectionLocked || mediaCommandPending}
+    outputPublished={!!view && !!reinterpretationRun && containsRunOutput(view, [reinterpretationRun])}
+    contextError={contextError} onCheck={checkInterpretation} onResend={resendInterpretation} onStop={stopInterpretation} /> : null;
   const recordPreviousReturn = useCallback(() => {
     if (!previous || !location || !currentView.current) return;
     let href = thoughtHref(location.id, location);
@@ -480,12 +573,14 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         : removed ? <div className={styles.empty}>
           <h1>Idea rejected</h1><p role="status">{notice}</p>
           <Link href={thoughtHref(location.id, location, "show-rejected")} prefetch={false}>Inspect rejected idea</Link>
+          {interpretationStatus}
         </div>
         : !thought || !view ? <div className={styles.empty}>
           <h1>Idea unavailable</h1>
           <p>{readState === "unavailable" ? "This idea is not available in this view." : "We could not read this idea. No changes were made by this read."}</p>
           {readState === "error" && <button className={styles.button} onClick={() => void load()}>Try reading again</button>}
           {readState === "unavailable" && !inspection && <Link href={thoughtHref(location.id, location, "history")} prefetch={false}>Inspect idea</Link>}
+          {reinterpretationState?.request !== "idle" && interpretationStatus}
         </div>
         : <>
           {inspection && <div className={styles.inspection}>
@@ -535,9 +630,17 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
               if (event.key === "Escape" && menuOpen) { event.preventDefault(); setMenuOpen(false); menuButton.current?.focus(); }
             }}>
               <button className={styles.textButton} ref={menuButton} aria-expanded={menuOpen}
-                aria-controls="idea-actions" onClick={() => setMenuOpen(!menuOpen)}>More actions</button>
+                aria-controls="idea-actions" onClick={() => {
+                  if (!menuOpen && !pending && !unconfirmed && !initialRetryUnresolved) void reinterpretation?.prepare();
+                  setMenuOpen(!menuOpen);
+                }}>More actions</button>
               <div className={styles.actions} id="idea-actions" hidden={!menuOpen}>
                 <Link href={ideaActionHref(thought.id, "export")} prefetch={false}>Export…</Link>
+                <button className={styles.textButton} type="button" aria-controls="idea-interpretation-status"
+                  disabled={disabled || initialRetryUnresolved || !subjectIsActive()}
+                  onClick={() => void activateReinterpret(!showExistingInterpretation)}>{showExistingInterpretation ? "Show interpretation work" : "Reinterpret"}</button>
+                {!subjectIsActive() && <p className={styles.metadata}>{thought.rejected === true ? "Restore this idea before reinterpreting it." : "Current access must be confirmed before reinterpreting this idea."}</p>}
+                {initialRetryUnresolved && <p className={styles.metadata}>Resolve the initial interpretation request below before requesting fresh work.</p>}
                 {thought.rejected === true ? <>
                   <button className={styles.textButton} disabled={disabled} onClick={() => void submitCommand({ action: "restore-thought", thoughtId: thought.id })}>Restore this idea</button>
                   <button className={styles.textButton} disabled={disabled} onClick={() => void submitCommand({ action: "restore-branch", thoughtId: thought.id })}>Restore idea branch</button>
@@ -599,12 +702,13 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </div>
 
           {downloadError && <div className={styles.warning} role="status"><h2>Original could not be downloaded</h2><p>The source record is still here, but its original bytes could not be read. No substitute file was created. You can try Download original again.</p></div>}
-          {media && mediaState && location && <MediaSourceStatus state={mediaState} controller={media} scope={mediaScope}
+          {interpretationStatus}
+          {!reinterpretationOwnsStatus && media && mediaState && location && <MediaSourceStatus state={mediaState} controller={media} scope={mediaScope}
             hasInterpretation={view.children.some(child => child.kind === "ai-interpretation" && child.rejected !== true)}
             hasRejectedInterpretation={view.children.some(child => child.kind === "ai-interpretation" && child.rejected === true)}
-            inspectHref={thoughtHref(thought.id, location, "history")} disabled={pending || unconfirmed || connecting || connectionLocked || mediaContextError}
+            inspectHref={thoughtHref(thought.id, location, "history")} disabled={pending || unconfirmed || connecting || connectionLocked || contextError || reinterpretationCommandPending}
             onCheck={checkMedia} beforeWrite={beforeMediaWrite} />}
-          {mediaContextError && <p className={styles.warning} role="status">Could not refresh the saved context. Last confirmed thoughts and Full reply remain available. Check current processing to read them again; no work was started by this read.</p>}
+          {contextError && !reinterpretationOwnsStatus && <p className={styles.warning} role="status">Could not refresh the saved context. Last confirmed thoughts and Full reply remain available. Check current processing to read them again; no work was started by this read.</p>}
 
           <section className={styles.context} aria-labelledby="idea-context-heading">
             <h2 id="idea-context-heading">{inspection ? "Inspected context" : "Surrounding context"}</h2>

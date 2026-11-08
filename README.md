@@ -31,6 +31,8 @@ The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees
 
 Weaver instructions support URL summaries and source-informed interpretations through available native/MCP tools. Bare link lists can produce separately searchable sibling summaries with inline source links; completed weaving retains a Full reply with outcome and access limitations. Retrieval depends on the operator's tools and source access; Thoughtloom does not archive fetched source snapshots. See [URL-aware weaving](.lore/context/url-weaving.md).
 
+Idea's [Reinterpret action](docs/server-startup.md#reinterpret-an-idea) requests fresh weaving without replacing earlier interpretations, replies or branches. It also provides a recovery path after source access changes.
+
 Lossless Markdown import is available from Capture through a separate import workspace, with queued execution, restricted configured segmentation or local structural fallback, bookmarkable reports, and user-only original-byte inspection. Imported wording is preserved; document order does not create an evolution chain.
 
 Retained image/PDF import is available from Capture's **Import → Image or PDF** workspace and through the user-only [backend API](docs/daemon-api.md#retained-media-import-and-source-inspection). The client separates original retention from AI interpretation and supports receipt recovery, source inspection/download, run status and deliberate retry. Originals stay outside SQLite; normal Weaver/Evolve receives a managed absolute path for OpenCode's tools. **The daemon and OpenCode must share filesystem access.** See the [web workflow](docs/server-startup.md#image-and-pdf-import-workflow) and [setup and paired backups](docs/server-startup.md#retained-media-and-shared-filesystem).

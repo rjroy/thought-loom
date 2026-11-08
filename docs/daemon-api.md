@@ -213,6 +213,34 @@ bun run api --role user GET '/exports/agentic/<run-id>'
 
 These routes are **user-only**; AI-role credentials return `403`. Query parameters are not accepted.
 
+### Reinterpret: `POST /thoughts/:id/reinterpret`
+
+Body: exactly `{}`. Supply an `Idempotency-Key` matching case-sensitive `[A-Za-z0-9._:-]{1,128}`; keys are not trimmed or normalized. The selected active thought can have any authorship. This requests a fresh weave without a new user contribution; use Evolve for additional instructions or development.
+
+Fresh admission returns `202`; an exact subject/key replay returns `200` with the original run, including after completion. Both return:
+
+```text
+{
+  receipt: {subjectId, requestKey, runId} | null,
+  run: {id, kind, status, confirmedThoughtIds, responseId} | null,
+  eligibility: {eligible, reason, blockingRun}
+}
+```
+
+Eligibility reasons are `null`, `subject-rejected`, `work-active`, `work-unsettled`, or `work-unverified`. Eligibility is advisory; admission transactionally checks all interpretation-capable weave work for the subject. A text title-clear job participates; a genuinely media-title-only job does not fulfill or block interpretation. Unverified historical cancellation settlement cannot authorize replacement work. Configuration absence permits durable queue admission without native execution.
+
+New interpretations are immutable children of the selected thought, not replacements for earlier output. Each run retains its own Full reply through the existing response readers. A media reinterpretation can create one new interpretation for that run; a historical child cannot satisfy completion. If it produces no new interpretation, the run fails while retaining its complete limitation reply. Ordinary text/URL weaving may finish honestly with a fallback reply and no new thoughts.
+
+Conflicting work returns `409` with `error`, `code` and the snapshot. Codes are `interpretation-active` or `interpretation-unsettled`. An unadmitted key has null `receipt` and `run`; the existing work is identified only by `eligibility.blockingRun`. Returning existing work does not assign the new key to it.
+
+Missing or freshly requested rejected subjects return `404`; restore a rejected subject before new work. Exact receipt replay remains user-only control access after rejection, does not resume work, and exposes no thought text, Full reply, file path or native binding. Anonymous requests return `401`, AI requests `403`, invalid input `400`, oversized bodies `413`, and unsupported content types `415`. Responses use `Cache-Control: private, no-store`.
+
+### Reinterpret receipt: `GET /thoughts/:id/reinterpret/by-key/:key`
+
+Returns `200` with the same control snapshot, including a null receipt if no admission is recorded for that subject/key at this read. A missing subject returns `404`. The route is user-only and can recover a known receipt after subject rejection without granting AI history access.
+
+After an uncertain POST, retain the original subject/key. Lookup absence cannot prove that a delayed POST will never arrive. An explicit resend uses the identical empty payload and the same key; never turn a timeout, missing receipt or advisory eligibility into an automatic new-key submission. Once a run is known, use its existing status and Stop routes. A terminal status alone does not certify native cancellation settlement.
+
 ### Evolve: `POST /thoughts/:id/evolve`
 
 Body: exactly `{"text":"A contribution to this discussion"}`. The path selects a normally visible parent. Missing or rejected parents return `404`; unknown body fields return `400`.
@@ -259,7 +287,7 @@ After an uncertain admission response, look up the same upload key; do not inven
 
 Raw download uses the stored validated `Content-Type`, `Content-Disposition: attachment; filename="source.<extension>"` (`png`, `jpg`, `gif`, `webp`, `pdf`) and `X-Content-Type-Options: nosniff`. The untrusted display name is not inserted into response headers. Normal scope excludes rejected sources; explicit user history can inspect/download them. Eligibility is checked again after file reading. Rejection does not delete the original; unavailable/corrupt originals produce a sanitized failure, not substituted content.
 
-A deliberate retry uses the retained source without another upload. The source must be normally eligible; a fresh retry also requires no confirmed initial interpretation and any previous non-title source run to be failed/interrupted with settled ordinary cancellation. Active, uncertain or unsettled work is not duplicated. Retry keys are scoped to their source and separate from the upload key. Matching replay returns its existing run, not a new execution. An existing interpretation prevents another initial summary even if later rejected; use Evolve for further development. Clearing a media title schedules title-only work, not a summary. Without agent configuration, retention succeeds and weaving stays queued; enabling agents later can process that queue.
+A deliberate retry uses the retained source without another upload. The source must be normally eligible; a fresh retry also requires no confirmed initial interpretation and safely settled previous interpretation work. Admission checks all relevant subject runs, including reinterpretation, not only the latest run. Active, uncertain, unsettled or unverified work is not duplicated. Retry keys are scoped to their source and separate from the upload key. Matching replay returns its existing run, not a new execution. An existing interpretation prevents another initial summary even if later rejected. Use Reinterpret for a fresh interpretation alongside retained output, or Evolve for additional instructions and development. Clearing a media title schedules title-only work, not a summary. Without agent configuration, retention succeeds and weaving stays queued; enabling agents later can process that queue.
 
 ### Media errors
 

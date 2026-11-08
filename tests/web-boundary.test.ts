@@ -11,6 +11,24 @@ const config = () => readWebConfig({ THOUGHTLOOM_DAEMON_URL: "http://127.0.0.1:3
 const logger = (records: LogRecord[]) => createLogger("verbose", record => records.push(record));
 const fakeFetch = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch => fn as typeof fetch;
 
+test("daemon transport preserves a case-sensitive reinterpretation receipt key without allowing encoded path escape", async () => {
+  const records: LogRecord[] = [], calls: { url: string; method: string | undefined; authorization: string | null; redirect: RequestRedirect | undefined }[] = [];
+  const fetcher = fakeFetch(async (input, init) => {
+    calls.push({ url: String(input), method: init?.method, authorization: new Headers(init?.headers).get("authorization"), redirect: init?.redirect });
+    return Response.json({ receipt: null, run: null, eligibility: { eligible: true, reason: null, blockingRun: null } });
+  });
+  const key = "Owned.Key:Case-1", path = `/thoughts/root-1/reinterpret/by-key/${encodeURIComponent(key)}`;
+  const deps = { fetch: fetcher, logger: logger(records), timeoutMs: 1000 };
+  expect((await requestDaemon(config(), { method: "GET", path }, deps)).status).toBe(200);
+  expect(calls).toEqual([{ url: `http://127.0.0.1:3001${path}`, method: "GET", authorization: `Bearer ${token}`, redirect: "error" }]);
+  await expect(requestDaemon(config(), { method: "GET", path: "/thoughts/root-1/reinterpret/by-key/a%2Fb" }, deps)).rejects.toThrow();
+  for (const invalid of [".", "..", "%2E", "%2E%2E"]) {
+    await expect(requestDaemon(config(), { method: "GET", path: `/thoughts/root-1/reinterpret/by-key/${invalid}` }, deps)).rejects.toThrow();
+  }
+  expect(calls).toHaveLength(1);
+  expect(JSON.stringify(records)).not.toContain(token);
+});
+
 describe("web server configuration", () => {
   test("Next upload proxy accommodates both bounded Markdown and media requests", async () => {
     const allowance = 4096 + 65536, nextMinimum = 10 * 1024 * 1024;

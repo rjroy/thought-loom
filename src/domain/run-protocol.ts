@@ -27,6 +27,21 @@ export interface NextStep {
   readonly input: string;
 }
 export type CancellationState = "none" | "pending" | "settled";
+/** Private immutable-input snapshot for ordinary cancellation, not execution or publication authority. */
+export interface OrdinaryCancellationJournal {
+  readonly runId: string;
+  readonly generation: number;
+  readonly status: "interrupted" | "failed";
+  readonly cancellation: "pending" | "settled";
+  readonly steps: readonly {
+    readonly promptId: string;
+    readonly input: string;
+    readonly state: StepState;
+    readonly nativeState: "unknown" | "running" | "completed";
+    readonly hasEnvelope: boolean;
+    readonly hasResult: boolean;
+  }[];
+}
 export class ProtocolValidationError extends Error {}
 
 /** JSON-only durable values, with object key order normalized for semantic replay comparisons. */

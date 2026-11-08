@@ -12,11 +12,11 @@ import { chromium, expect } from "@playwright/test";
 import { checkRootSplash } from "./root-splash.runtime";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
-import { ideaDaemon, checkIdeaRoute, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
+import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
-import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface } from "./media-import.runtime";
+import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface, checkMediaReinterpretStatusOwner } from "./media-import.runtime";
 import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
@@ -57,6 +57,9 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
     "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
     "apps/web/src/app/api/ideas/[id]/route.ts", "apps/web/src/server/idea.ts",
+    "apps/web/src/app/api/ideas/[id]/reinterpret/route.ts", "apps/web/src/app/api/ideas/[id]/reinterpret/by-key/[key]/route.ts",
+    "apps/web/src/features/idea/reinterpretation.ts", "apps/web/src/server/reinterpretation.ts", "apps/web/src/server/reinterpretation-route.ts",
+    "apps/web/src/features/idea/reinterpretation-controller.ts", "apps/web/src/features/idea/reinterpretation-request.ts", "apps/web/src/components/reinterpretation-status.tsx",
     "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts", "apps/web/src/features/idea/media.ts",
     "apps/web/src/app/api/evolve/thoughts/[id]/route.ts", "apps/web/src/app/api/evolve/thoughts/[id]/responses/[responseId]/route.ts",
     "apps/web/src/app/api/evolve/runs/[id]/route.ts", "apps/web/src/server/evolve.ts",
@@ -254,7 +257,7 @@ async function main(): Promise<void> {
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
-    else if (request.url === "/connections" || request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
+    else if (request.url === "/connections" || request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || request.url?.startsWith("/runs/owned-weave-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
   });
@@ -353,6 +356,25 @@ async function main(): Promise<void> {
       } finally { await browser.close(); }
       return;
     }
+    const reinterpretCase = process.env.THOUGHTLOOM_TEST_REINTERPRET_CASE;
+    if (reinterpretCase) {
+      assert.ok(["core", "recovery", "storage", "guards", "stop", "media", "all"].includes(reinterpretCase), "Unknown focused reinterpretation case");
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try {
+            if (reinterpretCase === "media") await checkMediaReinterpretStatusOwner(page, origin);
+            else {
+              await checkIdeaReinterpretBrowser(page, fixtureIdea, origin, reinterpretCase);
+              if (reinterpretCase === "all") await checkMediaReinterpretStatusOwner(page, origin);
+            }
+          }
+          finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     const agenticCase = process.env.THOUGHTLOOM_TEST_AGENTIC_CASE;
     if (agenticCase === "routes") {
       await checkAgenticSearchRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
@@ -404,6 +426,7 @@ async function main(): Promise<void> {
     await checkCaptureRoute({ origin, host, probe, daemon: fixtureDaemon });
     await checkSearchRoute({ origin, host, probe, daemon: fixtureSearch });
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
+    await checkIdeaReinterpretRoute({ origin, host, probe, daemon: fixtureIdea });
     await checkEvolveRoute({ origin, host, probe, daemon: fixtureEvolve });
     await checkExportRoute({ origin, host, probe, daemon: fixtureExport });
     await checkAgenticSearchRoutes({ origin, host, probe, daemon: fixtureAgenticSearch });
@@ -441,6 +464,8 @@ async function main(): Promise<void> {
           await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
           await noContextBack();
           await checkAgenticSearchEntry(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
+          await checkIdeaReinterpretBrowser(page, fixtureIdea, origin);
+          await checkMediaReinterpretStatusOwner(page, origin);
           await checkAgenticSearchSaved(page, fixtureAgenticSearch, { origin, daemonOrigin, token });
           await checkAgenticWorkspaceBrowser(page, fixtureAgenticSearch, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await checkAgenticUnknownAdmission(page, fixtureAgenticSearch, { origin });

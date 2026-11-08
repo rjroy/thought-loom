@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
+import { sameBinding, type AgentBinding } from "../agent/binding";
 import type { InitialRunContext } from "../domain/run-context";
 import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord, type RunSources } from "../domain/run";
-import type { CancellationState, RunStep } from "../domain/run-protocol";
+import type { CancellationState, OrdinaryCancellationJournal, RunStep } from "../domain/run-protocol";
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import type { Thought } from "../domain/thought";
 import { nonEmpty } from "../domain/validation";
@@ -12,11 +13,17 @@ import { SqliteAgenticExports } from "./agentic-export";
 import { initialSearchContext } from "./search-initial-context";
 import { SqliteSearchPublication } from "./search-publication";
 import { SqliteSearchPromptClock } from "./search-prompt-clock";
+import { assertOrdinaryCancellationJournal } from "./run-cancellation";
+import { weaveDispatchAllowed } from "./weave-work";
+import { readAgentBinding } from "./run-record";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
   constructor(db: Database, private readonly sources: RunSources,
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
+  canDispatch(runId: string): boolean {
+    return this.transaction("check weave dispatch",runId,() => weaveDispatchAllowed(this.db,runId));
+  }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
     const prepared = this.guardedExecution("prepare worker context",claim,run => {
       const step = this.currentStep(run.id);
@@ -86,7 +93,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         if (response) responses.set(response.id,response);
       }
     }
-    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id} :
+    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id,...(purpose === "reinterpretation" ? {purpose} : {})} :
       {kind:"evolve",contributionId:subject.id,continuationId:subject.parentId},thoughts,connections,responses:[...responses.values()]};
   }
   /** Failed transport is not submission evidence. Only a previously committed intent makes this observation-only. */
@@ -130,8 +137,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       if (run.kind === "search") return false; // Search settlement needs its later joined-flight and admission proof.
       if (!["interrupted","failed"].includes(run.status)) return false;
       const cancellation = this.db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(runId) as {state:CancellationState};
-      if (cancellation.state === "settled") return true;
-      if (cancellation.state !== "pending") return false;
+      if (cancellation.state !== "pending" && cancellation.state !== "settled") return false;
       // Inspect the whole durable history, not the current prepared successor or the presence of a binding.
       // Only one untouched initial step proves no prompt was dispatched; creating/binding a session is not a submission.
       // Legacy interrupted rows backfill as uncertain. Legacy failed rows can backfill as prepared with unknown input,
@@ -146,5 +152,27 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       this.logger.verbose("[run storage] unsubmitted cancellation settled locally",{runId});
       return true;
     });
+  }
+  /** Positive native-terminal proof settles only its unchanged journal/binding, never a protocol reply. */
+  settleOrdinaryCancellation(journal: OrdinaryCancellationJournal, expectedBinding: AgentBinding): void {
+    const changed = this.transaction("settle ordinary worker cancellation",journal.runId,() => {
+      assertOrdinaryCancellationJournal(this.db,journal);
+      const binding = readAgentBinding(this.db,journal.runId);
+      if (!binding || !sameBinding(binding,expectedBinding)) throw new RunFenceError("Cancellation binding changed during reconciliation");
+      if (this.require(journal.runId).kind === "weave" && journal.cancellation === "pending") {
+        for (const step of journal.steps) {
+          if (step.state !== "submitting" && step.state !== "uncertain") continue;
+          // The turn ended, including interruption/failure. The paired state is required by the SQL CHECK;
+          // no successful envelope/result is invented, and processed or never-submitted steps stay intact.
+          const updated = this.db.run(`UPDATE run_steps SET state='completed',native_state='completed'
+            WHERE run_id=? AND prompt_id=? AND input=? AND state=? AND native_state=?`,
+          [journal.runId,step.promptId,step.input,step.state,step.nativeState]);
+          if (updated.changes !== 1) throw new RunFenceError("Cancellation step changed during reconciliation");
+        }
+      }
+      this.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=? AND cancellation_state='pending'",[journal.runId]);
+      return journal.cancellation === "pending";
+    });
+    if (changed) this.logger.info("[worker] native cancellation settled",{runId:journal.runId,generation:journal.generation});
   }
 }

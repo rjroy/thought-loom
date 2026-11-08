@@ -134,6 +134,65 @@ export function correlateHistory(sessionId: string, prompts: readonly PersistedP
   return output === null ? {state:"uncertain"} : {state:"completed",output};
 }
 
+/** Cancellation needs terminal execution facts for every dispatched input, not a successful protocol reply. */
+export function cancellationHistorySettled(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[],
+  inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>, binding: AgentBinding): boolean {
+  const nativeTools = allowsNativeTools(binding), seen = new Set<string>();
+  const known = new Map(prompts.map((prompt,index) => [prompt.promptId,{...prompt,index}]));
+  if (known.size !== prompts.length) throw new AgentBindingError("Cancellation prompt identity is duplicated");
+  let users = 0, userCreated = 0, turn: NativeMessage[] = [], terminal = true, previous = -Infinity;
+  const finished = (): boolean => {
+    const idle = turn.at(-1);
+    if (!idle || idle.type !== "idle" || !["succeeded","failed","interrupted"].includes(idle.outcome) || idle.time.created < userCreated) return false;
+    const assistants = turn.slice(0,-1);
+    if (!nativeTools && assistants.length > 1) return false;
+    for (const assistant of assistants) {
+      if (assistant.type !== "assistant" || (assistant.time.completed !== undefined &&
+          (!Number.isFinite(assistant.time.completed) || assistant.time.completed < assistant.time.created || assistant.time.completed > idle.time.created))) return false;
+    }
+    // Interrupted/failed execution can terminate before an assistant is complete, or before one exists at all.
+    if (idle.outcome !== "succeeded") return true;
+    return assistants.length > 0 && assistants.every((assistant,index) => {
+      if (assistant.type !== "assistant" || assistant.time.completed === undefined || !Number.isFinite(assistant.time.completed)) return false;
+      const tools = assistant.tools ?? [], toolIds = new Set<string>();
+      for (const tool of tools) {
+        if (!tool.id.trim() || !tool.name.trim() || toolIds.has(tool.id) || (tool.status !== "completed" && tool.status !== "error") ||
+            !Number.isFinite(tool.time.created) || tool.time.completed === undefined || !Number.isFinite(tool.time.completed) ||
+            tool.time.completed < tool.time.created || tool.time.completed > assistant.time.completed) return false;
+        toolIds.add(tool.id);
+      }
+      return index < assistants.length-1 ? assistant.finish === "tool-calls" && tools.length > 0 :
+        assistant.finish === "stop" || assistant.finish === "length" || assistant.finish === "error";
+    });
+  };
+  for (const message of messages) {
+    if (hasUntrackedNativeContext(message,nativeTools)) throw new AgentBindingError("Cancellation history contains untracked native context");
+    if (typeof message.id !== "string" || !message.id.trim() || seen.has(message.id) ||
+        !Number.isFinite(message.time.created) || message.time.created < previous) throw new AgentBindingError("Cancellation native history order is invalid");
+    seen.add(message.id); previous = message.time.created;
+    if (message.type === "user") {
+      const expected = known.get(message.id);
+      if (!expected || expected.index !== users || expected.input !== message.text) throw new AgentBindingError("Cancellation native input differs from the run journal");
+      if (users > 0 && !finished()) terminal = false;
+      users++; userCreated = message.time.created; turn = [];
+    } else {
+      if (users === 0) terminal = false;
+      turn.push(message);
+    }
+  }
+  const queued = new Set<string>();
+  for (const item of inbox) {
+    const expected = known.get(item.id);
+    if (hasUntrackedInboxContext(item) || item.type !== "user" || item.sessionID !== sessionId || !expected ||
+        expected.input !== item.payload.text || queued.has(item.id) || !Number.isFinite(item.time.created)) {
+      throw new AgentBindingError("Cancellation native inbox differs from the run journal");
+    }
+    queued.add(item.id);
+  }
+  return prompts.length > 0 && terminal && users === prompts.length && finished() &&
+    queued.size === 0 && !Object.hasOwn(active,sessionId);
+}
+
 /** Import-only terminal facts. These do not validate segmentation or authorize canonical writes. */
 export function correlateImportHistory(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>): ImportObservation {
   if (messages.some(message => hasUntrackedNativeContext(message))) return {state:"quarantined"};

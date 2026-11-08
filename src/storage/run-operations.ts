@@ -59,9 +59,12 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       }
       if (step.promptId !== run.promptId || step.state !== "completed") throw new RunFenceError("Prompt is no longer current");
       if (operation.type === "interpretation" && subjectId !== null &&
-          this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(subjectId) &&
-          this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
-        throw new RunConflictError("Source already has an initial interpretation; use Evolve");
+          this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(subjectId)) {
+        if (this.weavePurpose(run) === "reinterpretation") {
+          if (this.hasIssuedInterpretation(run.id,subjectId)) throw new RunConflictError("This media run already issued its interpretation");
+        } else if (this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
+          throw new RunConflictError("Source already has an initial interpretation; use Evolve");
+        }
       }
       const effect = this.apply(operation,subjectId);
       const thoughtId = effect.type === "development" || effect.type === "interpretation" ? effect.thought.id : null;
@@ -75,6 +78,10 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
     });
     this.logger.verbose("[run storage] step operation confirmed", { runId: claim.runId, promptId, type: result.type, generation: claim.generation });
     return result;
+  }
+  private hasIssuedInterpretation(runId: string, subjectId: string): boolean {
+    return this.db.query(`SELECT 1 FROM run_issued_thoughts issued JOIN thoughts t ON t.id=issued.thought_id
+      WHERE issued.run_id=? AND t.parent_id=? AND t.kind='ai-interpretation'`).get(runId,subjectId) !== null;
   }
   private apply(operation: StepOperation, subjectId: string | null): StepOperationResult {
     try {
@@ -105,7 +112,8 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       // Associate the subject and every issued thought: a rejected summary must not
       // expose an outcome that may describe it to AI through another association.
       const issued = this.issued(run.id);
-      if (this.weavePurpose(run) === "media-title-only") {
+      const purpose = this.weavePurpose(run);
+      if (purpose === "media-title-only") {
         if (issued.length) throw new RunForbiddenError("Media title-only work cannot publish issued knowledge");
         // A later complete envelope cannot launder a retained forbidden request or a legacy receipt.
         for (const earlier of this.readSteps(run.id)) {
@@ -122,9 +130,10 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
         role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
       new SqliteSharedResponses(this.db,this.logger).save(response);
       this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
-      const missingInterpretation = this.weavePurpose(run) === "ordinary" &&
+      const missingInterpretation = purpose !== "media-title-only" &&
         this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(intent.subjectId) !== null &&
-        this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId) === null;
+        (purpose === "reinterpretation" ? !this.hasIssuedInterpretation(run.id,intent.subjectId) :
+          this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId) === null);
       this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=? WHERE id=?",
         [missingInterpretation ? "failed" : "completed",missingInterpretation ? "pending" : "none",run.id]);
     });

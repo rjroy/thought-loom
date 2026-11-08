@@ -5,13 +5,15 @@ import type { AgentBindings, NativePhase, PersistedPrompt } from "../agent/openc
 import { AgentBindingError, allowsNativeTools, assertBindingPermissions, normalizeBinding, sameBinding, type AgentBinding } from "../agent/binding";
 import { AgentUncertainError } from "../agent/errors";
 import { requireExecutionRun, RunFenceError, type Claim, type RunRecord } from "../domain/run";
-import { protocolJson, ProtocolValidationError } from "../domain/run-protocol";
+import { protocolJson, ProtocolValidationError, type OrdinaryCancellationJournal } from "../domain/run-protocol";
 import { ImportPreservationError } from "../domain/markdown-import-contract";
 import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 import { ExecutionOwnerLease } from "./execution-owner";
 import { readAgentBinding } from "./run-record";
+import { assertOrdinaryCancellationJournal, ordinaryCancellationJournal } from "./run-cancellation";
+import { weaveDispatchAllowed } from "./weave-work";
 
 // Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
 const processSubmitOwner = randomUUID();
@@ -54,6 +56,20 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
   }
   get(runId: string): AgentBinding | null {
     return readAgentBinding(this.db,runId);
+  }
+  cancellationJournal(runId: string, prompt: PersistedPrompt): OrdinaryCancellationJournal {
+    this.executionOwner?.assertHeld();
+    return this.transaction("read ordinary cancellation journal",runId,() => {
+      const journal = ordinaryCancellationJournal(this.db,runId), current = journal.steps.at(-1);
+      if (!this.get(runId) || current?.promptId !== prompt.promptId || current.input !== prompt.input) throw new RunFenceError();
+      return journal;
+    });
+  }
+  assertCancellationJournal(journal: OrdinaryCancellationJournal): void {
+    this.executionOwner?.assertHeld();
+    this.transaction("authorize ordinary cancellation",journal.runId,() => {
+      assertOrdinaryCancellationJournal(this.db,journal);
+    });
   }
   private importStep(claim: Claim): {readonly run:RunRecord;readonly step:ImportOwnedStep} {
     const run=this.active(claim);
@@ -170,6 +186,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
         }));
       } else if (phase === "submit") {
         if (run.status !== "queued" || this.currentStep(run.id).state !== "prepared") throw new AgentUncertainError("Native attempt is already recorded; observe it instead of resubmitting");
+        if (run.kind === "weave" && !weaveDispatchAllowed(this.db,run.id)) throw new RunFenceError("Subject weave dispatch is postponed");
         if (run.kind === "search") {
           if (!this.get(run.id)) throw new RunFenceError("Search submission requires its bound owner");
           const submitOwner = this.executionOwner?.id ?? processSubmitOwner;

@@ -57,10 +57,13 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
       "The daemon validates the structured sourceThoughtIds and appends their recorded identities, titles and attribution in a Sources section. Text or links in your report body are model-authored explanation, not daemon-validated citations. Do not claim semantic verification or create new developments."],
     capabilities:reads,context});
   const job = context.job;
+  const reinterpret = job.kind === "weave" && job.purpose === "reinterpretation";
   const subject = job.kind === "weave" ? context.thoughts.find(thought => thought.id === job.subjectId) : undefined;
   const role = context.job.kind === "weave"
     ? subject?.kind === "media-original"
-      ? "You are Thoughtloom's background weaver for this retained source. Read its original file, follow the user's clarification or summarize it, and save one source-grounded searchable interpretation. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a Full reply on the source."
+      ? reinterpret
+        ? "You are Thoughtloom's background weaver reinterpreting this retained source afresh. Reopen its original file, follow the user's clarification or summarize it, and save one new source-grounded searchable interpretation for this run. Earlier interpretations do not fulfill this request. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a new Full reply on the source."
+        : "You are Thoughtloom's background weaver for this retained source. Read its original file, follow the user's clarification or summarize it, and save one source-grounded searchable interpretation. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a Full reply on the source."
       : "You are Thoughtloom's background weaver. Examine this fixed subject; fill an absent title, record a useful interpretation or supported connections when warranted. No findings is a valid outcome. Finish with a concise user-facing outcome in the complete envelope's reply field; it will be retained as a Full reply on the subject."
     : "You are Thoughtloom's Evolve agent. Respond to the admitted user contribution in its explicit discussion context. Record useful developments with that contribution as their only evolution parent. Finish with the full human-facing conversational reply in the complete envelope's reply field, not an operation summary. A clarifying question without a separate development is valid.";
   const writes = context.job.kind === "weave" ? [
@@ -81,10 +84,15 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
     subject.mediaSource.clarification === null
       ? "Summarize the original file with a source-grounded interpretation. Save the searchable interpretation as a child using the normal interpretation capability, not extracted-text thoughts."
       : "Read the original file and follow the exact separately attributed user clarification in the source descriptor. Save the source-grounded interpretation with the normal interpretation capability.",
-    "Create one initial interpretation of this source. If the original is inaccessible or cannot be understood, explain the limitation in the final reply without inventing content. Completion without a saved interpretation records failed source processing, not a successful summary.",
+    reinterpret
+      ? "Create exactly one new interpretation of this source for this run, as a direct child of the fixed subject. If the original is inaccessible or cannot be understood, explain the limitation in the final reply without inventing content. Completion without this run's own saved interpretation records failed source processing; historical interpretations cannot make it successful."
+      : "Create one initial interpretation of this source. If the original is inaccessible or cannot be understood, explain the limitation in the final reply without inventing content. Completion without a saved interpretation records failed source processing, not a successful summary.",
+  ] : [];
+  const reinterpretInstructions = reinterpret ? [
+    "This is an explicit reinterpretation of the fixed subject. Examine it afresh and read referenced sources again; earlier interpretations and replies are not substitutes for current retrieval. Preserve all earlier thoughts, replies and ancestry. New interpretations are direct children of this subject, not replacements or a chain through earlier output. No new text or changed instructions were supplied by the user.",
   ] : [];
   return protocolJson({version:1,kind:"job",role,instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,...discovery,
-    fileInstructions,...mediaInstructions,"sourceIds is an array of supporting thought IDs; it may be empty."],
+    ...reinterpretInstructions,fileInstructions,...mediaInstructions,"sourceIds is an array of supporting thought IDs; it may be empty."],
     capabilities:[...reads,...writes,connection],context,...(originals.length ? {originals} : {})});
 }
 

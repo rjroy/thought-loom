@@ -132,3 +132,19 @@ test("Evolve fallback targets contribution; weaver knowledge writes do not recur
   f.creation.connect("ai", { fromId: "root", toId: interpretation.id, category: "related", explanation: "relationship" });
   expect(jobs(f.db)).toEqual(before);
 }));
+
+test("Evolve completion retains its reply and queues a follow-up while the target already has a weave", () => fixture(f => {
+  const admission = f.service.admit("user", "evolve", { parentId: "root", text: "question while busy" });
+  if (!admission.contribution) throw new Error("Expected contribution");
+  const claim = f.service.claim(admission.run.id);
+  const result = f.service.execute(claim, { id: "busy-development", type: "development", parentId: admission.contribution.id, text: "target for follow-up", sourceIds: [] });
+  const existing = f.operations.admitWeave("user", { subjectId: result.thought.id, triggerId: "already-active" });
+  const reply = { id: "busy-reply", role: "addendum", state: "complete", text: "retained reply", thoughtIds: [result.thought.id] } as const;
+  f.service.finish(claim, reply);
+  expect(f.runs.reply(admission.run.id)).toEqual(reply);
+  expect(f.runs.get(admission.run.id)?.status).toBe("completed");
+  expect(jobs(f.db)).toEqual([
+    expect.objectContaining({ id: existing.id, subjectId: result.thought.id, status: "queued" }),
+    expect.objectContaining({ subjectId: result.thought.id, status: "queued", triggerId: `evolve:${admission.run.id}` }),
+  ]);
+}));

@@ -164,6 +164,11 @@ describe("typed operations on durable run aggregate", () => {
     expect(() => ops.executeStep(claim, filled.promptId, interpretation)).toThrow(RunFenceError);
     expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 1 });
     const guarded = ops.admitWeave("user", { ...intent, triggerId: "guarded-pass" });
+    expect(steps.cancellation(filled.id)).toBe("pending");
+    expect(() => service.claim(guarded.id)).toThrow();
+    // The controlled completed native step above supplies the journal proof; emulate its trusted cleanup settlement.
+    expect(steps.steps(filled.id)).toEqual([expect.objectContaining({ state: "completed", input: "context" })]);
+    steps.settleCancellation(filled.id);
     const guardedClaim = service.claim(guarded.id);
     expect(service.context(guardedClaim, { kind: "thought", id: "subject" })).not.toBeNull();
     rejection.rejectThought("user", "subject");

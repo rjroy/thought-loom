@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
 import { expectGlyph } from "./explore.runtime";
 
-type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
+type Attempt = { method: string; path: string; authorization: string | undefined; body: string; key: string | undefined };
 const original = "Owned original idea wording, unchanged by title edits.";
 const thought = { id: "idea-root", text: original, title: "Owned original title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: "idea-parent", sourceIds: ["idea-source", "idea-hidden", "idea-child"] };
 const source = { ...thought, id: "idea-source", text: "Owned supporting source", title: "Owned source", parentId: null, sourceIds: [] };
@@ -11,6 +11,7 @@ const parent = { ...thought, id: "idea-parent", text: "Owned rejected ancestor",
 const plain = { ...thought, id: "idea-plain", text: "Owned plain idea with no reply", title: "Plain idea", parentId: null, sourceIds: [] };
 const imported = { ...plain, id: "idea-imported", text: "Owned imported idea", title: "Imported idea", author: "source", kind: "imported-original", origin: "markdown-import" };
 const child = { ...thought, id: "idea-child", text: "Owned direct interpretation", title: "Owned interpretation", titleAuthor: null, author: "ai", kind: "ai-interpretation", parentId: "idea-root", sourceIds: ["idea-root", "idea-hidden"] };
+const newChild = { ...child, id: "idea-new-child", text: "Owned fresh interpretation", title: "Fresh interpretation", sourceIds: [] };
 const grandchild = { ...child, id: "idea-grandchild", text: "Owned grandchild not direct context", title: "Owned grandchild", parentId: "idea-child", sourceIds: [] };
 const edge = { id: "idea-edge", fromId: "idea-root", toId: "idea-source", category: "supports", proposedBy: "ai", explanation: "Owned directed connection rationale", sourceIds: [] };
 const hiddenEdge = { ...edge, id: "idea-hidden-edge", toId: "idea-hidden", explanation: "Endpoint hidden only" };
@@ -21,6 +22,9 @@ const preview4 = { rootId: "idea-root", branchIds: [...preview3.branchIds, "idea
 
 export function ideaDaemon(token: string) {
   const attempts: Attempt[] = [];
+  const reinterpretKeys = new Set<string>();
+  let reinterpretMode: "normal" | "unknown-before" | "unknown-after" | "active" | "unsettled" = "normal";
+  let holdReinterpret = false, releaseReinterpret: (() => void) | undefined, reinterpretCompleted = false, stopped = false, uncertainStop = false;
   let title: string | null = thought.title, rootRejected = false, childEdgeRejected = false, branchAttempt = 0;
   let holdPreview = false, holdTitle = false, failure = false;
   let connectionStatus: 201 | 400 | 404 | 500 = 201, holdConnection = false;
@@ -39,14 +43,58 @@ export function ideaDaemon(token: string) {
     connectionStatus(value: typeof connectionStatus) { connectionStatus = value; },
     holdConnection() { holdConnection = true; },
     releaseConnection() { releaseConnection?.(); releaseConnection = undefined; holdConnection = false; },
+    resetReinterpret(mode: typeof reinterpretMode = "normal") { reinterpretKeys.clear(); reinterpretMode = mode; reinterpretCompleted = false; stopped = false; uncertainStop = false; holdReinterpret = false; releaseReinterpret?.(); releaseReinterpret = undefined; },
+    holdReinterpret() { holdReinterpret = true; },
+    releaseReinterpret() { releaseReinterpret?.(); releaseReinterpret = undefined; holdReinterpret = false; },
+    completeReinterpret() { reinterpretCompleted = true; },
+    reinterpretMode(mode: typeof reinterpretMode) { reinterpretMode = mode; },
+    failReinterpretStop() { uncertainStop = true; },
     async handler(req: IncomingMessage, res: ServerResponse) {
       let body = ""; for await (const chunk of req) body += String(chunk);
       const path = req.url ?? "", method = req.method ?? "";
-      attempts.push({ path, method, authorization: req.headers.authorization, body });
+      const key = typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined;
+      attempts.push({ path, method, authorization: req.headers.authorization, body, key });
       if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401).end(); return; }
       const url = new URL(path, "http://fixture.invalid");
       const inspection = url.searchParams.get("scope") === "history" || url.searchParams.get("scope") === "show-rejected";
       const send = (value: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+      const run = { id: "owned-weave-run", kind: "weave", status: stopped ? "interrupted" : reinterpretCompleted ? "completed" : "queued", confirmedThoughtIds: reinterpretCompleted ? [newChild.id] : [], responseId: null };
+      const eligibility = { eligible: false, reason: "work-active", blockingRun: run };
+      if (url.pathname === "/runs/owned-weave-run") { send(run); return; }
+      if (url.pathname === "/runs/owned-weave-run/stop" && method === "POST") { if (uncertainStop) { res.writeHead(500).end(); return; } stopped = true; send({ ...run, status: "interrupted" }); return; }
+      if (url.pathname === "/thoughts/idea-root/reinterpret" && method === "POST") {
+        if (!key || body !== "{}") { res.writeHead(400).end(); return; }
+        if (holdReinterpret) await new Promise<void>(resolve => { releaseReinterpret = resolve; });
+        if (reinterpretMode === "active" || reinterpretMode === "unsettled") {
+          send({ error:"Conflict", code:`interpretation-${reinterpretMode}`, receipt:null, run:null,
+            eligibility:{...eligibility,reason:reinterpretMode === "active" ? "work-active" : "work-unverified"} },409); return;
+        }
+        if (reinterpretMode === "unknown-before") { res.writeHead(500).end(); return; }
+        if (reinterpretMode === "unknown-after") { reinterpretKeys.add(key); res.writeHead(500).end(); return; }
+        if (key === "active" || key === "unsettled") {
+          send({ error: "Conflict", code: `interpretation-${key}`, receipt: null, run: null,
+            eligibility: { ...eligibility, reason: key === "active" ? "work-active" : "work-unverified" } }, 409); return;
+        }
+        if (key === "private-error") { res.writeHead(500).end("PRIVATE-UPSTREAM-PATH /private/native"); return; }
+        if (key === "redirect") { res.writeHead(302, { location: "http://foreign.invalid/private" }).end(); return; }
+        const snapshot = { receipt: { subjectId: "idea-root", requestKey: key, runId: run.id }, run, eligibility };
+        const status = reinterpretKeys.has(key) ? 200 : 202;
+        reinterpretKeys.add(key); send(snapshot, status); return;
+      }
+      const lookup = url.pathname.match(/^\/thoughts\/idea-root\/reinterpret\/by-key\/([^/]+)$/);
+      if (lookup && method === "GET") {
+        const requestKey = decodeURIComponent(lookup[1] ?? "");
+        if (requestKey === "unsafe") { send({ receipt: null, run: null, eligibility: { eligible: true, reason: null, blockingRun: null }, nativeSessionId: "PRIVATE-NATIVE-ID" }); return; }
+        if (requestKey === "absent") { send({ receipt: null, run: null, eligibility: { eligible: true, reason: null, blockingRun: null } }); return; }
+        if (requestKey === "rejected") {
+          send({ receipt: { subjectId: "idea-root", requestKey, runId: run.id }, run: { ...run, status: "interrupted" },
+            eligibility: { eligible: false, reason: "subject-rejected", blockingRun: null } }); return;
+        }
+        if (!reinterpretKeys.has(requestKey)) {
+          send({ receipt:null,run:null,eligibility:reinterpretKeys.size ? eligibility : {eligible:true,reason:null,blockingRun:null} }); return;
+        }
+        send({ receipt: { subjectId: "idea-root", requestKey, runId: run.id }, run, eligibility }); return;
+      }
       if (method === "GET") {
         if (url.pathname === "/thoughts/idea-root/branch/preview") {
           if (branchAttempt > 0 && holdPreview) await new Promise<void>(resolve => { releasePreview = resolve; });
@@ -64,7 +112,7 @@ export function ideaDaemon(token: string) {
         if (url.pathname === "/thoughts/idea-hidden") { res.writeHead(404).end(); return; }
         if (url.pathname.endsWith("/connections")) { send(url.pathname.includes("idea-root") ? (inspection ? [{ ...edge, rejected: true }, { ...hiddenEdge, rejected: false }, { ...childEdge, rejected: childEdgeRejected }] : [edge, ...(!childEdgeRejected ? [childEdge] : [])]) : []); return; }
         if (url.pathname.endsWith("/responses")) { send(url.pathname.includes("idea-root") ? [reply] : []); return; }
-        if (url.pathname.endsWith("/children")) { send(url.pathname === "/thoughts/idea-root/children" ? [child] : url.pathname === "/thoughts/idea-child/children" ? [grandchild] : []); return; }
+        if (url.pathname.endsWith("/children")) { send(url.pathname === "/thoughts/idea-root/children" ? [child,...(reinterpretCompleted ? [newChild] : [])] : url.pathname === "/thoughts/idea-child/children" ? [grandchild] : []); return; }
         res.writeHead(404).end(); return;
       }
       if (failure) { res.writeHead(500).end("owned private write failure"); return; }
@@ -150,6 +198,197 @@ export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: 
   assert.ok(calls.some(call => call.method === "PUT" && call.path === "/thoughts/idea-root/title" && call.body === '{"title":null}'));
   assert.ok(calls.some(call => call.method === "POST" && call.path === "/thoughts/idea-root/reject" && call.body === ""));
   daemon.reset();
+}
+
+/** Exercise the real Next route files, not an imported or invented handler seam. */
+export async function checkIdeaReinterpretRoute({ origin, host, probe, daemon }: { origin: string; host: string; probe: Probe; daemon: Fixture }): Promise<void> {
+  const base = "/api/ideas/idea-root/reinterpret", key = "Owned.Key:Case-1", start = daemon.attempts.length;
+  const headers = `Content-Type: application/json\r\nIdempotency-Key: ${key}\r\nContent-Length: 2\r\n`;
+  assert.equal((await probe("POST", base, `Host: foreign.invalid\r\nOrigin: ${origin}\r\n${headers}`, "{}")).status, 403);
+  assert.equal((await probe("POST", base, `Host: ${host}\r\nOrigin: http://foreign.invalid\r\n${headers}`, "{}")).status, 403);
+  assert.equal((await probe("GET", `${base}/by-key/${key}`, "Host: foreign.invalid\r\n")).status, 403);
+  assert.equal(daemon.attempts.length, start);
+  const post = (requestKey: string, body = "{}", suffix = "") => fetch(`${origin}${base}${suffix}`, { method: "POST", redirect: "manual",
+    headers: { origin, "content-type": "application/json", "idempotency-key": requestKey, "x-role": "ai" }, body });
+  const get = (requestKey: string, suffix = "") => fetch(`${origin}${base}/by-key/${encodeURIComponent(requestKey)}${suffix}`, { redirect: "manual" });
+  const admitted = await post(key);
+  assert.equal(admitted.status, 202); assert.match(admitted.headers.get("cache-control") ?? "", /private.*no-store/i);
+  const snapshot = await admitted.json();
+  assert.deepEqual(snapshot.receipt, { subjectId: "idea-root", requestKey: key, runId: "owned-weave-run" });
+  assert.equal(snapshot.run.id, snapshot.receipt.runId);
+  assert.doesNotMatch(JSON.stringify(snapshot), /foundation-owned-token|PRIVATE-NATIVE-ID|\/private\/native/);
+  const replay = await post(key);
+  assert.equal(replay.status, 200); assert.deepEqual((await replay.json()).receipt, snapshot.receipt);
+  const lookup = await get(key);
+  assert.equal(lookup.status, 200); assert.match(lookup.headers.get("cache-control") ?? "", /private.*no-store/i);
+  assert.deepEqual((await lookup.json()).receipt, snapshot.receipt);
+  const missing = await get("absent");
+  assert.equal(missing.status, 200); assert.equal((await missing.json()).receipt, null);
+  const rejected = await get("rejected");
+  assert.equal(rejected.status, 200);
+  const rejectedBody = await rejected.json();
+  assert.equal(rejectedBody.eligibility.reason, "subject-rejected");
+  assert.equal(rejectedBody.receipt.requestKey, "rejected");
+  for (const code of ["active", "unsettled"]) {
+    const conflict = await post(code);
+    assert.equal(conflict.status, 409);
+    assert.match(conflict.headers.get("cache-control") ?? "", /private.*no-store/i);
+    const body = await conflict.json();
+    assert.equal(body.code, `interpretation-${code}`); assert.equal(body.receipt, null);
+    assert.equal(body.eligibility.blockingRun.id, "owned-weave-run");
+  }
+  const unsafe = await get("unsafe");
+  assert.ok(unsafe.status !== 200 || !(await unsafe.text()).includes("PRIVATE-NATIVE-ID"));
+  for (const response of [await post("private-error"), await post("redirect")]) {
+    assert.ok(response.status >= 500); assert.equal(response.headers.get("location"), null);
+    assert.doesNotMatch(await response.text(), /PRIVATE-UPSTREAM|\/private\/native|foundation-owned-token/);
+  }
+  const beforeInvalid = daemon.attempts.length;
+  for (const response of [await post("bad key"), await post("."), await post(".."), await post("valid", '{"text":"injected"}'), await post("valid", "[]"),
+    await post("valid", "{}", "?scope=history"), await get("bad key"), await get("valid", "?scope=history"),
+    await fetch(`${origin}${base}/extra`, { method: "POST", headers: { origin } })]) assert.ok(response.status >= 400);
+  assert.equal(daemon.attempts.length, beforeInvalid);
+  const calls = daemon.attempts.slice(start);
+  assert.ok(calls.every(call => call.authorization === daemon.expectedAuthorization));
+  assert.ok(calls.some(call => call.method === "POST" && call.path === "/thoughts/idea-root/reinterpret" && call.key === key && call.body === "{}"));
+  assert.ok(calls.some(call => call.method === "GET" && decodeURIComponent(call.path) === `/thoughts/idea-root/reinterpret/by-key/${key}`));
+}
+
+export async function checkIdeaReinterpretBrowser(page: Page, daemon: Fixture, origin: string, selected = "all"): Promise<void> {
+  const commandPath = "/thoughts/idea-root/reinterpret";
+  const writes = () => daemon.attempts.filter(call => call.method === "POST" && call.path === commandPath);
+  const open = async () => {
+    await page.getByRole("button", { name: "More actions" }).click();
+    const action = page.getByRole("button", { name: /^reinterpret$/i });
+    await expect(action).toBeVisible();
+    return action;
+  };
+  const visit = async () => {
+    daemon.reset();
+    await page.goto(origin, { waitUntil: "networkidle" });
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto(`${origin}/ideas/idea-root?responseId=idea-reply`, { waitUntil: "networkidle" });
+    await expect(page.getByText(original, { exact: true })).toBeVisible();
+    await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+  };
+
+  if (selected === "all" || selected === "core") {
+    daemon.resetReinterpret(); await visit();
+    const start = writes().length, action = await open();
+    daemon.holdReinterpret();
+    try {
+      await action.evaluate(element => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
+      await expect.poll(() => writes().length).toBe(start + 1);
+      const admitted = writes().at(-1);
+      assert.ok(admitted?.key && admitted.body === "{}");
+      const stored = await page.evaluate(() => JSON.stringify(sessionStorage));
+      assert.ok(stored.includes("idea-root") && stored.includes(admitted.key), "identity must be stored before dispatch");
+      assert.doesNotMatch(stored, /Owned original idea wording|foundation-owned-token|\/private\//);
+      assert.equal(writes().length, start + 1);
+    } finally { daemon.releaseReinterpret(); }
+    await expect(page.getByText(/queued|working|in progress/i).first()).toBeVisible();
+    daemon.completeReinterpret();
+    const check = page.getByRole("button", { name: /check (?:work|status|progress)/i });
+    if (await check.count()) await check.first().click();
+    await expect(page.getByText(newChild.text, { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(url => url.pathname === "/ideas/idea-root" && url.searchParams.get("responseId") === "idea-reply");
+    assert.equal(writes().length, start + 1);
+  }
+
+  if (selected === "all" || selected === "recovery") for (const mode of ["unknown-before", "unknown-after"] as const) {
+    daemon.resetReinterpret(mode); await visit();
+    const start = writes().length;
+    await (await open()).click();
+    await expect.poll(() => writes().length).toBe(start + 1);
+    const requestKey = writes().at(-1)?.key;
+    assert.ok(requestKey);
+    await expect(page.getByRole("button", { name: /check request/i })).toBeVisible();
+    const storage = await page.evaluate(() => JSON.stringify(sessionStorage));
+    assert.ok(storage.includes("idea-root") && storage.includes(requestKey));
+    assert.doesNotMatch(storage, /Owned original idea wording|foundation-owned-token|\/private\//);
+    const beforeReload = daemon.attempts.length;
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByText(original, { exact: true })).toBeVisible();
+    assert.equal(writes().length, start + 1, "reload must not resend a command");
+    await expect.poll(() => daemon.attempts.slice(beforeReload).some(call => call.method === "GET" && call.path.includes(`/reinterpret/by-key/${requestKey}`))).toBe(true);
+    const check = page.getByRole("button", { name: /check request/i });
+    if (await check.isVisible()) await check.click();
+    assert.equal(writes().length, start + 1, "receipt check is read-only");
+    if (mode === "unknown-before") {
+      const stored = await page.evaluate(() => JSON.stringify(sessionStorage));
+      assert.ok(stored.includes(requestKey), "an absent receipt cannot erase an uncertain command");
+      daemon.reinterpretMode("normal");
+      await page.getByRole("button", { name: /send same request/i }).click();
+      await expect.poll(() => writes().length).toBe(start + 2);
+      assert.equal(writes().at(-1)?.key, requestKey);
+    } else {
+      await expect(page.getByText(/queued|working|in progress/i).first()).toBeVisible();
+      assert.equal(writes().length, start + 1);
+    }
+    await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+  }
+
+  if (selected === "all" || selected === "storage") {
+    daemon.resetReinterpret(); await visit();
+    const action = await open(), start = writes().length;
+    await page.evaluate(() => { Storage.prototype.setItem = function () { throw new DOMException("Fixture storage denied", "SecurityError"); }; });
+    await action.click();
+    await expect(page.getByRole("heading", { name: /request recovery unavailable/i })).toBeVisible();
+    assert.equal(writes().length, start, "a command without recoverable identity must not dispatch");
+    await page.reload({ waitUntil: "networkidle" });
+  }
+
+  if (selected === "all" || selected === "stop") {
+    daemon.resetReinterpret(); await visit();
+    const before = daemon.attempts.length;
+    await (await open()).click();
+    await expect(page.getByRole("button", { name: /^stop(?: work| interpretation)?$/i })).toBeVisible();
+    daemon.failReinterpretStop();
+    await page.getByRole("button", { name: /^stop(?: work| interpretation)?$/i }).click();
+    const stops = () => daemon.attempts.slice(before).filter(call => call.method === "POST" && call.path === "/runs/owned-weave-run/stop");
+    await expect.poll(() => stops().length).toBe(1);
+    const status = page.getByRole("region", { name: "Interpretation status" });
+    await expect(status.getByRole("heading", { name: "Stop not confirmed" })).toBeVisible();
+    const readsBefore = daemon.attempts.filter(call => call.method === "GET" && call.path === "/runs/owned-weave-run").length;
+    await status.getByRole("button", { name: "Check interpretation" }).click();
+    await expect.poll(() => daemon.attempts.filter(call => call.method === "GET" && call.path === "/runs/owned-weave-run").length).toBeGreaterThan(readsBefore);
+    await expect(status.getByRole("heading", { name: "Stop not confirmed" })).toBeVisible();
+    await expect(page.getByText(original, { exact: true })).toBeVisible();
+    await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+    assert.equal(stops().length, 1, "checking an unconfirmed Stop cannot repeat it");
+    const stop = page.getByRole("button", { name: /^stop(?: work| interpretation)?$/i });
+    if (await stop.count()) await expect(stop).toBeDisabled();
+  }
+
+  if (selected === "all" || selected === "guards") {
+    for (const mode of ["active", "unsettled"] as const) {
+      daemon.resetReinterpret(mode); await visit();
+      const start = writes().length;
+      await (await open()).click();
+      await expect.poll(() => writes().length).toBe(start + 1);
+      const status = page.getByRole("region", { name: "Interpretation status" });
+      await expect(status.getByRole("heading", { name: mode === "active" ? /interpretation.*queued/i : "Earlier work is unresolved" })).toBeVisible();
+      assert.equal(writes().length, start + 1);
+      await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+      if (mode === "active") {
+        const beforeStop = daemon.attempts.filter(call => call.method === "POST" && call.path === "/runs/owned-weave-run/stop").length;
+        await page.getByRole("button", { name: /^stop(?: work| interpretation)?$/i }).click();
+        await expect.poll(() => daemon.attempts.filter(call => call.method === "POST" && call.path === "/runs/owned-weave-run/stop").length).toBe(beforeStop + 1);
+        await expect(page.getByText(original, { exact: true })).toBeVisible();
+      }
+    }
+    daemon.resetReinterpret(); daemon.reset();
+    await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: /reject idea/i }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Reject this idea" }).click();
+    await page.goto(`${origin}/ideas/idea-root?scope=show-rejected`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "More actions" }).click();
+    const action = page.getByRole("button", { name: /^reinterpret$/i });
+    if (await action.count()) await expect(action).toBeDisabled();
+    assert.ok(await page.getByRole("button", { name: /restore this idea/i }).isVisible());
+  }
 }
 
 async function checkStaleConnectionSearch(page: Page, daemon: Fixture, searchDaemon: SearchFixture, origin: string): Promise<void> {

@@ -187,6 +187,8 @@ Idea's **About** button shares the existing Edit title / Full reply / More actio
 
 The four Idea action-row buttons use cyan `--color-link` text with a 1px underline at rest. Enabled hover changes to cream `--color-text` with a 2px underline; pressing uses the same cream with a 3px underline. These treatments do not change dimensions or spacing. The existing blue keyboard focus ring remains, and disabled controls keep their existing reduced opacity without hover or pressed enhancement. Evolve retains its gold primary treatment.
 
+Reinterpret lives inside More actions, not as another primary action or screen. It requires no text entry and keeps the selected Idea in place. One existing bordered status area above Surrounding Context presents progress, checking and Stop; media initial recovery and reinterpretation must not expose competing controls for the same run. Background publication preserves the current Full reply selection/open state and adds new direct children through the existing canonical Idea reader. Unknown admission separates Check request from explicit Send same request; an unconfirmed Stop is checked, never automatically repeated. Only minimal tab-session request identities are retained for reload recovery, with no thought text or credentials. This extends the approved Idea layout without new artwork or composition references.
+
 ### Screen patterns and states
 
 | Surface | Current states and interaction pattern |
