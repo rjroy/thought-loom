@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { sameBinding, type AgentBinding } from "../agent/binding";
 import type { InitialRunContext } from "../domain/run-context";
 import { requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, type Claim, type RunRecord, type RunSources } from "../domain/run";
 import type { CancellationState, OrdinaryCancellationJournal, RunStep } from "../domain/run-protocol";
@@ -14,6 +15,7 @@ import { SqliteSearchPublication } from "./search-publication";
 import { SqliteSearchPromptClock } from "./search-prompt-clock";
 import { assertOrdinaryCancellationJournal } from "./run-cancellation";
 import { weaveDispatchAllowed } from "./weave-work";
+import { readAgentBinding } from "./run-record";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
@@ -151,10 +153,23 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       return true;
     });
   }
-  /** The native port supplies positive proof; this commit may settle only its unchanged terminal journal. */
-  settleOrdinaryCancellation(journal: OrdinaryCancellationJournal): void {
+  /** Positive native-terminal proof settles only its unchanged journal/binding, never a protocol reply. */
+  settleOrdinaryCancellation(journal: OrdinaryCancellationJournal, expectedBinding: AgentBinding): void {
     const changed = this.transaction("settle ordinary worker cancellation",journal.runId,() => {
       assertOrdinaryCancellationJournal(this.db,journal);
+      const binding = readAgentBinding(this.db,journal.runId);
+      if (!binding || !sameBinding(binding,expectedBinding)) throw new RunFenceError("Cancellation binding changed during reconciliation");
+      if (this.require(journal.runId).kind === "weave" && journal.cancellation === "pending") {
+        for (const step of journal.steps) {
+          if (step.state !== "submitting" && step.state !== "uncertain") continue;
+          // The turn ended, including interruption/failure. The paired state is required by the SQL CHECK;
+          // no successful envelope/result is invented, and processed or never-submitted steps stay intact.
+          const updated = this.db.run(`UPDATE run_steps SET state='completed',native_state='completed'
+            WHERE run_id=? AND prompt_id=? AND input=? AND state=? AND native_state=?`,
+          [journal.runId,step.promptId,step.input,step.state,step.nativeState]);
+          if (updated.changes !== 1) throw new RunFenceError("Cancellation step changed during reconciliation");
+        }
+      }
       this.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=? AND cancellation_state='pending'",[journal.runId]);
       return journal.cancellation === "pending";
     });

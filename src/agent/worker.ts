@@ -325,7 +325,7 @@ export class RunWorker {
       const journal = this.bindings.cancellationJournal(run.id,{promptId:step.promptId,input:step.input});
       const result = await this.transport().cancel(run.id,binding,{promptId:step.promptId,input:step.input});
       this.localFence(run.id);
-      if (result === "settled") this.state.settleOrdinaryCancellation(journal);
+      if (result === "settled") this.state.settleOrdinaryCancellation(journal,binding);
       this.logger.verbose("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
     } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
   }

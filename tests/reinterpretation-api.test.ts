@@ -179,6 +179,66 @@ test("recorded never-submitted settled weave permits a fresh key", async () => m
   expect(f.read(db => db.query("SELECT count(*) AS n FROM runs").get())).toEqual({ n: 2 });
 }));
 
+test("positively reconciled interrupted submission permits a fresh receipt and native dispatch", async () => mediaApiFixture(async f => {
+  seed(f);
+  // The native prompt is admitted but stays active until the controlled interrupted boundary is exposed.
+  f.client.holdOutput = true;
+  const admitted = await f.request(endpoint(), command("original-interrupted"));
+  expect(admitted.status).toBe(202);
+  const first = control(await body(admitted));
+  await f.until(() => f.client.prompts.length === 1,"first native submission");
+  const prompt = f.client.prompts[0];
+  if (!prompt) throw new Error("Expected the owned submitted prompt");
+  const stopped = await f.request(`/runs/${first.runId}/stop`, {method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+  expect(stopped.status).toBe(200);
+  expect((await body(stopped)).status).toBe("interrupted");
+  const before = f.read(db => db.query("SELECT position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps WHERE run_id=? ORDER BY position").all(first.runId)) as {
+    position:number;prompt_id:string;input:string;state:string;native_state:string;envelope_json:string | null;result_json:string | null;
+  }[];
+  expect(before).toHaveLength(1);
+  expect(before[0]).toMatchObject({position:0,prompt_id:prompt.id,input:prompt.text,envelope_json:null,result_json:null});
+  expect(before[0]?.state).not.toBe("completed");
+  expect(before[0]?.native_state).not.toBe("completed");
+  const fenced = f.read(db => db.query("SELECT status,generation FROM runs WHERE id=?").get(first.runId));
+  expect(fenced).toMatchObject({status:"interrupted"});
+  const blocked = await f.request(`${endpoint()}/by-key/after-stop`);
+  expect(blocked.status).toBe(200);
+  expect(object((await body(blocked)).eligibility).eligible).toBe(false);
+
+  f.client.messages.set(prompt.sessionID,[
+    {id:prompt.id,type:"user",time:{created:10},text:prompt.text},
+    {id:`interrupted-${prompt.id}`,type:"idle",time:{created:11},outcome:"interrupted"},
+  ]);
+  f.client.holdOutput = false;
+  await f.until(() => f.read(db => db.query<{cancellation_state:string},[string]>("SELECT cancellation_state FROM runs WHERE id=?").get(first.runId))?.cancellation_state === "settled", "positively reconciled cancellation");
+  expect(f.client.interrupts).toContain(prompt.sessionID);
+  expect(f.read(db => db.query("SELECT position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps WHERE run_id=? ORDER BY position").all(first.runId))).toEqual([
+    {position:0,prompt_id:prompt.id,input:prompt.text,state:"completed",native_state:"completed",envelope_json:null,result_json:null},
+  ]);
+  expect(f.read(db => db.query("SELECT status,generation FROM runs WHERE id=?").get(first.runId))).toEqual(fenced);
+  // A configless daemon reopen must consume the committed proof without native re-observation.
+  await f.stop();
+  await f.start({THOUGHTLOOM_AGENT_CONFIG:undefined});
+  const callsBeforeLookup = f.nativeCalls;
+  const lookup = await f.request(`${endpoint()}/by-key/after-stop`);
+  expect(lookup.status).toBe(200);
+  const snapshot = await body(lookup);
+  expect(snapshot.receipt).toBeNull();
+  expect(object(snapshot.eligibility)).toEqual({eligible:true,reason:null,blockingRun:null});
+  expect(f.nativeCalls).toEqual(callsBeforeLookup);
+  const replay = await f.request(endpoint(), command("original-interrupted"));
+  expect(replay.status).toBe(200); expect(control(await body(replay)).receipt).toEqual(first.receipt);
+  await f.stop();
+  await f.start();
+  const replacement = await f.request(endpoint(), command("after-stop"));
+  expect(replacement.status).toBe(202);
+  const next = control(await body(replacement));
+  expect(next.runId).not.toBe(first.runId);
+  await f.until(() => f.client.prompts.length >= 2,"replacement native submission");
+  expect(f.client.prompts[1]?.sessionID).not.toBe(prompt.sessionID);
+  expect(f.client.scriptErrors).toEqual([]);
+},{configured:true,script:() => ({version:1,kind:"complete",reply:"Owned fixture outcome"})}),20000);
+
 for (const sameKey of [true, false]) test(`simultaneous ${sameKey ? "same" : "different"}-key commands retain one durable admission`, async () => mediaApiFixture(async f => {
   seed(f);
   const keys = ["concurrent-a", sameKey ? "concurrent-a" : "concurrent-b"];

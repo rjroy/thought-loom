@@ -8,13 +8,14 @@ import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
 import { TitleService } from "../src/domain/title";
-import { RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
+import { RunFenceError, RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
 import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteRunWorkerState } from "../src/storage/run-worker";
 import { SqliteSearchRepository } from "../src/storage/search";
 import { SqliteTitleRepository } from "../src/storage/title";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
@@ -80,6 +81,36 @@ function worker(f: ReturnType<typeof setup>, output: (index: number) => string, 
 async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: string) {
   // Test harness bound only; the worker must not impose an effort quota.
   for (let i = 0; i < 20 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
+}
+
+async function provenInterruptedWeave(f: ReturnType<typeof setup>) {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "settlement-proof" });
+  const w = worker(f, () => complete("not published"));
+  for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(run.id);
+  const prompt = w.native.submitted[0];
+  if (!prompt) throw new Error("Expected submitted owned prompt");
+  w.instance.pause(); await w.instance.drain();
+  f.service.stop("user", run.id);
+  const bindings = new SqliteAgentBindings(f.db), saved = bindings.get(run.id);
+  if (!saved) throw new Error("Expected owned native binding");
+  const session = { id:saved.sessionId, location:saved.location, model:saved.model, permissions:saved.permissions,
+    metadata:{owner:"thoughtloom",runId:run.id,protocolVersion:"1"} };
+  const client: PublicClient = {
+    serverInfo:async () => ({version:"fixture"}), sessionCreate:async () => session, sessionGet:async () => session,
+    prompt:async () => { throw new Error("Cleanup must not submit"); }, inbox:async () => [], active:async () => ({}),
+    history:async () => ({data:[{id:prompt.promptId,type:"user",time:{created:1},text:prompt.input},
+      {id:"owned-interrupted",type:"idle",time:{created:2},outcome:"interrupted"}],cursor:{}}),
+    cancelInbox:async () => {}, interrupt:async () => ({interrupted:true}),
+  };
+  const adapter = new OpenCodeAdapter(client,bindings,bindings.assertActive.bind(bindings));
+  const journal = bindings.cancellationJournal(run.id,prompt);
+  expect(await adapter.cancel(run.id,saved,prompt)).toBe("settled");
+  expect(f.steps.cancellation(run.id)).toBe("pending");
+  const state = new SqliteRunWorkerState(f.db,{id:f.id,now});
+  const snapshot = () => ({run:f.db.query("SELECT * FROM runs WHERE id=?").get(run.id),
+    steps:f.db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(run.id),
+    binding:f.db.query("SELECT * FROM agent_bindings WHERE run_id=?").get(run.id)});
+  return {run,prompt,bindings,saved,adapter,journal,state,snapshot};
 }
 
 test("weave alone renders discovery guidance alongside the shared evidence fences", () => {
@@ -275,6 +306,38 @@ test("prepared successor does not hide earlier submitted work from cancellation"
   expect(f.steps.cancellation(run.id)).toBe("settled");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
   expect(w.native.submitted).toHaveLength(1);
+}));
+
+test("positive cancellation cannot commit against a stale journal or a different binding", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  // A new terminal generation invalidates the previously observed native proof's journal identity.
+  f.db.query("UPDATE runs SET generation=generation+1 WHERE id=?").run(owned.run.id);
+  const before = owned.snapshot();
+  expect(() => owned.state.settleOrdinaryCancellation(owned.journal,owned.saved)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  const current = owned.bindings.cancellationJournal(owned.run.id,owned.prompt);
+  const foreign = {...owned.saved,model:{...owned.saved.model,id:"foreign-model"}};
+  expect(() => owned.state.settleOrdinaryCancellation(current,foreign)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  expect(await owned.adapter.cancel(owned.run.id,owned.saved,owned.prompt)).toBe("settled");
+  owned.state.settleOrdinaryCancellation(current,owned.saved);
+  expect(f.steps.cancellation(owned.run.id)).toBe("settled");
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
+}));
+
+test("settlement transaction rolls back native-terminal bookkeeping on a later SQL failure", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  const before = owned.snapshot();
+  f.db.exec(`CREATE TRIGGER test_cancel_settlement_fault BEFORE UPDATE OF cancellation_state ON runs
+    WHEN NEW.cancellation_state='settled' BEGIN SELECT RAISE(ABORT,'owned settlement fault'); END;`);
+  try {
+    expect(() => owned.state.settleOrdinaryCancellation(owned.journal,owned.saved)).toThrow(/owned settlement fault/);
+    expect(owned.snapshot()).toEqual(before);
+    expect(f.steps.cancellation(owned.run.id)).toBe("pending");
+  } finally { f.db.exec("DROP TRIGGER test_cancel_settlement_fault"); }
+  owned.state.settleOrdinaryCancellation(owned.journal,owned.saved);
+  expect(f.steps.cancellation(owned.run.id)).toBe("settled");
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
 }));
 
 test("title-clear waits behind a started weave across successor preparation and worker restart", async () => fixture(async f => {
