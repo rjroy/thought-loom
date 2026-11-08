@@ -4,29 +4,29 @@ import { RunConflictError, RunNotFoundError, type RunRecord, type RunSources } f
 import type { WeaveIntent } from "../domain/run-operations";
 import type { MaterialKind } from "../domain/thought";
 import type { MediaRetryEligibility } from "../domain/media-import";
-import type { RunStatus } from "../domain/run";
 import { resolveWeavePurpose } from "../domain/weave-scheduling";
 import { nonEmpty, record } from "../domain/validation";
 import { insertRun, readRun } from "./run-record";
+import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
 
 export type WeaveSources = RunSources;
 
-/** Shared source gate: caller checks source visibility; the latest ordinary weave also drives inspection. */
+/** All interpretation histories gate retry; only the latest interpretation run drives source inspection. */
 export function sourceWeaveEligibility(db: Database, subjectId: string): {
   readonly runId: string | null; readonly retry: MediaRetryEligibility;
 } {
-  const previous = db.query<{id:string;status:RunStatus;cancellation:string},[string]>(`SELECT id,status,cancellation_state AS cancellation
-    FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id NOT LIKE 'title-clear:%' ORDER BY rowid DESC LIMIT 1`).get(subjectId);
+  const subject = db.query<{kind:MaterialKind},[string]>("SELECT kind FROM thoughts WHERE id=?").get(subjectId);
+  if (!subject) throw new RunNotFoundError();
+  const work = subjectWeaveWork(db,subjectId,subject.kind), previous = work.at(-1);
   const runId = previous?.id ?? null;
   if (db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
     return {runId,retry:{eligible:false,reason:"interpretation-exists"}};
   }
-  if (!previous || ((previous.status === "failed" || previous.status === "interrupted") && previous.cancellation === "settled")) {
-    return {runId,retry:{eligible:true,reason:null}};
+  for (const item of work) {
+    const reason = weaveWorkBlockReason(db,item);
+    if (reason !== null) return {runId,retry:{eligible:false,reason:reason === "work-active" ? "work-active" : "work-unsettled"}};
   }
-  const reason = previous.status === "completed" ? "work-completed" :
-    previous.status === "queued" || previous.status === "submitting" || previous.status === "running" ? "work-active" : "work-unsettled";
-  return {runId,retry:{eligible:false,reason}};
+  return previous?.status === "completed" ? {runId,retry:{eligible:false,reason:"work-completed"}} : {runId,retry:{eligible:true,reason:null}};
 }
 
 /** The same admission for manual and scheduled work; nested calls join the originating command's transaction. */

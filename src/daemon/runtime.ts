@@ -31,6 +31,8 @@ import { openMediaFiles, type MediaFiles } from "../storage/media-files";
 import { createMediaValidator, type MediaValidator } from "../storage/media-validator";
 import { mediaStoreId } from "../storage/media-source";
 import { SqliteMediaImports } from "../storage/media-import";
+import { ReinterpretationService } from "../domain/reinterpretation";
+import { SqliteReinterpretations } from "../storage/reinterpretation";
 
 /** Optional test-owned transport and technical timer seams; default runtime uses the maintained SDK. */
 export interface RuntimeDependencies {
@@ -167,6 +169,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576},
+      reinterpretations:{commands:new ReinterpretationService(new SqliteReinterpretations(db,scheduling)),notify:() => supervisor?.notifyWork()},
       media:{commands:new SqliteMediaImports(db,scheduling,files,rejection),maxBytes:mediaMaxBytes,notify:() => supervisor?.notifyWork()} });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: request => {
       if (!acceptingRequests) return new Response("Daemon stopping",{ status: 503 });

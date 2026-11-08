@@ -142,6 +142,11 @@ test("source status and retry admission agree across active, uncertain and settl
       expect((await f.request(`${base}/retry`,retry(`blocked-${state.status}`))).status).toBe(409);
     }
     db.query("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?").run(first.runId);
+    // A settled bit alone cannot prove the failed legacy row was never submitted.
+    expect(object((await body(await f.request(base))).retry)).toEqual({eligible:false,reason:"work-unsettled"});
+    expect((await f.request(`${base}/retry`,retry("unverified-settled"))).status).toBe(409);
+    // This fixture never dispatched: retain its exact prepared input to prove the local case.
+    db.query("UPDATE run_steps SET input=? WHERE run_id=?").run("test-owned prepared input",first.runId);
     expect(await body(await f.request(base))).toEqual({thought:first.thought,run:await body(await f.request(`/runs/${first.runId}`)),
       retry:{eligible:true,reason:null}});
     const accepted = await f.request(`${base}/retry`,retry("settled-retry"));
@@ -209,14 +214,23 @@ test("configured media admission gives the normal worker real PNG and PDF paths 
 test("media HTTP retry reuses a failed original after normal cancellation without duplicating its interpretation", async () => {
   let interpret = false;
   await mediaApiFixture(async f => {
+    let holdTerminalEvidence = true, heldReads = 0;
+    f.client.historyPage = async input => {
+      const failed = f.read(db => db.query("SELECT 1 FROM runs WHERE session_id=? AND status='failed'").get(input.sessionID)) !== null;
+      if (holdTerminalEvidence && failed) { heldReads++; return {data:[],cursor:{}}; }
+      return {data:f.client.messages.get(input.sessionID) ?? [],cursor:{}};
+    };
     const bytes = independentPng(), first = await receipt(await f.request("/imports/media",upload(bytes,"failed-source")));
     const source = first.thought.mediaSource.id, retryPath = `/media-sources/${source}/retry`;
     await f.until(async () => (await body(await f.request(`/runs/${first.runId}`))).status === "failed","failed source outcome");
+    await f.until(() => heldReads > 0,"cancellation without terminal evidence");
     expect(f.read(db => db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(first.runId))).toEqual({state:"pending"});
     expect((await f.request(retryPath,retry("deliberate-retry"))).status).toBe(409);
+    expect(f.read(db => db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(first.runId))).toEqual({state:"pending"});
+    holdTerminalEvidence = false;
     await f.until(() => f.read(db => db.query("SELECT 1 FROM runs WHERE id=? AND cancellation_state='settled'").get(first.runId)) !== null,"ordinary cancellation settlement");
-    expect(f.client.inboxCancellations).toHaveLength(1);
-    expect(f.client.interrupts).toHaveLength(1);
+    expect(f.client.inboxCancellations).toHaveLength(0); // The fixture never placed a prompt in the native inbox.
+    expect(f.client.interrupts.length).toBeGreaterThan(0);
     interpret = true;
     const accepted = await f.request(retryPath,retry("deliberate-retry"));
     expect(accepted.status).toBe(202);
@@ -237,6 +251,80 @@ test("media HTTP retry reuses a failed original after normal cancellation withou
   },{configured:true,script:(_index,input) => !interpret ? pathComplete("The owned source could not be understood.") :
     object(JSON.parse(input)).kind === "job" ? pathRequest("interpretation",{text:"Retried owned interpretation.",sourceIds:[]}) : pathComplete("Saved the retried interpretation.")});
 },30000);
+
+test("initial media retry and reinterpretation race to one interpretation admission", async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media", upload(independentPng(), "race-media")));
+  const db = new Database(f.dbPath);
+  try {
+    db.query("UPDATE run_steps SET input=? WHERE run_id=?").run("never dispatched fixture input", first.runId);
+    db.query("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?").run(first.runId);
+  } finally { db.close(); }
+  const [retryResponse, reinterpretResponse] = await Promise.all([
+    f.request(`/media-sources/${first.thought.mediaSource.id}/retry`, retry("race-retry")),
+    f.request(`/thoughts/${first.thought.id}/reinterpret`, retry("race-reinterpret")),
+  ]);
+  expect([retryResponse.status, reinterpretResponse.status].sort()).toEqual([202, 409]);
+  expect(f.read(db => db.query("SELECT count(*) AS n FROM runs WHERE weave_subject_id=?").get(first.thought.id))).toEqual({n:2});
+  const lookup = await f.request(`/thoughts/${first.thought.id}/reinterpret/by-key/race-reinterpret`);
+  expect(lookup.status).toBe(200);
+  const recoveredReceipt = (await body(lookup)).receipt;
+  if (reinterpretResponse.status === 202) expect(object(recoveredReceipt).requestKey).toBe("race-reinterpret");
+  else expect(recoveredReceipt).toBeNull();
+}), 20000);
+
+for (const firstCommand of ["retry", "reinterpret"] as const) test(`media ${firstCommand} admitted first blocks the other command without a receipt alias`, async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media", upload(independentPng(), `ordered-${firstCommand}`)));
+  const db = new Database(f.dbPath);
+  try {
+    db.query("UPDATE run_steps SET input=? WHERE run_id=?").run("never dispatched fixture input", first.runId);
+    db.query("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?").run(first.runId);
+  } finally { db.close(); }
+  const sendRetry = () => f.request(`/media-sources/${first.thought.mediaSource.id}/retry`, retry("ordered-retry"));
+  const sendReinterpret = () => f.request(`/thoughts/${first.thought.id}/reinterpret`, retry("ordered-reinterpret"));
+  const admitted = await (firstCommand === "retry" ? sendRetry() : sendReinterpret());
+  expect(admitted.status).toBe(202);
+  const rejected = await (firstCommand === "retry" ? sendReinterpret() : sendRetry());
+  expect(rejected.status).toBe(409);
+  const lookup = await f.request(`/thoughts/${first.thought.id}/reinterpret/by-key/ordered-reinterpret`);
+  expect(lookup.status).toBe(200);
+  const recoveredReceipt = (await body(lookup)).receipt;
+  if (firstCommand === "reinterpret") expect(object(recoveredReceipt).requestKey).toBe("ordered-reinterpret");
+  else expect(recoveredReceipt).toBeNull();
+  expect(f.read(db => db.query("SELECT count(*) AS n FROM runs WHERE weave_subject_id=?").get(first.thought.id))).toEqual({n:2});
+}), 20000);
+
+test("media title-only invitation coexists with reinterpretation admission", async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media", upload(independentPng(), "title-coexist")));
+  const db = new Database(f.dbPath);
+  try {
+    db.query("UPDATE runs SET status='completed' WHERE id=?").run(first.runId);
+    let sequence = 0;
+    admitWeave(db, { id: () => `title-coexist-${++sequence}`, now: () => "2030-01-01T00:00:00Z" },
+      { subjectId: first.thought.id, triggerId: "title-clear:coexisting" });
+  } finally { db.close(); }
+  const response = await f.request(`/thoughts/${first.thought.id}/reinterpret`, retry("with-title"));
+  expect(response.status).toBe(202);
+  const data = await body(response);
+  expect(object(data.receipt).requestKey).toBe("with-title");
+  expect(f.read(db => db.query("SELECT weave_trigger_id AS trigger FROM runs WHERE weave_subject_id=? ORDER BY rowid").all(first.thought.id)))
+    .toEqual([{trigger:expect.any(String)}, {trigger:"title-clear:coexisting"}, {trigger:"reinterpret:with-title"}]);
+}), 20000);
+
+test("a media source with an earlier interpretation can admit explicit reinterpretation", async () => mediaApiFixture(async f => {
+  const first = await receipt(await f.request("/imports/media", upload(independentPng(), "media-history")));
+  const db = new Database(f.dbPath);
+  try {
+    db.query("UPDATE runs SET status='completed' WHERE id=?").run(first.runId);
+    new SqliteStore(db).saveThought({id:"prior-media-output",text:"Earlier interpretation",title:null,titleAuthor:null,
+      author:"ai",kind:"ai-interpretation",createdAt:"2030-01-01T00:00:00Z",origin:"weave",parentId:first.thought.id,sourceIds:[]});
+  } finally { db.close(); }
+  const response = await f.request(`/thoughts/${first.thought.id}/reinterpret`, retry("fresh-with-history"));
+  expect(response.status).toBe(202);
+  expect(object((await body(response)).receipt)).toEqual(expect.objectContaining({subjectId:first.thought.id,requestKey:"fresh-with-history"}));
+  expect(f.read(db => db.query("SELECT id,parent_id AS parent FROM thoughts WHERE id='prior-media-output'").get()))
+    .toEqual({id:"prior-media-output",parent:first.thought.id});
+  expect((await f.request(`/media-sources/${first.thought.mediaSource.id}/retry`,retry("initial-again"))).status).toBe(409);
+}), 20000);
 
 test("media restart and paired restore preserve file identity while a mismatched store fails without repair", async () => mediaApiFixture(async f => {
   const bytes = independentPng(), admitted = await receipt(await f.request("/imports/media",upload(bytes,"restore-source")));

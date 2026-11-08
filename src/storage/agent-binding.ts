@@ -13,6 +13,7 @@ import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 import { ExecutionOwnerLease } from "./execution-owner";
 import { readAgentBinding } from "./run-record";
 import { assertOrdinaryCancellationJournal, ordinaryCancellationJournal } from "./run-cancellation";
+import { weaveDispatchAllowed } from "./weave-work";
 
 // Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
 const processSubmitOwner = randomUUID();
@@ -185,6 +186,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
         }));
       } else if (phase === "submit") {
         if (run.status !== "queued" || this.currentStep(run.id).state !== "prepared") throw new AgentUncertainError("Native attempt is already recorded; observe it instead of resubmitting");
+        if (run.kind === "weave" && !weaveDispatchAllowed(this.db,run.id)) throw new RunFenceError("Subject weave dispatch is postponed");
         if (run.kind === "search") {
           if (!this.get(run.id)) throw new RunFenceError("Search submission requires its bound owner");
           const submitOwner = this.executionOwner?.id ?? processSubmitOwner;

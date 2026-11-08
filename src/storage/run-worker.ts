@@ -13,11 +13,15 @@ import { initialSearchContext } from "./search-initial-context";
 import { SqliteSearchPublication } from "./search-publication";
 import { SqliteSearchPromptClock } from "./search-prompt-clock";
 import { assertOrdinaryCancellationJournal } from "./run-cancellation";
+import { weaveDispatchAllowed } from "./weave-work";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
   constructor(db: Database, private readonly sources: RunSources,
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
+  canDispatch(runId: string): boolean {
+    return this.transaction("check weave dispatch",runId,() => weaveDispatchAllowed(this.db,runId));
+  }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
     const prepared = this.guardedExecution("prepare worker context",claim,run => {
       const step = this.currentStep(run.id);
@@ -87,7 +91,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         if (response) responses.set(response.id,response);
       }
     }
-    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id} :
+    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id,...(purpose === "reinterpretation" ? {purpose} : {})} :
       {kind:"evolve",contributionId:subject.id,continuationId:subject.parentId},thoughts,connections,responses:[...responses.values()]};
   }
   /** Failed transport is not submission evidence. Only a previously committed intent makes this observation-only. */

@@ -165,6 +165,10 @@ export class RunWorker {
       if (!run) { this.searchClock.forget(runId); throw new RunConflictError("Worker run does not exist"); }
       if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return; // Import dispatch belongs to its separately authorized worker.
       if (terminal(run)) { this.forget(runId); return; }
+      if (run.kind === "weave" && run.status === "queued" && !this.state.canDispatch(runId)) {
+        this.logger.verbose("[worker] subject weave waiting",{runId});
+        return;
+      }
       let binding = this.bindings.get(runId);
       if (!binding) {
         const selected = this.dependencies.bindingFor?.(Object.freeze({...run})) ?? null;

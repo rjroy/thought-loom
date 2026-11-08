@@ -7,6 +7,7 @@ import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
+import { TitleService } from "../src/domain/title";
 import { RunService, type Claim, type NativeDispatcher, type RunRecord } from "../src/domain/run";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
@@ -15,6 +16,7 @@ import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
 import { SqliteSearchRepository } from "../src/storage/search";
+import { SqliteTitleRepository } from "../src/storage/title";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 
 const now = () => "2031-01-01T00:00:00Z";
@@ -273,6 +275,67 @@ test("prepared successor does not hide earlier submitted work from cancellation"
   expect(f.steps.cancellation(run.id)).toBe("settled");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
   expect(w.native.submitted).toHaveLength(1);
+}));
+
+test("title-clear waits behind a started weave across successor preparation and worker restart", async () => fixture(async f => {
+  const titles = new TitleService(new SqliteTitleRepository(f.db, { id: f.id, now }));
+  titles.setUser("user", "root", "Existing title");
+  const first = f.ops.admitWeave("user", { subjectId: "root", triggerId: "started-interpretation" });
+  const w = worker(f, () => request("readThought", { id: "root" }));
+  for (let i = 0; i < 20 && f.steps.steps(first.id).length < 2; i++) await w.instance.tick(first.id);
+  const successor = f.steps.steps(first.id)[1];
+  if (!successor || successor.input === null) throw new Error("Expected a prepared successor");
+  expect(successor.state).toBe("prepared");
+  expect(w.native.submitted).toHaveLength(1);
+  expect(titles.setUser("user", "root", null)).toEqual({ title: null, titleAuthor: null });
+  const waiting = f.db.query<{id:string}, []>("SELECT id FROM runs WHERE weave_subject_id='root' AND weave_trigger_id LIKE 'title-clear:%'").get();
+  if (!waiting) throw new Error("Expected a durable title-clear invitation");
+  const before = f.runs.get(waiting.id);
+  if (!before) throw new Error("Expected the queued title-clear run");
+  expect(before).toMatchObject({ status: "queued", generation: 0 });
+  w.instance.pause(); await w.instance.drain();
+  const restarted = worker(f, () => complete("done"));
+  try {
+    for (let i = 0; i < 3; i++) await restarted.instance.tick(waiting.id);
+    expect(restarted.native.submitted).toEqual([]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+    for (let i = 0; i < 8 && restarted.native.submitted.length === 0; i++) await restarted.instance.tick(first.id);
+    expect(restarted.native.submitted).toEqual([{ promptId: successor.promptId, input: successor.input }]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+    await drive(restarted.instance, f, first.id);
+    expect(f.runs.get(first.id)?.status).toBe("completed");
+    for (let i = 0; i < 8 && restarted.native.submitted.length < 2; i++) await restarted.instance.tick(waiting.id);
+    expect(restarted.native.submitted.map(item => item.promptId)).toEqual([successor.promptId, before.promptId]);
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
+}));
+
+test("newer queued interpretation cannot dispatch before the oldest queued invitation", async () => fixture(async f => {
+  const first = f.ops.admitWeave("user", { subjectId: "root", triggerId: "oldest" });
+  const second = f.ops.admitWeave("user", { subjectId: "root", triggerId: "newer" });
+  const w = worker(f, () => complete("done"));
+  try {
+    const before = f.runs.get(second.id);
+    for (let i = 0; i < 4; i++) await w.instance.tick(second.id);
+    expect(w.native.submitted).toEqual([]);
+    expect(f.runs.get(second.id)).toEqual(before);
+    for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(first.id);
+    expect(w.native.submitted.map(item => item.promptId)).toEqual([first.promptId]);
+    expect(f.runs.get(second.id)).toEqual(before);
+  } finally { w.instance.pause(); await w.instance.drain(); }
+}));
+
+test("an unverified historical cancellation blocks a later queued weave from native dispatch", async () => fixture(async f => {
+  const old = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-old" });
+  f.db.query("UPDATE run_steps SET input=?,state='uncertain' WHERE run_id=?").run("old exact input", old.id);
+  f.db.query("UPDATE runs SET status='interrupted',cancellation_state='settled' WHERE id=?").run(old.id);
+  const waiting = f.ops.admitWeave("user", { subjectId: "root", triggerId: "waiting" });
+  const w = worker(f, () => complete("must not run"));
+  try {
+    const before = f.runs.get(waiting.id);
+    for (let i = 0; i < 4; i++) await w.instance.tick(waiting.id);
+    expect(w.native.submitted).toEqual([]);
+    expect(f.runs.get(waiting.id)).toEqual(before);
+  } finally { w.instance.pause(); await w.instance.drain(); }
 }));
 
 test("a prepared successor cannot settle an earlier dispatched weave without native evidence, including after worker restart", async () => fixture(async f => {

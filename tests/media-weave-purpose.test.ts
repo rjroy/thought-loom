@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { capabilityResultPrompt } from "../src/agent/worker-prompts";
 import { readCapabilityResult, type CapabilityRequest, type ReadCapabilityRequest } from "../src/domain/capability";
+import { RejectionService } from "../src/domain/rejection";
 import { RunFenceError, RunForbiddenError } from "../src/domain/run";
 import { stepOperationEnvelope, type StepOperation, type StepOperationResult } from "../src/domain/run-operations";
 import { protocolJson } from "../src/domain/run-protocol";
 import type { TextThought } from "../src/domain/thought";
 import { record } from "../src/domain/validation";
+import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { mediaThought, mediaTime } from "./fixtures/media-source";
 import { asyncMediaWeaveFixture, bindMediaReplay, mediaNeighbor, mediaReplayWorker, mediaWeaveFixture, prepareMediaRun,
   retainForbiddenMediaSuccessor, seedMediaRelations, startMediaTitleClear,
@@ -39,6 +41,70 @@ async function reachMediaSubmission(replay: ReturnType<typeof mediaReplayWorker>
 }
 
 describe("persisted media weave purpose", () => {
+  test("reinterpretation purpose reaches the media initial context and rendered prompt", () => mediaWeaveFixture(f => {
+    const run = f.ops.admitWeave("user", { subjectId: mediaThought.id, triggerId: "reinterpret:fresh-media" });
+    const prepared = prepareMediaRun(f, run);
+    expect(prepared.context.job).toEqual({ kind: "weave", subjectId: mediaThought.id, purpose: "reinterpretation" });
+    const rendered = record(JSON.parse(prepared.input));
+    expect(record(record(rendered.context).job)).toEqual({ kind: "weave", subjectId: mediaThought.id, purpose: "reinterpretation" });
+    expect(prepared.input).toContain(mediaThought.id);
+  }));
+
+  test("media reinterpretation publishes its own direct child despite a rejected historical child", () => mediaWeaveFixture(f => {
+    // Admit before inserting the test-owned prior child to isolate execution from the separate admission gate.
+    const run = f.ops.admitWeave("user", { subjectId: mediaThought.id, triggerId: "reinterpret:new-child" });
+    const prior: TextThought = { id: "historical-media-child", text: "Previous source interpretation", title: null, titleAuthor: null,
+      author: "ai", kind: "ai-interpretation", createdAt: mediaTime, origin: "weave", parentId: mediaThought.id, sourceIds: [] };
+    f.store.saveThought(prior);
+    f.store.saveResponse({ id: "historical-media-reply", text: "Earlier outcome", role: "addendum", state: "complete", thoughtIds: [mediaThought.id, prior.id] });
+    new RejectionService(new SqliteRejectionRepository(f.db)).rejectThought("user", prior.id);
+    const prepared = prepareMediaRun(f, run);
+    expect(prepared.context.thoughts).not.toContainEqual(prior);
+    const input: CapabilityRequest = { capability: "interpretation", arguments: { text: "Fresh source interpretation", sourceIds: [] } };
+    request(f, prepared, input);
+    const result = f.dispatcher.dispatch(prepared.claim, prepared.step.promptId, input);
+    if (result.type !== "interpretation") throw new Error("Expected a new interpretation");
+    expect(result.thought).toMatchObject({ parentId: mediaThought.id, kind: "ai-interpretation", text: "Fresh source interpretation" });
+    expect(result.thought.id).not.toBe(prior.id);
+    expect(f.db.query("SELECT thought_id FROM run_issued_thoughts WHERE run_id=?").all(run.id)).toEqual([{ thought_id: result.thought.id }]);
+    const next = f.steps.advance(prepared.claim, prepared.step.promptId, result, { promptId: "reinterpretation-complete", input: "confirmed new interpretation" });
+    f.steps.completeStep(prepared.claim, next.promptId, { version: 1, kind: "complete", reply: "New interpretation saved" });
+    f.state.finish(prepared.claim, next.promptId);
+    expect(f.runs.get(run.id)?.status).toBe("completed");
+    expect(f.runs.reply(run.id)).toMatchObject({ text: "New interpretation saved", thoughtIds: [mediaThought.id, result.thought.id] });
+    expect(f.store.getThought(prior.id)).toEqual(prior);
+    expect(f.store.getResponse("historical-media-reply")).toMatchObject({ text: "Earlier outcome" });
+  }));
+
+  test("historical media child cannot make an empty reinterpretation successful", () => mediaWeaveFixture(f => {
+    const run = f.ops.admitWeave("user", { subjectId: mediaThought.id, triggerId: "reinterpret:no-output" });
+    f.store.saveThought({ id: "existing-media-child", text: "Earlier interpretation", title: null, titleAuthor: null,
+      author: "ai", kind: "ai-interpretation", createdAt: mediaTime, origin: "weave", parentId: mediaThought.id, sourceIds: [] });
+    const prepared = prepareMediaRun(f, run);
+    f.steps.completeStep(prepared.claim, prepared.step.promptId, { version: 1, kind: "complete", reply: "The original was inaccessible" });
+    f.state.finish(prepared.claim, prepared.step.promptId);
+    expect(f.runs.get(run.id)?.status).toBe("failed");
+    expect(f.runs.reply(run.id)).toMatchObject({ role: "fallback", state: "complete", text: "The original was inaccessible", thoughtIds: [mediaThought.id] });
+    expect(f.db.query("SELECT thought_id FROM run_issued_thoughts WHERE run_id=?").all(run.id)).toEqual([]);
+    expect(f.db.query("SELECT id FROM thoughts WHERE parent_id=?").all(mediaThought.id)).toEqual([{ id: "existing-media-child" }]);
+  }));
+
+  test("a media title-only weave and an interpretation may both reach native submission", async () => asyncMediaWeaveFixture(async f => {
+    const title = startMediaTitleClear(f);
+    bindMediaReplay(f, title);
+    const run = f.ops.admitWeave("user", { subjectId: mediaThought.id, triggerId: "reinterpret:parallel-title" });
+    const reinterpretation = prepareMediaRun(f, run);
+    bindMediaReplay(f, reinterpretation);
+    const replay = mediaReplayWorker(f);
+    try {
+      for (let tick = 0; tick < 8 && replay.submitted.length < 2; tick++) {
+        await replay.worker.tick(title.run.id);
+        await replay.worker.tick(run.id);
+      }
+      expect(replay.submitted.map(prompt => prompt.promptId).sort()).toEqual([title.step.promptId, reinterpretation.step.promptId].sort());
+    } finally { replay.worker.pause(); await replay.worker.drain(); }
+  }));
+
   test("media title-clear cannot publish an interpretation", () => mediaWeaveFixture(f => {
     const prepared = startMediaTitleClear(f);
     expect(f.ops.weaveIntent(prepared.run.id)).toEqual({ subjectId: mediaThought.id, triggerId: expect.stringMatching(/^title-clear:.+/) });

@@ -10,6 +10,7 @@ import { SqliteRunAggregate } from "./run-aggregate";
 import { evolveWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave } from "./weave-admission";
 import { searchRevision } from "../domain/search-session-guards";
+import { weaveDispatchAllowed } from "./weave-work";
 
 /** Durable transaction boundary; never invokes a model or network while holding a SQLite lock. */
 export class SqliteRunRepository extends SqliteRunAggregate implements RunRepository {
@@ -37,6 +38,9 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     const outcome = this.transaction("claim", id, () => {
       const run = this.require(id);
       requireExecutionRun(run);
+      if (run.kind === "weave" && run.status === "queued" && !weaveDispatchAllowed(this.db,id)) {
+        throw new RunFenceError("Subject weave is waiting for preceding work");
+      }
       this.active({ runId: id, generation: run.generation });
       if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run,"context-invalidated"); return null; }
       const generation = run.generation + 1;
