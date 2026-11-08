@@ -202,6 +202,12 @@ Simple's current preview follows the setup methods in document order. A newly co
 
 One context row renders each referenced thought once, in first-occurrence order: direct children, then connection neighbors, then provenance sources. Its relationship strips preserve every applicable role. Each recorded connection has its own rationale and reject/restore controls beside that relationship; the row has one Open idea action. The immediate parent remains a separate reference even when also present as a source or connection neighbor. A root has no invented parent. An unavailable parent is labelled unavailable, with deliberate inspection available from normal view, never an automatic broader read.
 
+### Guided connection creation
+
+The [selected guided B references](../../.impeccable/mocks/user-connections/README.md) place a secondary Connect action on Idea and an inline, single-column creation flow beneath its existing tools. Normal-scope search and actual-text preview select the other thought. Four existing categories, sentence-based direction, required rationale and optional additional source thoughts lead to a visible review summary and one explicit Create action. Source identities are existing thoughts, not preservation settings or verified endorsements.
+
+The editor reuses Quiet Night tokens, readable native controls and the existing Idea tools. Drafts stay intact between wizard steps; refresh or leaving clears them. Cancel confirms discarding entered work, but no history interception or browser-storage recovery is added. Pending submissions prevent repeat activation. Unconfirmed writes retain a readonly, copyable snapshot while mounted and warn that creation may have completed, without automatic retry. Runtime and actual-client review remain separate from approval of the composition references.
+
 ### Conversational-search routes and composition
 
 The [location helpers](src/features/agentic-search/location.ts) define bookmarkable `/explore/ask` entry, `/explore/ask/saved` catalog, `/explore/ask/:id` session and `/explore/ask/:id/history` inspection routes. Ordinary Explore retains its keyword form and separate **Ask your library** / **Saved searches** links; neither link nor page rendering creates a session or admits a turn. New search and Resume are explicit user actions. Browser requests use the existing fixed-purpose Next server boundary, never direct daemon access.

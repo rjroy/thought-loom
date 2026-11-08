@@ -23,17 +23,22 @@ export function ideaDaemon(token: string) {
   const attempts: Attempt[] = [];
   let title: string | null = thought.title, rootRejected = false, childEdgeRejected = false, branchAttempt = 0;
   let holdPreview = false, holdTitle = false, failure = false;
+  let connectionStatus: 201 | 400 | 404 | 500 = 201, holdConnection = false;
   let releasePreview: (() => void) | undefined, releaseTitle: (() => void) | undefined;
+  let releaseConnection: (() => void) | undefined;
   return {
     attempts, expectedAuthorization: `Bearer ${token}`,
     currentTitle() { return title; },
     freshPreviewWaiting() { return releasePreview !== undefined; },
-    reset() { title = thought.title; rootRejected = false; childEdgeRejected = false; branchAttempt = 0; holdPreview = false; holdTitle = false; failure = false; },
+    reset() { title = thought.title; rootRejected = false; childEdgeRejected = false; branchAttempt = 0; holdPreview = false; holdTitle = false; failure = false; connectionStatus = 201; holdConnection = false; },
     holdFreshPreview() { holdPreview = true; },
     releasePreview() { releasePreview?.(); releasePreview = undefined; holdPreview = false; },
     holdTitle() { holdTitle = true; },
     releaseTitle() { releaseTitle?.(); releaseTitle = undefined; holdTitle = false; },
     failWrites(value: boolean) { failure = value; },
+    connectionStatus(value: typeof connectionStatus) { connectionStatus = value; },
+    holdConnection() { holdConnection = true; },
+    releaseConnection() { releaseConnection?.(); releaseConnection = undefined; holdConnection = false; },
     async handler(req: IncomingMessage, res: ServerResponse) {
       let body = ""; for await (const chunk of req) body += String(chunk);
       const path = req.url ?? "", method = req.method ?? "";
@@ -63,6 +68,13 @@ export function ideaDaemon(token: string) {
         res.writeHead(404).end(); return;
       }
       if (failure) { res.writeHead(500).end("owned private write failure"); return; }
+      if (url.pathname === "/connections" && method === "POST") {
+        if (holdConnection) await new Promise<void>(resolve => { releaseConnection = resolve; });
+        if (connectionStatus !== 201) { res.writeHead(connectionStatus).end("owned private connection failure"); return; }
+        const value: unknown = JSON.parse(body);
+        if (!value || typeof value !== "object") { res.writeHead(400).end(); return; }
+        send({ ...value, id: "owned-created-connection", proposedBy: "user" }, 201); return;
+      }
       if (url.pathname === "/thoughts/idea-root/title" && method === "PUT") {
         if (holdTitle) await new Promise<void>(resolve => { releaseTitle = resolve; });
         const value: unknown = JSON.parse(body);
@@ -80,6 +92,7 @@ export function ideaDaemon(token: string) {
 }
 
 type Fixture = ReturnType<typeof ideaDaemon>;
+type SearchFixture = ReturnType<typeof import("./explore.runtime").searchDaemon>;
 
 export function connectionRejectCount(daemon: Fixture, walkthroughStart: number): number {
   return daemon.attempts.slice(walkthroughStart).filter(call => call.path === "/connections/idea-child-edge/reject").length;
@@ -139,7 +152,209 @@ export async function checkIdeaRoute({ origin, host, probe, daemon }: { origin: 
   daemon.reset();
 }
 
-export async function checkIdeaBrowser(page: Page, daemon: Fixture, options: { origin: string; narrow: boolean }): Promise<void> {
+async function checkStaleConnectionSearch(page: Page, daemon: Fixture, searchDaemon: SearchFixture, origin: string): Promise<void> {
+  daemon.reset();
+  const scenarioStart = daemon.attempts.length;
+  await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  // Force the old response to arrive even when the picker aborts its signal.
+  await page.evaluate(() => {
+    const originalFetch = window.fetch;
+    (window as Window & { ownedFetch?: typeof fetch }).ownedFetch = originalFetch;
+    window.fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) => originalFetch(input, String(input).includes("q=owned") ? { ...init, signal: undefined } : init),
+      originalFetch,
+    );
+  });
+  try {
+    await page.getByRole("button", { name: /connect to another thought/i }).click();
+    const main = page.locator("main"), search = main.getByRole("textbox", { name: /search.*thought/i }).first();
+    const button = main.getByRole("button", { name: /^search$/i }).first();
+    const start = searchDaemon.attempts.length;
+    searchDaemon.setMode("hold");
+    await search.fill("owned");
+    await button.click();
+    await expect.poll(() => searchDaemon.attempts.slice(start).some(call => new URL(call.path, origin).searchParams.get("q") === "owned")).toBe(true);
+    searchDaemon.setMode("normal");
+    await search.fill("source-owned");
+    await button.click();
+    const newer = main.locator("article").filter({ hasText: "Owned imported search text" });
+    await expect(newer).toBeVisible();
+    const oldResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/search" && new URL(response.url()).searchParams.get("q") === "owned");
+    searchDaemon.release();
+    assert.equal((await oldResponse).status(), 200);
+    await expect(newer).toBeVisible();
+    await expect(main.locator("article").filter({ hasText: "Owned matching thought begins" })).toHaveCount(0);
+    await newer.getByRole("button", { name: /choose|select/i }).click();
+    await expect(main.getByText("Owned imported search text", { exact: true }).first()).toBeVisible();
+    page.once("dialog", dialog => { void dialog.accept(); });
+    await main.getByRole("button", { name: /^cancel$/i }).click();
+    await expect(search).not.toBeVisible();
+    assert.equal(daemon.attempts.slice(scenarioStart).filter(call => call.method === "POST" && call.path === "/connections").length, 0);
+  } finally {
+    searchDaemon.setMode("normal");
+    searchDaemon.release();
+    await page.evaluate(() => {
+      const owned = window as Window & { ownedFetch?: typeof fetch };
+      if (owned.ownedFetch) window.fetch = owned.ownedFetch;
+      delete owned.ownedFetch;
+    });
+  }
+}
+
+async function checkConnectionDraftLeaving(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset();
+  await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  const action = page.getByRole("button", { name: /connect to another thought/i });
+  const rationale = page.getByRole("textbox", { name: /(?:rationale|explanation|why)/i });
+  const writes = () => daemon.attempts.filter(call => call.path === "/connections" && call.method === "POST").length;
+  const before = writes();
+  const dialogs: string[] = [];
+  const handleDialog = async (dialog: import("@playwright/test").Dialog) => { dialogs.push(dialog.type()); await dialog.accept(); };
+  page.on("dialog", handleDialog);
+  try {
+    await action.click();
+    await rationale.fill("Owned refresh draft");
+    await page.reload({ waitUntil: "networkidle" });
+    assert.deepEqual(dialogs, [], "refresh must not ask for discard confirmation");
+    await action.click();
+    await expect(rationale).toHaveValue("");
+    await rationale.fill("Owned navigation draft");
+    await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*(?:results|explore)/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/explore");
+    assert.deepEqual(dialogs, [], "contextual navigation must not ask for discard confirmation");
+    await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+    await action.click();
+    await expect(rationale).toHaveValue("");
+    assert.equal(writes(), before, "leaving an unfinished draft must not create a connection");
+  } finally { page.off("dialog", handleDialog); }
+}
+
+async function checkUserConnection(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset();
+  await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  const action = page.getByRole("button", { name: /connect to another thought/i });
+  await action.focus();
+  await expect(action).toBeFocused();
+  assert.ok(await action.evaluate(element => element.matches(":focus-visible")), "Connect needs visible keyboard focus");
+  await page.keyboard.press("Enter");
+  const main = page.locator("main");
+  const search = main.getByRole("textbox", { name: /search.*thought/i }).first();
+  await expect(search).toBeVisible();
+  await search.fill("owned");
+  const searchResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/search" && new URL(response.url()).searchParams.get("q") === "owned");
+  await main.getByRole("button", { name: /^search$/i }).first().click();
+  const searchUrl = new URL((await searchResponse).url());
+  assert.ok(!searchUrl.searchParams.has("scope") || searchUrl.searchParams.get("scope") === "normal");
+  const match = main.locator("article").filter({ hasText: "Owned matching thought begins" }).first();
+  await expect(match).toBeVisible();
+  await match.getByRole("button", { name: /choose|select/i }).click();
+  await expect(main.getByText("Owned matching thought for contextual navigation", { exact: true })).toBeVisible();
+  await search.fill("owned");
+  await main.getByRole("button", { name: /^search$/i }).first().click();
+  const replyHit = main.locator("article").filter({ hasText: "Owned response original full wording" }).first();
+  await replyHit.getByRole("button", { name: /choose|select/i }).click();
+  await expect(main.getByText("Owned matching thought for contextual navigation", { exact: true })).toBeVisible();
+  for (const category of ["Supports", "Contradicts", "Extends", "Related"]) await expect(main.getByRole("radio", { name: new RegExp(category, "i") })).not.toBeChecked();
+  await main.getByRole("radio", { name: /supports/i }).check();
+  const explanation = main.getByRole("textbox", { name: /(?:rationale|explanation|why)/i });
+  const submit = main.getByRole("button", { name: /^create connection$/i });
+  await expect(submit).toBeDisabled();
+  await explanation.fill("Owned connection rationale");
+  const sourceSearch = main.getByRole("textbox", { name: /search.*supporting|supporting.*search/i });
+  await sourceSearch.fill("source-owned");
+  await main.getByRole("button", { name: /search.*supporting/i }).click();
+  const sourceResult = main.locator("article").filter({ hasText: "Owned imported search text" }).first();
+  await expect(sourceResult).toContainText("Owned imported search result");
+  await sourceResult.getByRole("button", { name: /choose|add|select/i }).click();
+  const remove = main.getByRole("button", { name: /remove supporting thought/i });
+  await expect(remove).toBeVisible();
+  await expect(main.getByText(/imported source/i).first()).toBeVisible();
+  await remove.click();
+  await expect(remove).toHaveCount(0);
+  await sourceSearch.fill("source-owned");
+  await main.getByRole("button", { name: /search.*supporting/i }).click();
+  await sourceResult.getByRole("button", { name: /choose|add|select/i }).click();
+  const directions = main.getByRole("radio", { name: /owned.*(?:supports|supported by).*owned/i });
+  assert.ok(await directions.count() >= 2, "direction choices must identify both thoughts in sentences");
+  await main.getByRole("radio", { name: /owned development.*supports.*owned original title/i }).check();
+  await expect(explanation).toHaveValue("Owned connection rationale");
+  await expect(remove).toBeVisible();
+  const review = main.getByRole("region", { name: /review/i });
+  await expect(review).toContainText("Owned original title");
+  await expect(review).toContainText("Owned development");
+  await expect(review).toContainText("Owned connection rationale");
+  await expect(review).toContainText("Owned imported search result");
+  const declineDiscard = async (trigger: () => Promise<void>) => {
+    let dismissed = false;
+    const handler = async (dialog: import("@playwright/test").Dialog) => { dismissed = true; await dialog.dismiss(); };
+    page.once("dialog", handler);
+    try {
+      await trigger();
+      if (!dismissed) {
+        const dialog = page.getByRole("dialog");
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole("button", { name: /keep|stay|cancel/i }).click();
+      }
+    } finally { page.off("dialog", handler); }
+    await expect(explanation).toHaveValue("Owned connection rationale");
+    await expect(remove).toBeVisible();
+    await expect(page).toHaveURL(url => url.pathname === "/ideas/idea-root");
+  };
+  await declineDiscard(() => main.getByRole("button", { name: /^cancel$/i }).click());
+  for (const status of [400, 404] as const) {
+    daemon.connectionStatus(status);
+    const before = daemon.attempts.filter(call => call.path === "/connections").length;
+    await submit.click();
+    await expect.poll(() => daemon.attempts.filter(call => call.path === "/connections").length).toBe(before + 1);
+    await expect(explanation).toHaveValue("Owned connection rationale");
+    await expect(remove).toBeVisible();
+    await expect(main.getByText(/(?:unavailable|not applied|could not create)/i).first()).toBeVisible();
+    await expect(main.getByText(/(?:was|is) rejected/i)).toHaveCount(0);
+  }
+  daemon.connectionStatus(201);
+  daemon.holdConnection();
+  try {
+    const before = daemon.attempts.filter(call => call.path === "/connections").length;
+    await submit.click();
+    await expect.poll(() => daemon.attempts.filter(call => call.path === "/connections").length).toBe(before + 1);
+    await expect(submit).toBeDisabled();
+    const sent = daemon.attempts.filter(call => call.path === "/connections").at(-1);
+    assert.deepEqual(JSON.parse(sent?.body ?? "null"), { fromId: "thought-1", toId: "idea-root", category: "supports", explanation: "Owned connection rationale", sourceIds: ["source-1"] });
+    daemon.releaseConnection();
+    await expect(main.getByText(/connection (?:created|saved)/i).first()).toBeVisible();
+    assert.equal(daemon.attempts.filter(call => call.path === "/connections").length, before + 1);
+  } finally { daemon.releaseConnection(); }
+  await page.goto(`${origin}/ideas/idea-root`, { waitUntil: "networkidle" });
+  await action.click();
+  await search.fill("owned");
+  await main.getByRole("button", { name: /^search$/i }).first().click();
+  await match.getByRole("button", { name: /choose|select/i }).click();
+  await main.getByRole("radio", { name: /related/i }).first().check();
+  await main.getByRole("radio", { name: /owned.*related.*owned/i }).first().check();
+  await explanation.fill("Owned uncertain rationale");
+  daemon.connectionStatus(500);
+  const beforeUncertain = daemon.attempts.filter(call => call.path === "/connections").length;
+  await submit.click();
+  await expect.poll(() => daemon.attempts.filter(call => call.path === "/connections").length).toBe(beforeUncertain + 1);
+  await expect(main.getByText(/(?:may|might|could) already (?:exist|have been)/i).first()).toBeVisible();
+  const snapshot = main.getByText("Owned uncertain rationale", { exact: true }).first();
+  await expect(snapshot).toBeVisible();
+  assert.notEqual(await snapshot.evaluate(element => getComputedStyle(element).userSelect), "none", "submitted snapshot must remain copyable");
+  assert.equal(await main.locator("input:not([readonly]):not(:disabled), textarea:not([readonly]):not(:disabled), [contenteditable=true]").evaluateAll(elements => elements.some(element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value === "Owned uncertain rationale" : element.textContent === "Owned uncertain rationale")), false);
+  if (await submit.count()) await expect(submit).not.toBeEnabled();
+  await page.waitForTimeout(300);
+  assert.equal(daemon.attempts.filter(call => call.path === "/connections").length, beforeUncertain + 1, "uncertain writes must not replay");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "connection flow must fit viewport");
+  await page.reload({ waitUntil: "networkidle" });
+  await action.click();
+  await expect(main.getByText("Owned uncertain rationale", { exact: true })).toHaveCount(0);
+  assert.equal(daemon.attempts.filter(call => call.path === "/connections").length, beforeUncertain + 1, "reload must not replay a write");
+}
+
+export async function checkIdeaBrowser(page: Page, daemon: Fixture, searchDaemon: SearchFixture, options: { origin: string; narrow: boolean }): Promise<void> {
+  await checkStaleConnectionSearch(page, daemon, searchDaemon, options.origin);
+  await checkConnectionDraftLeaving(page, daemon, options.origin);
+  await checkUserConnection(page, daemon, options.origin);
   daemon.reset();
   const walkthroughStart = daemon.attempts.length;
   await page.goto(`${options.origin}/ideas/idea-imported`, { waitUntil: "networkidle" });

@@ -40,6 +40,8 @@ export function searchDaemon(token: string) {
       const url = new URL(path, "http://fixture.invalid");
       if (url.pathname.startsWith("/thoughts/")) {
         if (url.pathname === "/thoughts/thought-3") { res.writeHead(500).end("owned inspection failure"); return; }
+        if (/^\/thoughts\/source-1\/(?:connections|responses|children)$/.test(url.pathname)) { res.writeHead(200, { "content-type": "application/json" }).end("[]"); return; }
+        if (url.pathname === "/thoughts/source-1") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...context, id: "source-1", text: "Owned imported search text", title: "Owned imported search result", author: "source", kind: "imported-original", origin: "markdown-import", rejected: false })); return; }
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ rejected: url.pathname === "/thoughts/thought-2" }));
         return;
       }

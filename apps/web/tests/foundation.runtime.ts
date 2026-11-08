@@ -47,6 +47,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/components/agentic-search-view.tsx", "apps/web/src/components/agentic-search-sessions.tsx", "apps/web/src/components/agentic-search-content.tsx", "apps/web/src/components/agentic-search.module.css",
     "apps/web/src/app/explore/ask/page.tsx", "apps/web/src/app/explore/ask/saved/page.tsx", "apps/web/src/app/explore/ask/[id]/page.tsx", "apps/web/src/app/explore/ask/[id]/history/page.tsx",
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
+    "apps/web/src/components/connection-editor.tsx", "apps/web/src/components/connection-thought-picker.tsx", "apps/web/src/components/connection-editor.module.css",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
     "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
@@ -245,7 +246,7 @@ async function main(): Promise<void> {
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
-    else if (request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
+    else if (request.url === "/connections" || request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
   });
@@ -451,7 +452,7 @@ async function main(): Promise<void> {
           await expect(search).toHaveValue("owned");
           await expect(page.getByRole("combobox", { name: /sort/i })).toHaveValue("newest");
           await expect.poll(async () => Math.abs(await page.evaluate(() => window.scrollY) - ideaScroll), { timeout: 5000 }).toBeLessThanOrEqual(2);
-          await checkIdeaBrowser(page, fixtureIdea, { origin, narrow: viewport.width < 500 });
+          await checkIdeaBrowser(page, fixtureIdea, fixtureSearch, { origin, narrow: viewport.width < 500 });
           await checkEvolveBrowser(page, fixtureEvolve, { origin, narrow: viewport.width < 500 });
           await checkExportBrowser(page, fixtureExport, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await page.evaluate(() => document.fonts.ready);
