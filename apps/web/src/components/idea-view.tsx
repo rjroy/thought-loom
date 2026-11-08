@@ -14,6 +14,7 @@ import { useExploreMemory } from "./explore-provider";
 import { useEvolveStore } from "./evolve-provider";
 import { useContextualBack } from "./contextual-back";
 import { ContentGlyph } from "./content-glyph";
+import { ConnectionEditor } from "./connection-editor";
 
 type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
 type PreviewState = { phase: "loading" | "error"; stale: boolean }
@@ -89,6 +90,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [unconfirmedCommand, setUnconfirmedCommand] = useState<IdeaCommand | null>(null);
   const [editing, setEditing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connectionLocked, setConnectionLocked] = useState(false);
   const [title, setTitle] = useState("");
   const [titleError, setTitleError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -104,16 +107,17 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const writing = useRef(false);
   const currentView = useRef(view);
   const titleInput = useRef<HTMLInputElement>(null);
+  const connectButton = useRef<HTMLButtonElement>(null);
   const more = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const dialogReturn = useRef<HTMLElement | null>(null);
-  const disabled = pending || unconfirmed;
+  const disabled = pending || unconfirmed || connecting || connectionLocked;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (!location) return;
     const generation = ++readGeneration.current;
-    setReadState("loading");
+    if (!background) setReadState("loading");
     const result = await readIdea(location.id, {
       scope: location.scope, part: "view", responseId: location.responseId,
     }, { fetch: window.fetch.bind(window) });
@@ -128,6 +132,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
         setReplyId(result.value.focusedResponse.id);
         setReplyOpen(true);
       }
+    } else if (background) {
+      setNotice("Connection created, but surrounding context could not be refreshed. Reopen this idea to read its current context.");
     } else {
       currentView.current = null;
       setView(null);
@@ -364,6 +370,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
             }}>Full reply</button>}
             <button className={`${styles.textButton} ${styles.aboutButton}`} aria-expanded={aboutOpen}
               aria-controls="idea-metadata" onClick={() => setAboutOpen(open => !open)}>About</button>
+            <button ref={connectButton} className={styles.textButton} disabled={disabled || editing || thought.rejected === true || inspection}
+              aria-expanded={connecting} aria-controls="idea-connection-editor" onClick={() => setConnecting(true)}>Connect to another thought…</button>
             <div className={styles.more} ref={more} onKeyDown={event => {
               if (event.key === "Escape" && menuOpen) { event.preventDefault(); setMenuOpen(false); menuButton.current?.focus(); }
             }}>
@@ -407,6 +415,18 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
               <button className={styles.textButton} type="button" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
             </div>
           </form>}
+
+          {connecting && <div id="idea-connection-editor">
+            <ConnectionEditor thought={thought} disabled={pending || unconfirmed} onLockedChange={setConnectionLocked}
+              onClose={() => { setConnecting(false); requestAnimationFrame(() => connectButton.current?.focus()); }}
+              onCreated={() => {
+                const explored = exploreMemory.current;
+                if (explored?.state.query.q.trim()) exploreMemory.current = {
+                  ...explored, state: { ...explored.state, phase: "loading", page: null, message: null },
+                };
+                void load(true);
+              }} />
+          </div>}
 
           {location.responseId && !view.focusedResponse && <p className={styles.notice}>
             The requested full reply is unavailable for this idea in this view.

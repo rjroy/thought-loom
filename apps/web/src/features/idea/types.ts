@@ -13,7 +13,17 @@ export interface IdeaView {
   readonly focusedResponse: SharedResponse | null;
 }
 export interface BranchPreview { readonly rootId: string; readonly branchIds: readonly string[]; readonly affectedIds: readonly string[]; readonly count: number; }
+export interface CreateConnectionCommand {
+  readonly action: "create-connection";
+  readonly thoughtId: string;
+  readonly fromId: string;
+  readonly toId: string;
+  readonly category: "supports" | "contradicts" | "extends" | "related";
+  readonly explanation: string;
+  readonly sourceIds?: readonly string[];
+}
 export type IdeaCommand =
+  | CreateConnectionCommand
   | { readonly action: "title"; readonly thoughtId: string; readonly title: string | null }
   | { readonly action: "reject-thought" | "restore-thought" | "restore-branch"; readonly thoughtId: string }
   | { readonly action: "reject-connection" | "restore-connection"; readonly thoughtId: string; readonly connectionId: string }

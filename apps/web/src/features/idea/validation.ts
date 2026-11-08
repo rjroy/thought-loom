@@ -1,4 +1,4 @@
-import type { BranchPreview, IdeaCommand, IdeaConnection, IdeaThought, IdeaView, SharedResponse } from "./types";
+import type { BranchPreview, CreateConnectionCommand, IdeaCommand, IdeaConnection, IdeaThought, IdeaView, SharedResponse } from "./types";
 
 export function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(item => typeof item === "string" && item.length > 0);
@@ -15,6 +15,13 @@ export function connection(v: unknown): v is IdeaConnection {
   return record(v) && typeof v.id === "string" && !!v.id && typeof v.fromId === "string" && typeof v.toId === "string"
     && (v.category === "supports" || v.category === "contradicts" || v.category === "extends" || v.category === "related")
     && actor(v.proposedBy) && typeof v.explanation === "string" && strings(v.sourceIds) && optionalRejected(v.rejected);
+}
+export function createdConnection(v: unknown, input: CreateConnectionCommand): v is IdeaConnection {
+  const sources = input.sourceIds ?? [];
+  return connection(v) && v.proposedBy === "user" && v.rejected !== true
+    && v.fromId === input.fromId && v.toId === input.toId && v.category === input.category
+    && v.explanation === input.explanation && v.sourceIds.length === sources.length
+    && v.sourceIds.every((source, index) => source === sources[index]);
 }
 export function sharedResponse(v: unknown): v is SharedResponse {
   return record(v) && typeof v.id === "string" && !!v.id && typeof v.text === "string"
@@ -33,6 +40,12 @@ export function command(v: unknown, id: string): v is IdeaCommand {
     case "reject-thought": case "restore-thought": case "restore-branch": return keys.length === 2;
     case "reject-connection": case "restore-connection": return keys.length === 3 && typeof v.connectionId === "string" && !!v.connectionId.trim();
     case "reject-branch": return keys.length === 3 && preview(v.preview, id);
+    case "create-connection": return keys.every(key => ["action", "thoughtId", "fromId", "toId", "category", "explanation", "sourceIds"].includes(key))
+      && typeof v.fromId === "string" && !!v.fromId.trim() && typeof v.toId === "string" && !!v.toId.trim()
+      && v.fromId !== v.toId && (v.fromId === id || v.toId === id)
+      && (v.category === "supports" || v.category === "contradicts" || v.category === "extends" || v.category === "related")
+      && typeof v.explanation === "string" && !!v.explanation.trim()
+      && (v.sourceIds === undefined || (strings(v.sourceIds) && v.sourceIds.every(source => !!source.trim())));
     default: return false;
   }
 }

@@ -1,6 +1,6 @@
 import type { DaemonRequest } from "./daemon";
 import type { IdeaThought } from "../features/idea/types";
-import { command, connection, preview, sharedResponse, thought } from "../features/idea/validation";
+import { command, connection, createdConnection, preview, sharedResponse, thought } from "../features/idea/validation";
 
 export interface IdeaDependencies { readonly callDaemon: (request: DaemonRequest) => Promise<Response>; }
 const headers = { "cache-control": "private, no-store" };
@@ -87,6 +87,7 @@ export async function handleIdeaCommand(request: Request, id: string, deps: Idea
     case "reject-thought": case "restore-thought": operation = { method: "POST", path: `${base}/${input.action === "reject-thought" ? "reject" : "restore"}` }; break;
     case "restore-branch": operation = { method: "POST", path: `${base}/branch/restore` }; break;
     case "reject-branch": operation = { method: "POST", path: `${base}/branch/reject`, body: JSON.stringify(input.preview) }; break;
+    case "create-connection": operation = { method: "POST", path: "/connections", body: JSON.stringify({ fromId: input.fromId, toId: input.toId, category: input.category, explanation: input.explanation, sourceIds: input.sourceIds ?? [] }) }; break;
     case "reject-connection": case "restore-connection":
       if (!safeId(input.connectionId)) return problem(400);
       operation = { method: "POST", path: `/connections/${encodeURIComponent(input.connectionId)}/${input.action === "reject-connection" ? "reject" : "restore"}` }; break;
@@ -100,7 +101,11 @@ export async function handleIdeaCommand(request: Request, id: string, deps: Idea
       return thought(value) && value.id === id && value.title === input.title
         && value.titleAuthor === (input.title === null ? null : "user") ? json(value) : problem(502);
     }
-    if (input.action !== "title" && response.status === 204) return new Response(null, { status: 204, headers });
+    if (input.action === "create-connection" && response.status === 201) {
+      const value: unknown = await response.json();
+      return createdConnection(value, input) ? json(value, 201) : problem(502);
+    }
+    if (input.action !== "title" && input.action !== "create-connection" && response.status === 204) return new Response(null, { status: 204, headers });
     return problem(502);
   } catch { return problem(502); }
 }
