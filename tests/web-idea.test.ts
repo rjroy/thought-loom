@@ -306,6 +306,71 @@ describe("Idea client request outcomes", () => {
     expect(result).toEqual({ kind: "view", value });
   });
   const command: IdeaCommand = { action: "reject-branch", thoughtId: "root-1", preview };
+  const titleCommand: IdeaCommand = { action: "title", thoughtId: "root-1", title: "new" };
+  const uncertain = { kind: "uncertain", message: "Outcome unconfirmed.", command: titleCommand } as const;
+  for (const status of [404, 500]) {
+    test(`read ${status} cancels an unread response body and preserves its safe result`, async () => {
+      let cancels = 0;
+      const body = new ReadableStream<Uint8Array>({ cancel() { cancels++; } });
+      const response = new Response(body, { status });
+      const result = await readIdea("root-1", { scope: "normal", part: "view" }, { fetch: fakeFetch(async () => response) });
+      expect(result).toEqual(status === 404 ? { kind: "unavailable", message: "Idea unavailable." } : { kind: "error", message: "Idea unavailable." });
+      expect(cancels).toBe(1);
+      expect(response.bodyUsed).toBe(true);
+    });
+  }
+  for (const [status, input, expected] of [
+    ...[400, 401, 403, 404].map(status => [status, titleCommand, { kind: "not-applied", message: "The change was not applied.", command: titleCommand }] as const),
+    [409, command, { kind: "conflict", message: "The branch changed; review a new preview.", command }],
+    [409, titleCommand, uncertain],
+    [500, titleCommand, uncertain],
+  ] as const) {
+    test(`command ${input.action} ${status} cancels an unread body and preserves its safe result`, async () => {
+      let cancels = 0;
+      const body = new ReadableStream<Uint8Array>({ cancel() { cancels++; } });
+      const response = new Response(body, { status });
+      const result = await commandIdea(input, { fetch: fakeFetch(async () => response) });
+      expect(result).toEqual(expected);
+      expect(cancels).toBe(1);
+      expect(response.bodyUsed).toBe(true);
+    });
+  }
+  for (const mode of ["throw", "reject", "pending"] as const) {
+    for (const operation of ["read", "command"] as const) {
+      test(`${operation} keeps its result when body cancellation ${mode}s`, async () => {
+        let cancels = 0;
+        const body = new ReadableStream<Uint8Array>();
+        Object.defineProperty(body, "cancel", { value: () => {
+          cancels++;
+          if (mode === "throw") throw new Error("private cancellation failure");
+          if (mode === "reject") return Promise.reject(new Error("private cancellation failure"));
+          return new Promise<void>(() => {});
+        } });
+        const response = new Response(body, { status: 500 });
+        const fetch = fakeFetch(async () => response);
+        const pending = operation === "read"
+          ? readIdea("root-1", { scope: "normal", part: "view" }, { fetch })
+          : commandIdea(titleCommand, { fetch });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const result = await Promise.race([pending, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("cancellation delayed the result")), 500); })]);
+          expect(result).toEqual(operation === "read" ? { kind: "error", message: "Idea unavailable." } : uncertain);
+          expect(cancels).toBe(1);
+        } finally { clearTimeout(timer); }
+      });
+    }
+  }
+  test("successful title JSON and malformed read and title JSON consume their bodies", async () => {
+    const titleResponse = json({ ...root, title: "new" });
+    expect(await commandIdea(titleCommand, { fetch: fakeFetch(async () => titleResponse) })).toEqual({ kind: "applied", thought: { ...root, title: "new" } });
+    expect(titleResponse.bodyUsed).toBe(true);
+    const readResponse = new Response("{", { status: 200 });
+    expect(await readIdea("root-1", { scope: "normal", part: "view" }, { fetch: fakeFetch(async () => readResponse) })).toEqual({ kind: "error", message: "Idea unavailable." });
+    expect(readResponse.bodyUsed).toBe(true);
+    const malformedTitle = new Response("{", { status: 200 });
+    expect(await commandIdea(titleCommand, { fetch: fakeFetch(async () => malformedTitle) })).toEqual(uncertain);
+    expect(malformedTitle.bodyUsed).toBe(true);
+  });
   test("view decoding retains direct context and rejects a missing or malformed projection", async () => {
     const value = { thought: root, parent: { id: "parent-1", thought: parent }, children: [child], sources: [{ id: "source-1", thought: source }, { id: "missing-source", thought: null }], connections: [{ connection: edge, thought: source }], responses: [reply], focusedResponse: reply };
     const read = (body: unknown) => readIdea("root-1", { scope: "normal", part: "view" }, { fetch: fakeFetch(async () => json(body)) });
