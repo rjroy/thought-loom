@@ -1,0 +1,36 @@
+{
+  "name": "focused-phone",
+  "path": ".impeccable/mocks/user-connections/focused-phone.png",
+  "status": "candidate approximate phone composition",
+  "approved": false,
+  "implementationAuthorized": false,
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-436a-7e71-9d18-a3e2ef14c956/exec-bfcf2c56-6c8a-4b6a-ac58-d1099b983d27.png",
+  "nativeSha256": "70240c9d123ce5bfd1a4da0b705fd2872548f8686a16d1ae044a0f7b6f1a832b",
+  "packagedSha256": "02c2c8a1c27f6ef6c1a18386ae7426d4743d8db40f62bb06b7123f8b2d2c14d1",
+  "decodedPixelsMatchNative": true,
+  "dimensions": {
+    "width": 1024,
+    "height": 1536
+  },
+  "colorSpace": "sRGB",
+  "channels": "srgb",
+  "references": [
+    {
+      "path": ".impeccable/mocks/user-connections/focused-desktop.png",
+      "sha256": "79ffa20cd68d1bb8681c42eddd96558e30ee12dd9080ab4bdb8a9461ac1324d4"
+    },
+    {
+      "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+      "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+    }
+  ],
+  "promptFile": ".impeccable/mocks/user-connections/focused-phone.prompt.txt",
+  "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only phone composition, not production artwork or runtime integration.\n\nA phone-width Thoughtloom web app page, edge to edge, portrait and naturally scrollable, no device or browser frame. Adapt composition C from the desktop candidate. The other reference contributes actual phone shell, Quiet Night palette, Source Sans 3 type and familiar control character. Maintain readable words and touch targets, not a shrunken desktop. No artwork.\n\nShared shell retains the contextual back arrow beside thoughtloom, tagline, Explore selected with blue underline / Capture / inactive Settings Reserved. Secondary actions remain cyan underlined words, not boxed or decorated with new icons. Header Create connection includes Return to idea. The desktop starting-thought rail becomes a compact Starting thought disclosure: \u201cQuestions before conclusions\u201d, You \u00b7 Original capture, \u201cA useful connection should help me ask a better question.\u201d\n\nThe single creation column begins Connect with, selected \u201cRemember the question\u201d, You \u00b7 Original capture: \u201cI often remember the question before I remember the note.\u201d Include Preview and Change thought. Category offers Supports, Contradicts, Extends, Related with Extends selected. Explicit From Remember the question / To Questions before conclusions and Swap direction make orientation clear. Required Why are these connected? contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Supporting thoughts (optional) expands to a query-first search field, Preview and Add supporting thought, with \u201cKeep the original words\u201d selected and Remove. End with a distinct pre-submit summary repeating directed sentence, rationale and supporting thought, then full-width gold Create connection and Cancel. State this records a connection, not an evolution parent. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+  "promptEmbeddedExactly": true,
+  "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+  "runnerVersion": "codex-cli 0.166.0",
+  "observedRunnerModel": "gpt-6-luna",
+  "imageModel": "not exposed by runner output",
+  "inspected": true,
+  "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+}

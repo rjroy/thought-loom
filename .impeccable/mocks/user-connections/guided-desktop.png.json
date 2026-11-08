@@ -1,0 +1,43 @@
+{
+  "name": "guided-desktop",
+  "path": ".impeccable/mocks/user-connections/guided-desktop.png",
+  "status": "selected B composition reference; exact PNG unchanged",
+  "approved": true,
+  "implementationAuthorized": false,
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e8-b4c1-74c1-a965-415a86211290/exec-d71035ec-8c3d-4773-a394-770d946931e2.png",
+  "nativeSha256": "1cd77d81fcd8c7078f52132292f17d87dbd22b0fb0651b0a28eebfb758a83ec8",
+  "packagedSha256": "63f05357648be89ba35915e6eae602dd5cc5f3fc8dd3832ae6c481810d283112",
+  "decodedPixelsMatchNative": true,
+  "dimensions": {
+    "width": 1487,
+    "height": 1058
+  },
+  "colorSpace": "sRGB",
+  "channels": "srgb",
+  "references": [
+    {
+      "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+      "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+    }
+  ],
+  "promptFile": ".impeccable/mocks/user-connections/guided-desktop.prompt.txt",
+  "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. The approved brief authorizes this design comp, not production artwork or runtime integration.\n\nA desktop web app screen for Thoughtloom, edge to edge with crisp readable text and no browser/device frame. Render the Idea-first create-connection flow at 1440px-wide landscape, allowing natural vertical growth. The supplied runtime screenshot contributes Quiet Night palette, Source Sans 3 typography, navigation and control character only, not its search-page content or layout. No artwork or graph.\n\nComposition B is a focused single-column guided inline flow beneath the Idea, not a split workspace. Top shows You \u00b7 Original capture, \u201cQuestions before conclusions\u201d: \u201cA useful connection should help me ask a better question, not tell me what I believe.\u201d Retain Evolve this idea, secondary Edit title / About / More actions / Connect to another thought\u2026 and the shared shell with contextual back arrow beside thoughtloom, tagline, Explore / Capture / Settings Reserved.\n\nBelow \u201cCreate connection\u201d, a small plain step indicator reads \u201cChoose thought / Describe / Review\u201d. Show Describe active; Choose thought is a completed editable section identifying \u201cRemember the question\u201d, You \u00b7 Original capture, with its actual words \u201cI often remember the question before I remember the note.\u201d and Change thought. Category is a full-width native choice with all four options visibly listed: Supports, Contradicts, Extends, Related; Extends chosen. Direction uses two explicit radio sentences with the titles: Remember the question extends Questions before conclusions, or the reverse. A required rationale field contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Supporting thoughts (optional) expands inline with \u201cKeep the original words\u201d, Remove and Find supporting thoughts. A subordinate review region beneath the fields repeats the directed sentence, rationale and selected support before gold Create connection and Cancel. Do not invent automatic saving or a second confirmation. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+  "promptEmbeddedExactly": true,
+  "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+  "runnerVersion": "codex-cli 0.166.0",
+  "observedRunnerModel": "gpt-6-luna",
+  "imageModel": "not exposed by runner output",
+  "inspected": true,
+  "approvalScope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+  "selected": true,
+  "approval": {
+    "userWords": "In that case this the guided option will be fine.",
+    "recordedAtUTC": "2026-11-08T02:34:10.123437+00:00",
+    "scope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+    "stateBoardsApproved": false,
+    "implementationAuthorized": false,
+    "runtimeAcceptance": false
+  },
+  "behaviorApprovalsRef": "manifest.json#behaviorApprovals",
+  "designHandoffFinalized": true
+}

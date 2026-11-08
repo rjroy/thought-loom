@@ -1,0 +1,484 @@
+{
+  "schemaVersion": 1,
+  "status": "Design handoff finalized: guided B, mounted-page drafts/discard warnings, and copyable readonly uncertainty without automatic retry",
+  "recordedAtUTC": "2026-11-08T02:13:40.814091+00:00",
+  "approvedChoices": {
+    "entry": "Idea page",
+    "optionalSupportingThoughts": "Include",
+    "composition": "B. Guided inline flow",
+    "draftLifecycle": "Mounted Idea page only; warn before Cancel/navigation discards entered work; no reload restoration",
+    "uncertainSave": "Copyable readonly submitted snapshot; warn connection may already exist; no automatic retry"
+  },
+  "scope": "design artifacts only; no production UI/backend/issue changes",
+  "compositionApproved": true,
+  "implementationAuthorized": false,
+  "runtimeAcceptance": false,
+  "images": [
+    {
+      "name": "inline-desktop",
+      "path": ".impeccable/mocks/user-connections/inline-desktop.png",
+      "status": "superseded: wrong starting-thought label",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e8-b4c1-7b01-99e2-09a5ec831c40/exec-25d6318a-da4c-4479-8d7b-8656f4c2ed57.png",
+      "nativeSha256": "92045668dfc3442e775aa1ce009beba4d36fb46b0cd5fff59a1dee7914f8b651",
+      "packagedSha256": "598c55e3e69738a1d6cba24c41a83ac23298fb2213c5c3d669df78cc639e7944",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1536,
+        "height": 1024
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+          "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/inline-desktop.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. The approved brief authorizes this design comp, not production artwork or runtime integration.\n\nA desktop web app screen for Thoughtloom, edge to edge, crisp readable UI, no browser frame or device. Render the Idea-first create-connection workspace, 1440px-wide landscape, naturally extending below the first viewport if needed. The supplied runtime screenshot contributes Quiet Night palette, Source Sans 3 typography, navigation and control character only, not its search-page content or layout. No new artwork.\n\nComposition A is an in-place workspace beneath the focused Idea. Show You \u00b7 Original capture, \u201cQuestions before conclusions\u201d, and its words: \u201cA useful connection should help me ask a better question, not tell me what I believe.\u201d Keep Evolve this idea secondary to the active creation task, with the existing Edit title / About / More actions row and active Connect to another thought\u2026 link. Shared shell: contextual back arrow beside thoughtloom, tagline, Explore / Capture / Settings Reserved.\n\nThe inline heading is \u201cCreate connection\u201d. Left: a compact starting-thought reference, \u201cFind another thought\u201d, query \u201cmemory\u201d, Search, two readable candidates with Preview and Choose this thought; expanded candidate \u201cRemember the question\u201d, You \u00b7 Original capture: \u201cI often remember the question before I remember the note.\u201d Show it chosen with Change thought. Right: Category with Supports / Contradicts / Extends / Related, Extends selected; recorded From Remember the question / To Questions before conclusions and Swap direction. Required \u201cWhy are these connected?\u201d contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Optional Supporting thoughts disclosure shows one selected \u201cKeep the original words\u201d, Remove, plus search/preview/add affordances. Finish with a visible summary repeating the directed sentence, rationale and supporting thought, Cancel and gold Create connection. Footer: \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+    },
+    {
+      "name": "guided-desktop",
+      "path": ".impeccable/mocks/user-connections/guided-desktop.png",
+      "status": "selected B composition reference; exact PNG unchanged",
+      "approved": true,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e8-b4c1-74c1-a965-415a86211290/exec-d71035ec-8c3d-4773-a394-770d946931e2.png",
+      "nativeSha256": "1cd77d81fcd8c7078f52132292f17d87dbd22b0fb0651b0a28eebfb758a83ec8",
+      "packagedSha256": "63f05357648be89ba35915e6eae602dd5cc5f3fc8dd3832ae6c481810d283112",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1487,
+        "height": 1058
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+          "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/guided-desktop.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. The approved brief authorizes this design comp, not production artwork or runtime integration.\n\nA desktop web app screen for Thoughtloom, edge to edge with crisp readable text and no browser/device frame. Render the Idea-first create-connection flow at 1440px-wide landscape, allowing natural vertical growth. The supplied runtime screenshot contributes Quiet Night palette, Source Sans 3 typography, navigation and control character only, not its search-page content or layout. No artwork or graph.\n\nComposition B is a focused single-column guided inline flow beneath the Idea, not a split workspace. Top shows You \u00b7 Original capture, \u201cQuestions before conclusions\u201d: \u201cA useful connection should help me ask a better question, not tell me what I believe.\u201d Retain Evolve this idea, secondary Edit title / About / More actions / Connect to another thought\u2026 and the shared shell with contextual back arrow beside thoughtloom, tagline, Explore / Capture / Settings Reserved.\n\nBelow \u201cCreate connection\u201d, a small plain step indicator reads \u201cChoose thought / Describe / Review\u201d. Show Describe active; Choose thought is a completed editable section identifying \u201cRemember the question\u201d, You \u00b7 Original capture, with its actual words \u201cI often remember the question before I remember the note.\u201d and Change thought. Category is a full-width native choice with all four options visibly listed: Supports, Contradicts, Extends, Related; Extends chosen. Direction uses two explicit radio sentences with the titles: Remember the question extends Questions before conclusions, or the reverse. A required rationale field contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Supporting thoughts (optional) expands inline with \u201cKeep the original words\u201d, Remove and Find supporting thoughts. A subordinate review region beneath the fields repeats the directed sentence, rationale and selected support before gold Create connection and Cancel. Do not invent automatic saving or a second confirmation. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+      "selected": true,
+      "approval": {
+        "userWords": "In that case this the guided option will be fine.",
+        "recordedAtUTC": "2026-11-08T02:34:10.123437+00:00",
+        "scope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+        "stateBoardsApproved": false,
+        "implementationAuthorized": false,
+        "runtimeAcceptance": false
+      },
+      "behaviorApprovalsRef": "manifest.json#behaviorApprovals",
+      "designHandoffFinalized": true
+    },
+    {
+      "name": "focused-desktop",
+      "path": ".impeccable/mocks/user-connections/focused-desktop.png",
+      "status": "candidate",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e8-b4c1-7883-8247-0ae408494601/exec-af46066c-d0f7-4625-93c4-ef44b53febb9.png",
+      "nativeSha256": "e19b8a22418eb5afd8ccc55aac84cb48823ca12a985e30364de7a3f44c9d6985",
+      "packagedSha256": "79ffa20cd68d1bb8681c42eddd96558e30ee12dd9080ab4bdb8a9461ac1324d4",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1487,
+        "height": 1058
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+          "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/focused-desktop.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. The approved brief authorizes this design comp, not production artwork or runtime integration.\n\nA desktop web app screen for Thoughtloom, edge to edge with crisp readable text, no browser/device frame. Render a contextual create-connection workspace entered from Idea at 1440px-wide landscape; permit natural vertical scrolling. The supplied runtime screenshot contributes Quiet Night palette, Source Sans 3 typography, navigation and control character only, not search-page content or layout. No illustration or graph.\n\nComposition C separates the task from ordinary Idea reading. Keep shared shell with contextual back arrow beside thoughtloom, tagline, Explore / Capture / Settings Reserved. Header \u201cCreate connection\u201d, with \u201cReturn to idea\u201d as a secondary action. A quiet left reading rail retains You \u00b7 Original capture, \u201cQuestions before conclusions\u201d, and the full starting words \u201cA useful connection should help me ask a better question, not tell me what I believe.\u201d The broad right workspace begins \u201cConnect with\u201d and a chosen second thought \u201cRemember the question\u201d, You \u00b7 Original capture: \u201cI often remember the question before I remember the note.\u201d Include Change thought and Preview controls.\n\nBelow, use clear labelled fields: Category with Supports / Contradicts / Extends / Related, Extends chosen. From Remember the question / To Questions before conclusions with Swap direction. Required \u201cWhy are these connected?\u201d contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d An expanded Supporting thoughts (optional) section has a query-first search box, Preview and Add supporting thought, with \u201cKeep the original words\u201d selected and Remove. End with a distinguished review strip containing the directed sentence, rationale and supporting title, then gold Create connection and Cancel. State clearly this records a connection, not a new evolution parent. Do not add a primary-navigation destination or invented save guarantees. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+    },
+    {
+      "name": "states-desktop",
+      "path": ".impeccable/mocks/user-connections/states-desktop.png",
+      "status": "candidate shared state specimens",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e9-75a5-7030-9f1c-f64e3a47bf92/exec-f4ce9cfb-36f7-4246-8cdd-fff018dd1245.png",
+      "nativeSha256": "ab156b8b3eaa53d1636bcd15ba248f35da045fbf90e6109aa88a02d1e775036f",
+      "packagedSha256": "426a670e47bde9c9e5da85368b1718d202bb88143b24182f8a951fd385977653",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1586,
+        "height": 992
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+          "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/states-desktop.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only state study, not a working application.\n\nA desktop Thoughtloom UI state-study screen, edge to edge with crisp readable text, no browser frame or device. Use a landscape canvas with six clearly separated specimen panels, each an alternative moment, never simultaneous banners on one form. The supplied runtime image contributes only Quiet Night palette, Source Sans 3 type, restrained surfaces, familiar controls and shared navigation character. No illustration, checkmark icon or decorative graph. Label the board \u201cCreate connection \u00b7 Alternative states \u00b7 Illustrative thoughts\u201d.\n\nShow six compact but fully legible application-region specimens with real labels and retained input context:\n\n1. \u201cFind another thought\u201d: query memory; Search; \u201cRemember the question\u201d, You \u00b7 Original capture; expanded words \u201cI often remember the question before I remember the note.\u201d; Choose this thought. A small \u201cNo results\u201d alternative says \u201cTry another query\u201d; a search read error retains the query with Retry search, which is a read only.\n2. \u201cRationale required\u201d: Category Extends, From Remember the question / To Questions before conclusions; blank Why are these connected? field; error \u201cExplain why these thoughts are connected.\u201d No lost selections.\n3. \u201cCreating connection\u2026\u201d: readonly submitted relationship and explanation \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d; disabled Create connection and Cancel; \u201cWaiting for confirmation. This request has already been sent.\u201d\n4. Confirmed green worded \u201cConnection created \u00b7 Proposed by You\u201d; recorded \u201cRemember the question extends Questions before conclusions\u201d; Why connected; Open idea. No edit or duplicate-prevention claim.\n5. Coral \u201cConnection not created\u201d: \u201cA connected or supporting thought is unavailable. Choose available thoughts, then review again.\u201d Retain the rationale, with Change thought and Review supporting thoughts. Do not identify which failed or why.\n6. Amber \u201cCreation unconfirmed\u201d: readonly submitted details; \u201cIt may have completed. Nothing will be sent again automatically.\u201d Copy submitted details and Open idea, without Retry, Check status, success checkmark or a new POST.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; B was selected instead. State specimens are not approved by that selection."
+    },
+    {
+      "name": "inline-desktop-revised",
+      "path": ".impeccable/mocks/user-connections/inline-desktop-revised.png",
+      "status": "candidate; corrects initial label",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-4369-79c1-a949-ce37dcdde728/exec-5aee1523-2e69-4859-a438-40ff37024e3c.png",
+      "nativeSha256": "b0a82ccced63e975b992a5c8ebd99da74f02ada96db4a3acdebcb6b679409036",
+      "packagedSha256": "f16370219180e0c2b18e0295da5cf6ade08ca3c93f84d94052eea6cb9107bf0f",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1536,
+        "height": 1024
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/mocks/user-connections/inline-desktop.png",
+          "sha256": "598c55e3e69738a1d6cba24c41a83ac23298fb2213c5c3d669df78cc639e7944"
+        },
+        {
+          "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+          "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/inline-desktop-revised.prompt.txt",
+      "prompt": "Generate one actual revised exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism and allow native staging. Do not write implementation code or alter project files. This is an authorized revision of an unapproved candidate, not production artwork.\n\nA desktop Thoughtloom web app screen, edge to edge, landscape with crisp text, no browser frame. Revise the supplied in-place candidate, preserving its two-column composition and existing complete form. The supplied actual-runtime screenshot is authoritative for Quiet Night palette, Source Sans 3 type, flat restrained surfaces and familiar controls. Remove the candidate's glow, gradient surfaces, extra action icons and boxed secondary metadata tools. Those tools must be cyan underlined text; Explore uses the existing blue selected underline; Settings Reserved stays noninteractive. Do not add new artwork.\n\nCorrect the candidate's material identity error: the focused Idea at the top AND the Starting thought reference are \u201cQuestions before conclusions\u201d, You \u00b7 Original capture, with \u201cA useful connection should help me ask a better question, not tell me what I believe.\u201d The chosen SECOND thought beneath Find another thought is \u201cRemember the question\u201d, with \u201cI often remember the question before I remember the note.\u201d Keep query memory, Search, readable candidate text, Preview and Choose this thought. Never label Remember the question as Starting thought.\n\nKeep all four categories Supports / Contradicts / Extends / Related with Extends chosen; explicit From Remember the question / To Questions before conclusions and Swap direction. Keep required Why are these connected? filled with \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Optional Supporting thoughts contains selected \u201cKeep the original words\u201d, Remove, query/search/preview/add. The visible pre-submit summary repeats the directed sentence, rationale and support. Gold Create connection and Cancel finish the form. Existing header return, tagline, navigation and footer \u201cIllustrative thoughts \u00b7 Design study\u201d remain.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+    },
+    {
+      "name": "guided-phone",
+      "path": ".impeccable/mocks/user-connections/guided-phone.png",
+      "status": "selected B composition reference; exact PNG unchanged",
+      "approved": true,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-4369-7a21-bdaf-0e59858d74b8/exec-05863884-8fa1-47b9-b9ff-cc20ecba2293.png",
+      "nativeSha256": "921de087e2ff36449edb912e347f370e0878c82e8a546d21f5a3f37eedab2cf8",
+      "packagedSha256": "b5e46e467f3a3180b6009f180f6f4ad10256db2053c0f054c91de064317c8893",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 887,
+        "height": 1774
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/mocks/user-connections/guided-desktop.png",
+          "sha256": "63f05357648be89ba35915e6eae602dd5cc5f3fc8dd3832ae6c481810d283112"
+        },
+        {
+          "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+          "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/guided-phone.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only phone composition, not production artwork or runtime integration.\n\nA phone-width Thoughtloom web app page, edge to edge, portrait with natural vertical scrolling, no device bezel or browser frame. Adapt composition B from the desktop reference. The other reference contributes actual shared phone chrome, Quiet Night palette, Source Sans 3 type and familiar control character. Keep readable text and ordinary touch targets; do not miniaturize a desktop screen. No artwork.\n\nShared shell: contextual back arrow beside thoughtloom, tagline, Explore selected with blue underline / Capture / inactive Settings Reserved. Existing secondary tools remain cyan underlined words, not boxed or decorated with new icons. The Idea is \u201cQuestions before conclusions\u201d, You \u00b7 Original capture, with \u201cA useful connection should help me ask a better question.\u201d Preserve Evolve this idea and secondary Connect to another thought\u2026 action.\n\nBelow, Create connection uses a single-column guided sequence \u201cChoose thought / Describe / Review\u201d, Describe active. A completed editable Choose thought section identifies \u201cRemember the question\u201d, You \u00b7 Original capture, its words \u201cI often remember the question before I remember the note.\u201d and Change thought. Do not show a modal. Category options Supports, Contradicts, Extends, Related remain visible with Extends chosen. Direction uses two stacked radio sentences: Remember the question extends Questions before conclusions, or the reverse. Required rationale contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Optional Supporting thoughts disclosure opens to selected \u201cKeep the original words\u201d, Remove and Find supporting thoughts. A separate Review section repeats both thought titles, direction, explanation and support before full-width gold Create connection and Cancel. Use natural long-page height, not tiny raster text. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+      "selected": true,
+      "approval": {
+        "userWords": "In that case this the guided option will be fine.",
+        "recordedAtUTC": "2026-11-08T02:34:10.123437+00:00",
+        "scope": "Selected B composition only; draft/discard and uncertainty approvals are recorded separately in manifest.json. Implement clearer source-thought identity within B. No wholesale state-board visual approval or runtime acceptance.",
+        "stateBoardsApproved": false,
+        "implementationAuthorized": false,
+        "runtimeAcceptance": false
+      },
+      "behaviorApprovalsRef": "manifest.json#behaviorApprovals",
+      "designHandoffFinalized": true
+    },
+    {
+      "name": "focused-phone",
+      "path": ".impeccable/mocks/user-connections/focused-phone.png",
+      "status": "candidate approximate phone composition",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-436a-7e71-9d18-a3e2ef14c956/exec-bfcf2c56-6c8a-4b6a-ac58-d1099b983d27.png",
+      "nativeSha256": "70240c9d123ce5bfd1a4da0b705fd2872548f8686a16d1ae044a0f7b6f1a832b",
+      "packagedSha256": "02c2c8a1c27f6ef6c1a18386ae7426d4743d8db40f62bb06b7123f8b2d2c14d1",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1024,
+        "height": 1536
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/mocks/user-connections/focused-desktop.png",
+          "sha256": "79ffa20cd68d1bb8681c42eddd96558e30ee12dd9080ab4bdb8a9461ac1324d4"
+        },
+        {
+          "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+          "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/focused-phone.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only phone composition, not production artwork or runtime integration.\n\nA phone-width Thoughtloom web app page, edge to edge, portrait and naturally scrollable, no device or browser frame. Adapt composition C from the desktop candidate. The other reference contributes actual phone shell, Quiet Night palette, Source Sans 3 type and familiar control character. Maintain readable words and touch targets, not a shrunken desktop. No artwork.\n\nShared shell retains the contextual back arrow beside thoughtloom, tagline, Explore selected with blue underline / Capture / inactive Settings Reserved. Secondary actions remain cyan underlined words, not boxed or decorated with new icons. Header Create connection includes Return to idea. The desktop starting-thought rail becomes a compact Starting thought disclosure: \u201cQuestions before conclusions\u201d, You \u00b7 Original capture, \u201cA useful connection should help me ask a better question.\u201d\n\nThe single creation column begins Connect with, selected \u201cRemember the question\u201d, You \u00b7 Original capture: \u201cI often remember the question before I remember the note.\u201d Include Preview and Change thought. Category offers Supports, Contradicts, Extends, Related with Extends selected. Explicit From Remember the question / To Questions before conclusions and Swap direction make orientation clear. Required Why are these connected? contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Supporting thoughts (optional) expands to a query-first search field, Preview and Add supporting thought, with \u201cKeep the original words\u201d selected and Remove. End with a distinct pre-submit summary repeating directed sentence, rationale and supporting thought, then full-width gold Create connection and Cancel. State this records a connection, not an evolution parent. Footer \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+    },
+    {
+      "name": "states-phone",
+      "path": ".impeccable/mocks/user-connections/states-phone.png",
+      "status": "candidate phone-width state specimens",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-4369-7340-b40b-5e93dbf7ef5c/exec-67fa8fe5-7899-424b-a892-80a7c9576a1b.png",
+      "nativeSha256": "eee31d9516d1a33a366e04379aae68e92eb56b1b84276d2614a16ee84ac966ab",
+      "packagedSha256": "9981ee29d4cb22aad66dcd09e218686bdd6de752a2578747f443c76a9c030aec",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 1003,
+        "height": 1568
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+          "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/states-phone.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation mechanism, allowing native staging. Do not write implementation code or alter project files. This is an authorized phone-width state study, not a working application.\n\nA portrait Thoughtloom phone-width UI state study, no bezel or browser frame. The supplied actual phone image carries Quiet Night palette, Source Sans 3 typography and familiar controls. Use readable, vertically stacked fragments separated by clear specimen headings: these are alternative states, not simultaneously active messages. No artwork or decorative icons. Title \u201cCreate connection \u00b7 State study\u201d; footer \u201cIllustrative thoughts\u201d. Natural vertical growth is allowed rather than squeezing text.\n\nShow five fragments. \u201cRationale required\u201d retains chosen Remember the question, category Extends, blank Why are these connected? and coral \u201cExplain why these thoughts are connected.\u201d \u201cCreating connection\u2026\u201d shows readonly directed sentence \u201cRemember the question extends Questions before conclusions\u201d, retained explanation, disabled Create connection and Cancel, and \u201cThis request has already been sent.\u201d \u201cConnection created \u00b7 Proposed by You\u201d is worded confirmed green feedback, with the same recorded relationship, Why connected and Open idea. \u201cConnection not created\u201d is coral: \u201cA connected or supporting thought is unavailable. Choose available thoughts, then review again.\u201d Retain the rationale \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d and Change thought / Review supporting thoughts. Do not guess which reference failed or whether rejected. Finally amber \u201cCreation unconfirmed\u201d: \u201cIt may have completed. Nothing will be sent again automatically.\u201d Retain a readonly submitted snapshot with Copy submitted details and Open idea. No Retry connection, Check status, reliable reconciliation, automatic resubmission, duplicate prevention or success checkmark in uncertainty.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; B was selected instead. State specimens are not approved by that selection."
+    },
+    {
+      "name": "inline-phone",
+      "path": ".impeccable/mocks/user-connections/inline-phone.png",
+      "status": "candidate approximate phone composition",
+      "approved": false,
+      "implementationAuthorized": false,
+      "nativePath": "/home/rjroy/.codex/generated_images/01a1b8ec-bcc0-7871-bb8d-8781b12de43b/exec-1c90c220-f895-472c-9b0a-49b37f57d1ef.png",
+      "nativeSha256": "ca35a44b6a2393b575a37c16517a011cf1a3cb571742323415ac2b9482dce275",
+      "packagedSha256": "9826d4926e064399296bfeaadee853a1a2de71a8a843a447076ced80d7344eab",
+      "decodedPixelsMatchNative": true,
+      "dimensions": {
+        "width": 836,
+        "height": 1881
+      },
+      "colorSpace": "sRGB",
+      "channels": "srgb",
+      "references": [
+        {
+          "path": ".impeccable/mocks/user-connections/inline-desktop-revised.png",
+          "sha256": "f16370219180e0c2b18e0295da5cf6ade08ca3c93f84d94052eea6cb9107bf0f"
+        },
+        {
+          "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+          "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+        }
+      ],
+      "promptFile": ".impeccable/mocks/user-connections/inline-phone.prompt.txt",
+      "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only phone composition, not production artwork or runtime integration.\n\nA phone-width Thoughtloom web app page, edge to edge, portrait and naturally scrollable, no device bezel or browser window. Adapt composition A from the supplied desktop candidate. The other reference supplies the actual shared phone shell, Quiet Night palette, Source Sans 3 type and control character. Keep text and touch targets comfortably readable rather than squeezing the whole desktop into one viewport. No artwork.\n\nPreserve contextual back arrow beside thoughtloom, tagline, Explore selected with blue underline / Capture / inactive Settings Reserved. Existing secondary tools remain cyan underlined words without new icons or boxes. Begin with the Idea \u201cQuestions before conclusions\u201d, You \u00b7 Original capture, its short actual text \u201cA useful connection should help me ask a better question\u201d, Evolve this idea and secondary Connect to another thought\u2026 action.\n\n\u201cCreate connection\u201d expands beneath Idea. Stack the desktop columns in reading order. Starting thought is Questions before conclusions; the chosen second thought is Remember the question. Show Find another thought with query memory and Search. Expanded chosen candidate \u201cRemember the question\u201d, You \u00b7 Original capture: \u201cI often remember the question before I remember the note.\u201d Include Change thought and Preview. Show Category with Supports, Contradicts, Extends, Related and Extends selected. Explicit From Remember the question / To Questions before conclusions with Swap direction. Required Why are these connected? contains \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d Expanded Supporting thoughts (optional) shows selected \u201cKeep the original words\u201d, Remove, Find supporting thoughts, Preview and Add. A distinct pre-submit summary repeats the directed sentence, rationale and supporting title above full-width gold Create connection and Cancel. Label \u201cIllustrative thoughts \u00b7 Design study\u201d.\n",
+      "promptEmbeddedExactly": true,
+      "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+      "runnerVersion": "codex-cli 0.166.0",
+      "observedRunnerModel": "gpt-6-luna",
+      "imageModel": "not exposed by runner output",
+      "inspected": true,
+      "approvalScope": "none; unselected or superseded comparison evidence after B selection"
+    }
+  ],
+  "validation": {
+    "nativeDecodes": true,
+    "allListedImagesVisuallyInspected": true,
+    "exactPromptEmbedded": true,
+    "decodedNativeCopiesUnchanged": true,
+    "productionTestsRun": false,
+    "deviceAccessibilityCertification": false,
+    "initialValidationWrapperIssue": "ImageMagick AE output is 0 (0); parser corrected to read the first value, then all image comparisons passed.",
+    "staticLocalLinks": {
+      "passed": true,
+      "linkOccurrences": 30,
+      "reviewImages": 8,
+      "externalLinks": 0
+    },
+    "galleryDetector": {
+      "command": "impeccable detect --json .impeccable/mocks/user-connections/index.html",
+      "result": [],
+      "scope": "Historical gallery detector result before selection-record text update; not rerun for this metadata/copy update.",
+      "checkedSourceSha256": "d465c5555e33dc515436af9a4f2a3c18fef84a3301456250918fea530b6b6c04"
+    },
+    "galleryBrowser": {
+      "command": "bun --no-env-file .impeccable/mocks/user-connections/verify-gallery.ts",
+      "status": "blocked",
+      "reason": "Cannot find module '@playwright/test' from this worktree's apps/web/package.json",
+      "dependencyInstallAttempted": false,
+      "browserChecksOrCapturesCompleted": false,
+      "scope": "Historical blocked attempt; no new browser or application validation claimed."
+    },
+    "selectionRecords": {
+      "passed": true,
+      "checkedAtUTC": "2026-11-08T02:35:14.976565+00:00",
+      "selectedReferences": [
+        "guided-desktop",
+        "guided-phone"
+      ],
+      "selectedHashesMatch": true,
+      "allNineImageHashesUnchanged": true,
+      "allNinePromptPayloadsUnchanged": true,
+      "sidecarsMatchManifest": true,
+      "onlyBCompositionApproved": true,
+      "stateBoardsApproved": false,
+      "behaviorContractApproved": false,
+      "implementationAuthorized": false,
+      "staticLocalLinksValid": true,
+      "productionOrBrowserTestsRerun": false,
+      "scope": "Historical check before the separate draft/discard and uncertainty approvals; not the current handoff status."
+    },
+    "finalHandoffRecords": {
+      "checkedAtUTC": "2026-11-08T02:40:57.491987+00:00",
+      "command": "python3 .impeccable/mocks/user-connections/verify-records.py",
+      "exitStatus": 0,
+      "result": "PASS: exact selected paths/hashes; both explicit Yes approvals; no pending user design decisions; 9 unchanged PNG/prompt identities; matching sidecars/source hashes; 30 local links and 8 gallery images.",
+      "whitespaceCheck": {
+        "command": "git diff --check",
+        "exitStatus": 0
+      },
+      "scope": "Design records only. Production/runtime/browser suites not rerun; historical gallery-browser dependency blocker is unchanged."
+    }
+  },
+  "limits": [
+    "Generated desktop and phone images are approximate composition studies, not actual CSS viewport captures.",
+    "README visual-review corrections override incidental raster errors.",
+    "No duplicate prevention, exactly-once submission, reliable retry or reconciliation capability is inferred."
+  ],
+  "sourceFiles": [
+    {
+      "path": ".impeccable/mocks/user-connections/README.md",
+      "sha256": "0a08744f3ee891b9da89e275a98805953401eee1856b280717b66cea2167adc1"
+    },
+    {
+      "path": ".impeccable/mocks/user-connections/index.html",
+      "sha256": "b0748686738046e236cbc660a142350982b090327fe82fda42d0e4703dd58a6d"
+    },
+    {
+      "path": ".impeccable/mocks/user-connections/verify-gallery.ts",
+      "sha256": "9228be7b8ac5c979da0299eb1a61ffafb08496be0602a651917debe4a71d7b4c"
+    },
+    {
+      "path": ".impeccable/mocks/user-connections/verify-records.py",
+      "sha256": "063dbf2e66229244ba1f9f845f9d58c858b87debc2825e41092c7f39cad8da19"
+    }
+  ],
+  "stateBoardsApproved": false,
+  "selection": {
+    "option": "B",
+    "name": "Guided inline flow",
+    "userWords": "In that case this the guided option will be fine.",
+    "recordedAtUTC": "2026-11-08T02:34:10.123437+00:00",
+    "scope": "B guided composition with finalized bounded behavior handoff; preserve incumbent-system corrections. Literal example copy, wholesale state-board visuals and runtime acceptance are not approved.",
+    "references": [
+      {
+        "path": ".impeccable/mocks/user-connections/guided-desktop.png",
+        "sha256": "63f05357648be89ba35915e6eae602dd5cc5f3fc8dd3832ae6c481810d283112"
+      },
+      {
+        "path": ".impeccable/mocks/user-connections/guided-phone.png",
+        "sha256": "b5e46e467f3a3180b6009f180f6f4ad10256db2053c0f054c91de064317c8893"
+      }
+    ],
+    "copyCorrection": {
+      "requirement": "Make additional source-thought identities unmistakable, not checkbox-like preservation settings. Source references record material informing the connection, not verified evidence.",
+      "layoutChangeApproved": false,
+      "imagesChanged": false,
+      "requiresNewApproval": false,
+      "handling": "Implementation copy correction within selected B; designer checks actual-client clarity. No new layout or asset generation requested."
+    },
+    "remainingUserDecisions": [],
+    "implementationAuthorized": false,
+    "runtimeAcceptance": false,
+    "remainingImplementationChecks": [
+      "Correct additional source-thought identity copy within selected B, without an asset-approval loop.",
+      "Verify mounted-only draft lifetime and Cancel/navigation discard warnings, including no reload restoration.",
+      "Verify native keyboard/focus, query-first normal-scope search, stale-response handling and responsive readable content.",
+      "Verify canonical success, known failures, readonly copyable uncertainty, duplicate-activation guard and no automatic POST retry.",
+      "Run controlled/domain/transport/browser checks and maintain affected docs in thought-loom-rry."
+    ]
+  },
+  "designHandoffFinalized": true,
+  "behaviorDecisionsResolved": true,
+  "behaviorApprovals": {
+    "draftLifecycle": {
+      "approved": true,
+      "userAnswer": "Yes",
+      "approvedProposition": "Mounted-Idea-page-only drafts, warning before Cancel/navigation discards entered work, and no reload restoration.",
+      "recordedAtUTC": "2026-11-08T02:40:36.405828+00:00"
+    },
+    "uncertainSave": {
+      "approved": true,
+      "userAnswer": "Yes",
+      "approvedProposition": "Copyable readonly submitted snapshot on uncertain save, warning that the connection may already exist, and no automatic retry.",
+      "recordedAtUTC": "2026-11-08T02:40:36.405828+00:00"
+    },
+    "scope": "These two explicit behavior approvals do not approve all state-board visuals or certify implementation."
+  },
+  "implementationFollowUp": {
+    "issue": "thought-loom-rry",
+    "scope": "Selected B client and fixed-purpose Next creation boundary using existing POST /connections; controlled domain/transport/state/browser/doc coverage and actual-client designer review.",
+    "trackerAuthority": "Beads owns current issue status/routing; not duplicated here.",
+    "currentInvocation": "Design records and metadata only; no production implementation performed."
+  }
+}

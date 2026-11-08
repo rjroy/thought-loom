@@ -1,0 +1,32 @@
+{
+  "name": "states-phone",
+  "path": ".impeccable/mocks/user-connections/states-phone.png",
+  "status": "candidate phone-width state specimens",
+  "approved": false,
+  "implementationAuthorized": false,
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1b8eb-4369-7340-b40b-5e93dbf7ef5c/exec-67fa8fe5-7899-424b-a892-80a7c9576a1b.png",
+  "nativeSha256": "eee31d9516d1a33a366e04379aae68e92eb56b1b84276d2614a16ee84ac966ab",
+  "packagedSha256": "9981ee29d4cb22aad66dcd09e218686bdd6de752a2578747f443c76a9c030aec",
+  "decodedPixelsMatchNative": true,
+  "dimensions": {
+    "width": 1003,
+    "height": 1568
+  },
+  "colorSpace": "sRGB",
+  "channels": "srgb",
+  "references": [
+    {
+      "path": ".impeccable/candidates/explore-clearing/review/runtime-phone.png",
+      "sha256": "8b299d16de4014fdc9fa6ca5feaf072aa5fe7a73fed89b396e36e6a2eea98bbb"
+    }
+  ],
+  "promptFile": ".impeccable/mocks/user-connections/states-phone.prompt.txt",
+  "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation mechanism, allowing native staging. Do not write implementation code or alter project files. This is an authorized phone-width state study, not a working application.\n\nA portrait Thoughtloom phone-width UI state study, no bezel or browser frame. The supplied actual phone image carries Quiet Night palette, Source Sans 3 typography and familiar controls. Use readable, vertically stacked fragments separated by clear specimen headings: these are alternative states, not simultaneously active messages. No artwork or decorative icons. Title \u201cCreate connection \u00b7 State study\u201d; footer \u201cIllustrative thoughts\u201d. Natural vertical growth is allowed rather than squeezing text.\n\nShow five fragments. \u201cRationale required\u201d retains chosen Remember the question, category Extends, blank Why are these connected? and coral \u201cExplain why these thoughts are connected.\u201d \u201cCreating connection\u2026\u201d shows readonly directed sentence \u201cRemember the question extends Questions before conclusions\u201d, retained explanation, disabled Create connection and Cancel, and \u201cThis request has already been sent.\u201d \u201cConnection created \u00b7 Proposed by You\u201d is worded confirmed green feedback, with the same recorded relationship, Why connected and Open idea. \u201cConnection not created\u201d is coral: \u201cA connected or supporting thought is unavailable. Choose available thoughts, then review again.\u201d Retain the rationale \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d and Change thought / Review supporting thoughts. Do not guess which reference failed or whether rejected. Finally amber \u201cCreation unconfirmed\u201d: \u201cIt may have completed. Nothing will be sent again automatically.\u201d Retain a readonly submitted snapshot with Copy submitted details and Open idea. No Retry connection, Check status, reliable reconciliation, automatic resubmission, duplicate prevention or success checkmark in uncertainty.\n",
+  "promptEmbeddedExactly": true,
+  "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+  "runnerVersion": "codex-cli 0.166.0",
+  "observedRunnerModel": "gpt-6-luna",
+  "imageModel": "not exposed by runner output",
+  "inspected": true,
+  "approvalScope": "none; B was selected instead. State specimens are not approved by that selection."
+}

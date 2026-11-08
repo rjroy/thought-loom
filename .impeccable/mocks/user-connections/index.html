@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thoughtloom connection compositions: review</title>
+  <style>
+    @font-face { font-family: "Source Sans 3"; src: url("../../brand/fonts/SourceSans3-VariableFont_wght.ttf") format("truetype"); font-weight: 200 900; font-display: swap; }
+    :root { color-scheme: dark; background: #031315; color: #fef6e1; font-family: "Source Sans 3", system-ui, sans-serif; font-size: 18px; line-height: 1.5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: clamp(1rem, 3vw, 3rem); }
+    main { max-width: 100rem; margin-inline: auto; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { font-size: 2rem; margin: 0 0 1rem; }
+    h2 { font-size: 1.5rem; margin: 0 0 .75rem; }
+    h3 { font-size: 1.125rem; margin: 1.5rem 0 .5rem; }
+    p { max-width: 72ch; color: #d5d3c5; }
+    a { color: #65c4c5; text-underline-offset: .2em; }
+    a:hover { color: #fef6e1; }
+    a:focus-visible { outline: 3px solid #8eaef2; outline-offset: 5px; }
+    ::selection { background: #35557f; color: #fef6e1; }
+    .intro { margin-bottom: 2.5rem; }
+    .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2rem; }
+    article { min-width: 0; border-top: 1px solid #344548; padding-top: 1rem; }
+    article > p { min-height: 5rem; margin-top: 0; }
+    figure { margin: 0 0 1.5rem; }
+    figure a { display: block; }
+    img { display: block; width: 100%; height: auto; border: 1px solid #344548; }
+    figcaption { margin-top: .5rem; font-size: 1rem; color: #a5a8a0; }
+    .phone { max-width: 20rem; margin-inline: auto; }
+    .states { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #344548; }
+    .state-images { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
+    footer { margin-top: 2.5rem; border-top: 1px solid #344548; padding-top: 1rem; }
+    @media (max-width: 60rem) { .options { grid-template-columns: 1fr; } article > p { min-height: 0; } .state-images { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header class="intro">
+    <h1>Create connection: composition review</h1>
+    <p>Design handoff finalized: Idea-page entry, optional supporting thoughts and B's guided composition are selected. Mounted-page-only drafts with discard warnings, no reload restoration, and readonly copyable uncertain-save recovery without automatic retry are approved. Shared state-board visuals remain reference-only.</p>
+    <p><strong>Selected: B.</strong> User: “In that case this the guided option will be fine.” Its single-column flow keeps Idea context and makes direction a full sentence.</p>
+    <p>The unchanged “Keep the original words” example is a poorly named source thought, not a preservation setting. Clearer source identity is an implementation copy correction within B, not another asset-approval loop. Generated phone sizes are approximate. <a href="README.md">Read the finalized handoff and implementation checks for thought-loom-rry</a>.</p>
+  </header>
+  <section class="options" aria-label="Three composition alternatives">
+    <article>
+      <h2>A. In-place workspace</h2>
+      <p>Search and relationship stay visible together. Best for comparing candidates, with more simultaneous density.</p>
+      <figure><a href="inline-desktop-revised.png"><img src="inline-desktop-revised.png" alt="A desktop: second-thought search left, relationship form right, pre-submit summary below."></a><figcaption>Desktop, corrected Starting thought label. Existing Idea tools remain, despite their omission here.</figcaption></figure>
+      <figure class="phone"><a href="inline-phone.png"><img src="inline-phone.png" alt="A phone study: Idea, second-thought search and preview, relationship, supporting thoughts, then summary and Create connection."></a><figcaption>Approximate phone composition, naturally stacked.</figcaption></figure>
+    </article>
+    <article>
+      <h2>B. Guided inline flow, selected</h2>
+      <p>Choose, describe and review beneath Idea. Full-sentence direction makes the relationship easier to verify.</p>
+      <figure><a href="guided-desktop.png"><img src="guided-desktop.png" alt="B desktop: one-column form with chosen thought, category, two sentence-based direction choices, rationale, support and review."></a><figcaption>Selected composition only. Preserve current navigation and correct the confusing source-thought example.</figcaption></figure>
+      <figure class="phone"><a href="guided-phone.png"><img src="guided-phone.png" alt="B phone study: one-column guided flow, four category choices and two readable direction sentences before rationale and review."></a><figcaption>Approximate phone composition. One final Create connection submission.</figcaption></figure>
+    </article>
+    <article>
+      <h2>C. Focused workspace</h2>
+      <p>A contextual destination with a starting-thought rail. More space for examination, but a separate task surface.</p>
+      <figure><a href="focused-desktop.png"><img src="focused-desktop.png" alt="C desktop: starting thought in a left reading rail, selected thought and full creation form on the right."></a><figcaption>Desktop. Keep one contextual header return, not duplicate return controls.</figcaption></figure>
+      <figure class="phone"><a href="focused-phone.png"><img src="focused-phone.png" alt="C phone study: starting thought disclosure, selected thought, directional relationship, rationale, supporting picker and review."></a><figcaption>Approximate phone composition. Starting rail becomes a disclosure.</figcaption></figure>
+    </article>
+  </section>
+  <section class="states" aria-labelledby="states-heading">
+    <h2 id="states-heading">Shared state treatment, not approved</h2>
+    <p>Alternative specimens: required-rationale validation, pending submission, confirmed creation, unavailable referenced material, and unconfirmed creation. An unknown outcome never offers automatic resubmission or a reliable Check/Retry promise.</p>
+    <div class="state-images">
+      <figure><a href="states-desktop.png"><img src="states-desktop.png" alt="Desktop state board separates search and preview, validation, pending, confirmed success, reference failure and unconfirmed outcome."></a><figcaption>Desktop specimens. Retry search is only a read, not another connection POST.</figcaption></figure>
+      <figure class="phone"><a href="states-phone.png"><img src="states-phone.png" alt="Phone state fragments distinguish validation, pending, confirmed creation, unavailable-reference failure and readonly unconfirmed snapshot."></a><figcaption>Portrait specimens, not simultaneous messages on a phone screen.</figcaption></figure>
+    </div>
+  </section>
+  <footer>
+    <p>All thoughts are illustrative. No production UI/backend changes or runtime acceptance. <a href="manifest.json">Exact candidate identities, generation provenance and verification</a>.</p>
+  </footer>
+</main>
+</body>
+</html>

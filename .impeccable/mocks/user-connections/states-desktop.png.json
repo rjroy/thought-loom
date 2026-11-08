@@ -1,0 +1,32 @@
+{
+  "name": "states-desktop",
+  "path": ".impeccable/mocks/user-connections/states-desktop.png",
+  "status": "candidate shared state specimens",
+  "approved": false,
+  "implementationAuthorized": false,
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1b8e9-75a5-7030-9f1c-f64e3a47bf92/exec-f4ce9cfb-36f7-4246-8cdd-fff018dd1245.png",
+  "nativeSha256": "ab156b8b3eaa53d1636bcd15ba248f35da045fbf90e6109aa88a02d1e775036f",
+  "packagedSha256": "426a670e47bde9c9e5da85368b1718d202bb88143b24182f8a951fd385977653",
+  "decodedPixelsMatchNative": true,
+  "dimensions": {
+    "width": 1586,
+    "height": 992
+  },
+  "colorSpace": "sRGB",
+  "channels": "srgb",
+  "references": [
+    {
+      "path": ".impeccable/candidates/glyphs/content-family/integration-review/content-after-explore-1440.png",
+      "sha256": "7b115028caabe5260745dd310a6cfb86a3df466c49b95c83a93fa789c60bf0d4"
+    }
+  ],
+  "promptFile": ".impeccable/mocks/user-connections/states-desktop.prompt.txt",
+  "prompt": "Generate one actual exploratory UI image and report its absolute native output path. Use the normal image-generation output mechanism; allow native staging. Do not write implementation code or alter project files. This is an authorized design-only state study, not a working application.\n\nA desktop Thoughtloom UI state-study screen, edge to edge with crisp readable text, no browser frame or device. Use a landscape canvas with six clearly separated specimen panels, each an alternative moment, never simultaneous banners on one form. The supplied runtime image contributes only Quiet Night palette, Source Sans 3 type, restrained surfaces, familiar controls and shared navigation character. No illustration, checkmark icon or decorative graph. Label the board \u201cCreate connection \u00b7 Alternative states \u00b7 Illustrative thoughts\u201d.\n\nShow six compact but fully legible application-region specimens with real labels and retained input context:\n\n1. \u201cFind another thought\u201d: query memory; Search; \u201cRemember the question\u201d, You \u00b7 Original capture; expanded words \u201cI often remember the question before I remember the note.\u201d; Choose this thought. A small \u201cNo results\u201d alternative says \u201cTry another query\u201d; a search read error retains the query with Retry search, which is a read only.\n2. \u201cRationale required\u201d: Category Extends, From Remember the question / To Questions before conclusions; blank Why are these connected? field; error \u201cExplain why these thoughts are connected.\u201d No lost selections.\n3. \u201cCreating connection\u2026\u201d: readonly submitted relationship and explanation \u201cRemembering the question gives me a practical way to follow a useful connection.\u201d; disabled Create connection and Cancel; \u201cWaiting for confirmation. This request has already been sent.\u201d\n4. Confirmed green worded \u201cConnection created \u00b7 Proposed by You\u201d; recorded \u201cRemember the question extends Questions before conclusions\u201d; Why connected; Open idea. No edit or duplicate-prevention claim.\n5. Coral \u201cConnection not created\u201d: \u201cA connected or supporting thought is unavailable. Choose available thoughts, then review again.\u201d Retain the rationale, with Change thought and Review supporting thoughts. Do not identify which failed or why.\n6. Amber \u201cCreation unconfirmed\u201d: readonly submitted details; \u201cIt may have completed. Nothing will be sent again automatically.\u201d Copy submitted details and Open idea, without Retry, Check status, success checkmark or a new POST.\n",
+  "promptEmbeddedExactly": true,
+  "generationRoute": "codex exec --skip-git-repo-check --image <ordered reference> ... - < <promptFile>",
+  "runnerVersion": "codex-cli 0.166.0",
+  "observedRunnerModel": "gpt-6-luna",
+  "imageModel": "not exposed by runner output",
+  "inspected": true,
+  "approvalScope": "none; B was selected instead. State specimens are not approved by that selection."
+}
