@@ -14,6 +14,10 @@ export const defaultCaptureLimits: CaptureLimits = Object.freeze({ sourceReadMs:
 const worker = fileURLToPath(new URL("./capture-worker.ts", import.meta.url));
 const controlLimit = 8192;
 const statusLimit = 8192;
+const statusStates = new Set(["R (running)", "S (sleeping)", "D (disk sleep)", "T (stopped)", "t (tracing stop)",
+  "X (dead)", "Z (zombie)", "P (parked)", "I (idle)"]);
+// Four ordinary RSS sampling periods for kernel teardown/exit notification, never a capture retry or an unbounded join.
+const missingRssExitMs = 100;
 
 export function captureLimits(input: Partial<CaptureLimits> = {}): CaptureLimits {
   const limits = { ...defaultCaptureLimits, ...input };
@@ -27,15 +31,22 @@ export interface CaptureStatusHandle {
   close(): Promise<void>;
 }
 export type OpenCaptureStatus = (pid: number) => Promise<CaptureStatusHandle>;
+export type StartCaptureReconciliationTimer = (expire: () => void) => () => void;
 export interface CaptureWorkerDependencies {
   readonly openStatus?: OpenCaptureStatus;
   readonly observeExit?: (childExit: Promise<number>) => Promise<number>;
+  readonly startReconciliationTimer?: StartCaptureReconciliationTimer;
 }
+const startReconciliationTimer: StartCaptureReconciliationTimer = expire => {
+  const timer = setTimeout(expire, missingRssExitMs);
+  return () => clearTimeout(timer);
+};
 
 type MonitorStage = "open" | "read" | "parse" | "close" | "sample";
 type MonitorCategory = "permission" | "io" | "resource" | "malformed" | "limit" | "unknown";
+type MonitorReason = "missing-rss" | "invalid-rss" | "invalid-status";
 class CaptureMonitorError extends BackupCaptureError {
-  constructor(readonly stage: MonitorStage, readonly category: MonitorCategory) { super("monitor-unavailable"); }
+  constructor(readonly stage: MonitorStage, readonly category: MonitorCategory, readonly reason?: MonitorReason) { super("monitor-unavailable"); }
 }
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined;
@@ -53,16 +64,31 @@ function monitorError(stage: MonitorStage, error: unknown): CaptureMonitorError 
   return new CaptureMonitorError(stage, category);
 }
 
-async function statusRss(file: CaptureStatusHandle): Promise<bigint | null> {
+async function statusRss(file: CaptureStatusHandle, pid: number): Promise<bigint | null> {
   let stage: MonitorStage = "read";
   try {
     const buffer = Buffer.alloc(statusLimit);
-    let length = 0, lineStart = 0, terminal = false;
+    let length = 0, lineStart = 0, state: string | undefined, invalidStatus = false;
+    let names = 0, states = 0, pids = 0, tails = 0;
     const lineRss = (line: string): bigint | undefined => {
-      if (line.startsWith("State:")) terminal = /^State:[ \t]*[ZX](?:[ \t]|$)/.test(line);
+      if (line.startsWith("Name:")) names++;
+      if (line.startsWith("State:")) {
+        states++;
+        const value = /^State:[ \t]*(.*?)[ \t]*\r?$/.exec(line)?.[1];
+        state = value?.[0]; if (value === undefined || !statusStates.has(value)) invalidStatus = true;
+      }
+      if (line.startsWith("Pid:")) {
+        pids++;
+        const match = /^Pid:[ \t]*([0-9]+)[ \t]*\r?$/.exec(line);
+        if (match?.[1] !== String(pid)) invalidStatus = true;
+      }
+      if (line.startsWith("nonvoluntary_ctxt_switches:")) {
+        tails++;
+        if (!/^nonvoluntary_ctxt_switches:[ \t]*[0-9]+[ \t]*\r?$/.test(line)) invalidStatus = true;
+      }
       if (!line.startsWith("VmRSS:")) return undefined;
       const match = /^VmRSS:[ \t]*([0-9]+)[ \t]+kB[ \t]*\r?$/.exec(line);
-      if (!match) throw new CaptureMonitorError("parse", "malformed");
+      if (!match) throw new CaptureMonitorError("parse", "malformed", "invalid-rss");
       return BigInt(match[1]) * 1024n;
     };
     // Every positive read must advance by at least one byte; both bytes and read calls are capped.
@@ -82,9 +108,12 @@ async function statusRss(file: CaptureStatusHandle): Promise<bigint | null> {
       if (result.bytesRead === 0) {
         if (lineStart < length) {
           const size = lineRss(available.subarray(lineStart).toString("utf8")); if (size !== undefined) return size;
+          throw new CaptureMonitorError("parse", "malformed", "invalid-status");
         }
-        if (terminal) return null;
-        throw new CaptureMonitorError("parse", "malformed");
+        if (!invalidStatus && states === 1 && (state === "Z" || state === "X")) return null;
+        // Linux can omit the whole mm section before reporting a zombie. A complete base record is not an exit proof.
+        const complete = length > 0 && !invalidStatus && names === 1 && states === 1 && pids === 1 && tails === 1 && state !== undefined;
+        throw new CaptureMonitorError("parse", "malformed", complete ? "missing-rss" : "invalid-status");
       }
     }
     throw new CaptureMonitorError("read", "limit");
@@ -100,8 +129,11 @@ export async function readCaptureRss(pid: number, openStatus: OpenCaptureStatus 
   try { file = await openStatus(pid); }
   catch (error) { if (gone(error)) return null; throw monitorError("open", error); }
   let size: bigint | null = null, failure: CaptureMonitorError | undefined;
-  try { size = await statusRss(file); } catch (error) { failure = monitorError("read", error); }
-  try { await file.close(); } catch (error) { failure ??= monitorError("close", error); }
+  try { size = await statusRss(file, pid); } catch (error) { failure = monitorError("read", error); }
+  try { await file.close(); }
+  catch (error) {
+    if (!failure || failure.reason === "missing-rss") failure = new CaptureMonitorError("close", monitorError("close", error).category);
+  }
   if (failure) throw failure;
   return size;
 }
@@ -113,31 +145,57 @@ export async function runCaptureWorker(requestPath: string, limits: CaptureLimit
   const child = Bun.spawn({ cmd: ["/usr/bin/prlimit", `--cpu=${Math.ceil(limits.totalMs / 1000)}:${Math.ceil(limits.totalMs / 1000)}`, "--core=0:0",
     "--", process.execPath, "--no-env-file", worker, requestPath], env: { PATH: "/usr/bin:/bin", LANG: "C" },
     cwd: dirname(requestPath), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  let exited = false, failure: string | undefined, phase: "starting" | "reading" | "encoding" | "complete" = "starting";
+  let actualExited = false, failure: string | undefined, phase: "starting" | "reading" | "encoding" | "complete" = "starting";
   let digest: string | undefined, count = 0, sample: Promise<void> | undefined, inputEnded = false, monitorReported = false;
+  let interruptReconciliation: (() => void) | undefined;
   const endInput = async () => { if (!inputEnded) { inputEnded = true; await child.stdin.end(); } };
   const kill = (code: string) => {
     failure ??= code;
-    if (!exited) try { child.kill("SIGKILL"); } catch { /* The owned child can already have exited. */ }
+    interruptReconciliation?.();
+    if (!actualExited) try { child.kill("SIGKILL"); } catch { /* The owned child can already have exited. */ }
   };
-  const exit = (dependencies.observeExit?.(child.exited) ?? child.exited).then(code => { exited = true; return code; }, error => { exited = true; throw error; });
+  // The test/lifecycle observer may delay notification; only this owned promise proves actual child exit.
+  const actualExit = child.exited.then(code => { actualExited = true; return code; });
+  const exit = dependencies.observeExit?.(actualExit) ?? actualExit;
   const sourceTimer = setTimeout(() => kill("source-timeout"), limits.sourceReadMs);
   const cancel = () => kill("aborted"); signal.addEventListener("abort", cancel, { once: true });
   if (signal.aborted) cancel();
+  const failMonitor = (safe: CaptureMonitorError) => {
+    kill("monitor-unavailable");
+    if (!monitorReported) {
+      monitorReported = true;
+      try { logger.error("[backup] RSS monitor failed", { stage: safe.stage, category: safe.category, ...(safe.reason ? { reason: safe.reason } : {}) }); }
+      catch { /* Diagnostics must not skip termination or joining the owned worker/sample. */ }
+    }
+  };
+  async function reconcileMissingRss(safe: CaptureMonitorError): Promise<void> {
+    if (failure) return; // Another latched failure already denies publication; do not replace it with a monitor error.
+    if (actualExited) { await actualExit; return; }
+    const decision = Promise.withResolvers<void>();
+    let settled = false, cancelTimer: (() => void) | undefined;
+    const finish = () => { if (!settled) { settled = true; decision.resolve(); } };
+    interruptReconciliation = finish;
+    try {
+      // Expiry latches failure immediately; later exit notification cannot turn an expired window into success.
+      cancelTimer = (dependencies.startReconciliationTimer ?? startReconciliationTimer)(() => { if (!settled) failMonitor(safe); });
+      void actualExit.then(finish, () => kill("capture-worker-failed"));
+      if (failure) finish();
+      await decision.promise;
+    } finally {
+      settled = true;
+      if (interruptReconciliation === finish) interruptReconciliation = undefined;
+      cancelTimer?.();
+    }
+  }
   const sampleRss = () => {
-    if (sample || exited) return;
-    sample = readCaptureRss(child.pid, dependencies.openStatus).then(size => {
-      if (!exited && size !== null && size > BigInt(limits.maxRssBytes)) kill("memory-limit");
-    }).catch(error => {
-      if (!exited) {
-        const safe = monitorError("sample", error); kill("monitor-unavailable");
-        if (!monitorReported) {
-          monitorReported = true;
-          try { logger.error("[backup] RSS monitor failed", { stage: safe.stage, category: safe.category }); }
-          catch { /* Diagnostics must not skip termination or joining the owned worker/sample. */ }
-        }
-      }
-    }).finally(() => { sample = undefined; });
+    if (sample || actualExited || failure) return;
+    sample = readCaptureRss(child.pid, dependencies.openStatus).catch(async (error: unknown) => {
+      const safe = monitorError("sample", error);
+      if (safe.reason === "missing-rss") { await reconcileMissingRss(safe); return null; }
+      throw safe;
+    }).then(size => {
+      if (size !== null && size > BigInt(limits.maxRssBytes)) kill("memory-limit");
+    }).catch((error: unknown) => { failMonitor(monitorError("sample", error)); }).finally(() => { sample = undefined; });
   };
   const memoryTimer = setInterval(sampleRss, 25); sampleRss();
   async function message(line: string): Promise<void> {
@@ -180,13 +238,17 @@ export async function runCaptureWorker(requestPath: string, limits: CaptureLimit
   try {
     const stdout = collect(child.stdout, true).catch(error => { kill(error instanceof BackupCaptureError ? error.code : "invalid-control-output"); throw error; });
     const stderr = collect(child.stderr, false).catch(error => { kill("control-failed"); throw error; });
-    const results = await Promise.allSettled([stdout, stderr, exit]);
+    const results = await Promise.allSettled([stdout, stderr, actualExit, exit]);
+    clearInterval(memoryTimer);
+    if (sample) await sample; // A late read/close refusal must settle before the success/failure decision, not only in finally.
     if (failure) throw new BackupCaptureError(failure);
-    check(results.every(result => result.status === "fulfilled") && results[2]?.status === "fulfilled" && results[2].value === 0 && digest !== undefined, "capture-worker-failed");
+    check(results.every(result => result.status === "fulfilled") && results[2]?.status === "fulfilled" && results[2].value === 0 &&
+      results[3]?.status === "fulfilled" && results[3].value === 0 && digest !== undefined, "capture-worker-failed");
     guard(); return digest;
   } finally {
     clearTimeout(sourceTimer); clearInterval(memoryTimer); signal.removeEventListener("abort", cancel);
-    if (!exited) { kill("capture-worker-failed"); await Promise.allSettled([exit]); }
+    if (!actualExited) kill("capture-worker-failed");
+    await Promise.allSettled([actualExit, exit]);
     try { await endInput(); } catch { /* A terminated child may have closed stdin first. */ }
     if (sample) await sample;
   }

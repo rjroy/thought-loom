@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { open, mkdir, mkdtemp, lstat, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { readCaptureRss, runCaptureWorker, type OpenCaptureStatus } from "../src/backup/capture-process";
+import { open, mkdir, mkdtemp, lstat, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
+import { readCaptureRss, runCaptureWorker, type OpenCaptureStatus, type StartCaptureReconciliationTimer } from "../src/backup/capture-process";
 import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import { createLogger, type LogRecord } from "../src/logging";
 
@@ -27,6 +27,21 @@ function status(text: string, chunkSize = 8192): { openStatus: OpenCaptureStatus
   }), closed: () => closed };
 }
 
+/** Complete, EOF-terminated test-owned status without the optional mm/memory section. */
+function nonterminalWithoutRss(pid: number): string {
+  return [
+    "Name:\towned-capture", "Umask:\t0077", "State:\tR (running)", `Tgid:\t${pid}`, "Ngid:\t0", `Pid:\t${pid}`,
+    "PPid:\t1", "TracerPid:\t0", "Uid:\t1000\t1000\t1000\t1000", "Gid:\t1000\t1000\t1000\t1000",
+    "FDSize:\t64", "Groups:\t1000", `NStgid:\t${pid}`, `NSpid:\t${pid}`, `NSpgid:\t${pid}`, `NSsid:\t${pid}`,
+    "Kthread:\t0", "Threads:\t1", "SigQ:\t0/1024", "SigPnd:\t0000000000000000", "ShdPnd:\t0000000000000000",
+    "SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000", "SigCgt:\t0000000000000000",
+    "CapInh:\t0000000000000000", "CapPrm:\t0000000000000000", "CapEff:\t0000000000000000",
+    "CapBnd:\t0000000000000000", "CapAmb:\t0000000000000000", "NoNewPrivs:\t0", "Seccomp:\t0",
+    "Cpus_allowed:\t1", "Cpus_allowed_list:\t0", "Mems_allowed:\t1", "Mems_allowed_list:\t0",
+    "voluntary_ctxt_switches:\t1", "nonvoluntary_ctxt_switches:\t0", "",
+  ].join("\n");
+}
+
 test("status reader treats only vanished processes as no sample and closes retained descriptors", async () => {
   for (const code of ["ENOENT", "ESRCH"]) {
     const missing: OpenCaptureStatus = async () => { throw errno(code); };
@@ -44,7 +59,8 @@ test("status reader treats only vanished processes as no sample and closes retai
   }
   const zombie = status("Name:\towned\nState:\tZ (zombie)\n");
   expect(await readCaptureRss(123, zombie.openStatus)).toBeNull(); expect(zombie.closed()).toBe(true);
-  for (const raw of ["Name:\towned\nState:\tR (running)\n", "Name:\towned\nState:\tS (sleeping)\nVmRSS:\tbroken kB\n"]) {
+  for (const raw of ["", "Name:\towned\nState:\t", "Name:\towned\nState:\tR (running)\n",
+    "Name:\towned\nState:\tR (running)\nVmRSS:\t12", "Name:\towned\nState:\tS (sleeping)\nVmRSS:\tbroken kB\n"]) {
     const bad = status(raw); await expect(readCaptureRss(123, bad.openStatus)).rejects.toThrow(); expect(bad.closed()).toBe(true);
   }
 });
@@ -111,6 +127,163 @@ test("a real worker can finish after a retained proc read reports ESRCH before t
     releaseExit.resolve(); expect(await bounded(outcome, "worker completion")).toMatch(/^[0-9a-f]{64}$/);
   } finally { releaseExit.resolve(); await Promise.allSettled([outcome]); }
 }), 20000);
+
+test("a complete nonterminal missing-RSS frame after actual exit0 does not invalidate a completed worker", async () => workerFixture(async request => {
+  const actualExit = Promise.withResolvers<number>(), releaseExit = Promise.withResolvers<void>(), closed = Promise.withResolvers<void>();
+  const controller = new AbortController(), logs: LogRecord[] = [];
+  let pid: number | undefined, actualExited = false, sampled = false, settled = false;
+  const openStatus: OpenCaptureStatus = async ownedPid => {
+    pid = ownedPid;
+    if (sampled) throw errno("ESRCH");
+    sampled = true;
+    const retained = await status(nonterminalWithoutRss(ownedPid)).openStatus(ownedPid);
+    return {
+      async read(buffer, offset, length, position) {
+        await actualExit.promise;
+        return retained.read(buffer, offset, length, position);
+      },
+      async close() { await retained.close(); closed.resolve(); },
+    };
+  };
+  const running = runCaptureWorker(request, limits, controller.signal, createLogger("verbose", record => logs.push(record)), () => {}, {
+    openStatus,
+    observeExit: async childExit => {
+      const code = await childExit; actualExited = true; actualExit.resolve(code);
+      await releaseExit.promise; return code;
+    },
+  });
+  const outcome = running.finally(() => { settled = true; }); void outcome.catch(() => {});
+  try {
+    expect(await bounded(actualExit.promise, "actual completed worker exit")).toBe(0);
+    await bounded(closed.promise, "missing-RSS retained status close");
+    // Drain the completed read's promise reactions while exit observation remains gated, not a timed exit window.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    releaseExit.resolve();
+    const digest = await bounded(outcome, "missing-RSS completed worker join");
+    const manifest = await readFile(join(dirname(request), "snapshot", "manifest.json"));
+    expect(digest).toBe(createHash("sha256").update(manifest).digest("hex"));
+    expect(logs.some(record => record.message === "[backup] RSS monitor failed")).toBe(false);
+  } finally {
+    releaseExit.resolve(); controller.abort();
+    if (!actualExited && pid !== undefined) try { process.kill(pid, "SIGKILL"); } catch { /* The owned worker may already have exited. */ }
+    await bounded(Promise.allSettled([outcome]), "missing-RSS completed worker cleanup");
+  }
+}), 30000);
+
+for (const [scenario, title] of [
+  ["exit", "missing RSS before actual exit reconciles only after the real worker completes"],
+  ["expiry", "missing RSS on a live held worker fails closed when its owned reconciliation timer expires"],
+  ["abort", "abort cancels missing-RSS reconciliation and a late expiry cannot replace the latched failure"],
+  ["malformed", "a complete live status with a bad VmRSS token never enters missing-RSS reconciliation"],
+] as const) {
+  test(title, async () => workerFixture(async request => {
+    const ready = Promise.withResolvers<void>(), actualExit = Promise.withResolvers<number>(), releaseExit = Promise.withResolvers<void>();
+    const timerEntered = Promise.withResolvers<void>(), controller = new AbortController(), logs: LogRecord[] = [];
+    const expiries: (() => void)[] = [];
+    let pid: number | undefined, actualExited = false, settled = false, opened = 0, closed = 0, timerCancels = 0, timerActive = false;
+    const startReconciliationTimer: StartCaptureReconciliationTimer = expire => {
+      expiries.push(expire); timerActive = true; timerEntered.resolve();
+      return () => { timerCancels++; timerActive = false; };
+    };
+    const openStatus: OpenCaptureStatus = async ownedPid => {
+      pid = ownedPid;
+      const frame = nonterminalWithoutRss(ownedPid);
+      const retained = await status(scenario === "malformed" ? frame.replace("Threads:\t1\n", "VmRSS:\tbroken kB\nThreads:\t1\n") : frame).openStatus(ownedPid);
+      opened++;
+      return {
+        async read(buffer, offset, length, position) {
+          await ready.promise;
+          return retained.read(buffer, offset, length, position);
+        },
+        async close() { await retained.close(); closed++; },
+      };
+    };
+    const logger = createLogger("verbose", record => {
+      logs.push(record);
+      if (record.message !== "[backup] source snapshot established") return;
+      const ownedPid = record.context?.pid;
+      if (typeof ownedPid !== "number" || pid !== undefined && ownedPid !== pid) throw new Error("Missing owned capture process");
+      pid = ownedPid; process.kill(ownedPid, "SIGSTOP"); ready.resolve();
+    });
+    const running = runCaptureWorker(request, { ...limits, sourceReadMs: 15000 }, controller.signal, logger, () => {}, {
+      openStatus, startReconciliationTimer,
+      observeExit: async childExit => {
+        const code = await childExit; actualExited = true; actualExit.resolve(code);
+        await releaseExit.promise; return code;
+      },
+    });
+    const outcome = running.then(digest => ({ ok:true as const, digest }), (error: unknown) => ({ ok:false as const, error }))
+      .finally(() => { settled = true; });
+    try {
+      await bounded(ready.promise, "owned worker held before scan authorization");
+      if (scenario === "malformed") {
+        await bounded(Promise.race([
+          actualExit.promise,
+          timerEntered.promise.then(() => { throw new Error("Bad VmRSS token incorrectly entered missing-RSS reconciliation"); }),
+        ]), "bad VmRSS token fail-closed exit", 5000);
+        expect(expiries).toHaveLength(0);
+      } else {
+        // The old implementation kills the child instead of registering a timer: fail on that behavior, not a hanging entry latch.
+        await bounded(Promise.race([
+          timerEntered.promise,
+          actualExit.promise.then(() => { throw new Error("Owned worker exited before missing-RSS reconciliation timer registration"); }),
+        ]), "missing-RSS reconciliation entry", 5000);
+        expect(actualExited).toBe(false); expect(settled).toBe(false);
+        expect(expiries).toHaveLength(1); expect(timerActive).toBe(true);
+        expect(opened).toBeGreaterThan(0); expect(closed).toBe(opened);
+        expect(await readdir(join(dirname(request), "snapshot"))).toEqual([]);
+        const expire = expiries[0];
+        if (!expire) throw new Error("Missing owned reconciliation expiry callback");
+        if (scenario === "exit") {
+          if (pid === undefined) throw new Error("Missing held owned worker PID");
+          process.kill(pid, "SIGCONT");
+        } else if (scenario === "expiry") expire();
+        else controller.abort();
+      }
+
+      const code = await bounded(actualExit.promise, "owned worker actual exit after reconciliation decision");
+      expect(settled).toBe(false); // Actual exit is independent of the deliberately held exit observer.
+      if (scenario === "exit") expect(code).toBe(0);
+      else expect(code).not.toBe(0);
+      if (scenario === "abort") {
+        const expire = expiries[0];
+        if (!expire) throw new Error("Missing cancelled reconciliation callback");
+        expire(); // Exercise a stale callback while the aborted result is latched but exit observation is still gated.
+      }
+      releaseExit.resolve();
+      const result = await bounded(outcome, "owned reconciliation worker/sample join");
+      if (scenario === "exit") {
+        expect(result.ok).toBe(true);
+        if (!result.ok) throw new Error("Missing-RSS reconciliation rejected a completed owned worker");
+        const manifest = await readFile(join(dirname(request), "snapshot", "manifest.json"));
+        expect(result.digest).toBe(createHash("sha256").update(manifest).digest("hex"));
+        expect(logs.some(record => record.message === "[backup] RSS monitor failed")).toBe(false);
+      } else {
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("Missing or malformed RSS authorized an incomplete held worker");
+        expect(result.error instanceof Error).toBe(true);
+        expect(result.error && typeof result.error === "object" && "code" in result.error ? result.error.code : null)
+          .toBe(scenario === "abort" ? "aborted" : "monitor-unavailable");
+        expect(await readdir(join(dirname(request), "snapshot"))).toEqual([]);
+      }
+      expect(closed).toBe(opened);
+      expect(expiries).toHaveLength(scenario === "malformed" ? 0 : 1);
+      if (scenario !== "malformed") expect(timerCancels).toBeGreaterThan(0);
+      expect(timerActive).toBe(false);
+      const errors = logs.filter(record => record.level === "error").length, readsAfterJoin = opened;
+      for (const expire of expiries) expire(); // Settled callbacks must be harmless even when the timer adapter delivers one late.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(await outcome).toBe(result); expect(opened).toBe(readsAfterJoin);
+      expect(logs.filter(record => record.level === "error").length).toBe(errors);
+    } finally {
+      ready.resolve(); releaseExit.resolve(); controller.abort();
+      for (const expire of expiries) try { expire(); } catch { /* Cleanup must still kill/join an owned worker after an assertion failure. */ }
+      if (!actualExited && pid !== undefined) try { process.kill(pid, "SIGKILL"); } catch { /* The owned worker may already have exited. */ }
+      await bounded(Promise.allSettled([outcome]), "owned reconciliation worker cleanup");
+    }
+  }), 30000);
+}
 
 test("worker joins a pending status read and never accepts an incomplete killed child", async () => workerFixture(async request => {
   const entered = Promise.withResolvers<void>(), exited = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(); let closed = false, settled = false;
