@@ -29,6 +29,8 @@ The agent receives the selected thought, relevant source/connection context, and
 
 Retain each user contribution as an immutable thought whose evolution parent is the selected continuation point. The agent can use bounded application operations to record new interpretations, developing ideas, or meaningful connections during the interaction. A recorded development has the user contribution as its one evolution parent. Supporting sources do not become additional parents.
 
+During the same run, Evolve can conditionally fill the admitted contribution's absent title and discover warranted connections using scoped full reads. A title fill cannot overwrite a current title. Do not create a development merely to restate the contribution. These changes share the run's fences and confirmed changes remain saved on Stop or failure.
+
 Show what was actually recorded or changed, with attribution and access to the supporting material. Do not mistake an agent's statement that it saved something for proof that it did. The conversational explanation may be longer or different from a saved formulation.
 
 An exchange can produce one or several recorded developments. The agent's conversational response is an addendum to its recorded developments, rather than a separate evolution node or an attachment to the user message. If several developments are produced, each links to the same retained full response. That response is available from any of them and remains searchable.

@@ -35,6 +35,6 @@ export function titleClearWeaveIntent(subjectId: string, invitationId: string): 
 /** Called only after the canonical reply's issued-order associations and current eligibility are checked. */
 export function evolveWeaveIntent(run: RunRecord, response: SharedResponse, issued: readonly string[]): WeaveIntent | null {
   if (run.kind !== "evolve" || response.state !== "complete") return null;
-  const subjectId = issued.at(-1) ?? run.inputThoughtId;
-  return subjectId === null ? null : {subjectId,triggerId:`evolve:${run.id}`};
+  const subjectId = issued.at(-1);
+  return subjectId === undefined ? null : {subjectId,triggerId:`evolve:${run.id}`};
 }

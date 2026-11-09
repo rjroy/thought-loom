@@ -60,6 +60,28 @@ function start(value: Parameters<Parameters<typeof fixture>[0]>[0], kind: "weave
 }
 
 describe("run-scoped capabilities and durable witnesses", () => {
+  test("Evolve search alone does not authorize connecting an unread candidate", () => fixture(value => {
+    const admission = value.service.admit("user", "evolve", { parentId: "subject", text: "contribution" });
+    if (!admission.contribution) throw new Error("Expected contribution");
+    const claim = value.service.claim(admission.run.id);
+    value.steps.prepare(claim, { promptId: admission.run.promptId, input: "test-owned context" });
+    const invoke = (promptId: string, request: CapabilityRequest, nextId: string) => {
+      value.steps.completeStep(claim, promptId, { version: 1, kind: "request", request });
+      const result = value.dispatcher.dispatch(claim, promptId, request);
+      value.steps.advance(claim, promptId, result, { promptId: nextId, input: JSON.stringify(result) });
+      return result;
+    };
+    invoke(admission.run.promptId, read(admission.contribution.id), "evolve-search");
+    const found = invoke("evolve-search", search, "evolve-connect");
+    expect(found).toMatchObject({ type: "search", candidates: expect.arrayContaining([expect.objectContaining({ id: "candidate" })]) });
+    expect(value.dispatcher.fullReadWitnesses(admission.run.id)).not.toContainEqual({ kind: "thought", id: "candidate" });
+    const connection: CapabilityRequest = { capability: "connection", arguments: { ...connect.arguments, fromId: admission.contribution.id, sourceIds: [admission.contribution.id] } };
+    value.steps.completeStep(claim, "evolve-connect", { version: 1, kind: "request", request: connection });
+    expect(() => value.dispatcher.dispatch(claim, "evolve-connect", connection)).toThrow(RunForbiddenError);
+    expect(value.ops.stepReceipt(admission.run.id, "evolve-connect")).toBeNull();
+    expect(value.db.query("SELECT COUNT(*) AS n FROM connections").get()).toEqual({ n: 1 });
+  }));
+
   test("search candidates are scoped and tracked but never authorize a connection alone", () => fixture(value => {
     value.rejection.rejectThought("user", "hidden");
     const run = start(value);

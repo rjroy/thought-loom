@@ -44,6 +44,42 @@ function proposal(operation: StepOperation) {
 }
 
 describe("typed operations on durable run aggregate", () => {
+  test("Evolve title fill targets only its admitted contribution and retains CAS, receipt and Stop guards", () => fixture(({ service, steps, ops, store, title }) => {
+    const admission = service.admit("user", "evolve", { parentId: "subject", text: "user contribution" });
+    if (!admission.contribution) throw new Error("Expected contribution");
+    const claim = service.claim(admission.run.id);
+    const fill: StepOperation = { type: "title-fill", title: "AI label" };
+    steps.prepare(claim, { promptId: admission.run.promptId, input: "context" });
+    steps.completeStep(claim, admission.run.promptId, proposal(fill));
+    expect(() => ops.executeStep(claim, admission.run.promptId, { ...fill, subjectId: "target" } as StepOperation)).toThrow(RunConflictError);
+    title.setUser("user", admission.contribution.id, "User label");
+    const result = ops.executeStep(claim, admission.run.promptId, fill);
+    expect(result).toEqual({ type: "title-fill", status: "unchanged" });
+    expect(store.getThought(admission.contribution.id)).toMatchObject({ title: "User label", titleAuthor: "user" });
+    expect(store.getThought("subject")?.title).toBe("Human title");
+    expect(store.getThought("target")?.title).toBeNull();
+    title.setUser("user", admission.contribution.id, null);
+    expect(ops.executeStep(claim, admission.run.promptId, fill)).toEqual(result);
+    expect(store.getThought(admission.contribution.id)?.title).toBeNull();
+    expect(ops.stepReceipt(admission.run.id, admission.run.promptId)).toEqual({ operation: fill, result });
+    service.stop("user", admission.run.id);
+    expect(() => ops.executeStep(claim, admission.run.promptId, fill)).toThrow(RunFenceError);
+  }));
+
+  test("rejecting an Evolve contribution fences its pending title fill", () => fixture(({ service, steps, ops, rejection, store }) => {
+    const admission = service.admit("user", "evolve", { parentId: "subject", text: "rejected contribution" });
+    if (!admission.contribution) throw new Error("Expected contribution");
+    const claim = service.claim(admission.run.id);
+    const fill: StepOperation = { type: "title-fill", title: "Must not save" };
+    steps.prepare(claim, { promptId: admission.run.promptId, input: "context" });
+    expect(service.context(claim, { kind: "thought", id: admission.contribution.id })).not.toBeNull();
+    steps.completeStep(claim, admission.run.promptId, proposal(fill));
+    rejection.rejectThought("user", admission.contribution.id);
+    expect(() => ops.executeStep(claim, admission.run.promptId, fill)).toThrow(RunFenceError);
+    expect(store.getThought(admission.contribution.id)?.title).toBeNull();
+    expect(ops.stepReceipt(admission.run.id, admission.run.promptId)).toBeNull();
+  }));
+
   test("persists weave intent and step-derived title no-op, interpretation and connection receipts", () => fixture(({ db, path, store, runs, service, steps, ops, title }) => {
     const run = ops.admitWeave("user", intent);
     expect(ops.weaveIntent(run.id)).toEqual(intent);

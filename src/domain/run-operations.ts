@@ -21,9 +21,10 @@ export interface WeaveIntent { readonly subjectId: string; readonly triggerId: s
 export function stepOperationScope(run: RunRecord, intent: WeaveIntent | null, operation: StepOperation): { readonly subjectId: string | null; readonly refs: readonly string[] } {
   if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
   if (run.kind === "weave" && !intent) throw new RunConflictError("Legacy weave subject is unknown");
-  const subjectId = intent?.subjectId ?? null;
+  const subjectId = run.kind === "weave" ? intent?.subjectId ?? null : operation.type === "title-fill" ? run.inputThoughtId : null;
   if (operation.type === "development" && (run.kind !== "evolve" || operation.parentId !== run.inputThoughtId)) throw new RunConflictError("Development parent must be the admitted contribution");
-  if ((operation.type === "interpretation" || operation.type === "title-fill") && (run.kind !== "weave" || subjectId === null)) throw new RunForbiddenError();
+  if (operation.type === "interpretation" && (run.kind !== "weave" || subjectId === null)) throw new RunForbiddenError();
+  if (operation.type === "title-fill" && subjectId === null) throw new RunForbiddenError();
   const refs = operation.type === "development" ? [operation.parentId,...operation.sourceIds] :
     operation.type === "interpretation" ? [...(subjectId === null ? [] : [subjectId]),...operation.sourceIds] :
     operation.type === "connection" ? [operation.fromId,operation.toId,...operation.sourceIds] : subjectId === null ? [] : [subjectId];

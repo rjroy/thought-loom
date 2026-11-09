@@ -78,6 +78,7 @@ Run `bd prime` for current workflow help. Use `bd` for all durable task tracking
 - Use a dedicated branch for an agreed sequence of Beads issues. After each issue is completed and verified, close it and create a local checkpoint commit referencing its ID, including only relevant changes. Respect explicit instructions not to commit; unrelated work stays untouched.
 - Outside authorized checkpoints, commit only with clear authority. Pushing, merging, and Dolt remote sync require separate authorization; do not treat `bd prime` session-close examples as that permission.
 - Beads' local Dolt database is authoritative. Do not generate `.beads/issues.jsonl` exports unless explicitly requested; use `bd` to inspect and verify tracker changes.
+- Always include the complete current `.beads/interactions.jsonl` changes in authorized commits. This file is a normal side effect of using Beads; do not classify its entries as unrelated work or partially stage them by issue.
 
 ## Protect local work and secrets
 
