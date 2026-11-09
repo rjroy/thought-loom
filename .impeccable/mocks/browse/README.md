@@ -21,7 +21,8 @@ The native image is **896 × 1754 opaque sRGB PNG**, copied without resizing. Im
 
 Rejected Browse B/C and superseded packaged A images/sidecars were removed after verifying this replacement. Only this selected PNG, its essential sidecar and these notes remain in the Browse package. Other selected references and user assets are untouched. Exact-image approval closes the composition selection gate; responsive and keyboard behavior remains specified in notes, not validated by runtime testing.
 
-## Implementation follow-up, not performed
+## Implementation status
 
-- The real toolbar still renders `Reserved` beside disabled Settings in [primary-navigation.tsx](../../../apps/web/src/components/primary-navigation.tsx). Remove that badge under an authorized client implementation scope; do not infer a working Settings screen from its removal.
-- Query-free chronological pagination and bounded complete direct-neighbor reads still lack API contracts. The comp does not claim those capabilities already exist. No daemon/client source, Beads or commits were changed here.
+- Browse list, Focused Map and Linked list are implemented. The shared [navigation](../../../apps/web/src/components/primary-navigation.tsx) omits `Reserved`; Settings remains noninteractive.
+- Query-free chronological pagination and bounded typed direct-neighbor reads are documented in the [daemon API](../../../docs/daemon-api.md). They required no schema change. Browser reads go through the Next.js server.
+- The implemented map retains typed directional strokes, a legend and written relationship rows, but omits inline edge captions to avoid overlap with nodes. Current behavior belongs to the [design system](../../../apps/web/DESIGN.md) and [product context](../../../.lore/context/browse-view.md), not incidental generated text in this reference.
