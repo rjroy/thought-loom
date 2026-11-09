@@ -38,6 +38,8 @@ The weaver may record AI hypotheses without requiring an approval click for each
 
 The conversational agent can make relevant knowledge changes during interaction. Background follow-up can then examine wider implications: connections to independent notes, tensions with earlier ideas, or another framing worth considering. It should not merely duplicate the immediate response or silently change the conversation's focus.
 
+Evolve handles contribution title filling and warranted connection discovery within the conversational run. On completed Evolve work, an ordinary follow-up weave targets the latest issued development if one exists. A reply without a development remains associated with the contribution and does not schedule a separate contribution weave.
+
 ## Trust and visibility
 
 Show simple processing state where useful: pending, working, finished, or failed. Successful capture remains successful even if weaving fails. Retry must not silently duplicate the same changes. Retain a concise completed Weaver outcome as a Full reply on the original capture, including useful partial-result or source-access limitations. A retained outcome does not require creating an interpretation when there is no useful finding.

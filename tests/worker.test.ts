@@ -81,7 +81,7 @@ function worker(f: ReturnType<typeof setup>, output: (index: number) => string, 
 }
 async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: string) {
   // Test harness bound only; the worker must not impose an effort quota.
-  for (let i = 0; i < 20 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
+  for (let i = 0; i < 40 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
 }
 
 test("default-level worker diagnostics classify initial preparation failures without exposing private data", async () => fixture(async f => {
@@ -153,16 +153,23 @@ async function provenInterruptedWeave(f: ReturnType<typeof setup>) {
   return {run,prompt,bindings,saved,adapter,journal,state,snapshot};
 }
 
-test("weave alone renders discovery guidance alongside the shared evidence fences", () => {
+test("weave and Evolve render discovery guidance alongside the shared evidence fences", () => {
   const context = { thoughts: [], connections: [], responses: [] };
-  const render = (job: Parameters<typeof initialWorkerPrompt>[0]["job"]) => JSON.parse(initialWorkerPrompt({ ...context, job })) as { role: string; instructions: string[] };
+  const render = (job: Parameters<typeof initialWorkerPrompt>[0]["job"]) => JSON.parse(initialWorkerPrompt({ ...context, job })) as { role: string; instructions: string[]; capabilities: { capability: string; argumentsSchema: { properties: Record<string, unknown> } }[] };
   const weave = render({ kind: "weave", subjectId: "subject" });
   const text = weave.instructions.join(" ");
   for (const phrase of ["claims, themes, and implications", "Actively search", "beyond lexical similarity", "snippets as discovery leads, not evidence", "Fully read promising candidate thoughts", "already fully read and needs no redundant reread", "does not read its endpoint thoughts", "supports, contradicts, extends, or related", "intended direction", "explain concretely", "only fully read supporting thoughts", "finding no useful connection is valid", "do not reconstruct it from indirect provenance"]) expect(text).toContain(phrase);
   expect(weave.role).toContain("fill an absent title");
   const evolve = render({ kind: "evolve", contributionId: "input", continuationId: null });
   const exported = render({ kind: "export", request: "fixture question", effort: "standard" });
-  for (const other of [evolve, exported]) expect(other.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
+  expect(evolve.instructions.join(" ")).toMatch(/search.*candidate/i);
+  expect(evolve.instructions.join(" ")).toMatch(/fully read/i);
+  expect(evolve.instructions.join(" ")).toMatch(/connection/i);
+  expect(evolve.instructions.join(" ")).not.toMatch(/sibling interpretations|source-informed interpretation|bare list of links/i);
+  expect(evolve.capabilities.map(item => item.capability)).toEqual(expect.arrayContaining(["title-fill", "search", "readThought", "connection", "development"]));
+  expect(evolve.capabilities.map(item => item.capability)).not.toContain("interpretation");
+  expect(Object.keys(evolve.capabilities.find(item => item.capability === "title-fill")?.argumentsSchema.properties ?? {})).toEqual(["title"]);
+  expect(exported.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
 });
 
 test("weave prompt gives intent-driven source guidance without broadening restricted roles", () => {
@@ -230,6 +237,34 @@ test("weave can search and read a candidate then connect it to the preloaded sub
   expect(f.capabilities.fullReadWitnesses(run.id)).toEqual(expect.arrayContaining([{ kind: "thought", id: "root" }, { kind: "thought", id: "candidate" }]));
   expect(f.db.query("SELECT from_id AS fromId,to_id AS toId,category,explanation FROM connections").get()).toEqual({ fromId: "root", toId: "candidate", category: "related", explanation: "The subject and candidate share a fixture theme" });
   expect(w.native.submitted).toHaveLength(4);
+}));
+
+for (const withDevelopment of [false, true]) test(`Evolve enriches its contribution in the same run ${withDevelopment ? "with developments" : "without a development"}`, async () => fixture(async f => {
+  f.store.saveThought({ id: "candidate", text: "zircon candidate", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  const admission = f.service.admit("user", "evolve", { parentId: "root", text: "my contribution" });
+  if (!admission.contribution) throw new Error("Expected contribution");
+  const contributionId = admission.contribution.id;
+  const outputs = [
+    request("title-fill", { title: "Contribution label" }),
+    request("search", { query: "zircon" }),
+    request("readThought", { id: "candidate" }),
+    request("connection", { fromId: contributionId, toId: "candidate", category: "supports", explanation: "The candidate supports the contribution", sourceIds: [contributionId, "candidate"] }),
+    ...(withDevelopment ? [request("development", { parentId: contributionId, text: "first development", sourceIds: [] }), request("development", { parentId: contributionId, text: "latest development", sourceIds: [] })] : []),
+    complete("full conversational reply"),
+  ];
+  const w = worker(f, index => outputs[index] ?? complete("unexpected extra turn"));
+  await drive(w.instance, f, admission.run.id);
+  expect(f.runs.get(admission.run.id)?.status).toBe("completed");
+  expect(w.native.submitted).toHaveLength(outputs.length);
+  expect(f.store.getThought(contributionId)).toMatchObject({ text: "my contribution", title: "Contribution label", titleAuthor: "ai", parentId: "root", author: "user" });
+  expect(f.capabilities.fullReadWitnesses(admission.run.id)).toEqual(expect.arrayContaining([{ kind: "thought", id: contributionId }, { kind: "thought", id: "candidate" }]));
+  expect(f.db.query("SELECT from_id AS fromId,to_id AS toId,category,explanation FROM connections").all()).toEqual([{ fromId: contributionId, toId: "candidate", category: "supports", explanation: "The candidate supports the contribution" }]);
+  const issued = f.db.query("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position").all(admission.run.id) as { id: string }[];
+  expect(issued).toHaveLength(withDevelopment ? 2 : 0);
+  for (const [index, item] of issued.entries()) expect(f.store.getThought(item.id)).toMatchObject({ text: index === 0 ? "first development" : "latest development", parentId: contributionId, author: "ai", kind: "developing-idea" });
+  expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(contributionId)).toEqual({ n: 0 });
+  expect(f.runs.reply(admission.run.id)).toEqual({ id: expect.any(String), text: "full conversational reply", role: withDevelopment ? "addendum" : "fallback", state: "complete", thoughtIds: withDevelopment ? issued.map(item => item.id) : [contributionId] });
+  expect(f.db.query("SELECT weave_subject_id AS subjectId,weave_trigger_id AS triggerId FROM runs WHERE kind='weave'").all()).toEqual(withDevelopment ? [{ subjectId: issued.at(-1)?.id, triggerId: `evolve:${admission.run.id}` }] : []);
 }));
 
 test("worker persists scoped initial context and ordered development result before the next prompt", async () => fixture(async f => {

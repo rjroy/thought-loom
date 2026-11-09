@@ -249,6 +249,8 @@ Body: exactly `{"text":"A contribution to this discussion"}`. The path selects a
 
 Success returns `201 {contribution, run}`. The daemon creates the user contribution and queued Evolve run atomically. IDs, timestamps, authorship, classification and ancestry defaults are daemon-owned. The returned `run` uses the status shape below; it does not claim generation has finished.
 
+During the run, Evolve may fill an absent title only on the admitted contribution and may record warranted connections after scoped full reads. A current title wins over a late AI fill. Confirmed changes remain saved on Stop or failure. A completed run schedules ordinary follow-up weaving on its latest issued development when one exists; a reply without a development remains associated with the contribution without scheduling a contribution weave.
+
 Without [agent configuration](server-startup.md#agent-configuration), this returns actionable `503` before saving the contribution. With configuration present, service unavailability leaves admitted work durable rather than discarding the contribution. The daemon owns execution; disconnecting the HTTP client does not cancel it.
 
 ### Status: `GET /runs/:id`

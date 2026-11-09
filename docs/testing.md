@@ -615,7 +615,7 @@ The suite covers these distinctions:
 - Lost acknowledgements recover the existing external identity. Native completion is durable evidence for finalization, not proof that the local output has already committed. Replayed operations do not create another development.
 - Stop, stale ownership and rejected context fence later work. Submission authorization is checked as well as later writes, and a late successful acknowledgement cannot revive a stopped run. Drafts do not override the durable order of saved developments.
 
-Deterministic agent tests supply controlled model proposals and replies. They check the rendered weave discovery instructions and establish conditional title filling, scoped capabilities, full-read evidence, saved developments and run behavior, not that a model will discover connections, semantic model quality or live-provider availability. Other command/API tests still simulate AI-authored calls directly.
+Deterministic agent tests supply controlled model proposals and replies. They check rendered Weaver and Evolve discovery instructions, conditional contribution title filling, scoped capabilities, full-read evidence, saved developments and run behavior. Evolve follow-up scheduling targets the latest development only, while a no-development reply remains attached to the contribution. These checks do not establish that a model will discover connections, semantic model quality or live-provider availability. Other command/API tests still simulate AI-authored calls directly.
 
 Run-kernel tests use a controlled `NativeDispatcher`, not the real OpenCode client. They establish domain/storage recovery and fencing, not native service compatibility. Claim generation is not an expiry-based lease or a model effort quota.
 

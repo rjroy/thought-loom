@@ -120,13 +120,14 @@ test("Evolve finish atomically saves canonical reply and targeted follow-up on l
   expect(jobs(f.db)).toEqual([{ id: expect.any(String), status: "queued", subjectId: last.thought.id, triggerId: expect.any(String) }]);
 }));
 
-test("Evolve fallback targets contribution; weaver knowledge writes do not recursively schedule", () => fixture(f => {
+test("Evolve fallback schedules no contribution weave; weaver knowledge writes do not recursively schedule", () => fixture(f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "fallback input" });
   if (!admission.contribution) throw new Error("Expected contribution");
   const claim = f.service.claim(admission.run.id);
   f.service.finish(claim, { id: "fallback", role: "fallback", state: "complete", text: "question back", thoughtIds: [admission.contribution.id] });
   const before = jobs(f.db);
-  expect(before).toEqual([{ id: expect.any(String), status: "queued", subjectId: admission.contribution.id, triggerId: expect.any(String) }]);
+  expect(f.runs.reply(admission.run.id)).toMatchObject({ text: "question back", role: "fallback", thoughtIds: [admission.contribution.id] });
+  expect(before).toEqual([]);
   const interpretation = f.creation.interpret("ai", "root", { text: "weaver interpretation" });
   f.titles.fillAi("ai", interpretation.id, "AI title");
   f.creation.connect("ai", { fromId: "root", toId: interpretation.id, category: "related", explanation: "relationship" });

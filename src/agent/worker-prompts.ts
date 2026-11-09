@@ -65,20 +65,27 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
         ? "You are Thoughtloom's background weaver reinterpreting this retained source afresh. Reopen its original file, follow the user's clarification or summarize it, and save one new source-grounded searchable interpretation for this run. Earlier interpretations do not fulfill this request. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a new Full reply on the source."
         : "You are Thoughtloom's background weaver for this retained source. Read its original file, follow the user's clarification or summarize it, and save one source-grounded searchable interpretation. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a Full reply on the source."
       : "You are Thoughtloom's background weaver. Examine this fixed subject; fill an absent title, record a useful interpretation or supported connections when warranted. No findings is a valid outcome. Finish with a concise user-facing outcome in the complete envelope's reply field; it will be retained as a Full reply on the subject."
-    : "You are Thoughtloom's Evolve agent. Respond to the admitted user contribution in its explicit discussion context. Record useful developments with that contribution as their only evolution parent. Finish with the full human-facing conversational reply in the complete envelope's reply field, not an operation summary. A clarifying question without a separate development is valid.";
+    : "You are Thoughtloom's Evolve agent. Respond to the admitted user contribution in its explicit discussion context. Record useful developments with that contribution as their only evolution parent; do not create a redundant development merely to restate the contribution. Finish with the full human-facing conversational reply in the complete envelope's reply field, not an operation summary. A clarifying question without a separate development is valid.";
   const writes = context.job.kind === "weave" ? [
     {capability:"interpretation",argumentsSchema:argumentsSchema({text:string,sourceIds:sources})},
     titleFill,
-  ] : [{capability:"development",argumentsSchema:argumentsSchema({parentId:{type:"string",const:context.job.contributionId},text:string,sourceIds:sources})}];
-  const discovery = context.job.kind === "weave" && subject?.kind !== "media-original" ? [
+  ] : [{capability:"development",argumentsSchema:argumentsSchema({parentId:{type:"string",const:context.job.contributionId},text:string,sourceIds:sources})},titleFill];
+  const conceptualDiscovery = [
     "Examine the fixed subject's claims, themes, and implications. Actively search existing thinking for promising candidates, including conceptual relationships beyond lexical similarity.",
     "Treat search snippets as discovery leads, not evidence. Fully read promising candidate thoughts before proposing a relationship; the subject in initial context is already fully read and needs no redundant reread. Optionally read a connection for context, but reading it does not read its endpoint thoughts.",
     "When warranted, propose a meaningful supports, contradicts, extends, or related connection. Choose fromId and toId so the category reads in the intended direction, and explain concretely how the fully read thoughts relate. Include only fully read supporting thoughts in sourceIds. Never fabricate significance or relationships; finding no useful connection is valid.",
+  ];
+  const discovery = context.job.kind === "weave" && subject?.kind !== "media-original" ? [
+    ...conceptualDiscovery,
     "Follow the intent of the entire captured thought when it includes a URL. A URL-only capture invites a source-grounded summary. Use permitted operator-configured native tools or MCPs to investigate referenced material when available; accompanying context may call for a coherent interpretation informed by sources rather than a separate summary of each.",
     "For every source-informed interpretation, include readable source links directly in its text, whether the capture is URL-only, contextual, or a list.",
     "For a bare list of links, record a separate searchable interpretation for each successfully read source, using multiple interpretation operations. The daemon makes these sibling thoughts under the fixed subject. Include readable Markdown source links directly in each interpretation; sourceIds contains only supporting Thoughtloom thought IDs, never URLs.",
     "Read each referenced source afresh for each new capture, even if the same URL was summarized before; a prior summary is not a substitute for current retrieval. Follow relevant links when useful for understanding, without exhaustive crawling. Do not retain source snapshots.",
     "If a source is inaccessible or retrieval fails, disclose the limitation in the final outcome, never invent source content or create a fabricated summary. Preserve successful summaries when other sources fail, and interpret supplied user context as best possible from available evidence."
+  ] : [];
+  const evolveEnrichment = context.job.kind === "evolve" ? [
+    "Examine the admitted user contribution as the fixed subject. Fill its absent title with title-fill when warranted; the daemon chooses the contribution and preserves any current user title.",
+    ...conceptualDiscovery,
   ] : [];
   const mediaInstructions = subject?.kind === "media-original" ? [
     subject.mediaSource.clarification === null
@@ -91,7 +98,7 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
   const reinterpretInstructions = reinterpret ? [
     "This is an explicit reinterpretation of the fixed subject. Examine it afresh and read referenced sources again; earlier interpretations and replies are not substitutes for current retrieval. Preserve all earlier thoughts, replies and ancestry. New interpretations are direct children of this subject, not replacements or a chain through earlier output. No new text or changed instructions were supplied by the user.",
   ] : [];
-  return protocolJson({version:1,kind:"job",role,instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,...discovery,
+  return protocolJson({version:1,kind:"job",role,instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,...discovery,...evolveEnrichment,
     ...reinterpretInstructions,fileInstructions,...mediaInstructions,"sourceIds is an array of supporting thought IDs; it may be empty."],
     capabilities:[...reads,...writes,connection],context,...(originals.length ? {originals} : {})});
 }
