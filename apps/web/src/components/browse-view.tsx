@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { browseListHref, decodeBrowseQuery, type BrowseQuery } from "../features/browse/query";
+import { browseListHref, browseMapHref, decodeBrowseQuery, type BrowseQuery } from "../features/browse/query";
 import { createBrowseController } from "../features/browse/controller";
 import { fetchBrowsePage } from "../features/browse/request";
 import type { IdeaThought } from "../features/idea/types";
@@ -73,6 +73,10 @@ export function BrowseView() {
     // Mount and Next navigation use the same actual-location input as popstate, never its delayed mirror.
     reconcileLocation();
   }, [params, reconcileLocation]);
+
+  useLayoutEffect(() => {
+    if (state.phase === "idle") reconcileLocation();
+  }, [state.phase, reconcileLocation]);
 
   useLayoutEffect(() => {
     const remember = () => {
@@ -177,7 +181,7 @@ export function BrowseView() {
             : filtered ? <p>Choose another authorship filter or clear filters to browse again.</p>
               : <><p>Capture a thought to give yourself something to return to.</p><Link href="/capture" prefetch={false}>Capture a thought</Link></>}
         </div>}
-        <ol className={styles.list} aria-label="Ideas">{items.map(item => <li key={item.id}><BrowseRow item={item} /></li>)}</ol>
+        <ol className={styles.list} aria-label="Ideas">{items.map(item => <li key={item.id}><BrowseRow item={item} query={query} /></li>)}</ol>
         {ready && state.nextCursor !== null && !problem && <button className={styles.button} type="button"
           disabled={state.loadingMore} aria-busy={state.loadingMore} onClick={() => void controller.loadMore()}>Load more</button>}
       </div>
@@ -185,14 +189,14 @@ export function BrowseView() {
   </section>;
 }
 
-function BrowseRow({ item }: { item: IdeaThought }) {
+function BrowseRow({ item, query }: { item: IdeaThought; query: BrowseQuery }) {
   const title = item.title ?? (item.kind === "media-original" ? item.mediaSource.name : item.text.trim().split(/\s+/).slice(0, 5).join(" "));
   const date = new Date(item.createdAt);
   const created = Number.isNaN(date.valueOf()) ? "Date unavailable" : new Intl.DateTimeFormat("en", {
     month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
   }).format(date);
   return <article className={styles.card}>
-    <h2>{title}</h2>
+    <h2><Link href={browseMapHref(item.id, browseListHref(query), query.scope)} prefetch={false}>{title}</Link></h2>
     {item.kind === "media-original" ? <MediaSourceDetails source={item.mediaSource} compact />
       : <p className={styles.excerpt}>{item.text.slice(0, 160)}{item.text.length > 160 ? "…" : ""}</p>}
     <div className={styles.byline}>

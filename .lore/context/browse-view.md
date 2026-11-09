@@ -11,7 +11,7 @@ tags: [thoughtloom, product, browse]
 
 Browse helps the user rediscover forgotten ideas without a search query or agent. It is a separate main-navigation destination alongside Explore and Capture. Explore remains search-focused. Remove the nonfunctional **Reserved** toolbar label; this does not authorize a Settings feature.
 
-Direct entry opens a recent-ideas list. **Browse from here** on Idea opens a map centered initially on that selected thought, which need not be an evolution-tree root. These are approved designs, not yet implemented behavior.
+Direct entry opens a recent-ideas list. **Browse from here** on Idea opens a map centered initially on that selected thought, which need not be an evolution-tree root. Both entry points are implemented.
 
 ## Chronological list
 
@@ -38,8 +38,10 @@ Hide rejected material by default. **Show rejected** includes it alongside activ
 
 Use explicit bounded loading for list rows and neighborhood expansion. Preserve confirmed content if further loading fails. Empty libraries invite Capture; empty filters offer reset; disconnected thoughts remain readable.
 
-On narrow screens the map precedes a normal-flow inspector. **Linked list** exposes the same explored neighborhood with keyboard-accessible inspect, expand and Open Idea actions. These responsive/accessibility decisions accompany the approved desktop composition; runtime validation is still required.
+On narrow screens the map precedes a normal-flow inspector. **Linked list** exposes the same explored neighborhood with keyboard-accessible inspect, expand and Open Idea actions. Isolated browser walkthroughs validate these interactions at wide and narrow viewports; this is not a general accessibility certification or large-library performance guarantee.
 
 ## Boundary and next steps
 
-The daemon now provides paginated query-free chronological reads through `GET /browse/thoughts` and bounded complete direct-neighbor expansion through `GET /thoughts/:id/neighborhood`; see the [API contracts](../../docs/daemon-api.md). These read capabilities required no schema change. The chronological list and shared Browse navigation are implemented; map entry and expansion remain the next client slice. Until that slice is complete, list titles are deliberately noninteractive rather than linking to an unimplemented screen. Keep client work separate under the [working agreement](architecture.md).
+The daemon provides paginated query-free chronological reads through `GET /browse/thoughts` and bounded complete direct-neighbor expansion through `GET /thoughts/:id/neighborhood`; see the [API contracts](../../docs/daemon-api.md). These read capabilities required no schema change. The chronological list, shared navigation, map entry, explicit expansion and Linked list alternative are implemented. Browser reads go through the Next.js server under the [working agreement](architecture.md).
+
+Map URLs identify the starting thought and inspection scope, not every explored node or the current selection. Mounted document memory preserves list pages/position and map exploration/camera when returning. Reload reconstructs the bookmarked starting point with one bounded page; it does not retain the old graph or list pages across document lifetimes. Visibility-changing Idea actions invalidate Browse memory on both attempt and settlement so returning during a pending write cannot retain stale content after that write completes.

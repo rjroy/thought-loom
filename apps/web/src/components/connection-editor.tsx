@@ -15,9 +15,11 @@ const categoryLabel = (category: Category) => category[0]!.toUpperCase() + categ
 const sentence = (from: IdeaThought, category: Category, to: IdeaThought) =>
   `${connectionTitle(from)} ${category === "related" ? "is related to" : category} ${connectionTitle(to)}`;
 
-export function ConnectionEditor({ thought, disabled, onClose, onCreated, onLockedChange }: {
+export function ConnectionEditor({ thought, disabled, onClose, onCreated, onLockedChange, onInvalidateReads }: {
   thought: IdeaThought; disabled: boolean; onClose: () => void; onCreated: () => void;
   onLockedChange: (locked: boolean) => void;
+  /** Write attempt and settlement invalidate consumer reads even if this editor has unmounted. */
+  onInvalidateReads: () => void;
 }) {
   const [other, setOther] = useState<IdeaThought | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
@@ -57,7 +59,8 @@ export function ConnectionEditor({ thought, disabled, onClose, onCreated, onLock
       category, explanation, sourceIds: sources.map(source => source.id),
     } };
     setSnapshot(submitted); setPhase("pending"); setNotice(null);
-    const result = await commandIdea(submitted.command, { fetch: window.fetch.bind(window) });
+    onInvalidateReads();
+    const result = await commandIdea(submitted.command, { fetch: window.fetch.bind(window) }).finally(onInvalidateReads);
     if (!alive.current) return;
     writing.current = false;
     if (result.kind === "applied") {

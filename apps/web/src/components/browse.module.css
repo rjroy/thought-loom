@@ -28,6 +28,8 @@
 .list:empty { display: none; }
 .card { min-inline-size: 0; padding: 1.25rem 1.5rem; border-radius: 0.75rem; background: var(--color-card); overflow-wrap: anywhere; }
 .card h2 { margin: 0 0 0.5rem; color: var(--color-text); font-size: 1.5rem; font-weight: 650; line-height: 1.25; letter-spacing: -0.02em; }
+.card h2 a { color: inherit; text-decoration: none; }
+.card h2 a:hover { text-decoration: underline; }
 .excerpt { max-inline-size: 72ch; margin: 0 0 0.75rem; white-space: pre-wrap; }
 .byline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; color: var(--color-muted); font-size: 1rem; }
 .kind { display: inline-flex; align-items: center; gap: 0.5rem; }

@@ -23,6 +23,7 @@ export interface BrowseController {
   setQuery(query: BrowseQuery): Promise<void>;
   refresh(): Promise<void>;
   loadMore(): Promise<void>;
+  invalidate(): void;
   dispose(): void;
 }
 
@@ -101,6 +102,7 @@ export function createBrowseController(
     },
     refresh: () => read(false),
     loadMore: () => read(true),
+    invalidate() { if (!disposed) { cancel(); publish({ phase: "idle", items: [], nextCursor: null, loadingMore: false, problem: null }); } },
     dispose() { disposed = true; cancel(); listeners.clear(); },
   };
 }
