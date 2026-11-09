@@ -17,6 +17,8 @@ import { searchRevision } from "../domain/search-session-guards";
 import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose } from "../domain/weave-scheduling";
 import { isReadCapability } from "../domain/capability";
 import { interruptOrdinaryRun, issuedRunThoughts, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type RunVisibility } from "./run-fences";
+import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertImportRunNotRestoreFenced } from "./import-authority";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = RunVisibility;
@@ -54,7 +56,9 @@ export class SqliteRunAggregate {
   }
   protected require(id: string): RunRecord { const run = this.loadRun(id); if (!run) throw new RunNotFoundError(); return run; }
   protected active(claim: Claim): RunRecord {
+    assertRunNotRestoreFenced(this.db,claim.runId);
     const run = this.require(claim.runId);
+    if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,run.id);
     if (run.generation !== claim.generation || !["queued","submitting","running","uncertain"].includes(run.status)) throw new RunFenceError();
     if (run.kind === "evolve" && run.inputThoughtId === null) throw new RunFenceError("Legacy evolve input identity unavailable; cannot resume safely");
     if (run.kind === "search") requireSearchExecutionOwner(this.db,run);
@@ -202,6 +206,7 @@ export class SqliteRunAggregate {
     if (response.thoughtIds.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
   }
   protected finalInterrupt(run: RunRecord, reason: "stopped" | "context-invalidated" | "failed" = "stopped"): void {
+    assertRunNotRestoreFenced(this.db,run.id);
     if (run.kind === "search") {
       searchRevision(run.generation + 1);
       this.db.run("UPDATE search_turns SET outcome_reason=? WHERE run_id=? AND outcome_reason IS NULL",[reason,run.id]);
@@ -209,6 +214,7 @@ export class SqliteRunAggregate {
       return;
     }
     if (run.kind === "import") {
+      assertImportRunNotRestoreFenced(this.db,run.id);
       this.db.run("UPDATE markdown_import_files SET outcome='interrupted',reason_code='interrupted' WHERE run_id=? AND outcome IS NULL",[run.id]);
       this.db.run("DELETE FROM markdown_import_payloads WHERE file_id IN (SELECT id FROM markdown_import_files WHERE run_id=? AND outcome IS NOT NULL)",[run.id]);
       this.db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);

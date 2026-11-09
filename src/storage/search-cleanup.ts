@@ -9,6 +9,7 @@ import { parseSearchCleanupManifest, searchCleanupFocus, SearchCleanupJournalErr
 import { parseSearchCleanupEvidence, mergeCleanupFacts, type SearchCleanupEvidence } from "./search-cleanup-evidence";
 import { readSearchCleanupSnapshot } from "./search-cleanup-snapshot";
 import { immediate } from "./transaction";
+import { assertRunNotRestoreFenced } from "./restore-fences";
 
 interface CleanupRow {
   readonly run_id: string; readonly session_id: string; readonly binding_json: string; readonly last_prompt_id: string;
@@ -49,9 +50,11 @@ export class SqliteSearchCleanup {
       WHERE c.run_id=? AND s.deleted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runs WHERE id=c.run_id)`).get(runId) !== null;
   }
   prepare(runId: string): SearchCleanupIdentity | null {
+    assertRunNotRestoreFenced(this.db,runId);
     // Non-search/active ticks take no additional write lock. The authoritative check repeats inside the snapshot transaction.
     if (!this.retained(runId) && !this.isPurged(runId)) return null;
     return immediate(this.db,() => {
+      assertRunNotRestoreFenced(this.db,runId);
       this.owner?.assertRegistered(this.db);
       if (!this.retained(runId) && !this.isPurged(runId)) return null;
       let row = this.row(runId);
@@ -67,6 +70,7 @@ export class SqliteSearchCleanup {
   /** Seal before input erasure. Existing Stop/rejection/legacy records remain byte-identical, never replaced or backfilled. */
   sealInTransaction(runId: string): void {
     if (!this.db.inTransaction) throw new SearchCleanupJournalError();
+    assertRunNotRestoreFenced(this.db,runId);
     this.owner?.assertRegistered(this.db);
     const snapshot = readSearchCleanupSnapshot(this.db,runId), prior = this.row(runId);
     if (prior) {
@@ -87,6 +91,7 @@ export class SqliteSearchCleanup {
     this.logger.info("[search cleanup] snapshot applied in transaction",{runId});
   }
   private current(identity: SearchCleanupIdentity): CleanupRecord {
+    assertRunNotRestoreFenced(this.db,identity.runId);
     const row = this.row(identity.runId);
     if (!row || row.state !== "pending" || row.session_id !== identity.sessionId || row.binding_json !== identity.bindingJson ||
       row.prompt_manifest_json !== identity.manifestJson ||
@@ -141,6 +146,7 @@ export class SqliteSearchCleanup {
     return parseSearchCleanupEvidence(identity,protocolJson(evidence));
   }
   private settle(identity: SearchCleanupIdentity, evidence: SearchCleanupEvidence, admission: "never-submitted" | "terminal"): void {
+    assertRunNotRestoreFenced(this.db,identity.runId);
     this.db.run("UPDATE search_native_cleanup SET drain_state='drained',admission_state=?,state='settled',evidence_json=? WHERE run_id=?",
       [admission,protocolJson(evidence),identity.runId]);
     const result = this.db.run(`UPDATE runs SET cancellation_state='settled' WHERE id=? AND kind='search'
@@ -175,9 +181,11 @@ export class SqliteSearchCleanup {
   }
   /** Transport ACK only, before an active-claim post-await fence. No row creation, prose, execution or settlement. */
   recordAdmission(fact: SearchAdmissionFact): void {
+    assertRunNotRestoreFenced(this.db,fact.runId);
     if (!this.owner) return;
     this.owner.assertRegistered(this.db);
     immediate(this.db,() => {
+      assertRunNotRestoreFenced(this.db,fact.runId);
       const row = this.row(fact.runId);
       if (!row || row.state !== "pending") return;
       const saved = this.decode(row);

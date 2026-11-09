@@ -11,6 +11,8 @@ import { evolveWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave } from "./weave-admission";
 import { searchRevision } from "../domain/search-session-guards";
 import { weaveDispatchAllowed } from "./weave-work";
+import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
+import { isImportRunRestoreFenced } from "./import-authority";
 
 /** Durable transaction boundary; never invokes a model or network while holding a SQLite lock. */
 export class SqliteRunRepository extends SqliteRunAggregate implements RunRepository {
@@ -36,6 +38,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   }
   claim(id: string): Claim {
     const outcome = this.transaction("claim", id, () => {
+      assertRunNotRestoreFenced(this.db,id);
       const run = this.require(id);
       requireExecutionRun(run);
       if (run.kind === "weave" && run.status === "queued" && !weaveDispatchAllowed(this.db,id)) {
@@ -59,11 +62,14 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     this.transitionNative(claim,status,nativeState,promptId);
   }
   stop(id: string): void { this.transaction("stop", id, () => {
+    if (isRunRestoreFenced(this.db,id)) return; // Historical control read, never ordinary interruption/cancellation intent.
     const run = this.require(id);
+    if (run.kind === "import" && isImportRunRestoreFenced(this.db,run.id)) return;
     if (["completed","interrupted","failed"].includes(run.status)) return;
     this.finalInterrupt(run);
   }); }
   expose(claim: Claim, ref: ContextRef): ContextValue | null { return this.transaction("expose", claim.runId, () => {
+    assertRunNotRestoreFenced(this.db,claim.runId);
     const run = this.require(claim.runId);
     requireOrdinaryRun(run);
     if (run.status === "interrupted" && run.generation !== claim.generation) return null;

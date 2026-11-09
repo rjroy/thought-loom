@@ -16,13 +16,15 @@ import { SqliteSearchPromptClock } from "./search-prompt-clock";
 import { assertOrdinaryCancellationJournal } from "./run-cancellation";
 import { weaveDispatchAllowed } from "./weave-work";
 import { readAgentBinding } from "./run-record";
+import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
+import { assertImportRunNotRestoreFenced } from "./import-authority";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
   constructor(db: Database, private readonly sources: RunSources,
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
   canDispatch(runId: string): boolean {
-    return this.transaction("check weave dispatch",runId,() => weaveDispatchAllowed(this.db,runId));
+    return this.transaction("check weave dispatch",runId,() => !isRunRestoreFenced(this.db,runId) && weaveDispatchAllowed(this.db,runId));
   }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
     const prepared = this.guardedExecution("prepare worker context",claim,run => {
@@ -112,6 +114,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
     });
   }
   finish(claim: Claim, promptId: string): void {
+    assertRunNotRestoreFenced(this.db,claim.runId);
     // Publication owns its own commit-after-fence transaction; an outer transaction must not roll that fence back.
     if (this.require(claim.runId).kind === "search") {
       new SqliteSearchPublication(this.db,this.sources).finalizeReply(claim,promptId);
@@ -133,7 +136,9 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
   }
   settleUnsubmitted(runId: string): boolean {
     return this.transaction("settle unsubmitted worker",runId,() => {
+      assertRunNotRestoreFenced(this.db,runId);
       const run = this.require(runId);
+      if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,runId);
       if (run.kind === "search") return false; // Search settlement needs its later joined-flight and admission proof.
       if (!["interrupted","failed"].includes(run.status)) return false;
       const cancellation = this.db.query("SELECT cancellation_state AS state FROM runs WHERE id=?").get(runId) as {state:CancellationState};

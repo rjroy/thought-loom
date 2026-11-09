@@ -3,6 +3,7 @@ import type { RunStatus } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
 import { resolveWeavePurpose } from "../domain/weave-scheduling";
 import { recordedWeaveCancellationSafe } from "./run-cancellation";
+import { isRunRestoreFenced } from "./restore-fences";
 
 export interface SubjectWeaveWork {
   readonly id: string;
@@ -29,6 +30,7 @@ export function subjectWeaveWork(db: Database, subjectId: string, kind: Material
 }
 
 export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): WeaveBlockReason | null {
+  if (isRunRestoreFenced(db,work.id)) return null;
   if (["queued","submitting","running"].includes(work.status)) return "work-active";
   if (work.status === "uncertain" || work.cancellation === "pending") return "work-unsettled";
   if (work.status === "completed") return null;
@@ -38,6 +40,7 @@ export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): Weav
 
 /** Caller owns its existing read/write transaction. Already-submitted work is observed separately, never redispatched. */
 export function weaveDispatchAllowed(db: Database, runId: string): boolean {
+  if (isRunRestoreFenced(db,runId)) return false;
   const run = db.query<{kind:string;subjectId:string|null;triggerId:string|null;materialKind:MaterialKind|null},[string]>(
     `SELECT r.kind,r.weave_subject_id AS subjectId,r.weave_trigger_id AS triggerId,t.kind AS materialKind
      FROM runs r LEFT JOIN thoughts t ON t.id=r.weave_subject_id WHERE r.id=?`).get(runId);
@@ -45,7 +48,7 @@ export function weaveDispatchAllowed(db: Database, runId: string): boolean {
   if (run.kind !== "weave" || run.subjectId === null || run.triggerId === null) return true; // Never infer an unknown legacy subject.
   if (run.materialKind === null) return false;
   if (resolveWeavePurpose(run.materialKind,run.triggerId) === "media-title-only") return true;
-  const work = subjectWeaveWork(db,run.subjectId,run.materialKind);
+  const work = subjectWeaveWork(db,run.subjectId,run.materialKind).filter(item => !isRunRestoreFenced(db,item.id));
   if (work.some(item => item.cancellation === "pending" || (!active(item.status) && weaveWorkBlockReason(db,item) !== null))) return false;
   const candidates = work.filter(item => active(item.status));
   const incumbent = candidates.find(item => item.started) ?? candidates[0];

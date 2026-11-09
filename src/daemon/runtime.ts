@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { CreationService } from "../domain/creation";
 import { RejectionService } from "../domain/rejection";
 import { SearchService } from "../domain/search";
@@ -113,6 +114,19 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     diagnostics.info("[import] transport configured",{maxBytes:valid.importMaxBytes ?? 1048576});
     executionOwner = await ExecutionOwnerLease.acquire(valid.dbPath,diagnostics);
     executionOwner.assertHeld();
+    diagnostics.info("[restore] startup marker check attempt");
+    let markerPresent = true;
+    try { await lstat(join(dirname(executionOwner.databasePath), ".restore-in-progress")); }
+    catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") markerPresent = false;
+      else throw error;
+    }
+    if (markerPresent) {
+      diagnostics.warning("[restore] startup blocked by incomplete restore");
+      throw new Error("Incomplete restore");
+    }
+    executionOwner.assertHeld();
+    diagnostics.info("[restore] startup marker check outcome");
     db = new Database(executionOwner.databasePath, { readwrite: true, create: false });
     executionOwner.assertHeld();
     diagnostics.info("[storage] enable WAL attempt");

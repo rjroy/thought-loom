@@ -8,10 +8,11 @@ import { resolveWeavePurpose } from "../domain/weave-scheduling";
 import { nonEmpty, record } from "../domain/validation";
 import { insertRun, readRun } from "./run-record";
 import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
+import { isRunRestoreFenced } from "./restore-fences";
 
 export type WeaveSources = RunSources;
 
-/** All interpretation histories gate retry; only the latest interpretation run drives source inspection. */
+/** Unfenced interpretation work gates retry; the latest historical run still drives source inspection. */
 export function sourceWeaveEligibility(db: Database, subjectId: string): {
   readonly runId: string | null; readonly retry: MediaRetryEligibility;
 } {
@@ -22,11 +23,12 @@ export function sourceWeaveEligibility(db: Database, subjectId: string): {
   if (db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
     return {runId,retry:{eligible:false,reason:"interpretation-exists"}};
   }
-  for (const item of work) {
+  const live = work.filter(item => !isRunRestoreFenced(db,item.id));
+  for (const item of live) {
     const reason = weaveWorkBlockReason(db,item);
     if (reason !== null) return {runId,retry:{eligible:false,reason:reason === "work-active" ? "work-active" : "work-unsettled"}};
   }
-  return previous?.status === "completed" ? {runId,retry:{eligible:false,reason:"work-completed"}} : {runId,retry:{eligible:true,reason:null}};
+  return live.at(-1)?.status === "completed" ? {runId,retry:{eligible:false,reason:"work-completed"}} : {runId,retry:{eligible:true,reason:null}};
 }
 
 /** The same admission for manual and scheduled work; nested calls join the originating command's transaction. */

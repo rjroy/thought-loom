@@ -2,6 +2,12 @@ import type { Database } from "bun:sqlite";
 import type { TableShape } from "./format";
 
 interface Column { readonly type: "TEXT" | "INTEGER" | "BLOB"; readonly notNull: 0 | 1 }
+export interface BackupColumn { readonly storage: "text" | "integer" | "blob"; readonly nullable: boolean }
+export interface BackupTableDefinition {
+  readonly shape: TableShape;
+  readonly columns: Readonly<Record<string, BackupColumn>>;
+  readonly autoIncrement: boolean;
+}
 interface ForeignKey {
   readonly columns: readonly string[];
   readonly table: string;
@@ -274,3 +280,17 @@ export function validateSourceSchema(db: Database): readonly TableShape[] {
 export const backupTableShapes: readonly TableShape[] = Object.freeze(definitions.map(table => Object.freeze({ name: table.name,
   columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
   .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+
+/** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
+export const backupTableDefinitions: readonly BackupTableDefinition[] = Object.freeze(backupTableShapes.map(shape => {
+  const definition = definitions.find(table => table.name === shape.name);
+  if (!definition) invalid();
+  const columns: Record<string, BackupColumn> = Object.create(null);
+  for (const name of shape.columns) {
+    const column = definition.columns[name];
+    const storage = column.type === "TEXT" ? "text" : column.type === "INTEGER" ? "integer" : "blob";
+    // INTEGER PRIMARY KEY reports notnull=0, but a backed-up identity cannot request SQLite auto-allocation.
+    columns[name] = Object.freeze({ storage, nullable: column.notNull === 0 && !shape.primaryKey.includes(name) });
+  }
+  return Object.freeze({ shape, columns: Object.freeze(columns), autoIncrement: definition.autoIncrement });
+}));

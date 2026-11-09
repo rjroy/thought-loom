@@ -3,6 +3,7 @@ import { RunConflictError, RunFenceError, RunForbiddenError, type Claim, type Co
 import { searchRevision, searchString } from "../domain/agentic-search";
 import { record, ValidationError } from "../domain/validation";
 import { searchReferencesEligible } from "./search-eligibility";
+import { assertRunNotRestoreFenced } from "./restore-fences";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 export interface SearchPublicationOwner {
@@ -24,6 +25,7 @@ export function searchPublicationOwner(db: Database, claim: Claim, promptId: str
   const data = record(claim);
   if (Object.keys(data).length !== 2 || !Object.hasOwn(data, "runId") || !Object.hasOwn(data, "generation")) throw new ValidationError("Invalid publication claim");
   searchString(claim.runId, "runId"); searchRevision(claim.generation); searchString(promptId, "promptId");
+  assertRunNotRestoreFenced(db,claim.runId);
   const row = db.query(`SELECT r.id AS runId,r.kind,t.session_id AS sessionId,r.generation,r.status,t.open_slot AS openSlot,s.deleted_at AS deletedAt,
     r.cancellation_state AS cancellation,r.input_thought_id AS inputThoughtId,r.weave_subject_id AS weaveSubjectId,r.weave_trigger_id AS weaveTriggerId,
     b.session_id AS bindingSessionId,b.protocol_version AS protocolVersion,
@@ -63,6 +65,7 @@ export function requireSearchFullReads(db: Database, owner: SearchPublicationOwn
 }
 /** Commit this observed contamination fence outside any publication effects, then report failure. */
 export function fenceSearchPublication(db: Database, owner: SearchPublicationOwner): void {
+  assertRunNotRestoreFenced(db,owner.runId);
   searchRevision(owner.generation + 1);
   db.run("UPDATE search_turns SET outcome_reason='context-invalidated' WHERE run_id=CAST(? AS TEXT) AND outcome_reason IS NULL", [text(owner.runId)]);
   db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=CAST(? AS TEXT)", [text(owner.runId)]);

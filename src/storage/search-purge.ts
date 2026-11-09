@@ -1,9 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { SearchConflictError, SearchStorageError } from "../domain/agentic-search";
+import { assertRestoreFenceSchema } from "./restore-fences-schema";
 
 /** Default local-only path. A binding/setup flight or possible dispatch requires the explicit retention controller. */
 export function purgeLocalSearchSession(db: Database, sessionId: string, at: string): void {
   if (!db.inTransaction) throw new SearchStorageError("search-purge-requires-transaction");
+  assertRestoreFenceSchema(db);
   const id = new TextEncoder().encode(sessionId);
   const owned = "SELECT run_id FROM search_turns WHERE session_id=CAST(? AS TEXT)";
   // An absent binding is not proof of no submission. Require an intact, untouched initial journal as well.
@@ -20,8 +22,10 @@ export function purgeLocalSearchSession(db: Database, sessionId: string, at: str
   }
   // Fence all local identities before erasing their content. No native settlement is inferred or recorded.
   db.run(`UPDATE runs SET generation=generation+1,status=CASE WHEN status IN ('queued','submitting','running','uncertain')
-    THEN 'interrupted' ELSE status END WHERE id IN (${owned})`, [id]);
-  db.run("UPDATE search_composer_contexts SET state='invalidated' WHERE session_id=CAST(? AS TEXT) AND state='active'", [id]);
+    THEN 'interrupted' ELSE status END WHERE id IN (${owned})
+    AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=runs.id)`, [id]);
+  db.run(`UPDATE search_composer_contexts SET state='invalidated' WHERE session_id=CAST(? AS TEXT) AND state='active'
+    AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='composer' AND rf.entity_id=search_composer_contexts.id)`, [id]);
   const changed = db.run(`UPDATE search_sessions SET title=NULL,deleted_at=?,last_activity_at=?,revision=revision+1
     WHERE id=CAST(? AS TEXT) AND deleted_at IS NULL`, [at, at, id]);
   if (changed.changes !== 1) throw new SearchStorageError("search-purge-owner-unavailable");

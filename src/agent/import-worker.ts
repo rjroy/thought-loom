@@ -13,6 +13,8 @@ import { SqliteRunProtocolRepository } from "../storage/run-protocol";
 import { AgentBindingError } from "./binding";
 import { AgentUnavailableError, AgentUncertainError } from "./errors";
 import type { AgentBinding, ImportObservation, PersistedPrompt } from "./opencode-adapter";
+import { assertImportRunNotRestoreFenced, isImportRunRestoreFenced } from "../storage/import-authority";
+import { isRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
 
 export interface ImportNative {
   bindingFor(run: RunRecord): Promise<AgentBinding>;
@@ -86,7 +88,7 @@ export class MarkdownImportWorker {
     for (let i=0;i<count;i++) {
       const item=entries.next(); if (item.done) break;
       const [runId,owner]=item.value, run=this.runs.get(runId);
-      if (!run || terminal(run)) this.forget(runId);
+      if (!run || terminal(run) || isImportRunRestoreFenced(this.dependencies.db,runId)) this.forget(runId);
       else {
         if (run.generation!==owner.claim.generation) this.fence(runId,owner);
         // Round-robin bounded cleanup also finds runs settled elsewhere that are no longer scan candidates.
@@ -103,6 +105,7 @@ export class MarkdownImportWorker {
   }
   private assertCurrent(claim: Claim): void {
     this.localFence();
+    assertImportRunNotRestoreFenced(this.dependencies.db,claim.runId);
     const run=this.runs.get(claim.runId);
     if (!run || run.generation!==claim.generation || terminal(run)) throw new RunFenceError();
   }
@@ -158,8 +161,12 @@ export class MarkdownImportWorker {
     let owner=this.owners.get(work.runId), claim=owner?.claim;
     let phase="claim";
     try {
+      if (isRunRestoreFenced(this.dependencies.db,work.runId) || isRestoreFenced(this.dependencies.db,"import-file",work.fileId)) {
+        this.forget(work.runId); return;
+      }
       const run=this.runs.get(work.runId);
       if (!run || run.kind!=="import") { this.forget(work.runId); return; }
+      if (isImportRunRestoreFenced(this.dependencies.db,work.runId)) { this.forget(work.runId); return; }
       if (terminal(run)) { this.forget(run.id); await this.cancel(run); return; }
       if (owner?.fenced) return;
       if (!owner) {
@@ -288,6 +295,7 @@ export class MarkdownImportWorker {
     try {
       const result=await this.transport().cancel({runId:run.id,generation:run.generation},binding,prompt);
       this.localFence();
+      assertImportRunNotRestoreFenced(this.dependencies.db,run.id);
       if (result==="settled") this.protocol.settleCancellation(run.id);
       this.logger.verbose("[import worker] cancellation outcome",{runId:run.id,state:result});
     } catch { if (!this.paused) this.logger.verbose("[import worker] cancellation remains pending",{runId:run.id}); }
