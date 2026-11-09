@@ -1,6 +1,6 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { RejectionService, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
+import { RejectionService, type BrowseThoughtQuery, type BrowseThoughtRows, type ReadScope, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
 import { immediate } from "./transaction";
@@ -33,6 +33,48 @@ function sourcesByOwner(rows: { ownerId: string; sourceId: string }[]): Map<stri
 /** Internal adapter; expose scoped RejectionService reads to consumers instead. */
 export class SqliteRejectionRepository implements RejectionRepository {
   constructor(private readonly db: Database, private readonly logger: Logger = createLogger()) {}
+
+  browseThoughts(scope: ReadScope, query: BrowseThoughtQuery): BrowseThoughtRows {
+    return boundary(this.logger, "browse thoughts", () => this.db.transaction(() => {
+      const direction = query.sort === "newest" ? "DESC" : "ASC";
+      const comparison = query.sort === "newest" ? "<" : ">";
+      const candidates = this.db.query<{ id: string }, [string, string | null, string | null, string | null, number]>(`
+        SELECT t.id FROM thoughts t
+        WHERE t.author IN (SELECT value FROM json_each(?))
+          AND (${scope.mode === "normal" ? "NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)" : "1"})
+          AND (? IS NULL OR (t.created_at,t.id) ${comparison} (?,?))
+        ORDER BY t.created_at ${direction},t.id ${direction} LIMIT ?`);
+      // The cursor timestamp appears twice in the keyset predicate.
+      const after = query.after;
+      const selected = candidates.all(JSON.stringify(query.authors), after?.createdAt ?? null, after?.createdAt ?? null, after?.id ?? null, query.limit + 1);
+      const ids = selected.slice(0, query.limit).map(row => row.id);
+      if (!ids.length) return { thoughts: [], rejectedThoughtIds: [], hasMore: false };
+      const json = JSON.stringify(ids);
+      const sourceRows = this.db.query<{ ownerId: string; sourceId: string }, [string]>(`
+        SELECT thought_id AS ownerId,source_id AS sourceId FROM thought_sources
+        WHERE thought_id IN (SELECT value FROM json_each(?)) ORDER BY thought_id,position`).all(json);
+      const sources = sourcesByOwner(sourceRows);
+      const rows = this.db.query<{ id: string; parentId: string | null }, [string]>(`
+        SELECT t.id,t.text,m.title,m.title_author AS titleAuthor,t.author,t.kind,t.created_at AS createdAt,t.origin,t.parent_id AS parentId
+        FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id
+        WHERE t.id IN (SELECT value FROM json_each(?))`).all(json);
+      const thoughts = storedThoughts(this.db, rows.map(row => ({ ...row, sourceIds: sources.get(row.id) ?? [] })));
+      const byId = new Map(thoughts.map(thought => [thought.id, thought]));
+      const ordered = ids.map(id => {
+        const thought = byId.get(id);
+        if (!thought) throw new Error("Browse thought unavailable");
+        return thought;
+      });
+      const references = new Set(ids);
+      if (scope.actor === "ai") for (const thought of ordered) {
+        if (thought.parentId !== null) references.add(thought.parentId);
+        for (const id of thought.sourceIds) references.add(id);
+      }
+      const rejected = this.db.query<{ id: string }, [string]>(`SELECT thought_id AS id FROM rejected_thoughts
+        WHERE thought_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...references]));
+      return { thoughts: ordered, rejectedThoughtIds: rejected.map(row => row.id), hasMore: selected.length > query.limit };
+    })());
+  }
 
   exportTree(rootId: string): readonly ExportTreeNode[] {
     return boundary(this.logger, "export tree", () => this.db.transaction(() => {

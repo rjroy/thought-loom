@@ -24,6 +24,17 @@ export interface RejectionSnapshot extends RejectionState {
 }
 export type ThoughtRead = Thought & { readonly rejected?: boolean };
 export type ConnectionRead = Connection & { readonly rejected?: boolean };
+export interface BrowseThoughtQuery {
+  readonly sort: "newest" | "oldest";
+  readonly authors: readonly Thought["author"][];
+  readonly limit: number;
+  readonly after?: { readonly createdAt: string; readonly id: string };
+}
+export interface BrowseThoughtRows {
+  readonly thoughts: readonly Thought[];
+  readonly rejectedThoughtIds: readonly string[];
+  readonly hasMore: boolean;
+}
 export interface RejectionTransaction {
   snapshot(): RejectionSnapshot;
   state?(target: RejectionTarget): RejectionState;
@@ -35,6 +46,7 @@ export interface RejectionRepository {
   state?(target: RejectionTarget): RejectionState;
   transaction<T>(action: (tx: RejectionTransaction) => T): T;
   exportTree?(rootId: string): readonly ExportTreeNode[];
+  browseThoughts?(scope: ReadScope, query: BrowseThoughtQuery): BrowseThoughtRows;
 }
 
 /** Internal ancestry includes rejected nodes only as traversal links, never as content. */
@@ -226,6 +238,16 @@ export class RejectionService {
 
   listThoughts(scope: ReadScope): readonly ThoughtRead[] {
     return this.thoughtsInSnapshot(scope, this.repository.snapshot());
+  }
+
+  browseThoughts(scope: ReadScope, query: BrowseThoughtQuery): { items: readonly ThoughtRead[]; hasMore: boolean } {
+    const showRejected = inspection(scope);
+    if (!this.repository.browseThoughts) throw new Error("Browse reads are unavailable");
+    const rows = this.repository.browseThoughts(scope, query);
+    const rejected = new Set(rows.rejectedThoughtIds);
+    const items = showRejected ? rows.thoughts.map(thought => ({ ...thought, rejected: rejected.has(thought.id) })) :
+      rows.thoughts.map(thought => scopeActiveThought(scope.actor, thought, rejected)).filter((thought): thought is Thought => thought !== null);
+    return { items, hasMore: rows.hasMore };
   }
 
   private connectionsInSnapshot(scope: ReadScope, snapshot: RejectionSnapshot): readonly ConnectionRead[] {

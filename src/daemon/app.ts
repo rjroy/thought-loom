@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { BranchConfirmationError, ForbiddenActorError, type Actor, type BranchPreview, type ReadScope, type RejectionService } from "../domain/rejection";
 import { nonEmpty, nullableString, oneOf, record, references, ValidationError } from "../domain/validation";
 import type { Context } from "hono";
@@ -97,6 +98,7 @@ function thoughtInput(data: Record<string, unknown>): ThoughtInput {
 function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
+  if (path === "/browse/thoughts") return path;
   if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
   if (path === "/exports/agentic") return "/exports/agentic";
@@ -122,6 +124,8 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     throw new Error("Invalid credentials configuration");
   }
   const app = new Hono<AppEnv>();
+  const browseSecret = randomBytes(32);
+  const browseSign = (value: string) => createHmac("sha256", browseSecret).update(value).digest();
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError || error instanceof SearchHttpError ? error.status :
       error instanceof AgentNotConfiguredError ? 503 :
@@ -215,6 +219,43 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     user(c); noQuery(c);
     if (!options.agents) throw new ApiError(503);
     return c.body(options.agents.report(c.get("actor"),c.req.param("id")),200,{"content-type":"text/markdown; charset=utf-8"});
+  });
+
+  app.get("/browse/thoughts", c => {
+    const params = new URL(c.req.url).searchParams;
+    const readScope = scope(c, ["sort", "author", "limit", "cursor"]);
+    if (readScope.mode === "history") throw new ApiError(400);
+    for (const key of ["sort", "limit", "cursor"]) if (params.getAll(key).length > 1) throw new ApiError(400);
+    const sort = oneOf(params.get("sort") ?? "newest", "sort", ["newest", "oldest"]);
+    const rawLimit = params.get("limit");
+    if (rawLimit !== null && !/^[1-9]\d*$/.test(rawLimit)) throw new ApiError(400);
+    const limit = rawLimit === null ? 50 : Number(rawLimit);
+    if (!Number.isSafeInteger(limit) || limit > 200) throw new ApiError(400);
+    const selected = params.getAll("author").map(value => oneOf(value, "author", ["user", "ai", "source"]));
+    const authors = [...new Set(selected.length ? selected : ["user", "ai", "source"] as const)].sort();
+    const binding = JSON.stringify({ endpoint: "browse/thoughts", actor: readScope.actor, scope: readScope.mode, sort, authors, limit });
+    const token = params.get("cursor");
+    let after: { createdAt: string; id: string } | undefined;
+    if (token !== null) {
+      const parts = token.split(".");
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new ApiError(400);
+      const signature = Buffer.from(parts[1], "base64url"), expected = browseSign(parts[0]);
+      if (signature.toString("base64url") !== parts[1] || signature.length !== expected.length || !timingSafeEqual(signature, expected)) throw new ApiError(400);
+      let payload: unknown;
+      try { payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")); } catch { throw new ApiError(400); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new ApiError(400);
+      const data = payload as Record<string, unknown>;
+      if (data.version !== 1 || data.binding !== binding || typeof data.createdAt !== "string" || !data.createdAt || typeof data.id !== "string" || !data.id) throw new ApiError(400);
+      after = { createdAt: data.createdAt, id: data.id };
+    }
+    const page = rejection.browseThoughts(readScope, { sort, authors, limit, ...(after ? { after } : {}) });
+    const last = page.items.at(-1);
+    let nextCursor: string | null = null;
+    if (page.hasMore && last) {
+      const value = Buffer.from(JSON.stringify({ version: 1, binding, createdAt: last.createdAt, id: last.id })).toString("base64url");
+      nextCursor = `${value}.${browseSign(value).toString("base64url")}`;
+    }
+    return c.json({ items: page.items, nextCursor });
   });
 
   app.get("/thoughts", c => c.json(rejection.listThoughts(scope(c))));

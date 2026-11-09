@@ -24,6 +24,8 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+The focused chronological Browse API checks use `bun --no-env-file test tests/browse-api.test.ts`. Their owned in-memory SQLite fixture exercises HTTP pagination, equal-time ordering, query and cursor binding, invalid input, visibility and media/source projections, live continuation and avoidance of the rejection snapshot. This is not a large-library performance measurement or a browser test.
+
 ### Continuous integration
 
 The [GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests and pushes to `master`. On GitHub-hosted Ubuntu 24.04 it uses Bun 1.4.3 and frozen dependencies, builds spellfix, runs the root tests and typecheck, builds and typechecks the web app, and runs both full browser foundation and shared-record integration suites. Commands use `--no-env-file`; the fixtures use owned data and deterministic fake agents, not repository secrets, an operator service, or a model provider. Native acceptance remains separate.
