@@ -23,7 +23,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 | [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
 | [Daemon API](docs/daemon-api.md) | Authentication, request and response shapes, routes, and examples. |
 | [Database schema](docs/database-schema.md) | SQLite tables, relationships, constraints, and migrations. |
-| [Portable backup and restore](docs/backup-restore.md) | Planned JSON/original-media Git format, online capture and safe standalone recovery contract; not implemented yet. |
+| [Portable backup and restore](docs/backup-restore.md) | Online JSON/original-media capture, Git scheduling and manual backup; safe standalone recovery remains planned. |
 | [Client design system](apps/web/DESIGN.md) | Implemented palette, typography, layout, interaction patterns, and responsive rules. |
 
 ## Current state

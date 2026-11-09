@@ -267,6 +267,10 @@ export function validateSourceSchema(db: Database): readonly TableShape[] {
   for (const table of expected.values()) {
     validateColumns(db, table); validateUniqueKeys(db, table); validateForeignKeys(db, table);
   }
-  return Object.freeze(definitions.map(table => Object.freeze({ name: table.name, columns: Object.freeze(Object.keys(table.columns).sort()),
-    primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid })).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+  return backupTableShapes;
 }
+
+/** Shared closed payload inventory; inspecting a file tree must not open or migrate an application database. */
+export const backupTableShapes: readonly TableShape[] = Object.freeze(definitions.map(table => Object.freeze({ name: table.name,
+  columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
+  .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));

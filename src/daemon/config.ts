@@ -2,6 +2,7 @@ import { parseAgentConfig, validateAgentConfig, type AgentConfig } from "./agent
 import { ConfigError } from "./config-error";
 import type { LogLevel } from "../logging";
 import { isAbsolute } from "node:path";
+import { parseBackupConfig, validateBackupConfig, type BackupConfig } from "../backup/config";
 export { ConfigError } from "./config-error";
 
 export interface DaemonConfig {
@@ -13,6 +14,7 @@ export interface DaemonConfig {
   readonly importMaxBytes?: number;
   readonly mediaDir?: string;
   readonly mediaMaxBytes?: number;
+  readonly backup?: BackupConfig;
 }
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
@@ -35,6 +37,7 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
     ...(rawMediaMax === undefined ? {} : {mediaMaxBytes:Number(rawMediaMax)}),
     ...(env.THOUGHTLOOM_MEDIA_DIR === undefined ? {} : {mediaDir:env.THOUGHTLOOM_MEDIA_DIR}),
     ...(agent === null ? {} : {agent}),
+    ...(env.THOUGHTLOOM_BACKUP_CONFIG === undefined ? {} : {backup:parseBackupConfig(env.THOUGHTLOOM_BACKUP_CONFIG)}),
   };
   return validateConfig(config);
 }
@@ -70,6 +73,7 @@ export function validateConfig(input: unknown): DaemonConfig {
   if (mediaMaxBytes !== undefined && (typeof mediaMaxBytes !== "number" || !Number.isSafeInteger(mediaMaxBytes) || mediaMaxBytes < 1)) throw new ConfigError("THOUGHTLOOM_MEDIA_MAX_BYTES must be a positive safe integer");
   const mediaDir = "mediaDir" in input ? input.mediaDir : undefined;
   if (mediaDir !== undefined && (typeof mediaDir !== "string" || !isAbsolute(mediaDir) || mediaDir.includes("\0"))) throw new ConfigError("THOUGHTLOOM_MEDIA_DIR must be an absolute directory path");
+  const backup = "backup" in input ? validateBackupConfig(input.backup, input.dbPath, mediaDir) : undefined;
   return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(importMaxBytes === undefined ? {} : {importMaxBytes}),
-    ...(mediaMaxBytes === undefined ? {} : {mediaMaxBytes}), ...(mediaDir === undefined ? {} : {mediaDir}), ...(agent === null ? {} : {agent}) };
+    ...(mediaMaxBytes === undefined ? {} : {mediaMaxBytes}), ...(mediaDir === undefined ? {} : {mediaDir}), ...(agent === null ? {} : {agent}), ...(backup === undefined ? {} : {backup}) };
 }
