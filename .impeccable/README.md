@@ -1,6 +1,6 @@
 # Selected design references and approved artwork
 
-The client is implemented. [Client design system](../apps/web/DESIGN.md), [product context](../.lore/context/) and [API contracts](../docs/daemon-api.md) describe current behavior. These four illustrative references preserve selected visual direction, not executable UI, test fixtures or an accessibility certification. Earlier comps and approval history remain in Git and Beads; they do not need duplicate state screenshots here.
+The client is implemented. [Client design system](../apps/web/DESIGN.md), [product context](../.lore/context/) and [API contracts](../docs/daemon-api.md) describe current behavior. These selected illustrative references preserve visual direction, not executable UI, test fixtures or an accessibility certification. Earlier comps and approval history remain in Git and Beads; they do not need duplicate state screenshots here.
 
 ## Selected references
 
@@ -10,8 +10,10 @@ The client is implemented. [Client design system](../apps/web/DESIGN.md), [produ
 | [Media workspace](mocks/media-import/b-selected-desktop.png) | Selected B: one Capture Import chooser, file details beside optional clarification; columns stack on phones. |
 | [Media source Idea](mocks/media-import/next-source-ready-desktop.png) | Original file and user clarification remain distinct from the separately recorded AI interpretation in Surrounding context. |
 | [Conversational search](mocks/agentic-search/focused.png) | “Approve B”: conversation beside accumulating discoveries, with a narrow disclosure rather than a permanent session rail. |
+| [User connections](mocks/user-connections/README.md) | Selected guided desktop and phone references with their associated decisions. |
+| [Browse / Focused Map](mocks/browse/README.md) | Approved chronological list and map with a right-hand inspector. Only the selected comp and its essential provenance/notes remain. |
 
-[Selected identities and brand provenance](selected-assets.json) retain the four image hashes and the full sixteen-color palette, roles and mixtures. Media design approval is recorded in completed `thought-loom-1kx.1`; implementation and independent checks are recorded in `thought-loom-1kx.2`. Raster text, incidental chrome and older wording do not override current implemented contracts.
+[Selected identities and brand provenance](selected-assets.json) retain the original four reference hashes and the full sixteen-color palette, roles and mixtures. The newer reference packages above retain their own selection notes and any associated provenance. Media design approval is recorded in completed `thought-loom-1kx.1`; implementation and independent checks are recorded in `thought-loom-1kx.2`. Raster text, incidental chrome and older wording do not override current implemented contracts.
 
 ## Essential direction
 

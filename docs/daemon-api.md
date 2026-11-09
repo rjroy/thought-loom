@@ -20,7 +20,7 @@ These are server-side service credentials, not user accounts. The future browser
 
 - Commands with JSON input require an object. Unknown body properties are rejected rather than silently accepted.
 - Text and reference fields must satisfy domain validation. Most creation fields are assigned by commands, not supplied by clients.
-- Record read routes accept only the optional `scope` query parameter, once. Search has its own parameters below. The command routes below reject query parameters.
+- Ordinary record read routes accept only the optional `scope` query parameter, once. Browse and Search have their own parameters below. The command routes below reject query parameters.
 - Successful creates normally return `201`; queued file admissions use the `202`/replay contracts below. Reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
 - Ordinary record collections are plain arrays. Search returns results and filter counts; import and search-session catalogs have bounded pagination.
 
@@ -74,6 +74,32 @@ All accept the read scopes above and return `200` JSON:
 Each per-thought relationship route requires the requested thought to be visible under the same read scope; a missing or hidden thought returns `404`. A visible thought with no visible related records returns an empty array. These reads use existing response, connection, and evolution relationships; they do not traverse discovered connections as evolution ancestry. Child and connection inspection records include the `rejected` field described above. Shared response associations follow the same visibility policy as `/responses/:id`, including the stricter AI rule.
 
 Completed weaving retains its final outcome through these response routes, associated with the original capture and any issued interpretations. This includes no-findings outcomes and source-access limitations; a failed URL does not create a fake interpretation. Shared-response AI visibility still requires all associated thoughts to be eligible. URL summaries are ordinary searchable interpretation thoughts with inline source links, not a new response or source-record type. Capture requests remain unchanged.
+
+### Chronological browse: `GET /browse/thoughts`
+
+Both authenticated roles can browse thoughts without a search query. The response is `{items, nextCursor}` with scoped Thought records and a string continuation or null. This does not include conversational responses; `/thoughts` remains an array.
+
+| Parameter | Values and default |
+| --- | --- |
+| `sort` | `newest` (default) or `oldest`; ties use thought ID in the same direction. |
+| `author` | Repeatable `user`, `ai`, or `source`; omitted means all. Repeated values are deduplicated. |
+| `scope` | `normal` (default) or user-only `show-rejected`. `history` is not accepted here. |
+| `limit` | Integer 1–200, default 50. |
+| `cursor` | Opaque continuation from a preceding page. |
+
+Unknown parameters, repeated singleton parameters, invalid values and invalid or mismatched cursors return `400`; AI inspection returns `403`. Cursors are authenticated with a process-local key and bind the normalized authors, sort, scope, actor and limit. Repeat the same effective query on continuation; a restart requires a fresh listing. Reads use a live `(createdAt,id)` keyset, not a snapshot: changes after the boundary can appear on later pages, while changes before it require refresh. Normal and inspection records retain the visibility, provenance and media projections described above.
+
+### Direct neighborhood: `GET /thoughts/:id/neighborhood`
+
+Both authenticated roles can request a bounded page of direct relationships around a visible thought. Parameters are singleton `scope` (`normal` by default or user-only `show-rejected`), `limit` (1–200, default 50) and an opaque `cursor`. `history`, unknown or repeated parameters, invalid limits and invalid or mismatched cursors return `400`; AI inspection returns `403`, and a missing or hidden focus returns `404`.
+
+The response is `{thought,nodes,edges,nextCursor}`. `thought` is the scoped focus; `nodes` contains the unique other scoped thoughts needed to resolve this page's edge endpoints. Edges are direct and retain direction:
+
+- `{kind:'evolution',id,fromId,toId}` points from parent to child.
+- `{kind:'provenance',id,fromId,toId,position}` points from a supporting source to the thought that records it. Distinct persisted source positions remain distinct edges, even when their endpoints match.
+- `{kind:'connection',id,fromId,toId,connection}` preserves the existing scoped connection DTO and recorded direction. Its evidence `sourceIds` do not create adjacency.
+
+Edge IDs are stable opaque identities for the same recorded relationship across pages and focus choices. Separate relationship roles are not merged. Each page contains at most `limit` edges; `nextCursor` is null when no further edge is currently visible. Cursors are authenticated with a process-local key and bind the focus, actor, scope and limit; a restart requires a fresh listing. The ordered edge walk is live, not a frozen snapshot: concurrent changes may appear after the continuation boundary, while earlier changes require refresh. Normal rejection rules apply to focus, endpoints and connections; AI parent and source references are redacted. User inspection includes explicit rejection flags on thoughts and connections.
 
 ## Agentic search sessions
 

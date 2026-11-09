@@ -1,0 +1,19 @@
+{
+  "option": "Focused Map · selected composition",
+  "status": "selected composition; refined exact comp visually inspected and approved by the user",
+  "nativePath": "/home/rjroy/.codex/generated_images/01a1c0bc-3b5d-7a63-a5db-88432ea69f15/exec-43b80e77-18e1-4874-8856-184a20c4bce1.png",
+  "dimensions": [896, 1754],
+  "format": "PNG, opaque sRGB",
+  "toolVersion": "codex-cli 0.167.0; native image edit",
+  "nativeSha256": "380f7622254f5c2aac456adad62495e924ce4aee06ef786a1158082b5a54fce1",
+  "candidateSha256": "ae34d69510e6db4c4946fe11b8dce666c636c81b5336cc05296dd128a09f7eaa",
+  "verification": "Exact packaged comp visually inspected: Reserved absent from both navigation bars; provenance graph edge and legend use round dots, conceptual edges remain dashed, evolution remains solid; list/map composition, five nodes and inspector retained. Native copy equality verified before prompt embedding; decoded RGB pixels unchanged by metadata embedding.",
+  "date": "2026-11-09",
+  "approved": true,
+  "compositionSelected": true,
+  "selection": "User preferred Focused Map, requested removal of Reserved, then explicitly approved the refined exact image on 2026-11-09.",
+  "route": "codex exec native image edit",
+  "inputNativePath": "/home/rjroy/.codex/generated_images/01a1c0ae-a13e-7a62-a327-f5589f3eb407/exec-4bcf0f1c-a882-4c3f-b9d8-570e23ec9585.png",
+  "inputCandidateSha256": "820a68bdab5a5caaa3b1c224824a0b9004930e261df05b6960a21412de267505",
+  "prompt": "Edit the attached Thoughtloom A Focused map comp into ONE refined selected design board. This is an explicitly authorized image refinement, not code or new variants. Preserve the exact two-screen composition, dimensions, Quiet Night colors/type, list rows and dates, map node placement, all existing behavior and the full actual-text inspector. Make only these changes: remove the word Reserved entirely from BOTH top navigation bars, leaving Settings itself in its existing subdued treatment and preserving navigation spacing and hierarchy. Fix the map's Used as a source edge from Questions before conclusions to Questions invite better disagreement: it must use clearly separated small ROUND DOTS along the entire line, not dashes. Match that dotted stroke and its arrowhead in the legend's Used as a source sample. Keep the conceptual Supports · AI and Related · You edges distinctly DASHED, and the two evolution arrows SOLID. Retain all five nodes, their exact connections/directions, selected-node outline, gold Show linked ideas button, cyan Open Idea link, Back to list, Map / Linked list and unchecked Show rejected. Do not recolor, add logos, invent controls, restyle or regenerate the content. Report the absolute native output image path using normal image-tool staging. Do not modify project files."
+}

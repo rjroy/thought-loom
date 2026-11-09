@@ -11,6 +11,8 @@ import type {
 import styles from "./idea.module.css";
 import { useIdeaNavigation, type PreviousIdea } from "./idea-navigation-provider";
 import { useExploreMemory } from "./explore-provider";
+import { useBrowseMapMemory, useBrowseMemory } from "./browse-provider";
+import { browseMapHref } from "../features/browse/query";
 import { useEvolveStore } from "./evolve-provider";
 import { useContextualBack } from "./contextual-back";
 import { ContentGlyph } from "./content-glyph";
@@ -103,6 +105,12 @@ function containsRunOutput(view: IdeaRecord, runs: readonly MediaRun[]) {
 export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const navigation = useIdeaNavigation();
   const exploreMemory = useExploreMemory();
+  const browseMemory = useBrowseMemory();
+  const browseMapMemory = useBrowseMapMemory();
+  const invalidateBrowseReads = useCallback(() => {
+    browseMapMemory.current?.controller.invalidate();
+    browseMemory.current?.controller.invalidate();
+  }, [browseMapMemory, browseMemory]);
   const evolve = useEvolveStore();
   const mediaMemory = useMediaSourceMemory();
   const subjectId = location?.id;
@@ -354,6 +362,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     media?.invalidate();
     reinterpretation?.invalidate();
     setPending(true);
+    invalidateBrowseReads();
     setNotice(null);
     // A write may change titles or eligibility. Reread on return, keeping the
     // exploration intent and place; this is not evidence that a write succeeded.
@@ -363,6 +372,9 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       state: { ...explored.state, phase: "loading", page: null, message: null },
     };
     const result = await commandIdea(command, { fetch: window.fetch.bind(window) });
+    // The reader may already have returned to Browse while this write was pending.
+    // Fence any intervening read on settlement too, including an uncertain outcome.
+    invalidateBrowseReads();
     if (!alive.current) return;
     writing.current = false;
     setPending(false);
@@ -550,7 +562,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     navigation.current = { destination: previous.href, href, title: titleOf(currentView.current.thought) };
   }, [previous, location, navigation]);
   useContextualBack(previous?.href ?? back,
-    previous ? `Previous thought: ${previous.title}` : back.startsWith("/explore/ask/") ? "Back to search" : back === "/explore" ? "Back to Explore" : "Back to results",
+    previous ? `Previous thought: ${previous.title}` : back.startsWith("/browse/") ? "Back to map" : back.startsWith("/browse") ? "Back to list" : back.startsWith("/explore/ask/") ? "Back to search" : back === "/explore" ? "Back to Explore" : "Back to results",
     previous ? recordPreviousReturn : undefined);
 
   return (
@@ -632,6 +644,9 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
             }}>Full reply</button>}
             <button className={`${styles.textButton} ${styles.aboutButton}`} aria-expanded={aboutOpen}
               aria-controls="idea-metadata" onClick={() => setAboutOpen(open => !open)}>About</button>
+            <Link className={styles.textButton} prefetch={false} href={browseMapHref(thought.id,
+              browseMemory.current?.url ?? browseMapMemory.current?.controller.getSnapshot().location.returnTo ?? "/browse",
+              inspection ? "show-rejected" : "normal")}>Browse from here</Link>
             <button ref={connectButton} className={styles.textButton} disabled={disabled || editing || thought.rejected === true || inspection}
               aria-expanded={connecting} aria-controls="idea-connection-editor" onClick={() => setConnecting(true)}>Connect to another thought…</button>
             <div className={styles.more} ref={more} onKeyDown={event => {
@@ -689,7 +704,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           {connecting && <div id="idea-connection-editor">
             <ConnectionEditor thought={thought} disabled={pending || unconfirmed || mediaCommandPending} onLockedChange={setConnectionLocked}
               onClose={() => { setConnecting(false); requestAnimationFrame(() => connectButton.current?.focus()); }}
-              onCreated={() => void connectionCreated()} />
+              onCreated={() => void connectionCreated()} onInvalidateReads={invalidateBrowseReads} />
           </div>}
 
           {location.responseId && !view.focusedResponse && <p className={styles.notice}>

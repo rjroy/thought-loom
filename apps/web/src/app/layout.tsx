@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { PrimaryNavigation } from "../components/primary-navigation";
 import { ExploreProvider } from "../components/explore-provider";
+import { BrowseProvider } from "../components/browse-provider";
 import { IdeaNavigationProvider } from "../components/idea-navigation-provider";
 import { EvolveProvider } from "../components/evolve-provider";
 import { ExportProvider } from "../components/export-provider";
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className={sourceSans.variable}>
       <body>
         <ExploreProvider>
+          <BrowseProvider>
           <IdeaNavigationProvider>
            <EvolveProvider>
            <ExportProvider>
@@ -72,6 +74,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
            </ExportProvider>
            </EvolveProvider>
           </IdeaNavigationProvider>
+          </BrowseProvider>
         </ExploreProvider>
       </body>
     </html>

@@ -12,6 +12,7 @@ import { chromium, expect } from "@playwright/test";
 import { checkRootSplash } from "./root-splash.runtime";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
+import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./browse.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
@@ -56,6 +57,11 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
     "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
     "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
+    "apps/web/src/features/browse/query.ts", "apps/web/src/features/browse/results.ts", "apps/web/src/features/browse/request.ts", "apps/web/src/features/browse/controller.ts",
+    "apps/web/src/features/browse/map-controller.ts", "apps/web/src/features/browse/map-layout.ts", "apps/web/src/app/api/browse/thoughts/[id]/neighborhood/route.ts",
+    "apps/web/src/app/api/browse/thoughts/route.ts", "apps/web/src/server/browse.ts",
+    "apps/web/src/app/browse/page.tsx", "apps/web/src/components/browse-view.tsx", "apps/web/src/components/browse-provider.tsx", "apps/web/src/components/browse.module.css",
+    "apps/web/src/app/browse/[id]/page.tsx", "apps/web/src/components/browse-map-view.tsx", "apps/web/src/components/browse-map-surface.tsx", "apps/web/src/components/browse-map.module.css",
     "apps/web/src/app/api/ideas/[id]/route.ts", "apps/web/src/server/idea.ts",
     "apps/web/src/app/api/ideas/[id]/reinterpret/route.ts", "apps/web/src/app/api/ideas/[id]/reinterpret/by-key/[key]/route.ts",
     "apps/web/src/features/idea/reinterpretation.ts", "apps/web/src/server/reinterpretation.ts", "apps/web/src/server/reinterpretation-route.ts",
@@ -247,13 +253,15 @@ async function main(): Promise<void> {
   const fixtureWeb = await createFixture(temp);
   const fixtureDaemon = captureDaemon(token);
   const fixtureSearch = searchDaemon(token);
+  const fixtureBrowse = browseDaemon(token);
   const fixtureIdea = ideaDaemon(token);
   const fixtureEvolve = evolveDaemon(token);
   const fixtureExport = exportDaemon(token);
   const fixtureImport = importDaemon(token);
   const fixtureAgenticSearch = agenticSearchDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
+    if (request.url?.startsWith("/browse/thoughts") || /^\/thoughts\/[^/]+\/neighborhood(?:\?|$)/.test(request.url ?? "")) void fixtureBrowse.handler(request, response);
+    else if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
     else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
@@ -283,6 +291,20 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    if (process.env.THOUGHTLOOM_TEST_BROWSE === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try { await checkBrowseBrowser(page, fixtureBrowse, { origin, daemonOrigin, token }); }
+          finally { await page.close(); }
+          const connectionPage = await browser.newPage({ viewport });
+          try { await checkPendingConnectionMap(connectionPage, fixtureBrowse, origin); }
+          finally { await connectionPage.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     const mediaCase = process.env.THOUGHTLOOM_TEST_MEDIA_CASE;
     if (mediaCase) {
       const checks = new Map([
@@ -490,6 +512,7 @@ async function main(): Promise<void> {
           await checkMediaImportEntry(page, origin);
           await page.goto(`${origin}/capture`, { waitUntil: "networkidle" });
           await checkCaptureBrowser(page, fixtureDaemon);
+          await checkBrowseBrowser(page, fixtureBrowse, { origin, daemonOrigin, token });
           await page.getByRole("link", { name: "Explore", exact: true }).click();
           await page.waitForURL("**/explore");
           await noContextBack();
@@ -522,6 +545,9 @@ async function main(): Promise<void> {
           for (const secret of secrets) assert.ok(!html.includes(secret), "browser HTML contains sentinel");
           assert.deepEqual(leaks, []);
         } finally { await page.close(); }
+        const browseConnectionPage = await browser.newPage({ viewport });
+        try { await checkPendingConnectionMap(browseConnectionPage, fixtureBrowse, origin); }
+        finally { await browseConnectionPage.close(); }
         // Each companion owns a fresh browser context; in particular the
         // active-reading case installs a clock that must not affect other checks.
         for (const check of [checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition]) {

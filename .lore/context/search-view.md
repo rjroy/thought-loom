@@ -9,7 +9,7 @@ tags: [thoughtloom, restart, product]
 
 ## Purpose and entry
 
-Search is the way back to recorded thinking. The entry surface is a search box and button, not a recent-notes feed, folder browser, random selection, or old-chat dashboard. Capture is the other primary entry mode.
+Search is the query-driven way back to recorded thinking. Its entry surface is a search box and button, not a recent-notes feed, folder browser, random selection, or old-chat dashboard. The separately approved [Browse](browse-view.md) provides query-free chronological and connected exploration; Capture records new thinking.
 
 The person searches for something they remember or want to investigate. Results may be recent or years old. Recency is not a measure of value.
 

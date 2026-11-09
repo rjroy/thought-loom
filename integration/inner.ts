@@ -292,6 +292,28 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     assert.equal(interpretation.parentId, id);
     assert.ok(Array.isArray(interpretation.sourceIds) && interpretation.sourceIds.includes(id));
     const interpretationId = string(interpretation.id);
+    // Browse crosses the real Next and owned daemon boundary without a model request.
+    const browseBefore = knowledge(dbPath);
+    await page.getByRole("link", { name: "Browse", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Browse", exact: true })).toBeVisible();
+    await expect(page.getByText(content, { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("Owned integrated interpretation", { exact: false }).first()).toBeVisible();
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByText(content, { exact: false }).first()).toBeVisible();
+    await page.locator("article").filter({ hasText: content }).getByRole("link").first().click();
+    await expect(page).toHaveURL(url => url.pathname === `/browse/${encodeURIComponent(id)}`);
+    await page.getByRole("button", { name: "Inspect Owned integrated interpretation" }).click();
+    await expect(page.getByRole("region", { name: "Selected idea" })).toContainText("Owned integrated interpretation");
+    await page.getByRole("button", { name: "Show linked ideas", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Linked ideas shown" })).toBeDisabled();
+    await page.getByRole("link", { name: "Open Idea" }).click();
+    await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(interpretationId)}`);
+    await page.goBack();
+    await expect(page).toHaveURL(url => url.pathname === `/browse/${encodeURIComponent(id)}`);
+    await expect(page.getByRole("region", { name: "Selected idea" })).toContainText("Owned integrated interpretation");
+    await page.getByRole("link", { name: "Back to list" }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/browse");
+    assert.deepEqual(knowledge(dbPath), browseBefore, "Browse must not change library knowledge");
     await page.getByRole("link", { name: "Explore", exact: true }).click();
     await page.getByRole("textbox", { name: /^search thoughts$/i }).fill("cobalt");
     await page.getByRole("button", { name: /^search$/i }).click();
