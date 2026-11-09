@@ -42,4 +42,4 @@ On narrow screens the map precedes a normal-flow inspector. **Linked list** expo
 
 ## Boundary and next steps
 
-The current API lacks paginated query-free chronological reads and bounded complete direct-neighbor expansion. Discuss those read contracts before implementation. No schema change is currently identified or authorized by this design. Keep daemon and client implementation scopes separate under the [working agreement](architecture.md).
+The daemon now provides paginated query-free chronological reads through `GET /browse/thoughts` and bounded complete direct-neighbor expansion through `GET /thoughts/:id/neighborhood`; see the [API contracts](../../docs/daemon-api.md). These read capabilities required no schema change. The chronological list and shared Browse navigation are implemented; map entry and expansion remain the next client slice. Until that slice is complete, list titles are deliberately noninteractive rather than linking to an unimplemented screen. Keep client work separate under the [working agreement](architecture.md).

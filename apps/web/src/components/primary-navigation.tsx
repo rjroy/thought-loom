@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const destinations = [
   { href: "/explore", label: "Explore" },
+  { href: "/browse", label: "Browse" },
   { href: "/capture", label: "Capture" },
 ] as const;
 
@@ -22,7 +23,7 @@ export function PrimaryNavigation() {
         );
       })}
       <span className="navigation-reserved" aria-disabled="true">
-        Settings <span className="reserved-label">Reserved</span>
+        Settings
       </span>
     </nav>
   );

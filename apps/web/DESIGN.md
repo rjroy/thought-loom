@@ -54,6 +54,8 @@ This is the implementation-derived design system for the `apps/web` workspace, n
 
 The **Focused B conversational-search client is implemented** alongside ordinary Explore. Its [selected composition](../../.impeccable/mocks/agentic-search/focused.png) is reference-only, not an application asset. The route and behavior rules below document the implementation; a reference image is not runtime acceptance.
 
+The **Focused Map Browse list is implemented** as the upper-list portion of the [selected Browse composition](../../.impeccable/mocks/browse/selected.png). The connected map remains a separate planned client scope. The list does not render nonworking map links or substitute Idea-reader navigation for the selected list-to-map flow.
+
 The values above are extracted from [global CSS](src/app/globals.css), [the shared layout](src/app/layout.tsx) and the screen CSS modules. They record existing values; they do not introduce a new token library or require a styling rewrite. The full sixteen-color palette remains available, without a requirement to use every color on each screen.
 
 ## Colors
@@ -84,7 +86,7 @@ The six non-master colors in the frontmatter are the implemented rounded sRGB mi
 
 Source Sans 3 supplies both reading and display roles. It is bundled through `next/font/local` from [the variable font](public/fonts/SourceSans3-VariableFont_wght.ttf), weight range 200–900, with [its OFL license](public/fonts/OFL.txt). The browser's generated family alias is not a second typeface. No network font service or separate decorative display face is used.
 
-The body is 18px with 27px line height at the default root size. Secondary copy and metadata are generally 16px. Weight 600–700, not uppercase decoration, establishes hierarchy. Reserved is a small 12px noninteractive badge.
+The body is 18px with 27px line height at the default root size. Secondary copy and metadata are generally 16px. Weight 600–700, not uppercase decoration, establishes hierarchy. Settings remains subdued noninteractive text; the confusing Reserved badge has been removed.
 
 | Existing text role | Desktop | Narrow |
 | --- | --- | --- |
@@ -92,6 +94,7 @@ The body is 18px with 27px line height at the default root size. Secondary copy 
 | Idea title | `clamp(2rem, 2.75vw, 2.75rem)`, weight 700, line height 1.15 | `2rem` |
 | Idea original words | `1.5rem`, line height 1.5, maximum 72ch | `1.25rem` |
 | Explore result title | `1.5rem`, weight 650, line height 1.25 | Same; wraps naturally |
+| Browse heading / thought title | `2.75rem`, weight 700 / `1.5rem`, weight 650 | Heading `2rem`; thought titles retain readable wrapping |
 | Evolve contribution / reply | `1.375rem`, line height 1.5, maximum 72ch | `1.25rem` |
 | Conversational-search session switcher / discovery title | `1.375rem`, weight 600, line height 1.35 / 1.25 | Same; wraps naturally |
 | Conversational-search message | `1.25rem`, line height 1.5, maximum 72ch | Same |
@@ -104,11 +107,12 @@ Explore has a visually hidden page heading and a visible search label on narrow 
 
 The shell uses `--page-inset: clamp(1.25rem, 3.125vw, 3rem)`. Main content has 2rem top and 4rem bottom padding; narrow top padding is 1.75rem. Shared grouping gaps repeatedly use 0.5rem, 0.75rem, 1rem, 1.5rem and 2rem; these are existing literals, not a declared global spacing scale.
 
-The desktop header has a minimum height of 4.625rem. At `max-width: 48rem`, the wordmark/tagline stack above the visible navigation row. Explore alone keeps the shared header sticky and adds scroll margins for its controls. There is no added hamburger destination or permanently fixed composer.
+The desktop header has a minimum height of 4.625rem. Its identity and navigation can wrap when their combined content needs more width; navigation itself also wraps instead of overflowing enlarged text. At `max-width: 48rem`, the wordmark/tagline stack above the visible navigation row. Explore alone keeps the shared header sticky and adds scroll margins for its controls. There is no added hamburger destination or permanently fixed composer.
 
 | Surface | Implemented composition | Narrow behavior |
 | --- | --- | --- |
 | Explore Compact | Full-width search above 15.875rem filter sidebar and fluid result column; 2rem column gap; close-spaced result cards with subordinate context strips | One column at 48rem; explicit Filters control with selected-value count, headed inline panel and Close filters; sort wraps above readable results |
+| Browse Focused list | Heading with Refresh list and Sort above a 15.875rem authorship/inspection sidebar and fluid chronological cards; 2rem column gap; maximum 100rem workspace | One column at 48rem; visible wrapping filters above cards, no concealed controls or reduced type |
 | Capture Wide / Roomy | Left-aligned form at 87% of workspace width; generous writing field, secondary optional title; Save at the far right | Full width at 48rem; writing field minimum 15rem; full-width Save below title |
 | Idea Rows | Focal thought with Evolve beside it and a separate visible immediate-parent title link when applicable; direct context rows group children, provenance and connection neighbors by thought ID; columns are title/author, actual text/relationships, Open idea | Single column at 48rem; full-width Evolve; parent link wraps; context and connection-specific actions flow below each thought |
 | Evolve Rail | Starting-thought rail at `minmax(13rem, 24%)`, 2rem gap, chronological exchange column; saved developments in two columns; composer follows the conversation with Send beside the textarea | Starting context becomes a disclosure at 48rem; development rows stack; textarea and compact Send remain side by side |
@@ -166,7 +170,7 @@ Skip intro is available immediately and Tab remains within that single control; 
 ### Shared navigation and keyboard access
 
 - A visible-on-focus Skip to content link targets the focusable main landmark. Main navigation is labelled; Explore remains selected for its `/explore/ask` subtree, and Capture includes its contextual Import route. No search destination is added to global navigation.
-- Settings Reserved is disabled, noninteractive text, not a defined settings screen. Idea, Evolve, Export and conversational search remain contextual routes; none is a third primary navigation link.
+- Explore, Browse and Capture are primary links. Browse remains selected for its own route subtree, not for Explore search. Settings is disabled, noninteractive text without a Reserved badge, not a defined settings screen. Idea, Evolve, Export and conversational search remain contextual routes.
 - Contextual route return is a single left-arrow link beside the wordmark, with a 44px target, blue keyboard focus and a destination-named hover/focus tooltip. It uses the existing header row rather than a separate content row on desktop or narrow screens. Idea prefers the known previous viewed thought, otherwise its validated Explore or search-session/history return destination; this is not blind browser Back. Conversational-search entry/catalog/session views return to the known Explore destination (otherwise `/explore`), and search History returns to its session. Evolve returns to its selected Idea (or Explore for an invalid link); Export returns only when its root is known. Ordinary Explore and Capture have no contextual arrow. Route-owned registration is cleared on unmount without clearing a newer route's entry. Immediate-parent navigation remains separate, and Export's Back to setup remains a content-stage action.
 - Links are ordinary links, including encoded canonical Idea IDs. Explore search/filter/sort/scope parameters support fresh bookmarks; valid result-return links preserve exploration intent. Evolve and Export roots use `thoughtId` in the URL.
 - Main action targets are generally 44–48px or taller. Narrow filter labels are 44px high; primary navigation links are at least 56px high, while the contextual Back arrow has its own 44px target. Text is not made smaller to force controls onto one line.
@@ -195,6 +199,7 @@ Reinterpret lives inside More actions, not as another primary action or screen. 
 | --- | --- |
 | Capture | Editing/required-text validation → Saving with retained readonly snapshot → canonical Saved receipt, Open idea and Capture another thought. Known not-saved retains editable fields for Retry save. Unknown outcome retains its original readonly snapshot, warns of duplication and requires deliberate Save another copy. No cross-reload or autosave promise. |
 | Explore | Query-first initial, loading with unknown facet counts, successful results, no results and request error with Retry search. Author/kind facets use server counts; selected Filters count counts chosen values, not matches. Actual matching text expands in place; a retained-response hit is labelled Full reply. Inclusive rejected inspection distinguishes Rejected, active and Status unknown without guessing. Search remains available while a read is pending so a newer submitted query can supersede it. |
+| Browse list | Automatic bounded first read, chronological loaded rows, explicit Load more, Refresh list, first-read and continuation retries, expired/invalid continuation requiring refresh, empty library and filter-empty states. Filter changes supersede pending reads and clear the previous scope immediately. Failed continuation retains confirmed cards. No full-response rows or active map links. |
 | Idea | Loading, read failure/unavailable, ordinary view and explicitly labelled user inspection. Edit/Clear changes title metadata only. The immediate parent's current title or first-five-word fallback is a visible link, never a History disclosure or ancestor walk. Direct children (including AI interpretations), provenance sources and discovered connection neighbors appear immediately in Surrounding context, without an overlapping Sources panel. Full reply, About and each connection's Why connected remain on demand. Individual/branch/connection actions remain separate. Branch confirmation uses the server preview count; a stale preview invalidates confirmation and requires a fresh explicit decision. |
 | Evolve | Fresh workspace without a greeting; frozen admission, known-run statuses, observation warning, interrupted/failed/completed exchanges and preserved next draft. Only canonical contributions, replies and saved developments are presented as recorded. Continuation and Open idea are different actions; latest eligible issued work is the default, with deliberate Change when applicable. Unknown observation retains last-confirmed display without silently retaining unconfirmed eligibility. |
 | Conversational search | Entry and saved catalog; unopened session with explicit Resume; focused normal conversation/discoveries and separate user-only History. The UI includes labelled request-status, local submitted-snapshot, blocked-draft, unavailable-content and Delete-confirmation treatments. The selected handoff owns their contract-driven behavior; this row is not a final recovery/concurrency verification claim. |
@@ -238,6 +243,14 @@ This acceptance does **not** visually establish the session sheet/catalog, Delet
 
 ### Recovery and state lifetime
 
+**Browse list:** `/browse` opens the query-free catalog with newest first, You + AI and normal visibility. Bookmarks use `sort=newest|oldest`, repeated `author=user|ai` and `scope=normal|show-rejected`; exclusive `author=none` preserves both boxes unchecked. Empty authors are a local empty selection, never the daemon's all-authors default. Clear filters restores both authors and hides rejected material while retaining sort. The closed Sort control shows the selected order; there is no relevance or shuffle option, count facet, or page-number navigation.
+
+The list uses the existing card mixture, title hierarchy, 20px material glyphs, worded You/AI attribution and UTC creation dates. Excerpts are the first 160 actual characters, not summaries; untitled text uses its first five words. Show rejected adds explicit user-inspection wording and Rejected labels. The map helper reserves a safely encoded `/browse/:id` destination with an allowlisted list return URL, but no map screen or row links are shipped in this slice.
+
+The browser reads only `/api/browse/thoughts`; the existing guarded Next server uses server-only credentials to call the fixed daemon catalog. One page is requested at a time, with the same effective query and limit on continuation. An invalidated continuation offers Refresh list rather than automatic replay. Loaded rows are deduplicated in server order. Bare Browse navigation resumes the current document's filters, loaded rows and reading position; explicit URL filters take precedence. Reload starts the bookmarked filters on a fresh live first page, with no persisted content/cursor or snapshot promise. The selected comp is illustrative composition evidence, not runtime, keyboard or physical-device certification.
+
+Browse controls and rows reflect the controller's accepted synchronous query. Consecutive filter changes merge with that latest query before publishing their bookmark URL, including the last-author-to-empty transition. An explicit browser `popstate` listener handles every history traversal, including an out-and-back that leaves the router hook's observed value unchanged. Mount and Next navigation call the same actual-location reconciliation before paint; router parameters only wake that reader and never independently supply query, validity or matching state. Traversals apply filters without adding history entries; URL normalization only replaces the current entry. Authorship, sort and inspection controls remain usable while reads or URL transitions are pending.
+
 Status is worded, not a percentage, invented ETA or model stream. A read failure is not proof that a run failed. Stop addresses the known run and requests cancellation; it does not guarantee an instant native stop. Neither an unknown admission nor an observation error automatically replays a write or guesses an ID.
 
 Explore memory and mounted Evolve/Export workspaces can survive in-app browsing in the current document. Reload/fresh-document policies are explicit; they are not persistence, automatic resume or background-queue guarantees. Capture retains its submitted snapshot in the current form's recovery state, not in persistent storage. Confirmed records and unsent drafts remain visually distinct.
@@ -249,6 +262,6 @@ Explore memory and mounted Evolve/Export workspaces can survive in-app browsing 
 - **Do** preserve reading order, visible keyboard focus, input values and safe long-text wrapping across narrow layouts.
 - **Do** show only canonical confirmed success and label uncertainty plainly; keep browsing, continuation and destructive scope distinct.
 - **Don't** copy tiny raster text, incidental generated header differences, decorative texture or invented italic emphasis into CSS.
-- **Don't** add a feed, graph, editable thought body, model/budget settings, extra shared navigation or Settings contents as a styling improvement.
+- **Don't** add unrelated feeds, whole-library graphs, editable thought bodies, model/budget settings, unapproved navigation or Settings contents as a styling improvement. Browse's approved list is an explicit product addition, not permission for those features.
 - **Don't** promote stale cached text into confirmed eligibility, silently broaden to rejected history, fabricate output or turn a read recovery action into a write retry.
 - **Don't** treat this system description, approximate comps or a passing browser probe as screen-reader, physical-device, software-keyboard or cross-browser certification.
