@@ -35,6 +35,18 @@ export interface BrowseThoughtRows {
   readonly rejectedThoughtIds: readonly string[];
   readonly hasMore: boolean;
 }
+export interface NeighborhoodPosition { readonly kind: number; readonly owner: string; readonly position: number }
+export type NeighborhoodEdge =
+  | { readonly kind: "evolution"; readonly id: string; readonly fromId: string; readonly toId: string }
+  | { readonly kind: "provenance"; readonly id: string; readonly fromId: string; readonly toId: string; readonly position: number }
+  | { readonly kind: "connection"; readonly id: string; readonly fromId: string; readonly toId: string; readonly connection: ConnectionRead };
+export interface NeighborhoodRows {
+  readonly thoughts: readonly Thought[];
+  readonly edges: readonly { readonly key: NeighborhoodPosition; readonly fromId: string; readonly toId: string; readonly connection?: Connection }[];
+  readonly rejectedThoughtIds: readonly string[];
+  readonly rejectedConnectionIds: readonly string[];
+  readonly hasMore: boolean;
+}
 export interface RejectionTransaction {
   snapshot(): RejectionSnapshot;
   state?(target: RejectionTarget): RejectionState;
@@ -47,6 +59,7 @@ export interface RejectionRepository {
   transaction<T>(action: (tx: RejectionTransaction) => T): T;
   exportTree?(rootId: string): readonly ExportTreeNode[];
   browseThoughts?(scope: ReadScope, query: BrowseThoughtQuery): BrowseThoughtRows;
+  neighborhood?(scope: ReadScope, id: string, limit: number, after?: NeighborhoodPosition): NeighborhoodRows | null;
 }
 
 /** Internal ancestry includes rejected nodes only as traversal links, never as content. */
@@ -248,6 +261,34 @@ export class RejectionService {
     const items = showRejected ? rows.thoughts.map(thought => ({ ...thought, rejected: rejected.has(thought.id) })) :
       rows.thoughts.map(thought => scopeActiveThought(scope.actor, thought, rejected)).filter((thought): thought is Thought => thought !== null);
     return { items, hasMore: rows.hasMore };
+  }
+
+  neighborhood(scope: ReadScope, id: string, limit: number, after?: NeighborhoodPosition): {
+    thought: ThoughtRead; nodes: readonly ThoughtRead[]; edges: readonly NeighborhoodEdge[]; next: NeighborhoodPosition | null;
+  } | null {
+    const showRejected = inspection(scope);
+    nonEmpty(id, "id");
+    if (!this.repository.neighborhood) throw new Error("Neighborhood reads are unavailable");
+    const rows = this.repository.neighborhood(scope, id, limit, after);
+    if (!rows) return null;
+    const rejected = new Set(rows.rejectedThoughtIds), rejectedConnections = new Set(rows.rejectedConnectionIds);
+    const projected = rows.thoughts.map(thought => showRejected ? { ...thought, rejected: rejected.has(thought.id) } : scopeActiveThought(scope.actor, thought, rejected))
+      .filter((thought): thought is ThoughtRead => thought !== null);
+    const thought = projected.find(item => item.id === id);
+    if (!thought) throw new Error("Neighborhood focus unavailable");
+    const edges: NeighborhoodEdge[] = rows.edges.map(edge => {
+      const { key, fromId, toId } = edge;
+      const edgeId = Buffer.from(JSON.stringify([key.kind, key.owner, key.position])).toString("base64url");
+      if (key.kind === 0) return { kind: "evolution", id: edgeId, fromId, toId };
+      if (key.kind === 1) return { kind: "provenance", id: edgeId, fromId, toId, position: key.position };
+      if (!edge.connection) throw new Error("Neighborhood connection unavailable");
+      const connection = showRejected ? { ...edge.connection, rejected: rejectedConnections.has(edge.connection.id) } :
+        scopeActiveConnection(scope.actor, edge.connection, rejected, rejectedConnections);
+      if (!connection) throw new Error("Neighborhood connection not visible");
+      return { kind: "connection", id: edgeId, fromId, toId, connection };
+    });
+    return { thought, nodes: projected.filter(item => item.id !== id), edges,
+      next: rows.hasMore ? rows.edges.at(-1)?.key ?? null : null };
   }
 
   private connectionsInSnapshot(scope: ReadScope, snapshot: RejectionSnapshot): readonly ConnectionRead[] {

@@ -89,6 +89,18 @@ Both authenticated roles can browse thoughts without a search query. The respons
 
 Unknown parameters, repeated singleton parameters, invalid values and invalid or mismatched cursors return `400`; AI inspection returns `403`. Cursors are authenticated with a process-local key and bind the normalized authors, sort, scope, actor and limit. Repeat the same effective query on continuation; a restart requires a fresh listing. Reads use a live `(createdAt,id)` keyset, not a snapshot: changes after the boundary can appear on later pages, while changes before it require refresh. Normal and inspection records retain the visibility, provenance and media projections described above.
 
+### Direct neighborhood: `GET /thoughts/:id/neighborhood`
+
+Both authenticated roles can request a bounded page of direct relationships around a visible thought. Parameters are singleton `scope` (`normal` by default or user-only `show-rejected`), `limit` (1–200, default 50) and an opaque `cursor`. `history`, unknown or repeated parameters, invalid limits and invalid or mismatched cursors return `400`; AI inspection returns `403`, and a missing or hidden focus returns `404`.
+
+The response is `{thought,nodes,edges,nextCursor}`. `thought` is the scoped focus; `nodes` contains the unique other scoped thoughts needed to resolve this page's edge endpoints. Edges are direct and retain direction:
+
+- `{kind:'evolution',id,fromId,toId}` points from parent to child.
+- `{kind:'provenance',id,fromId,toId,position}` points from a supporting source to the thought that records it. Distinct persisted source positions remain distinct edges, even when their endpoints match.
+- `{kind:'connection',id,fromId,toId,connection}` preserves the existing scoped connection DTO and recorded direction. Its evidence `sourceIds` do not create adjacency.
+
+Edge IDs are stable opaque identities for the same recorded relationship across pages and focus choices. Separate relationship roles are not merged. Each page contains at most `limit` edges; `nextCursor` is null when no further edge is currently visible. Cursors are authenticated with a process-local key and bind the focus, actor, scope and limit; a restart requires a fresh listing. The ordered edge walk is live, not a frozen snapshot: concurrent changes may appear after the continuation boundary, while earlier changes require refresh. Normal rejection rules apply to focus, endpoints and connections; AI parent and source references are redacted. User inspection includes explicit rejection flags on thoughts and connections.
+
 ## Agentic search sessions
 
 All routes below are user-only; AI credentials receive `403`. Only fresh turn admission requires agent configuration. All responses, including authentication failures, are `Cache-Control: private, no-store`. The metadata routes expose no conversation text or composer context. The [conversational search web client](server-startup.md#conversational-search) uses fixed Next.js server boundaries; the browser never calls the daemon directly. See [`search-session-routes.ts`](../src/daemon/search-session-routes.ts) and the [isolated walkthrough](testing.md#isolated-agentic-search-walkthrough).

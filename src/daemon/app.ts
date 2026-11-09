@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { BranchConfirmationError, ForbiddenActorError, type Actor, type BranchPreview, type ReadScope, type RejectionService } from "../domain/rejection";
+import { BranchConfirmationError, ForbiddenActorError, type Actor, type BranchPreview, type NeighborhoodPosition, type ReadScope, type RejectionService } from "../domain/rejection";
 import { nonEmpty, nullableString, oneOf, record, references, ValidationError } from "../domain/validation";
 import type { Context } from "hono";
 import { CreationForbiddenError, CreationNotFoundError, type CreationService, type ThoughtInput } from "../domain/creation";
@@ -113,7 +113,7 @@ function safePath(path: string): string {
   if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
-    (["reject", "restore", "preview", "evolve", "stop", "children", "connections", "responses"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
+    (["reject", "restore", "preview", "evolve", "stop", "children", "connections", "responses", "neighborhood"].includes(parts.at(-1) ?? "") && parts.length > 3 ? "/" + parts.at(-1) : "");
 }
 
 /** Construct a server-side transport around scoped reads and validated commands. */
@@ -263,6 +263,41 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     const item = rejection.listThoughts(scope(c)).find(t => t.id === c.req.param("id"));
     if (!item) throw new ApiError(404);
     return c.json(item);
+  });
+  app.get("/thoughts/:id/neighborhood", c => {
+    const params = new URL(c.req.url).searchParams;
+    const readScope = scope(c, ["limit", "cursor"]);
+    if (readScope.mode === "history") throw new ApiError(400);
+    for (const key of ["limit", "cursor"]) if (params.getAll(key).length > 1) throw new ApiError(400);
+    const rawLimit = params.get("limit");
+    if (rawLimit !== null && !/^[1-9]\d*$/.test(rawLimit)) throw new ApiError(400);
+    const limit = rawLimit === null ? 50 : Number(rawLimit);
+    if (!Number.isSafeInteger(limit) || limit > 200) throw new ApiError(400);
+    const id = c.req.param("id");
+    const binding = JSON.stringify({ endpoint: "neighborhood", id, actor: readScope.actor, scope: readScope.mode, limit });
+    const token = params.get("cursor");
+    let after: NeighborhoodPosition | undefined;
+    if (token !== null) {
+      const parts = token.split(".");
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new ApiError(400);
+      const signature = Buffer.from(parts[1], "base64url"), expected = browseSign(parts[0]);
+      if (signature.toString("base64url") !== parts[1] || signature.length !== expected.length || !timingSafeEqual(signature, expected)) throw new ApiError(400);
+      let payload: unknown;
+      try { payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")); } catch { throw new ApiError(400); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new ApiError(400);
+      const data = payload as Record<string, unknown>;
+      if (data.version !== 1 || data.binding !== binding || typeof data.kind !== "number" || !Number.isInteger(data.kind) || data.kind < 0 || data.kind > 2 ||
+        typeof data.owner !== "string" || !data.owner || typeof data.position !== "number" || !Number.isSafeInteger(data.position) || data.position < 0) throw new ApiError(400);
+      after = { kind: data.kind, owner: data.owner, position: data.position };
+    }
+    const page = rejection.neighborhood(readScope, id, limit, after);
+    if (!page) throw new ApiError(404);
+    let nextCursor: string | null = null;
+    if (page.next) {
+      const value = Buffer.from(JSON.stringify({ version: 1, binding, ...page.next })).toString("base64url");
+      nextCursor = `${value}.${browseSign(value).toString("base64url")}`;
+    }
+    return c.json({ thought: page.thought, nodes: page.nodes, edges: page.edges, nextCursor });
   });
   for (const relation of ["children", "connections", "responses"] as const) {
     app.get(`/thoughts/:id/${relation}`, c => {

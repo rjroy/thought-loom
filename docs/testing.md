@@ -26,6 +26,8 @@ Ordinary tests supply their own configuration and data rather than relying on yo
 
 The focused chronological Browse API checks use `bun --no-env-file test tests/browse-api.test.ts`. Their owned in-memory SQLite fixture exercises HTTP pagination, equal-time ordering, query and cursor binding, invalid input, visibility and media/source projections, live continuation and avoidance of the rejection snapshot. This is not a large-library performance measurement or a browser test.
 
+The direct-neighborhood HTTP fixture uses `bun --no-env-file test tests/neighborhood-api.test.ts`. It covers directed edge roles, duplicate provenance occurrences, page endpoint resolution and high-degree walks, rejection and AI evidence redaction, malformed requests and cursor binding without a rejection snapshot. It does not measure SQL scan/sort work or exercise a browser.
+
 ### Continuous integration
 
 The [GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests and pushes to `master`. On GitHub-hosted Ubuntu 24.04 it uses Bun 1.4.3 and frozen dependencies, builds spellfix, runs the root tests and typecheck, builds and typechecks the web app, and runs both full browser foundation and shared-record integration suites. Commands use `--no-env-file`; the fixtures use owned data and deterministic fake agents, not repository secrets, an operator service, or a model provider. Native acceptance remains separate.

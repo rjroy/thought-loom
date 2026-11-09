@@ -1,6 +1,6 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { RejectionService, type BrowseThoughtQuery, type BrowseThoughtRows, type ReadScope, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
+import { RejectionService, type BrowseThoughtQuery, type BrowseThoughtRows, type NeighborhoodPosition, type NeighborhoodRows, type ReadScope, type ExportTreeNode, type RejectionRepository, type RejectionSnapshot, type RejectionState, type RejectionTarget, type RejectionTransaction } from "../domain/rejection";
 import { createConnection } from "../domain/connection";
 import { createResponse } from "../domain/response";
 import { immediate } from "./transaction";
@@ -33,6 +33,66 @@ function sourcesByOwner(rows: { ownerId: string; sourceId: string }[]): Map<stri
 /** Internal adapter; expose scoped RejectionService reads to consumers instead. */
 export class SqliteRejectionRepository implements RejectionRepository {
   constructor(private readonly db: Database, private readonly logger: Logger = createLogger()) {}
+
+  neighborhood(scope: ReadScope, id: string, limit: number, after?: NeighborhoodPosition): NeighborhoodRows | null {
+    return boundary(this.logger, "neighborhood", () => this.db.transaction(() => {
+      const visible = scope.mode === "normal";
+      const focus = this.db.query<{ id: string }, [string]>(`SELECT t.id FROM thoughts t WHERE t.id=?
+        ${visible ? "AND NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)" : ""}`).get(id);
+      if (!focus) return null;
+      type EdgeRow = { kind: number; owner: string; position: number; fromId: string; toId: string };
+      const selected = this.db.query<EdgeRow, [string, number | null, string | null, number | null, number]>(`
+        WITH edges AS (
+          SELECT 0 AS kind,t.id AS owner,0 AS position,t.parent_id AS fromId,t.id AS toId
+          FROM thoughts t WHERE t.parent_id IS NOT NULL AND (t.id=?1 OR t.parent_id=?1)
+          UNION ALL
+          SELECT 1,s.thought_id,s.position,s.source_id,s.thought_id FROM thought_sources s
+          WHERE s.thought_id=?1 OR s.source_id=?1
+          UNION ALL
+          SELECT 2,c.id,0,c.from_id,c.to_id FROM connections c WHERE c.from_id=?1 OR c.to_id=?1
+        )
+        SELECT e.* FROM edges e
+        WHERE (?2 IS NULL OR (e.kind,e.owner,e.position) > (?2,?3,?4))
+          ${visible ? `AND NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=e.fromId)
+            AND NOT EXISTS (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=e.toId)
+            AND (e.kind<>2 OR NOT EXISTS (SELECT 1 FROM rejected_connections r WHERE r.connection_id=e.owner))` : ""}
+        ORDER BY e.kind,e.owner,e.position LIMIT ?5`).all(id, after?.kind ?? null, after?.owner ?? null, after?.position ?? null, limit + 1);
+      const page = selected.slice(0, limit);
+      const ids = new Set([id]);
+      for (const edge of page) { ids.add(edge.fromId); ids.add(edge.toId); }
+      const thoughtIds = JSON.stringify([...ids]);
+      const thoughtSources = sourcesByOwner(this.db.query<{ ownerId: string; sourceId: string }, [string]>(`
+        SELECT thought_id AS ownerId,source_id AS sourceId FROM thought_sources
+        WHERE thought_id IN (SELECT value FROM json_each(?)) ORDER BY thought_id,position`).all(thoughtIds));
+      const thoughtRows = this.db.query<{ id: string }, [string]>(`SELECT t.id,t.text,m.title,m.title_author AS titleAuthor,
+        t.author,t.kind,t.created_at AS createdAt,t.origin,t.parent_id AS parentId FROM thoughts t
+        JOIN thought_titles m ON m.thought_id=t.id WHERE t.id IN (SELECT value FROM json_each(?))`).all(thoughtIds);
+      const thoughts = storedThoughts(this.db, thoughtRows.map(row => ({ ...row, sourceIds: thoughtSources.get(row.id) ?? [] })));
+      const connectionIds = JSON.stringify(page.filter(edge => edge.kind === 2).map(edge => edge.owner));
+      const connectionSources = sourcesByOwner(this.db.query<{ ownerId: string; sourceId: string }, [string]>(`
+        SELECT connection_id AS ownerId,source_id AS sourceId FROM connection_sources
+        WHERE connection_id IN (SELECT value FROM json_each(?)) ORDER BY connection_id,position`).all(connectionIds));
+      const connectionRows = this.db.query<{ id: string }, [string]>(`SELECT id,from_id AS fromId,to_id AS toId,
+        category,proposed_by AS proposedBy,explanation FROM connections WHERE id IN (SELECT value FROM json_each(?))`).all(connectionIds);
+      const connections = connectionRows.map(row => createConnection({ ...row, sourceIds: connectionSources.get(row.id) ?? [] }));
+      const byConnection = new Map(connections.map(connection => [connection.id, connection]));
+      const references = new Set(ids);
+      if (scope.actor === "ai") {
+        for (const thought of thoughts) {
+          if (thought.parentId !== null) references.add(thought.parentId);
+          for (const source of thought.sourceIds) references.add(source);
+        }
+        for (const connection of connections) for (const source of connection.sourceIds) references.add(source);
+      }
+      const rejectedThoughtIds = this.db.query<{ id: string }, [string]>(`SELECT thought_id AS id FROM rejected_thoughts
+        WHERE thought_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...references])).map(row => row.id);
+      const rejectedConnectionIds = this.db.query<{ id: string }, [string]>(`SELECT connection_id AS id FROM rejected_connections
+        WHERE connection_id IN (SELECT value FROM json_each(?))`).all(connectionIds).map(row => row.id);
+      return { thoughts, rejectedThoughtIds, rejectedConnectionIds, hasMore: selected.length > limit,
+        edges: page.map(({ kind, owner, position, fromId, toId }) => ({ key: { kind, owner, position }, fromId, toId,
+          ...(kind === 2 ? { connection: byConnection.get(owner) } : {}) })) };
+    })());
+  }
 
   browseThoughts(scope: ReadScope, query: BrowseThoughtQuery): BrowseThoughtRows {
     return boundary(this.logger, "browse thoughts", () => this.db.transaction(() => {
