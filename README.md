@@ -23,6 +23,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 | [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
 | [Daemon API](docs/daemon-api.md) | Authentication, request and response shapes, routes, and examples. |
 | [Database schema](docs/database-schema.md) | SQLite tables, relationships, constraints, and migrations. |
+| [Portable backup and restore](docs/backup-restore.md) | Online JSON/original-media capture, Git backup and offline empty-target restore; contracts and validation boundaries. |
 | [Client design system](apps/web/DESIGN.md) | Implemented palette, typography, layout, interaction patterns, and responsive rules. |
 
 ## Current state
@@ -41,4 +42,4 @@ Conversational agentic search is available from Explore's **Ask your library** a
 
 The separate Next.js/React client provides Capture, bookmarkable Explore searches, Idea reading with title metadata, user-created connections and rejection/restoration controls, Evolve with recorded developments and known-run status/Stop, and Simple/Agentic Markdown exports. Browser requests use a server-only daemon boundary. Without agent configuration, capture, search, user-created connections and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration. Settings remains reserved, with no implemented settings screen.
 
-Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above describe the implementation that exists today.
+Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above distinguish implemented behavior from explicitly marked planned contracts.

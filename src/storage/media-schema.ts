@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { rebuildThoughtSearch } from "./search-projections";
 
 /** Metadata only. Store identity is explicitly initialized by its daemon owner, never by migration. */
 export function createMediaTables(db: Database): void {
@@ -69,9 +70,6 @@ export function indexMediaClarification(db: Database): void {
         SELECT t.id,CASE WHEN t.kind='media-original' THEN coalesce(s.clarification,'') ELSE t.text END,NEW.title
         FROM thoughts t LEFT JOIN media_sources s ON s.source_thought_id=t.id WHERE t.id=NEW.thought_id;
     END;
-    DELETE FROM thought_search_fts;
-    INSERT INTO thought_search_fts(thought_id,text,title)
-      SELECT t.id,CASE WHEN t.kind='media-original' THEN coalesce(s.clarification,'') ELSE t.text END,m.title
-      FROM thoughts t JOIN thought_titles m ON m.thought_id=t.id LEFT JOIN media_sources s ON s.source_thought_id=t.id;
   `);
+  rebuildThoughtSearch(db);
 }

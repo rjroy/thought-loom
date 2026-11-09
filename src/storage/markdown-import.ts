@@ -10,7 +10,9 @@ import { equalBytes, importManifest, importPartition, importRelativePath, import
   type ImportManifest, type ImportOutcome, type ImportPartition, type ImportPartitionResult, type ImportPrivateInput, type MarkdownImportRepository, type Segmentation } from "../domain/markdown-import";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { admitWeave } from "./weave-admission";
-import { readOwnedImportInput } from "./import-authority";
+import { assertImportOwnerNotRestoreFenced, assertImportRunNotRestoreFenced, readOwnedImportInput, unfencedImportFileSql } from "./import-authority";
+import { assertNotRestoreFenced, isRestoreFenced } from "./restore-fences";
+import { assertRestoreFenceSchema } from "./restore-fences-schema";
 
 interface FileRow {
   id: string; importId: string; namespaceId: string; position: number; requestKey: string; relativePath: string;
@@ -25,6 +27,7 @@ const localWork = `FROM markdown_import_files f JOIN runs r ON r.id=f.run_id
   JOIN run_steps s ON s.run_id=r.id AND s.position=0
   WHERE r.kind='import' AND r.status IN ('queued','submitting','running','uncertain')
     AND f.outcome IS NULL AND f.waiting_on_file_id IS NULL
+    AND ${unfencedImportFileSql}
     AND NOT EXISTS(SELECT 1 FROM run_steps later WHERE later.run_id=r.id AND later.position!=0)
     AND (s.result_json IS NOT NULL OR (r.status='queued' AND s.state='prepared' AND s.native_state='unknown'
       AND s.envelope_json IS NULL AND (s.input IS NOT NULL OR NOT EXISTS(SELECT 1 FROM agent_bindings b WHERE b.run_id=r.id))))`;
@@ -56,6 +59,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
         return {batch:this.requireBatch(replay.id),replayed:true};
       }
       const id = nonEmpty(this.sources.id(),"importId");
+      assertNotRestoreFenced(this.db,"import-batch",id);
       this.db.run("INSERT INTO markdown_imports(id,request_key,namespace_id,created_at) VALUES (?,?,?,?)",[id,requestKey,namespace,nonEmpty(this.sources.now(),"createdAt")]);
       this.logger.info("[import] batch admitted",{importId:id});
       return {batch:this.requireBatch(id),replayed:false};
@@ -77,7 +81,9 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
   sealBatch(actor: Actor, importId: string): ImportBatch {
     requireImportUser(actor); nonEmpty(importId,"importId");
     return this.transaction("seal import batch",importId,() => {
+      const historical = isRestoreFenced(this.db,"import-batch",importId);
       const batch = this.requireBatch(importId);
+      if (historical) return batch;
       if (batch.sealedAt===null) {
         this.db.run("UPDATE markdown_imports SET sealed_at=? WHERE id=?",[nonEmpty(this.sources.now(),"sealedAt"),importId]);
         this.logger.info("[import] batch sealed",{importId});
@@ -86,6 +92,13 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     });
   }
   private row(fileId: string): FileRow | null { return this.db.query(`SELECT ${fileColumns} FROM markdown_import_files WHERE id=?`).get(fileId) as FileRow | null; }
+  private liveFile(fileId: string): FileRow {
+    assertNotRestoreFenced(this.db,"import-file",fileId);
+    const row = this.row(fileId);
+    if (!row) throw new ImportNotFoundError();
+    assertImportOwnerNotRestoreFenced(this.db,row);
+    return row;
+  }
   file(actor: Actor, importId: string, fileId: string): ImportFile | null {
     requireImportUser(actor); nonEmpty(importId,"importId"); nonEmpty(fileId,"fileId");
     return this.transaction("read import file",fileId,() => {
@@ -124,9 +137,11 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
         if (payload && !equalBytes(payload,bytes)) throw new ImportPreservationError("digest-collision");
         return {file:this.report(replay),replayed:true};
       }
+      if (isRestoreFenced(this.db,"import-batch",importId)) throw new ImportConflictError("import-sealed");
       if (batch.sealedAt!==null) throw new ImportConflictError("import-sealed");
       const choice = this.admissionChoice(batch.namespaceId,relativePath,bytes,sha256);
       const id = nonEmpty(this.sources.id(),"fileId"), now = nonEmpty(this.sources.now(),"createdAt");
+      assertNotRestoreFenced(this.db,"import-file",id);
       const position = (this.db.query("SELECT COALESCE(MAX(position)+1,0) AS n FROM markdown_import_files WHERE import_id=?").get(importId) as {n:number}).n;
       const runId = choice.kind==="holder" ? this.newRun(now).id : null;
       this.db.run(`INSERT INTO markdown_import_files(id,import_id,namespace_id,position,request_key,relative_path,sha256,byte_length,created_at,run_id,waiting_on_file_id,outcome,document_id)
@@ -175,12 +190,13 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
   /** Bounded local work, not native dispatch. Settled holders wake contenders by rerunning the same ordered checks. */
   resolveWaiters(limit = 50): number {
     safeInteger(limit,"waiter limit"); if (limit<1 || limit>200) throw new ImportConflictError("Invalid waiter scan limit");
+    assertRestoreFenceSchema(this.db);
     const rows = this.db.query(`SELECT f.id FROM markdown_import_files f JOIN markdown_import_files h ON h.id=f.waiting_on_file_id
-      WHERE f.outcome IS NULL AND h.outcome IS NOT NULL ORDER BY f.rowid LIMIT ?`).all(limit) as {id:string}[];
+      WHERE f.outcome IS NULL AND h.outcome IS NOT NULL AND ${unfencedImportFileSql} ORDER BY f.rowid LIMIT ?`).all(limit) as {id:string}[];
     let settled=0;
     for (const {id} of rows) this.transaction("recheck import waiter",id,() => {
-      const row = this.row(id);
-      if (!row || row.outcome!==null || row.waitingOn===null || this.row(row.waitingOn)?.outcome===null) return;
+      const row = this.liveFile(id);
+      if (row.outcome!==null || row.waitingOn===null || this.row(row.waitingOn)?.outcome===null) return;
       const bytes = this.payload(id); if (!bytes) throw new ImportPreservationError("Import waiter payload missing");
       const choice = this.admissionChoice(row.namespaceId,row.relativePath,bytes,row.sha256,id);
       this.db.run("UPDATE markdown_import_files SET run_id=?,waiting_on_file_id=?,outcome=?,document_id=? WHERE id=?",[
@@ -202,7 +218,7 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
   }
   claim(fileId: string): Claim {
     return this.transaction("claim import",fileId,() => {
-      const row=this.row(nonEmpty(fileId,"fileId")); if (!row?.runId) throw new ImportNotFoundError();
+      const row=this.liveFile(nonEmpty(fileId,"fileId")); if (!row.runId) throw new ImportNotFoundError();
       const run=this.require(row.runId); this.owned({runId:run.id,generation:run.generation});
       this.db.run("UPDATE runs SET generation=generation+1 WHERE id=?",[run.id]);
       return {runId:run.id,generation:run.generation+1};
@@ -214,28 +230,33 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     if (through!==null) safeInteger(through,"local scan high-water");
     if (limit<1 || limit>200) throw new RunConflictError("Invalid local scan limit");
     return this.transaction("scan local imports","imports",() => {
+      assertRestoreFenceSchema(this.db);
       const highWater=through ?? (this.db.query("SELECT COALESCE(MAX(rowid),0) AS n FROM markdown_import_files").get() as {n:number}).n;
       const items=this.db.query(`SELECT f.id AS fileId,r.id AS runId,r.generation,f.rowid AS position ${localWork}
         AND f.rowid>? AND f.rowid<=? ORDER BY f.rowid LIMIT ?`).all(after,highWater,limit) as ImportLocalWork[];
       return {items,through:highWater};
     });
   }
-  /** Configured imports include observation-only attempts and fenced native cleanup, in finite row order. */
+  /** Configured imports include observation-only attempts and ordinary terminal cleanup, never restored work. */
   nativeCandidates(after: number, through: number | null, limit: number): { readonly items: readonly ImportLocalWork[]; readonly through: number } {
     safeInteger(after,"import scan position"); safeInteger(limit,"import scan limit");
     if (through!==null) safeInteger(through,"import scan high-water");
     if (limit<1 || limit>200) throw new RunConflictError("Invalid import scan limit");
+    assertRestoreFenceSchema(this.db);
     const highWater=through ?? (this.db.query("SELECT COALESCE(MAX(rowid),0) AS n FROM markdown_import_files").get() as {n:number}).n;
     const items=this.db.query(`SELECT f.id AS fileId,r.id AS runId,r.generation,f.rowid AS position
       FROM markdown_import_files f JOIN runs r ON r.id=f.run_id
       WHERE r.kind='import' AND f.waiting_on_file_id IS NULL AND
         ((f.outcome IS NULL AND r.status IN ('queued','submitting','running','uncertain')) OR
-         (f.outcome IS NOT NULL AND r.status IN ('completed','failed','interrupted') AND r.cancellation_state='pending'))
+          (f.outcome IS NOT NULL AND r.status IN ('completed','failed','interrupted') AND r.cancellation_state='pending'))
+        AND ${unfencedImportFileSql}
         AND f.rowid>? AND f.rowid<=? ORDER BY f.rowid LIMIT ?`).all(after,highWater,limit) as ImportLocalWork[];
     return {items,through:highWater};
   }
   claimNative(work: ImportLocalWork): Claim | null {
     return this.transaction("claim native import",work.runId,() => {
+      this.liveFile(work.fileId);
+      assertImportRunNotRestoreFenced(this.db,work.runId);
       const row=this.db.query(`SELECT r.generation FROM runs r JOIN markdown_import_files f ON f.run_id=r.id
         WHERE r.id=? AND f.id=? AND r.kind='import' AND r.generation=? AND f.outcome IS NULL AND f.waiting_on_file_id IS NULL
           AND r.status IN ('queued','submitting','running','uncertain')`).get(work.runId,work.fileId,work.generation) as {generation:number}|null;
@@ -250,8 +271,9 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
       return {chosen:step.result!==null,submitted:run.status!=="queued" || step.state!=="prepared" || step.nativeState!=="unknown"};
     });
   }
-  /** Historical input is available only for cleanup of a fenced import, never for a new dispatch. */
+  /** Terminal local cancellation only; installation-restored imports never gain cleanup authority. */
   cancellationPrompt(runId: string): {readonly promptId:string;readonly input:string} | null {
+    assertImportRunNotRestoreFenced(this.db,runId);
     const run=this.require(runId);
     if (run.kind!=="import" || !["completed","failed","interrupted"].includes(run.status)) throw new RunFenceError();
     return this.db.query(`SELECT s.prompt_id AS promptId,s.input FROM run_steps s JOIN runs r ON r.id=s.run_id
@@ -262,6 +284,8 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
   /** Claim control first so corrupt private input can be failed under a real generation, never published. */
   claimLocal(work: ImportLocalWork): {readonly claim:Claim;readonly chosen:boolean} | null {
     return this.transaction("claim local import",work.runId,() => {
+      this.liveFile(work.fileId);
+      assertImportRunNotRestoreFenced(this.db,work.runId);
       const row=this.db.query(`SELECT r.id,r.generation,s.result_json IS NOT NULL AS chosen ${localWork}
         AND f.id=? AND r.id=? AND r.generation=?`).get(work.fileId,work.runId,work.generation) as {id:string;generation:number;chosen:number}|null;
       if (!row) return null;
@@ -275,10 +299,12 @@ export class SqliteMarkdownImports extends SqliteRunAggregate implements Markdow
     safeInteger(limit,"local cancellation limit");
     if (limit<1 || limit>200) throw new RunConflictError("Invalid local cancellation limit");
     this.transaction("settle local import cancellations","imports",() => {
+      assertRestoreFenceSchema(this.db);
       const result=this.db.run(`UPDATE runs SET cancellation_state='settled' WHERE id IN (
         SELECT r.id FROM runs r JOIN markdown_import_files f ON f.run_id=r.id
         JOIN run_steps s ON s.run_id=r.id AND s.position=0
         WHERE r.kind='import' AND r.status IN ('completed','interrupted','failed') AND r.cancellation_state='pending' AND f.outcome IS NOT NULL
+          AND ${unfencedImportFileSql}
           AND s.prompt_id=r.prompt_id AND s.state='prepared' AND s.native_state='unknown' AND s.envelope_json IS NULL
           AND (s.result_json IS NULL OR json_extract(s.result_json,'$.evidence.state')='not-submitted')
           AND (r.status!='completed' OR s.result_json IS NOT NULL)

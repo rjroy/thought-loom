@@ -4,6 +4,8 @@ import { ExecutionOwnerLease } from "./execution-owner";
 import { SqliteSearchCleanup } from "./search-cleanup";
 import { purgeSearchSessionContent } from "./search-purge";
 import type { Logger } from "../logging";
+import { isRunRestoreFenced } from "./restore-fences";
+import { assertRestoreFenceSchema } from "./restore-fences-schema";
 
 interface OwnedRun {
   readonly id: string; readonly status: string; readonly cancellation: string; readonly generation: number; readonly bound: number;
@@ -27,6 +29,7 @@ export class SqliteSearchRetention {
     // One transaction cannot span two SQLite handles, even when their filenames identify the same database.
     if (db !== this.db) throw new SearchStorageError("search-retention-connection-mismatch");
     this.owner.assertRegistered(db);
+    assertRestoreFenceSchema(db);
   }
   purgeInTransaction(sessionId: string, at: string): readonly string[] {
     this.assertFor(this.db);
@@ -37,11 +40,13 @@ export class SqliteSearchRetention {
       EXISTS(SELECT 1 FROM agent_bindings WHERE run_id=r.id) AS bound
       FROM search_turns t JOIN runs r ON r.id=t.run_id WHERE t.session_id=CAST(? AS TEXT) ORDER BY t.position`).all(session) as OwnedRun[];
     for (const run of runs) {
-      searchRevision(run.generation + 1);
       if (run.kind !== "search" || run.input !== null || run.subject !== null || run.trigger !== null) throw new SearchStorageError("search-retention-owner-unavailable");
+      if (isRunRestoreFenced(this.db,run.id)) continue; // Local erasure needs no new native or never-submitted certificate.
+      searchRevision(run.generation + 1);
       if (!run.bound && !this.neverAuthorizedUnbound(run)) throw new SearchConflictError("native-cleanup-required");
     }
     for (const run of runs) {
+      if (isRunRestoreFenced(this.db,run.id)) continue;
       const active = ["queued","submitting","running","uncertain"].includes(run.status);
       if (active) this.db.run("UPDATE search_turns SET outcome_reason=COALESCE(outcome_reason,'stopped') WHERE run_id=?",[run.id]);
       // Completed/failed/interrupted outcomes stay exactly those outcomes. Delete does not turn completed work into Stop.
@@ -51,11 +56,12 @@ export class SqliteSearchRetention {
           run.generation+1,active ? "interrupted" : run.status,run.bound && run.cancellation === "none" ? "pending" : run.cancellation,run.id);
       if (fenced?.id !== run.id) throw new SearchStorageError("search-retention-fence-unavailable");
     }
-    this.db.run("UPDATE search_composer_contexts SET state='invalidated' WHERE session_id=CAST(? AS TEXT) AND state='active'",[session]);
+    this.db.run(`UPDATE search_composer_contexts SET state='invalidated' WHERE session_id=CAST(? AS TEXT) AND state='active'
+      AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='composer' AND rf.entity_id=search_composer_contexts.id)`,[session]);
     const changed = this.db.run(`UPDATE search_sessions SET title=NULL,deleted_at=?,last_activity_at=?,revision=revision+1
       WHERE id=CAST(? AS TEXT) AND deleted_at IS NULL`,[at,at,session]);
     if (changed.changes !== 1) throw new SearchStorageError("search-purge-owner-unavailable");
-    for (const run of runs) if (run.bound) this.cleanup.sealInTransaction(run.id);
+    for (const run of runs) if (run.bound && !isRunRestoreFenced(this.db,run.id)) this.cleanup.sealInTransaction(run.id);
     purgeSearchSessionContent(this.db,sessionId);
     this.owner.assertRegistered(this.db);
     const batch = Object.freeze(runs.map(run => run.id));

@@ -6,6 +6,7 @@ import { SearchConflictError, SearchNotFoundError, SearchStorageError, searchRev
 import { mergeSearchReferences, searchReferencesEligible } from "./search-eligibility";
 import { signSearchContext, verifySearchContext } from "./search-context-token";
 import { readSearchMessage, type SearchOfferedContent } from "./search-workspace-content";
+import { isRestoreFenced } from "./restore-fences";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 interface ComposerRow { readonly id: string; readonly sessionId: string; readonly revision: number; readonly state: string }
@@ -17,6 +18,7 @@ export class SqliteSearchComposers {
     if (!this.db.inTransaction) throw new SearchStorageError("search-composer-requires-transaction");
   }
   private row(sessionId: string, composerId: string): ComposerRow {
+    if (isRestoreFenced(this.db,"composer",composerId)) throw new SearchConflictError("context-changed");
     const row = this.db.query(`SELECT id,session_id AS sessionId,revision,state FROM search_composer_contexts
       WHERE id=CAST(? AS TEXT) AND session_id=CAST(? AS TEXT)`).get(text(composerId), text(sessionId)) as ComposerRow | null;
     if (!row) throw new SearchNotFoundError("search-composer-not-found");
@@ -48,12 +50,14 @@ export class SqliteSearchComposers {
   }
   open(sessionId: string, composerId: string, at: string): SearchComposerView {
     this.requireTransaction();
+    if (isRestoreFenced(this.db,"composer",composerId)) throw new SearchConflictError("context-changed");
     this.db.run(`INSERT INTO search_composer_contexts(id,session_id,state,created_at)
       VALUES (CAST(? AS TEXT),CAST(? AS TEXT),'active',?)`, [text(composerId), text(sessionId), at]);
     return this.view(this.row(sessionId, composerId));
   }
   discard(sessionId: string, composerId: string): void {
     this.requireTransaction();
+    if (isRestoreFenced(this.db,"composer",composerId)) return;
     const row = this.db.query(`SELECT state FROM search_composer_contexts WHERE id=CAST(? AS TEXT) AND session_id=CAST(? AS TEXT)`)
       .get(text(composerId),text(sessionId)) as { state: string } | null;
     if (!row) throw new SearchNotFoundError("search-composer-not-found");

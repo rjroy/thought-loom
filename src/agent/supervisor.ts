@@ -1,5 +1,6 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
+import { assertRestoreFenceSchema } from "../storage/restore-fences-schema";
 
 const concurrency=8;
 
@@ -50,14 +51,17 @@ export class RunSupervisor {
   }
   private candidates(source: Source, limit: number): readonly {id:string;position:number}[] {
     if (limit <= 0) return [];
+    assertRestoreFenceSchema(this.dependencies.db);
     const cursor = source === "runs" ? this.runCursor : this.cleanupCursor;
     const table = source === "runs" ? "runs" : "search_native_cleanup";
     cursor.through ??= (this.dependencies.db.query(`SELECT COALESCE(MAX(rowid),0) AS n FROM ${table}`).get() as {n:number}).n;
-    const sql = source === "runs" ? `SELECT id,rowid AS position FROM runs WHERE kind IN ('weave','evolve','export','search') AND
-      (status IN ('queued','submitting','running','uncertain') OR (status IN ('completed','interrupted','failed') AND cancellation_state='pending'))
-      AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?` :
+    const sql = source === "runs" ? `SELECT r.id,r.rowid AS position FROM runs r WHERE r.kind IN ('weave','evolve','export','search') AND
+      (r.status IN ('queued','submitting','running','uncertain') OR (r.status IN ('completed','interrupted','failed') AND r.cancellation_state='pending'))
+      AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=r.id)
+      AND r.rowid>? AND r.rowid<=? ORDER BY r.rowid LIMIT ?` :
       `SELECT c.run_id AS id,c.rowid AS position FROM search_native_cleanup c JOIN search_sessions s ON s.id=c.session_id
       WHERE c.state='pending' AND s.deleted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runs WHERE id=c.run_id)
+      AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=c.run_id)
       AND c.rowid>? AND c.rowid<=? ORDER BY c.rowid LIMIT ?`;
     const rows = this.dependencies.db.query(sql).all(cursor.after,cursor.through,limit) as {id:string;position:number}[];
     const last = rows.at(-1);

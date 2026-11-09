@@ -9,11 +9,12 @@ import { protocolJson, ProtocolValidationError, type OrdinaryCancellationJournal
 import { ImportPreservationError } from "../domain/markdown-import-contract";
 import { ValidationError } from "../domain/validation";
 import { SqliteRunAggregate } from "./run-aggregate";
-import { readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
+import { assertImportRunNotRestoreFenced, readOwnedImportInput, type ImportOwnedStep } from "./import-authority";
 import { ExecutionOwnerLease } from "./execution-owner";
 import { readAgentBinding } from "./run-record";
 import { assertOrdinaryCancellationJournal, ordinaryCancellationJournal } from "./run-cancellation";
 import { weaveDispatchAllowed } from "./weave-work";
+import { assertRunNotRestoreFenced } from "./restore-fences";
 
 // Isolated workers without a deployed lease remain explicitly unqualified. Never backfill this into the registry.
 const processSubmitOwner = randomUUID();
@@ -30,6 +31,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
   bind(runId: string, input: AgentBinding, claim?: Claim): void {
     const binding = normalizeBinding(input);
     const valid = this.transaction("bind agent",runId,() => {
+      assertRunNotRestoreFenced(this.db,runId);
       const run = this.loadRun(runId);
       if (!run) throw new AgentBindingError("Run does not exist for agent binding");
       requireExecutionRun(run);
@@ -153,6 +155,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
   }
   assertImportCancellation(claim: Claim, prompt: PersistedPrompt): void {
     this.transaction("authorize import cleanup",claim.runId,() => {
+      assertImportRunNotRestoreFenced(this.db,claim.runId);
       const run=this.require(claim.runId);
       if (run.kind!=="import" || run.generation!==claim.generation || !["completed","failed","interrupted"].includes(run.status) || !this.get(run.id)) throw new RunFenceError();
       const step=this.db.query(`SELECT s.position,s.prompt_id AS promptId,s.input,s.state,s.native_state AS nativeState,s.result_json AS result

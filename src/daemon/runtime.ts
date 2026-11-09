@@ -1,5 +1,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { CreationService } from "../domain/creation";
 import { RejectionService } from "../domain/rejection";
 import { SearchService } from "../domain/search";
@@ -33,13 +35,16 @@ import { mediaStoreId } from "../storage/media-source";
 import { SqliteMediaImports } from "../storage/media-import";
 import { ReinterpretationService } from "../domain/reinterpretation";
 import { SqliteReinterpretations } from "../storage/reinterpretation";
+import { BackupScheduler, systemBackupTimer, type BackupTimer } from "../backup/scheduler";
+import { runBackupAttempt } from "../backup/run";
 
-/** Optional test-owned transport and technical timer seams; default runtime uses the maintained SDK. */
+/** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
   readonly logSink?: LogSink;
   readonly resolveAgentService?: (config: AgentConfig) => Promise<ResolvedAgentService>;
   readonly createPublicClient?: (service: ResolvedAgentService) => PublicClient;
   readonly startTimer?: (poll: () => void) => () => void;
+  readonly backupScheduler?: { readonly timer: BackupTimer; readonly attempt: (signal: AbortSignal) => Promise<void> };
 }
 
 export interface LifecycleEvent {
@@ -67,12 +72,15 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let searchClockReceipts: SearchClockReceipts | undefined;
   let mediaFiles: MediaFiles | undefined;
   let mediaValidator: MediaValidator | undefined;
+  let backupScheduler: BackupScheduler | undefined;
   let acceptingRequests = true;
   const requestFlights = new Set<Promise<Response>>();
   async function close(force: boolean): Promise<boolean> {
     let failed = false;
     const pending: Promise<unknown>[] = [];
     acceptingRequests = false;
+    // Seal/abort synchronously, and join capture/Git before originals, database and execution ownership are released.
+    try { if (backupScheduler) pending.push(backupScheduler.stop()); } catch { failed = true; }
     // Pause the worker synchronously before awaiting either drain; a late native callback cannot advance local work.
     try { worker?.pause(); } catch { failed = true; }
     try { if (supervisor) pending.push(supervisor.stop()); } catch { failed = true; }
@@ -106,8 +114,25 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     diagnostics.info("[import] transport configured",{maxBytes:valid.importMaxBytes ?? 1048576});
     executionOwner = await ExecutionOwnerLease.acquire(valid.dbPath,diagnostics);
     executionOwner.assertHeld();
+    diagnostics.info("[restore] startup marker check attempt");
+    let markerPresent = true;
+    try { await lstat(join(dirname(executionOwner.databasePath), ".restore-in-progress")); }
+    catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") markerPresent = false;
+      else throw error;
+    }
+    if (markerPresent) {
+      diagnostics.warning("[restore] startup blocked by incomplete restore");
+      throw new Error("Incomplete restore");
+    }
+    executionOwner.assertHeld();
+    diagnostics.info("[restore] startup marker check outcome");
     db = new Database(executionOwner.databasePath, { readwrite: true, create: false });
     executionOwner.assertHeld();
+    diagnostics.info("[storage] enable WAL attempt");
+    const journalMode = db.query("PRAGMA journal_mode=WAL").get() as { journal_mode: string } | null;
+    if (journalMode?.journal_mode !== "wal") throw new Error("Knowledge database WAL mode unavailable");
+    diagnostics.info("[storage] enable WAL outcome");
     migrate(db, diagnostics);
     executionOwner.register(db);
     const owner = executionOwner, mediaMaxBytes = valid.mediaMaxBytes ?? 16*1024*1024;
@@ -185,6 +210,15 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     let stopping: Promise<void> | undefined;
     logger({ phase: "outcome", operation: "start", success: true, url });
     diagnostics.info("[daemon] started");
+    if (valid.backup && valid.backup.intervalSeconds !== null) {
+      const backup = valid.backup, injected = dependencies.backupScheduler;
+      backupScheduler = new BackupScheduler({ intervalSeconds: backup.intervalSeconds, timer: injected?.timer ?? systemBackupTimer, logger: diagnostics,
+        attempt: injected?.attempt ?? (async signal => {
+          const mediaDirectory = await realpath(valid.mediaDir ?? `${owner.databasePath}.media`);
+          await runBackupAttempt({ databasePath: owner.databasePath, mediaDirectory, config: backup, signal, logger: diagnostics });
+        }) });
+      backupScheduler.start();
+    }
     return {
       url,
       stop() {

@@ -177,6 +177,70 @@ describe("media source migration and immutable metadata", () => {
     } finally { reopened.close(); }
   }));
 
+  test("additive restore fences preserve the populated predecessor and remain immutable across migration", () => fileFixture((db, path) => {
+    seedFrozen(db);
+    const before = preserved(db);
+    migrate(db);
+    expect(preserved(db)).toEqual(before);
+    expect(db.query("SELECT * FROM restore_fences").all()).toEqual([]);
+    const columns = db.query<{ name: string; type: string; notnull: number; pk: number }, []>("PRAGMA table_info(restore_fences)").all();
+    expect(columns.map(({ name, type, notnull }) => ({ name, type, notnull })).sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { name: "entity_id", type: "TEXT", notnull: 1 },
+      { name: "entity_kind", type: "TEXT", notnull: 1 },
+      { name: "original_state_json", type: "TEXT", notnull: 1 },
+      { name: "restored_at", type: "TEXT", notnull: 1 },
+      { name: "snapshot_sha256", type: "TEXT", notnull: 1 },
+    ]);
+    expect(columns.filter(column => column.pk > 0).sort((a, b) => a.pk - b.pk).map(column => column.name)).toEqual(["entity_kind", "entity_id"]);
+    expect(db.query("PRAGMA foreign_key_list(restore_fences)").all()).toEqual([]);
+    const digest = "a".repeat(64);
+    const insert = "INSERT INTO restore_fences(entity_kind,entity_id,snapshot_sha256,restored_at,original_state_json) VALUES (?,?,?,?,?)";
+    for (const kind of ["run", "import-batch", "import-file", "composer"]) db.run(insert, [kind, "fixture", digest, "2030", "{}"]);
+    expect(() => db.run(insert, ["unknown", "other", digest, "2030", "{}"])).toThrow();
+    expect(() => db.run(insert, ["run", "other", null, "2030", "{}"])).toThrow();
+    expect(() => db.run("UPDATE restore_fences SET original_state_json='changed' WHERE entity_kind='run'")).toThrow();
+    expect(() => db.run("DELETE FROM restore_fences WHERE entity_kind='run'")).toThrow();
+    expect(() => db.run("INSERT OR REPLACE INTO restore_fences VALUES ('run','fixture',?,'2031','{}')", [digest])).toThrow();
+    const fences = db.query("SELECT * FROM restore_fences ORDER BY entity_kind,entity_id").all();
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); migrate(reopened);
+      expect(reopened.query("SELECT * FROM restore_fences ORDER BY entity_kind,entity_id").all()).toEqual(fences);
+      expect(preserved(reopened)).toEqual(before);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  }));
+
+  test("a failure after real restore-fence DDL rolls back migration and preserves the frozen predecessor", () => fileFixture(db => {
+    seedFrozen(db);
+    const before = preserved(db);
+    const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name").all();
+    const beforeSchema = schema();
+    let injected = false;
+    const failing = new Proxy(db, { get(target, key) {
+      if (key === "exec") return (sql: string) => {
+        const result = target.exec(sql);
+        if (sql.includes("CREATE TABLE IF NOT EXISTS restore_fences")) {
+          expect(target.query("SELECT name FROM sqlite_schema WHERE type='table' AND name='restore_fences'").get()).toEqual({ name: "restore_fences" });
+          injected = true;
+          throw new Error("injected after restore fence DDL");
+        }
+        return result;
+      };
+      const member = Reflect.get(target, key, target);
+      return typeof member === "function" ? member.bind(target) : member;
+    } });
+    expect(() => migrate(failing)).toThrow("injected after restore fence DDL");
+    expect(injected).toBe(true);
+    expect(db.inTransaction).toBe(false);
+    expect(schema()).toEqual(beforeSchema);
+    expect(preserved(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    migrate(db);
+    expect(preserved(db)).toEqual(before);
+    expect(db.query("SELECT * FROM restore_fences").all()).toEqual([]);
+  }));
+
   test("mixed-case cascading incoming FK preserves its populated row across media migration and reopen", () => fileFixture((db, path) => {
     seedFrozen(db);
     db.exec(`CREATE TABLE fixture_cascading_incoming (

@@ -21,6 +21,7 @@ import type { ExecutionOwnerLease } from "../storage/execution-owner";
 import { SqliteSearchCleanup } from "../storage/search-cleanup";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
 import { SqliteSearchRetention } from "../storage/search-retention";
+import { assertRunNotRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
 
 /** Native calls are outside SQLite transactions. Production supplies OpenCodeAdapter. */
 export interface WorkerNative {
@@ -118,10 +119,12 @@ export class RunWorker {
     const execution = Promise.resolve().then(async () => {
       if (this.paused) return;
       this.dependencies.executionOwner?.assertHeld();
+      if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
       if (this.cleanup.isPurged(runId)) return; // Cancellation-only identity, never infer an execution run/binding from its outbox.
       if (beforePoll) await beforePoll();
       if (!this.paused && !this.flights.get(runId)?.retired) {
         this.dependencies.executionOwner?.assertHeld();
+        if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
         await this.poll(runId);
       }
     });
@@ -140,6 +143,7 @@ export class RunWorker {
     if (this.paused) throw new WorkerPaused();
     if (this.flights.get(runId)?.retired) throw new WorkerRetired();
     this.dependencies.executionOwner?.assertHeld();
+    assertRunNotRestoreFenced(this.dependencies.db,runId);
   }
   private transport(): WorkerNative {
     const factory = this.dependencies.native;
@@ -162,6 +166,7 @@ export class RunWorker {
     let claim = this.owners.get(runId);
     let stage = "load-run";
     try {
+      this.localFence(runId);
       const run = this.runs.get(runId);
       if (!run) { this.searchClock.forget(runId); throw new RunConflictError("Worker run does not exist"); }
       if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return; // Import dispatch belongs to its separately authorized worker.
@@ -213,9 +218,9 @@ export class RunWorker {
       if (current.status === "queued" && step.state === "prepared") {
         stage = "submit";
         const submitted = await this.call(owner,prompt,"submit",() => this.transport().submit(owner,binding,prompt,
-          run.kind !== "search" ? undefined : fact => {
-            try { this.cleanup.recordAdmission(fact); }
-            catch { this.logger.warning("[search cleanup] admission metadata remains uncertain",{runId,promptId:prompt.promptId}); }
+           run.kind !== "search" ? undefined : fact => {
+             try { assertRunNotRestoreFenced(this.dependencies.db,runId); this.cleanup.recordAdmission(fact); }
+             catch { this.logger.warning("[search cleanup] admission metadata remains uncertain",{runId,promptId:prompt.promptId}); }
           }));
         if (submitted.ok && this.runs.get(runId)?.status === "queued") {
           // An implementation that reports successful dispatch without durable intent violates WorkerNative's contract.
@@ -334,6 +339,7 @@ export class RunWorker {
     // Called only by this run's registered cleanup tail after its actual execution promise has joined.
     if (run.kind === "search") return;
     if (this.paused || !["interrupted","failed"].includes(run.status) || this.steps.cancellation(run.id) !== "pending") return;
+    if (isRunRestoreFenced(this.dependencies.db,run.id)) return;
     if (this.state.settleUnsubmitted(run.id)) return;
     const binding = this.bindings.get(run.id);
     if (!binding) return;
@@ -351,6 +357,7 @@ export class RunWorker {
   private async cleanupRun(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
     this.dependencies.executionOwner?.assertHeld();
+    if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
     const run = this.runs.get(runId);
     if (run?.kind === "search" || !run) { await this.cleanupSearch(runId); return; }
     if (terminal(run)) { this.forget(runId); await this.cancel(run); }
@@ -358,12 +365,14 @@ export class RunWorker {
   private async cleanupSearch(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
     try {
+      assertRunNotRestoreFenced(this.dependencies.db,runId);
       const identity = this.cleanup.prepare(runId);
       if (!identity || this.paused || !this.cleanup.drained(identity)) return;
       const native = this.transport();
       if (!native.cancelSearch) return;
       const authorize = () => {
         if (this.paused) throw new WorkerPaused();
+        assertRunNotRestoreFenced(this.dependencies.db,runId);
         this.cleanup.authorize(identity);
       };
       authorize();

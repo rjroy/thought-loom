@@ -15,6 +15,8 @@ import { searchRunEffort } from "../storage/search-initial-context";
 import type { SearchClockDependencies } from "../domain/search-time";
 import type { ExecutionOwnerLease } from "../storage/execution-owner";
 import type { SqliteSearchRetention } from "../storage/search-retention";
+import { assertRunNotRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
+import { assertImportRunNotRestoreFenced } from "../storage/import-authority";
 
 export interface ConfiguredWorkerDependencies extends RunSources {
   readonly db: Database;
@@ -47,8 +49,10 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     this.exports = new SqliteAgenticExports(dependencies.db,dependencies);
     this.importWorker=new MarkdownImportWorker({...dependencies,native:(bindings,localFence) => {
       let adapter: OpenCodeAdapter | undefined;
-      const owned=async (binding: AgentBinding): Promise<OpenCodeAdapter> => {
+      const owned=async (runId: string, binding: AgentBinding): Promise<OpenCodeAdapter> => {
+        assertImportRunNotRestoreFenced(dependencies.db,runId);
         localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
+        assertImportRunNotRestoreFenced(dependencies.db,runId);
         const service=this.service;
         if (this.paused || !service || service.url!==binding.serviceUrl) throw new AgentUnavailableError("Import-owned service is unavailable");
         if (!adapter) {
@@ -59,17 +63,19 @@ export class ConfiguredRunWorker implements SupervisedWorker {
       };
       const native: ImportNative={
         bindingFor:async run => {
+          assertImportRunNotRestoreFenced(dependencies.db,run.id);
           localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
+          assertImportRunNotRestoreFenced(dependencies.db,run.id);
           const service=this.service, config=dependencies.config;
           if (!service || this.paused) throw new AgentUnavailableError("Import agent service is unavailable");
           const variant=config.effort.standard;
           return normalizeBinding({sessionId:run.sessionId,serviceUrl:service.url,location:{directory:config.directory},
             model:{...config.model,...(variant===null ? {} : {variant})},permissions:[{action:"*",resource:"*",effect:"deny"}],protocolVersion:1});
         },
-        ensureSession:async (claim,binding,prompt) => (await owned(binding)).ensureImportSession(claim,binding,prompt),
-        submit:async (claim,binding,prompt) => (await owned(binding)).submitImport(claim,binding,prompt),
-        observe:async (claim,binding,prompts) => (await owned(binding)).observeImport(claim,binding,prompts),
-        cancel:async (claim,binding,prompt) => (await owned(binding)).cancelImport(claim,binding,prompt),
+        ensureSession:async (claim,binding,prompt) => (await owned(claim.runId,binding)).ensureImportSession(claim,binding,prompt),
+        submit:async (claim,binding,prompt) => (await owned(claim.runId,binding)).submitImport(claim,binding,prompt),
+        observe:async (claim,binding,prompts) => (await owned(claim.runId,binding)).observeImport(claim,binding,prompts),
+        cancel:async (claim,binding,prompt) => (await owned(claim.runId,binding)).cancelImport(claim,binding,prompt),
       };
       return native;
     }});
@@ -86,10 +92,12 @@ export class ConfiguredRunWorker implements SupervisedWorker {
         permissions:[{action:"*",resource:"*",effect:run.kind === "weave" || run.kind === "evolve" ? "allow" : "deny"}],protocolVersion:1});
     },native:bindings => {
       let adapter: OpenCodeAdapter | undefined;
-      const owned = async (binding: AgentBinding): Promise<OpenCodeAdapter> => {
+      const owned = async (runId: string, binding: AgentBinding): Promise<OpenCodeAdapter> => {
         this.assertOwner();
+        assertRunNotRestoreFenced(dependencies.db,runId);
         await this.resolve();
         this.assertOwner();
+        assertRunNotRestoreFenced(dependencies.db,runId);
         const service = this.service;
         // Never retarget a persisted session or send a newly selected endpoint's credentials to an old endpoint.
         if (this.paused || !service || service.url !== binding.serviceUrl) throw new AgentUnavailableError("Run-owned service is unavailable");
@@ -97,13 +105,13 @@ export class ConfiguredRunWorker implements SupervisedWorker {
           import:() => { throw new RunFenceError("Import authority is not available on the ordinary transport"); },runtime:() => this.assertOwner()},this.logger);
       };
       const native: WorkerNative = {
-        ensureSession:async (claim,binding) => (await owned(binding)).ensureSession(claim,binding),
-        submit:async (claim,binding,prompt,onAdmission) => (await owned(binding)).submit(claim,binding,prompt,onAdmission),
-        observe:async (claim,binding,prompts) => (await owned(binding)).observe(claim,binding,prompts),
-        cancel:async (runId,binding,prompt) => (await owned(binding)).cancel(runId,binding,prompt),
+        ensureSession:async (claim,binding) => (await owned(claim.runId,binding)).ensureSession(claim,binding),
+        submit:async (claim,binding,prompt,onAdmission) => (await owned(claim.runId,binding)).submit(claim,binding,prompt,onAdmission),
+        observe:async (claim,binding,prompts) => (await owned(claim.runId,binding)).observe(claim,binding,prompts),
+        cancel:async (runId,binding,prompt) => (await owned(runId,binding)).cancel(runId,binding,prompt),
         cancelSearch:async (identity,authorize) => {
           authorize();
-          const adapter = await owned(identity.binding);
+          const adapter = await owned(identity.runId,identity.binding);
           authorize();
           return adapter.cancelSearch(identity,authorize);
         },
@@ -137,6 +145,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   }
   private async beforePoll(runId: string): Promise<void> {
     if (this.paused) return;
+    if (isRunRestoreFenced(this.dependencies.db,runId)) return;
     const run = this.runs.get(runId);
     if (run && run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return;
     // Canonical local output and terminal cleanup without a binding do not require discovery or a network connection.

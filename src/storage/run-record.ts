@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { RunKind, RunRecord } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
 import { assertBindingPermissions, normalizeBinding, type AgentBinding } from "../agent/binding";
+import { assertRunNotRestoreFenced } from "./restore-fences";
 
 /** One run identity/projection shared by aggregate operations and transactional weave admission. No initialization here. */
 export function readRun(db: Database, id: string): RunRecord | null {
@@ -25,6 +26,7 @@ export function readAgentBinding(db: Database, runId: string): AgentBinding | nu
 }
 
 export function insertRun(db: Database, run: RunRecord, intent: WeaveIntent | null = null): void {
+  assertRunNotRestoreFenced(db,run.id);
   db.run(`INSERT INTO runs (id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id)
     VALUES (?,?,?,?,?,?,?,?,?,?)`,[run.id,run.kind,run.status,run.sessionId,run.promptId,run.createdAt,run.generation,run.inputThoughtId,intent?.subjectId ?? null,intent?.triggerId ?? null]);
 }

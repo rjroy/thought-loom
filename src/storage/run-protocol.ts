@@ -10,6 +10,8 @@ import { searchString } from "../domain/search-session-guards";
 import { confirmSearchResult } from "./search-capability-result";
 import { requireCurrentSearchPublication, requireSearchFullReads, searchPublicationOwner } from "./search-publication-guard";
 import { retainedSearchSuccessorClock, type SqliteSearchPromptClock } from "./search-prompt-clock";
+import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertImportRunNotRestoreFenced } from "./import-authority";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
@@ -142,7 +144,9 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
   }
   settleCancellation(runId: string): void {
     this.transaction("settle cancellation",runId,() => {
+      assertRunNotRestoreFenced(this.db,runId);
       const run = this.require(runId);
+      if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,runId);
       if (run.kind === "search") throw new RunForbiddenError("Search cancellation requires owned drain evidence");
       if (run.status !== "interrupted" && run.status !== "failed" && !(run.kind === "import" && run.status === "completed")) throw new RunFenceError("Only fenced runs have native cancellation to settle");
       const state = this.cancellation(runId);

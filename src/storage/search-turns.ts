@@ -5,6 +5,8 @@ import { SearchStorageError, searchRevision, searchSessionView, searchTurnReques
 import { protocolJson } from "../domain/run-protocol";
 import { oneOf, record } from "../domain/validation";
 import type { SearchClockOwner } from "../domain/search-time";
+import { assertNotRestoreFenced, assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
+import { assertRestoreFenceSchema } from "./restore-fences-schema";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 interface TurnRow {
@@ -25,13 +27,18 @@ function runView(sessionId: string, row: RunRow): SearchRunView {
 export class SqliteSearchTurns {
   constructor(private readonly db: Database) {}
   hasActive(sessionId: string): boolean {
-    return this.db.query("SELECT 1 FROM search_turns WHERE session_id=CAST(? AS TEXT) AND open_slot=1").get(text(sessionId)) !== null;
+    assertRestoreFenceSchema(this.db);
+    return this.db.query(`SELECT 1 FROM search_turns t WHERE t.session_id=CAST(? AS TEXT) AND t.open_slot=1
+      AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=t.run_id)`).get(text(sessionId)) !== null;
   }
   clockOwner(sessionId: string | null, runId: string | null): SearchClockOwner | null {
+    assertRestoreFenceSchema(this.db);
+    if (runId !== null && isRunRestoreFenced(this.db,runId)) return null;
     const row = this.db.query(`SELECT r.id AS runId,r.generation,t.session_id AS searchSessionId,r.session_id AS nativeSessionId
       FROM search_turns t JOIN search_sessions s ON s.id=t.session_id AND s.deleted_at IS NULL
       JOIN runs r ON r.id=t.run_id AND r.kind='search' AND r.status IN ('queued','submitting','running','uncertain')
       WHERE t.open_slot=1 AND r.cancellation_state='none' AND (? IS NULL OR t.session_id=CAST(? AS TEXT))
+        AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=r.id)
         AND (? IS NULL OR r.id=CAST(? AS TEXT))`).get(sessionId,sessionId,runId,runId) as SearchClockOwner | null;
     return row ? Object.freeze({...row,generation:searchRevision(row.generation)}) : null;
   }
@@ -48,12 +55,14 @@ export class SqliteSearchTurns {
     return row ? runView(row.sessionId,row) : null;
   }
   activeControl(sessionId: string): SearchRunView | null {
+    assertRestoreFenceSchema(this.db);
     const row = this.db.query(`SELECT t.run_id AS runId,u.id AS userMessageId,a.id AS assistantMessageId,
       r.status,r.cancellation_state AS cancellation,t.outcome_reason AS outcomeReason
       FROM search_turns t JOIN runs r ON r.id=t.run_id AND r.kind='search'
       JOIN search_messages u ON u.run_id=t.run_id AND u.role='user'
       LEFT JOIN search_messages a ON a.run_id=t.run_id AND a.role='assistant'
-      WHERE t.session_id=CAST(? AS TEXT) AND t.open_slot=1`).get(text(sessionId)) as RunRow | null;
+      WHERE t.session_id=CAST(? AS TEXT) AND t.open_slot=1
+        AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=r.id)`).get(text(sessionId)) as RunRow | null;
     if (!row && this.hasActive(sessionId)) throw new SearchStorageError("search-turn-message-unavailable");
     return row ? runView(sessionId,row) : null;
   }
@@ -88,6 +97,8 @@ export class SqliteSearchTurns {
   admit(admission: SearchTurnAdmission): SearchTurnControlView {
     if (!this.db.inTransaction) throw new SearchStorageError("search-admission-requires-transaction");
     const { sessionId, requestKey, request, context, runId, userMessageId, nativeSessionId, promptId, admittedAt } = admission;
+    assertNotRestoreFenced(this.db,"composer",request.composerId);
+    assertRunNotRestoreFenced(this.db,runId);
     const id = text(sessionId);
     this.db.run(`INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation)
       VALUES (CAST(? AS TEXT),'search','queued',CAST(? AS TEXT),CAST(? AS TEXT),?,0)`, [text(runId), text(nativeSessionId), text(promptId), admittedAt]);

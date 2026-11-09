@@ -23,7 +23,9 @@ import { SqliteSearchRepository } from "./search";
 import type { SqliteSearchRetention } from "./search-retention";
 import { SqliteKnowledgeWriter } from "./knowledge-write";
 import { migrateMediaFoundation } from "./media-migration";
+import { migrateRestoreFences } from "./restore-fences-schema";
 import { initializeMediaStore, mediaStoreId, saveMediaSource, storedThought, type MediaSourceWrite } from "./media-source";
+import { rebuildResponseSearch } from "./search-projections";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -172,8 +174,6 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         CREATE TRIGGER IF NOT EXISTS response_search_insert AFTER INSERT ON responses BEGIN
           INSERT INTO response_search_fts(response_id,text) VALUES (NEW.id,NEW.text);
         END;
-        DELETE FROM response_search_fts;
-        INSERT INTO response_search_fts(response_id,text) SELECT id,text FROM responses;
         CREATE TABLE IF NOT EXISTS search_revision (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
         INSERT OR IGNORE INTO search_revision(id,revision) VALUES (1,0);
         CREATE TRIGGER IF NOT EXISTS search_revision_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
@@ -186,12 +186,14 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         CREATE TRIGGER IF NOT EXISTS search_revision_reject_insert AFTER INSERT ON rejected_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS search_revision_reject_delete AFTER DELETE ON rejected_thoughts BEGIN UPDATE search_revision SET revision=revision+1 WHERE id=1; END;
       `);
+      rebuildResponseSearch(db);
       migrateRunSchema(db);
       migrateImportFoundation(db);
       migrateSearchFoundation(db);
       migrateExecutionOwners(db);
       migrateSearchCleanup(db);
       migrateMediaFoundation(db, logger);
+      migrateRestoreFences(db);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;

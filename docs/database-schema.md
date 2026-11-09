@@ -1,6 +1,6 @@
 # Database schema
 
-[Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md)
+[Start here](../README.md) · [Daemon API](daemon-api.md) · [Server startup](server-startup.md) · [Backup contract](backup-restore.md)
 
 Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative migration starts in [`src/storage/sqlite.ts`](../src/storage/sqlite.ts); Markdown import definitions and its predecessor FK-closure rebuild live in [`import-schema.ts`](../src/storage/import-schema.ts) and [`import-migration.ts`](../src/storage/import-migration.ts). The [media metadata foundation](#media-source-storage-foundation) has its own thought/FK migration. The separate [agentic-search storage](#agentic-search-storage-foundation) supports user-only saved sessions and configured search execution through the [daemon API](daemon-api.md#agentic-search-sessions). Public Markdown import access is documented in the [daemon API](daemon-api.md#markdown-import-and-source-inspection).
 
@@ -13,6 +13,30 @@ Thoughtloom uses SQLite through Bun's built-in `bun:sqlite`. The authoritative m
 - Rejection is presence in a separate state table, not deletion or modification of the recorded thought.
 
 Database names use `snake_case`; the [API](daemon-api.md#response-records) uses `camelCase`.
+
+## Backup and recovery boundary
+
+Daemon startup enables and verifies WAL on the knowledge database under its execution-owner lease before migration. The separate lease sidecar remains in DELETE journal mode. WAL alone is not an online backup implementation.
+
+The [portable format](backup-restore.md#application-schema-inventory) inventories all current durable tables, derived search data and transient exclusions. It includes rejected records, private SQL import payloads, complete native journals/cancellation evidence, historical owner attribution and original media files, not just ordinary scoped Thought projections. The actual execution-owner sidecar is never a recovery artifact.
+
+The internal [compiled backup inventory](../src/backup/schema.ts) validates supported table/column/type/nullability, primary/foreign/unique-key and derived-object metadata without changing the source. Its effective typed column definitions also drive strict decoding; primary-key nulls never request new SQLite identities. It is not a complete SQL-constraint/trigger or record-integrity validator. The [explicit capture service](backup-restore.md#coherent-online-capture) separately performs shared integrity/reference/seal/map checks, copies raw rows from one owned-process WAL read transaction, then closes it before encoding and verifying original files. It never migrates/registers an owner or changes source rows. [Private restore staging](backup-restore.md#implemented-private-staging-not-an-installation) loads original-state records into a new marker-gated database, preserving rowids, sequences, existing fences and plural search epochs while rebuilding derived search data. The separate [staged recovery operation](backup-restore.md#implemented-staged-recovery-transitions) adds missing fences and applies only the enumerated local transitions in one transaction, without migration/native/owner effects. [Offline installation](backup-restore.md#standalone-offline-installation) uses the shared trusted loader on a new fixed-inode target under its actual execution lease and durable marker; it copies the already recovered records, not a second recovery. The installer never registers a new historical owner. A raw database copy has no newly generated fences and can resume retained jobs. No schema/format compatibility ID or online-backup guarantee should be inferred from SQLite's schema counter.
+
+### `restore_fences`
+
+[`restore-fences-schema.ts`](../src/storage/restore-fences-schema.ts) adds this table within the existing core migration transaction, with no data backfill, existing-table rebuild or native call.
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `entity_kind` | `TEXT` | `run`, `import-batch`, `import-file` or `composer`; first component of the primary key. |
+| `entity_id` | `TEXT` | Nonempty historical identity; second primary-key component. |
+| `snapshot_sha256` | `TEXT` | Exactly 64 lowercase hexadecimal characters; selected manifest digest. |
+| `restored_at` | `TEXT` | Nonempty timestamp; staged recovery supplies canonical UTC syntax for new fences. |
+| `original_state_json` | `TEXT` | Valid JSON object; new recovery fences retain exact before-values for explicitly changed local state, using qualified keys/scalar tags and final LF. Existing fences remain byte-exact. |
+
+All columns are `NOT NULL`. There are no FKs: historical run/composer identities can outlive deliberate search-content deletion. Update/delete and identity/rowid replacement triggers make rows immutable. Migration leaves the table empty and preserves populated records on repeat/reopen. Migration and the shared [authority helper](../src/storage/restore-fences.ts) verify the compiled table/immutable-trigger definitions and fail closed when they are unavailable or incompatible; missing metadata is not permission to execute. Each entity-kind gate preserves exact fence identity and refuses inconsistent ordinary string binding rather than authorizing an alias.
+
+Run claim/context/capability/preparation/binding/finalization and cancellation-settlement paths consult `entity_kind='run'` directly, including native-worker and cleanup-journal gates even when a run row has been purged. Import authority additionally checks the associated batch/file; private input, choice, publication, failure/Stop payload deletion and local/native cancellation settlement are denied for any fenced owner. Import scans exclude those owners before their limits. Batch/file keyed receipt replay remains historical, while fenced batches reject new file admission and sealing writes. Composer guards refuse new turn authority without fencing the saved session. Live weave coordination and supervisor scans ignore fenced work without removing history/latest/by-key records. Local search Delete preserves fences and existing historical cleanup evidence without fabricating a new certificate; fresh work retains ordinary cleanup rules. These authority checks and original-state staging generate no transitions/fence records. Explicit staged recovery adds missing fences, closes active search slots and interrupts pending import reservations while preserving accepted payloads and native/cancellation facts; final installation preserves that exact state. No schema change is involved. Complete restored-startup/fresh-work evidence remains separate from table/guard presence.
 
 ## Tables
 
