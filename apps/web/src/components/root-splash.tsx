@@ -23,6 +23,8 @@ export function RootSplash({ children }: { children: ReactNode }) {
     const finish = () => {
       if (!active || done) return;
       done = true;
+      // Canceling the dissolve removes its fill before React unmounts the overlay.
+      if (overlay.current) overlay.current.style.visibility = "hidden";
       cancel();
       setPhase("finished");
       router.replace("/explore", { scroll: false });
