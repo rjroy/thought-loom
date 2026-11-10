@@ -1,0 +1,257 @@
+{
+  "created_utc": "2026-11-10T17:27:23.888404+00:00",
+  "status": "implemented-user-accepted-after-runtime-previews",
+  "acceptance": "On 2026-11-10, following runtime previews, the user said 'awesome ... be sure to cleanup the .impeccable directory, branch, commit, and PR', accepting the delivered integration without additional live user testing.",
+  "evidence_retention": "Before screenshots and enlarged-text screenshot were removed during authorized consolidation; before filenames and hashes below are historical. After desktop and mobile screenshots remain.",
+  "production_approval": "User selected Approve and integrate for the exact production image on 2026-11-10",
+  "runtime_asset": "apps/web/public/backgrounds/browse-cat.png",
+  "runtime_asset_sha256": "212e78305b51c45f0249ebd8939ccc8be96ecb10cfc97b5b572d78209d31b657",
+  "production_bytes_match": true,
+  "next_version": "16.4.5",
+  "browser": "Chromium 155.0.8059.84 headless",
+  "isolation": "Allowlisted current source and filesystem copies of existing installed dependencies in an owned /tmp/opencode workspace; explicit test-only configuration and existing deterministic Browse/Settings daemon doubles; no install, private dotenv, operator service or provider. All owned processes stopped.",
+  "capture_commands": [
+    "bun --no-env-file /tmp/opencode/thoughtloom-whimsy-preview.ts before",
+    "bun --no-env-file /tmp/opencode/thoughtloom-whimsy-preview.ts after /tmp/opencode/thoughtloom-whimsy-runtime-NJ6MEL",
+    "bun --no-env-file /tmp/opencode/thoughtloom-whimsy-preview.ts check /tmp/opencode/thoughtloom-whimsy-runtime-NJ6MEL"
+  ],
+  "capture_driver_status": "One-off external validation driver, not a maintained runtime input; existing focused browser checks are maintained in apps/web/tests.",
+  "next_build_command": "bun --no-env-file run --bun next build (owned fixture)",
+  "next_build_result": "passed before, after and focused visual probe phases",
+  "observations": [
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "label": "desktop",
+      "before": "before-desktop.png",
+      "after": "after-desktop.png",
+      "before_sha256": "14bf0ad1a68523a76a37dce238f728b8722f4449db778ec4d3942129701e4d2a",
+      "after_sha256": "f789bf4d93e660a79c851c3d362ce2365dc6c92cb0eb2cbdc14f31799b304909",
+      "existing_measured_geometry_unchanged": true,
+      "whole_png_byte_identical": false,
+      "overflow": false,
+      "elements": {
+        "main h1": [
+          {
+            "x": 45,
+            "y": 107,
+            "width": 138.90625,
+            "height": 50.59375
+          }
+        ],
+        "main h2": [
+          {
+            "x": 355,
+            "y": 249.59375,
+            "width": 1016,
+            "height": 30
+          },
+          {
+            "x": 355,
+            "y": 406.59375,
+            "width": 1016,
+            "height": 30
+          },
+          {
+            "x": 355,
+            "y": 563.59375,
+            "width": 1016,
+            "height": 30
+          },
+          {
+            "x": 355,
+            "y": 720.59375,
+            "width": 1016,
+            "height": 30
+          }
+        ],
+        "aside[aria-label=\"Browse filters\"]": [
+          {
+            "x": 45,
+            "y": 189.59375,
+            "width": 254,
+            "height": 299
+          }
+        ],
+        "main article": [
+          {
+            "x": 331,
+            "y": 229.59375,
+            "width": 1064,
+            "height": 141
+          },
+          {
+            "x": 331,
+            "y": 386.59375,
+            "width": 1064,
+            "height": 141
+          },
+          {
+            "x": 331,
+            "y": 543.59375,
+            "width": 1064,
+            "height": 141
+          },
+          {
+            "x": 331,
+            "y": 700.59375,
+            "width": 1064,
+            "height": 141
+          }
+        ],
+        "main form": [],
+        "main textarea": []
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "label": "mobile",
+      "before": "before-mobile.png",
+      "after": "after-mobile.png",
+      "before_sha256": "0cdee8dbf8e4269e6903e693acc2658d21ebcf682beccf37f8a4d346ef0ab035",
+      "after_sha256": "0cdee8dbf8e4269e6903e693acc2658d21ebcf682beccf37f8a4d346ef0ab035",
+      "existing_measured_geometry_unchanged": true,
+      "whole_png_byte_identical": true,
+      "overflow": false,
+      "elements": {
+        "main h1": [
+          {
+            "x": 20,
+            "y": 181,
+            "width": 101.03125,
+            "height": 36.796875
+          }
+        ],
+        "main h2": [
+          {
+            "x": 40,
+            "y": 556.796875,
+            "width": 310,
+            "height": 30
+          },
+          {
+            "x": 40,
+            "y": 713.796875,
+            "width": 310,
+            "height": 30
+          },
+          {
+            "x": 40,
+            "y": 870.796875,
+            "width": 310,
+            "height": 30
+          },
+          {
+            "x": 40,
+            "y": 1027.796875,
+            "width": 310,
+            "height": 30
+          }
+        ],
+        "aside[aria-label=\"Browse filters\"]": [
+          {
+            "x": 20,
+            "y": 306.796875,
+            "width": 350,
+            "height": 166
+          }
+        ],
+        "main article": [
+          {
+            "x": 20,
+            "y": 536.796875,
+            "width": 350,
+            "height": 141
+          },
+          {
+            "x": 20,
+            "y": 693.796875,
+            "width": 350,
+            "height": 141
+          },
+          {
+            "x": 20,
+            "y": 850.796875,
+            "width": 350,
+            "height": 141
+          },
+          {
+            "x": 20,
+            "y": 1007.796875,
+            "width": 350,
+            "height": 141
+          }
+        ],
+        "main form": [],
+        "main textarea": []
+      }
+    }
+  ],
+  "focused_decoration_checks": [
+    {
+      "route": "browse",
+      "width": 390,
+      "enlarged": false,
+      "visible": false,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 768,
+      "enlarged": false,
+      "visible": false,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 769,
+      "enlarged": false,
+      "visible": true,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 900,
+      "enlarged": false,
+      "visible": true,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 1024,
+      "enlarged": false,
+      "visible": true,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 1440,
+      "enlarged": false,
+      "visible": true,
+      "passed": true
+    },
+    {
+      "route": "browse",
+      "width": 1440,
+      "enlarged": true,
+      "visible": true,
+      "passed": true
+    }
+  ],
+  "independent_functional_validation": "Root and web typechecks, 36 focused tests, production build, 14 viewport/text probes, and Browse/Settings functional journeys passed independently; the Designer had not run the full journeys.",
+  "independent_review": "Oracle bun-typescript-reviewer accepted with no material defects.",
+  "mechanical_detector": {
+    "exit_code": 0,
+    "result": "seven advisory findings on unchanged pre-existing font-size declarations across Browse/Settings CSS; no new font rule introduced"
+  },
+  "limitations": [
+    "Not physical-device/software-keyboard testing",
+    "Not screen-reader or contrast certification",
+    "Integration authorization does not equal user runtime appearance acceptance"
+  ]
+}

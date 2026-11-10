@@ -1,0 +1,67 @@
+{
+  "status": "candidate-pending-exact-production-approval",
+  "created_utc": "2026-11-10T17:04:24.886005+00:00",
+  "tool_version": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "source": {
+    "path": "../concept.png",
+    "sha256": "81b29be9654f38c89fabc17e0758f70a507e8c04ae9d3af044f97f675428ae2f",
+    "info": "PNG 1402x1122 srgba 4.0 False"
+  },
+  "output": {
+    "path": "browse-cat.png",
+    "sha256": "212e78305b51c45f0249ebd8939ccc8be96ecb10cfc97b5b572d78209d31b657",
+    "bytes": 64188,
+    "info": "PNG 400x320 srgba 4.0 False"
+  },
+  "recipe_argv": [
+    "magick",
+    "/home/rjroy/Projects/writing/thought-loom/.impeccable/candidates/browse-whimsy/concept.png",
+    "-filter",
+    "Lanczos",
+    "-resize",
+    "400x320",
+    "-strip",
+    "-define",
+    "png:color-type=6",
+    "-define",
+    "png:exclude-chunks=date,time",
+    "png:-"
+  ],
+  "deterministic_two_pass_match": true,
+  "source_unchanged_after_build": true,
+  "operations": [
+    "ordinary alpha-aware Lanczos downsample",
+    "strip metadata",
+    "encode 8-bit RGBA PNG"
+  ],
+  "excluded_operations": [
+    "new generation",
+    "repainting",
+    "matting",
+    "alpha threshold or erosion",
+    "cropping",
+    "repositioning",
+    "runtime integration"
+  ],
+  "preservation_checks": {
+    "source": {
+      "png_header_8bit_rgba": true,
+      "alpha": "0 1 0.173272",
+      "half_alpha_bounds": "1065x964+145+96"
+    },
+    "output": {
+      "png_header_8bit_rgba": true,
+      "alpha": "0 1 0.173402",
+      "half_alpha_bounds": "303x274+42+28"
+    },
+    "independent_rebuild_matches_output": true
+  },
+  "preview_evidence": {
+    "retention": "Historical preview paths below were removed during authorized consolidation; layouts record what was inspected.",
+    "comparison": "../review/comparison.png",
+    "comparison_layout": "source left, production right; actual dark page ground top, warm-light diagnostic ground bottom; intended display size",
+    "production_grounds": "../review/production-grounds.png",
+    "production_grounds_layout": "actual dark page ground left; warm-light diagnostic ground right; production pixel dimensions",
+    "source_grounds": "../review/source-grounds.png"
+  }
+}

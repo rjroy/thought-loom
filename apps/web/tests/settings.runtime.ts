@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { expect, type Page } from "@playwright/test";
 
@@ -82,6 +83,40 @@ const settings = (page: Page) => page.getByRole("main").getByRole("region", { na
 const savedNotice = (page: Page) => settings(page).getByRole("status").filter({ hasText: /(?:changes|instructions) saved|saved (?:changes|instructions)/i });
 const saveError = (page: Page) => settings(page).getByRole("alert").filter({ hasText: /not saved|could not save|couldn.t save|unable to save|conflict|changed elsewhere|another (?:browser|user|session)/i });
 
+export async function checkSettingsWhimsy(page: Page): Promise<void> {
+  const notebook = page.locator('img[src="/backgrounds/settings-notebook.png"]');
+  await expect(notebook).toHaveCount(1);
+  await expect(notebook).toHaveAttribute("alt", "");
+  await expect(notebook).toHaveAttribute("aria-hidden", "true");
+  await expect(notebook).toHaveCSS("pointer-events", "none");
+  assert.equal(await notebook.evaluate(image => image.tabIndex), -1);
+  assert.equal(await notebook.evaluate(image => (image as HTMLImageElement).draggable), false);
+  const asset = await page.request.get(new URL("/backgrounds/settings-notebook.png", page.url()).href);
+  assert.equal(asset.status(), 200);
+  assert.deepEqual(await asset.body(), await readFile(new URL("../../../.impeccable/candidates/settings-whimsy/production/settings-notebook.png", import.meta.url)));
+  const geometry = await notebook.evaluate(image => {
+    const intro = image.previousElementSibling?.getBoundingClientRect();
+    const workspace = image.closest("section")?.getBoundingClientRect();
+    return { intro: intro && { x: intro.x, right: intro.right, y: intro.y, width: intro.width },
+      workspace: workspace && { right: workspace.right, width: workspace.width },
+      rootSize: parseFloat(getComputedStyle(document.documentElement).fontSize) };
+  });
+  assert.ok(geometry.intro && geometry.workspace);
+  if (geometry.workspace.width < geometry.intro.width + 2 * geometry.rootSize + 160) {
+    await expect(notebook).not.toBeVisible();
+    return;
+  }
+  await expect(notebook).toBeVisible();
+  await notebook.evaluate(image => (image as HTMLImageElement).decode());
+  const bounds = await notebook.boundingBox();
+  assert.ok(bounds);
+  assert.equal(bounds.width, 160);
+  assert.equal(bounds.height, 90);
+  assert.ok(bounds.x >= geometry.intro.right + 2 * geometry.rootSize - 1, "notebook must clear the unchanged intro copy");
+  assert.ok(bounds.x + bounds.width <= geometry.workspace.right + 1, "notebook must fit inside the Settings workspace");
+  assert.ok(Math.abs(bounds.y - geometry.intro.y) < 1, "notebook must align with the section introduction");
+}
+
 async function valuesMatch(page: Page, value: Omit<Instructions, "revision">): Promise<void> {
   const inputs = controls(page);
   for (const field of fields) await expect(inputs[field]).toHaveValue(value[field]);
@@ -164,6 +199,7 @@ async function checkSettingsExactSave(page: Page, daemon: Fixture, origin: strin
   await expect(page.getByRole("button", { name: /^Save changes$/i })).toHaveCount(1);
   await expect(page.getByRole("combobox")).toHaveCount(0);
   await valuesMatch(page, empty());
+  await checkSettingsWhimsy(page);
   await expect(settings(page).getByText(/next (?:agent )?turn/i)).toBeVisible();
   const value = { weaver: "  café 雪\nsecond line  ", evolve: "\t  ", search: "Find tensions, not just shared words.", export: "🌱\n" };
   const inputs = controls(page);

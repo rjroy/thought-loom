@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { browseListHref, browseMapHref, decodeBrowseQuery, type BrowseQuery } from "../features/browse/query";
@@ -136,30 +137,34 @@ export function BrowseView() {
       </div>
     </div>
     <div className={styles.columns}>
-      <aside className={styles.filters} aria-label="Browse filters">
-        <fieldset>
-          <legend>Authorship</legend>
-          {(["user", "ai"] as const).map(author => <label className={styles.choice} key={author}>
-            <input type="checkbox" checked={query.author.includes(author)} onChange={event => {
-              const checked = event.currentTarget.checked;
-              change(current => ({ ...current,
-                author: checked ? [...current.author, author] : current.author.filter(value => value !== author),
-              }));
-            }} />
-            <span>{author === "user" ? "You" : "AI"}</span>
-          </label>)}
-        </fieldset>
-        <div className={styles.filterFooter}>
-          <label className={styles.choice}><input type="checkbox" checked={query.scope === "show-rejected"}
-            onChange={event => {
-              const scope = event.currentTarget.checked ? "show-rejected" : "normal";
-              change(current => ({ ...current, scope }));
-            }} />
-            <span>Show rejected</span>
-          </label>
-          <button className={styles.textButton} type="button" onClick={() => change(current => ({ ...current, author: ["user", "ai"], scope: "normal" }))}>Clear filters</button>
-        </div>
-      </aside>
+      <div className={styles.filterRail}>
+        <aside className={styles.filters} aria-label="Browse filters">
+          <fieldset>
+            <legend>Authorship</legend>
+            {(["user", "ai"] as const).map(author => <label className={styles.choice} key={author}>
+              <input type="checkbox" checked={query.author.includes(author)} onChange={event => {
+                const checked = event.currentTarget.checked;
+                change(current => ({ ...current,
+                  author: checked ? [...current.author, author] : current.author.filter(value => value !== author),
+                }));
+              }} />
+              <span>{author === "user" ? "You" : "AI"}</span>
+            </label>)}
+          </fieldset>
+          <div className={styles.filterFooter}>
+            <label className={styles.choice}><input type="checkbox" checked={query.scope === "show-rejected"}
+              onChange={event => {
+                const scope = event.currentTarget.checked ? "show-rejected" : "normal";
+                change(current => ({ ...current, scope }));
+              }} />
+              <span>Show rejected</span>
+            </label>
+            <button className={styles.textButton} type="button" onClick={() => change(current => ({ ...current, author: ["user", "ai"], scope: "normal" }))}>Clear filters</button>
+          </div>
+        </aside>
+        <Image src="/backgrounds/browse-cat.png" alt="" aria-hidden="true"
+          width={200} height={160} unoptimized loading="eager" draggable={false} className={styles.whimsy} />
+      </div>
       <div className={styles.results}>
         {query.scope === "show-rejected" && <p className={styles.inspection}>User inspection · Rejected content remains unavailable to AI.</p>}
         <div role="status" aria-live="polite" aria-atomic="true" className={styles.status}>
