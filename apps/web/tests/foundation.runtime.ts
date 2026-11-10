@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
-import { checkRootSplash } from "./root-splash.runtime";
+import { checkRootSplash, checkRootSplashChunkHandoff } from "./root-splash.runtime";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
 import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./browse.runtime";
@@ -287,6 +287,38 @@ async function main(): Promise<void> {
   const daemonOrigin = `http://127.0.0.1:${(daemon.address() as AddressInfo).port}`;
   const secrets = [token, daemonOrigin];
   const env: NodeJS.ProcessEnv = { NODE_ENV: "production", PATH: process.env.PATH, HOME: temp, TMPDIR: temp, NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_WEB_ORIGIN: origin, THOUGHTLOOM_DAEMON_URL: daemonOrigin, THOUGHTLOOM_USER_TOKEN: token, THOUGHTLOOM_IMPORT_MAX_BYTES: String(12 * 1024 * 1024) };
+    if (process.env.THOUGHTLOOM_TEST_ROOT_SPLASH_CHUNKS === "1") {
+      server = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], { ...env, NODE_ENV: "development" });
+      const output = collect(server);
+      const deadline = Date.now() + 60_000;
+      let ready = false;
+      while (Date.now() < deadline && server.exitCode === null) {
+        try { const response = await fetch(`${origin}/`, { signal: AbortSignal.timeout(10_000) }); if (response.status === 200) { await response.text(); ready = true; break; } } catch { /* compiling */ }
+        await delay(100);
+      }
+      assert.ok(ready, `Owned Next development server did not become ready:\n${output()}`);
+      const explore = await fetch(`${origin}/explore`, { signal: AbortSignal.timeout(30_000) });
+      assert.equal(explore.status, 200);
+      await explore.text();
+      async function exploreChunks(route: string): Promise<string[]> {
+        const source = await readFile(resolve(fixtureWeb, `.next/dev/server/app/${route}page_client-reference-manifest.js`), "utf8");
+        const assignment = source.indexOf(" = ", source.indexOf("\n"));
+        assert.notEqual(assignment, -1, "Expected a generated route manifest assignment");
+        const manifest: unknown = JSON.parse(source.slice(assignment + 3).trim().replace(/;$/, ""));
+        assert.ok(manifest && typeof manifest === "object" && "clientModules" in manifest && manifest.clientModules && typeof manifest.clientModules === "object");
+        const module = Object.entries(manifest.clientModules).find(([key]) => key.endsWith("/src/components/explore-view.tsx"))?.[1];
+        assert.ok(module && typeof module === "object" && "chunks" in module && Array.isArray(module.chunks) && module.chunks.every((chunk: unknown) => typeof chunk === "string"));
+        return module.chunks;
+      }
+      const rootChunks = new Set(await exploreChunks(""));
+      const destinationOnly = (await exploreChunks("explore/")).filter(chunk => chunk.endsWith(".js") && !rootChunks.has(chunk));
+      assert.ok(destinationOnly.length, "Fixture must have a destination-only ExploreView chunk to hold");
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try { await checkRootSplashChunkHandoff(browser, origin, destinationOnly); }
+      finally { await browser.close(); }
+      console.log("Root splash delayed chunk handoff passed");
+      return;
+    }
     await runChecked(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "build"], env, "Next build", 120_000);
     await assertStaticClean(resolve(fixtureWeb, ".next/static"), secrets);
     server = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "start", "--hostname", "127.0.0.1", "--port", String(port)], env);

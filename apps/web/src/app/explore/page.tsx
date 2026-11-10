@@ -1,18 +1,11 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
+import { connection } from "next/server";
 import { ExploreView } from "../../components/explore-view";
 
 export const metadata: Metadata = { title: "Explore" };
 
-export default function ExplorePage() {
-  return (
-    <Suspense fallback={
-      <div className="workspace-intro">
-        <h1>Explore</h1>
-        <p>Loading search controls…</p>
-      </div>
-    }>
-      <ExploreView />
-    </Suspense>
-  );
+export default async function ExplorePage() {
+  // Keep the revealed root presentation until the request-rendered destination is ready.
+  await connection();
+  return <ExploreView />;
 }
