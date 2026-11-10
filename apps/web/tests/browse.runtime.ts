@@ -1,7 +1,37 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page, type Route } from "@playwright/test";
 import type { NeighborhoodEdge } from "../src/features/browse/results";
+
+const catSelector = 'img[src="/backgrounds/browse-cat.png"]';
+
+export async function checkBrowseWhimsy(page: Page): Promise<void> {
+  const cat = page.locator(catSelector);
+  await expect(cat).toHaveCount(1);
+  await expect(cat).toHaveAttribute("alt", "");
+  await expect(cat).toHaveAttribute("aria-hidden", "true");
+  await expect(cat).toHaveCSS("pointer-events", "none");
+  assert.equal(await cat.evaluate(image => image.tabIndex), -1);
+  assert.equal(await cat.evaluate(image => (image as HTMLImageElement).draggable), false);
+  const asset = await page.request.get(new URL("/backgrounds/browse-cat.png", page.url()).href);
+  assert.equal(asset.status(), 200);
+  assert.deepEqual(await asset.body(), await readFile(new URL("../../../.impeccable/candidates/browse-whimsy/production/browse-cat.png", import.meta.url)));
+  if ((page.viewportSize()?.width ?? 0) <= 768) {
+    await expect(cat).not.toBeVisible();
+    return;
+  }
+  await expect(cat).toBeVisible();
+  await cat.evaluate(image => (image as HTMLImageElement).decode());
+  const bounds = await cat.boundingBox(), filters = await page.getByRole("complementary", { name: "Browse filters" }).boundingBox();
+  const clear = await page.getByRole("button", { name: "Clear filters" }).boundingBox();
+  assert.ok(bounds && filters && clear);
+  assert.equal(bounds.width, 200);
+  assert.equal(bounds.height, 160);
+  assert.ok(bounds.y >= filters.y + filters.height + 24, "cat must sit below the complete filter panel");
+  assert.ok(bounds.y > clear.y + clear.height, "Clear filters must precede the decoration");
+  assert.ok(bounds.x >= filters.x && bounds.x + bounds.width <= filters.x + filters.width, "cat must stay within the filter rail");
+}
 
 export function browseDaemon(token: string) {
   const attempts: string[] = [];
@@ -145,6 +175,7 @@ async function checkMapJourney(page: Page, fixture: ReturnType<typeof browseDaem
   const listUrl = new URL(page.url());
   await page.getByRole("link", { name: "Owned browse title 50", exact: true }).click();
   await expect(page).toHaveURL(url => url.pathname === "/browse/browse-50");
+  await expect(page.locator(catSelector)).toHaveCount(0);
   const inspector = page.getByRole("region", { name: "Selected idea" });
   await expect(inspector.getByRole("heading", { name: "Owned browse title 50" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Idea map" })).toBeVisible();
@@ -310,6 +341,7 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await expect(page.getByRole("heading", { name: "Browse", exact: true })).toBeVisible();
   await expect(link).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Owned browse title 50", { exact: true })).toBeVisible();
+  await checkBrowseWhimsy(page);
   await expect(page.getByText("Owned browse title 0", { exact: true })).toHaveCount(0);
   const rows = page.getByRole("list", { name: "Ideas" }).getByRole("listitem");
   await expect(rows).toHaveCount(50);

@@ -31,6 +31,8 @@ These packages retain actual production inputs, outputs and reproducible recipes
 - [Glyph family](candidates/glyphs/content-family/README.md): approved sources, corrected lantern/sprout, nine material/relationship derivatives and byte-comparison fixtures.
 - [Explore clearing](candidates/explore-clearing/README.md): immutable source, matte recipe and runtime PNG.
 - [Capture canopy](candidates/capture-canopy/README.md): immutable source, resampling recipe and runtime PNG; desktop Capture only, omitted on phones.
+- [Browse cat](candidates/browse-whimsy/README.md): approved concept, resampling receipt and runtime PNG; desktop Browse list only.
+- [Settings notebook](candidates/settings-whimsy/README.md): approved concept, resampling receipt and runtime PNG; shown when the Settings introduction has sufficient side space.
 - [Root arrival](candidates/root-splash/README.md): immutable approved motion study, exact WebP extraction and reveal geometry. Its two Explore reference captures remain only because the immutable study loads them.
 - [Source Sans 3](brand/fonts/SourceSans3-VariableFont_wght.ttf) and [OFL license](brand/fonts/OFL.txt).
 

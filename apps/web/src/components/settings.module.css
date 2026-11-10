@@ -1,4 +1,4 @@
-.workspace { max-inline-size: 70rem; }
+.workspace { max-inline-size: 70rem; container: settings / inline-size; }
 .workspace h1 {
   margin: 0 0 1.5rem;
   color: var(--color-text);
@@ -7,7 +7,13 @@
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
+.introRow { position: relative; }
 .intro { max-inline-size: 75ch; }
+.whimsy { display: none; position: absolute; inset-block-start: 0; inset-inline-start: calc(75ch + 2rem); inline-size: 160px; block-size: 90px; pointer-events: none; user-select: none; }
+/* Reveal only when the unchanged copy measure, clearance and artwork all fit. */
+@container settings (min-width: calc(75ch + 2rem + 160px)) {
+  .whimsy { display: block; }
+}
 .intro h2 {
   margin: 0 0 0.5rem;
   color: var(--color-text);

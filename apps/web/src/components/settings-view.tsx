@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import Image from "next/image";
 import { createSettingsController, settingsCanSave, settingsDirty } from "../features/settings/controller";
 import { createAgentInstructionsClient } from "../features/settings/request";
 import { instructionFields, type InstructionField } from "../features/settings/types";
@@ -34,10 +35,14 @@ export function SettingsView() {
 
   return <section className={styles.workspace} aria-labelledby="settings-heading">
     <h1 id="settings-heading">Settings</h1>
-    <div className={styles.intro}>
-      <h2>Additional agent instructions</h2>
-      <p>Add guidance for each agent. It supplements built-in instructions, without overriding permissions or data-protection rules.</p>
-      <p className={styles.scope} id="settings-scope">Applies across Thoughtloom, not just this browser. Leave a field empty for no extra guidance.</p>
+    <div className={styles.introRow}>
+      <div className={styles.intro}>
+        <h2>Additional agent instructions</h2>
+        <p>Add guidance for each agent. It supplements built-in instructions, without overriding permissions or data-protection rules.</p>
+        <p className={styles.scope} id="settings-scope">Applies across Thoughtloom, not just this browser. Leave a field empty for no extra guidance.</p>
+      </div>
+      <Image src="/backgrounds/settings-notebook.png" alt="" aria-hidden="true"
+        width={160} height={90} unoptimized loading="eager" draggable={false} className={styles.whimsy} />
     </div>
     {state.problem?.kind === "read" && <p className={styles.problem} role="alert">{state.problem.message}</p>}
     <form ref={form} noValidate onSubmit={event => { void submit(event); }}>

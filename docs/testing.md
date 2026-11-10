@@ -61,6 +61,15 @@ provider integration. Both browser harness source-copy allowlists include the
 Settings runtime inputs; the shared-record harness also includes the new daemon
 settings modules.
 
+Both source-copy allowlists include the approved `backgrounds/settings-notebook.png`
+and `backgrounds/browse-cat.png` runtime PNGs, not their authoring packages. The
+focused Settings/Browse browser checks compare served bytes with the approved
+production sources and verify decorative semantics, disabled dragging/pointer
+events, desktop placement and narrow-screen omission. Browse also checks that
+the cat is absent from its map; Settings verifies that the notebook fits beyond
+the unchanged introduction rather than covering its copy. These are controlled
+browser checks, not physical-device, screen-reader or runtime visual acceptance.
+
 Request-helper tests use owned response streams to verify best-effort,
 nonblocking cancellation of discarded error bodies. Cancellation failure does
 not replace the request classification, and successful JSON responses are
