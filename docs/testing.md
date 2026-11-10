@@ -24,6 +24,48 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Additional agent instructions
+
+```sh
+bun --no-env-file test tests/agent-instructions-api.test.ts
+bun --no-env-file test tests/agent-instructions-worker.test.ts tests/media-path-worker.test.ts tests/capability-migration.test.ts
+bun --no-env-file test tests/backup-schema.test.ts tests/backup-format.test.ts tests/restore-decode.test.ts tests/restore-target.test.ts
+```
+
+The settings API tests use owned daemon/SQLite fixtures for global defaults,
+atomic revision-checked saves, authorization, exact text, restart, request limits
+and private logging. Controlled native clients exercise role-specific guidance,
+initial-preparation capture, synchronization failure, lost acknowledgements,
+capability exchanges and the next turn of an existing Search conversation.
+Import segmentation remains a positive exclusion control. These tests do not
+call an operator service or establish provider compliance with textual guidance.
+
+Migration fixtures preserve populated guidance, including leading BOM, and
+legacy absence through schema rebuilds. Versioned backup checks cover logical-2
+settings/guidance and logical-1 restoration to explicit empty defaults. These
+commands describe test boundaries, not a claim that all checks passed on the
+current revision.
+
+The Settings browser checks use:
+
+```sh
+bun --no-env-file test tests/web-settings-boundary.test.ts tests/web-settings-request.test.ts
+THOUGHTLOOM_TEST_SETTINGS_CASE=all bun --no-env-file run web:test:runtime
+```
+
+The built-Next fixture and owned browser exercise the fixed server-side route,
+bookmarkable Settings page, global save/reload, exact text and clearing, UTF-8
+field limits, accessible feedback, conflicts, and edits made while a save is
+pending. Its controlled daemon fixture is not a real SQLite round trip or a
+provider integration. Both browser harness source-copy allowlists include the
+Settings runtime inputs; the shared-record harness also includes the new daemon
+settings modules.
+
+Request-helper tests use owned response streams to verify best-effort,
+nonblocking cancellation of discarded error bodies. Cancellation failure does
+not replace the request classification, and successful JSON responses are
+consumed normally. Browser navigation retains its existing network-idle waits.
+
 The focused chronological Browse API checks use `bun --no-env-file test tests/browse-api.test.ts`. Their owned in-memory SQLite fixture exercises HTTP pagination, equal-time ordering, query and cursor binding, invalid input, visibility and media/source projections, live continuation and avoidance of the rejection snapshot. This is not a large-library performance measurement or a browser test.
 
 The direct-neighborhood HTTP fixture uses `bun --no-env-file test tests/neighborhood-api.test.ts`. It covers directed edge roles, duplicate provenance occurrences, page endpoint resolution and high-degree walks, rejection and AI evidence redaction, malformed requests and cursor binding without a rejection snapshot. It does not measure SQL scan/sort work or exercise a browser.
@@ -64,7 +106,7 @@ Further controls are still needed for Evolve/media admission across historical f
 bun --no-env-file test tests/restore-decode.test.ts tests/restore-staging.test.ts
 ```
 
-The decoder cases use test-owned raw cells for signed-int64 extrema, BLOBs, nullable fields, BOM/CRLF text and canonical row/key ordering; they reject malformed storage tags, null primary keys, invalid UTF-8/base64, duplicate identities and incomplete/noncanonical manifests. Staging uses an owned current-schema daemon/SQLite/capture fixture, not the frozen migration predecessor with its extra unsupported table. It compares all 41 raw table projections, retained rowids/sequences/media bytes, existing fences and original run facts, checks derived search/SQL integrity and reinstated immutable guards, and checks closed-DB disposal. Recomputed-hash missing-parent/seal cases must fail as invalid records; missing/extra/symlinked payloads, digest/JSON-budget mismatches and pre-abort must preserve caller entries. Unknown disposal content must remain untouched. These describe the suites, not a claim that this working-tree revision passed.
+The decoder cases use test-owned raw cells for signed-int64 extrema, BLOBs, nullable fields, BOM/CRLF text and canonical row/key ordering; they reject malformed storage tags, null primary keys, invalid UTF-8/base64, duplicate identities and incomplete/noncanonical manifests. Staging uses an owned current-schema daemon/SQLite/capture fixture, not the frozen migration predecessor with its extra unsupported table. It compares all 42 raw table projections, retained rowids/sequences/media bytes, existing fences and original run facts, checks derived search/SQL integrity and reinstated immutable guards, and checks closed-DB disposal. Recomputed-hash missing-parent/seal cases must fail as invalid records; missing/extra/symlinked payloads, digest/JSON-budget mismatches and pre-abort must preserve caller entries. Unknown disposal content must remain untouched. These describe the suites, not a claim that this working-tree revision passed.
 
 RC-01 staging cases recompute canonical bytes and hashes with oversized `eligibility`, `retrieval`, `catalog`, retained-document sequence and preserved import-file rowid values; these must fail as `invalid-records` without changing caller entries or the source snapshot. A positive control retains the inclusive safe maximum for catalog/document sequence and full-int64 ordinary-run generation/manifest high-water values. The other designated application revision/cursor fields use the same shared range check but are not individually exercised by these cases; capture-side range refusal is not separately established by this staging suite. No passing rerun is claimed here.
 
@@ -82,7 +124,7 @@ Search-generation overflow, concurrent recover/dispose joins, unusual identity-b
 bun --no-env-file test tests/restore-target.test.ts tests/restore-command.test.ts
 ```
 
-The target suite uses a genuine owned capture with BOM text, retained Markdown/media, sequence high-water values and historical runs. Its reference is a separately staged/recovered copy. It compares the final 41-table/sequence state and originals, FTS/integrity/guards, an existing-empty and an absent target, the unchanged source snapshot and the fixed target DB inode. At synchronous target ownership/marker/commit/validation logs, it inspects the actual inode/marker; the durable-marker boundary also starts an owned competing process against the real execution lease and confirms the main DB still has no schema. Refusal cases cover occupied/symlink targets, invalid input, pre-abort and a genuinely held zero-byte placeholder lease. Aborts after the durable marker and after DB commit must retain the marker, release ownership and block daemon startup before resolver/client creation. These are source-read test boundaries, not a report of a passing rerun.
+The target suite uses a genuine owned capture with BOM text, retained Markdown/media, sequence high-water values and historical runs. Its reference is a separately staged/recovered copy. It compares the final 42-table/sequence state and originals, FTS/integrity/guards, an existing-empty and an absent target, the unchanged source snapshot and the fixed target DB inode. At synchronous target ownership/marker/commit/validation logs, it inspects the actual inode/marker; the durable-marker boundary also starts an owned competing process against the real execution lease and confirms the main DB still has no schema. Refusal cases cover occupied/symlink targets, invalid input, pre-abort and a genuinely held zero-byte placeholder lease. Aborts after the durable marker and after DB commit must retain the marker, release ownership and block daemon startup before resolver/client creation. These are source-read test boundaries, not a report of a passing rerun.
 
 Command cases isolate parsing/exit behavior with a typed restore-operation dependency, controlled clock, signal and supplied environment. They reject unknown/duplicate/missing/relative/NUL/hash-invalid arguments before service entry, ignore unrelated role/agent/backup settings, check failure/cancellation joins and safe logs, and import the real module in an owned no-env-file child without installing signal handlers or reading its dotenv. They do not themselves perform a full command-driven installation or OS-signal walkthrough.
 
@@ -522,6 +564,13 @@ These selected modes are focused checks, not replacements for the complete runti
 `web:test:integration` is a separate opt-in, not part of the ordinary test suite. Its built-in-only bootstrap copies an explicit set of current source/configuration inputs into an owned workspace, installs the frozen lock, builds the checksum-verified spellfix extension there, and starts the inner fixture with dependencies resolved inside that copy. It does not reuse private environment files, personal databases, generated launchers or ignored working-tree build artifacts.
 
 The allowlist in [`integration.bootstrap.ts`](../apps/web/tests/integration.bootstrap.ts) follows the daemon's runtime imports and the media client workflow. It includes daemon `import-body.ts`/`media-routes.ts`, domain `media-import.ts`, and storage `media-import.ts`, `media-admission.ts`, `media-files.ts`, `media-file-paths.ts`, `media-validator.ts`, its child entry `media-validator-worker.ts`, `media-validation.ts` and `media-pdf-validation.ts`, alongside `run-fences.ts` and the media metadata/migration modules. The child entry is a file input even though launched by URL rather than a static import. Worker modules still receive a resolver function; the daemon owns construction. Keep the copied closure aligned with actual imports/child entries. Source inspection alone is not a harness rerun.
+
+The inner fixture's native client implements session-scoped keyed instruction
+storage. Before the browser walkthrough, deterministic checks verify empty
+state, session isolation, replacement and removal. These checks establish the
+fake client's contract, not live OpenCode behavior. Root typecheck includes
+`integration/**/*.ts`; any outer validation copy must contain those inputs
+before running typecheck, not add them only before the browser command.
 
 Unlike the per-screen fake-daemon runtime, this walkthrough connects the browser and production Next server to a real owned Hono daemon backed by temporary SQLite and injected deterministic fake-agent callbacks. Desktop and narrow paths follow the same Capture-created identity through Explore, Idea, Evolve and both exports, including the actual persisted AI interpretation, its parent/provenance, title changes, rejection/restoration and mounted known-run return. Non-export work settles by explicit state predicates before knowledge-table snapshots, and the intended Evolve follow-up weave must publicly complete rather than merely reach any terminal status. Fake interpretations cite their own job's fully read subject. Run/report bookkeeping may change without implying a knowledge mutation. Held fake responses are released before daemon drain, and cleanup attempts all owned resources even if an earlier release fails.
 

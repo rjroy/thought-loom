@@ -12,6 +12,7 @@ The client is implemented. [Client design system](../apps/web/DESIGN.md), [produ
 | [Conversational search](mocks/agentic-search/focused.png) | “Approve B”: conversation beside accumulating discoveries, with a narrow disclosure rather than a permanent session rail. |
 | [User connections](mocks/user-connections/README.md) | Selected guided desktop and phone references with their associated decisions. |
 | [Browse / Focused Map](mocks/browse/README.md) | Approved chronological list and map with a right-hand inspector. Only the selected comp and its essential provenance/notes remain. |
+| [Settings](mocks/settings/README.md) | Approved desktop and phone composition: four additional-instruction fields and one Save changes action. |
 
 [Selected identities and brand provenance](selected-assets.json) retain the original four reference hashes and the full sixteen-color palette, roles and mixtures. The newer reference packages above retain their own selection notes and any associated provenance. Media design approval is recorded in completed `thought-loom-1kx.1`; implementation and independent checks are recorded in `thought-loom-1kx.2`. Raster text, incidental chrome and older wording do not override current implemented contracts.
 

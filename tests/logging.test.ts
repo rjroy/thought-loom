@@ -78,6 +78,9 @@ test("observation transport outage warns once and reports recovery without treat
   const token = "observation-private-native-token";
   const exception = "observation-private-transport-detail";
   class Client implements PublicClient {
+    async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+    async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+    async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
     session: NativeSession | null = null;
     readonly prompts: { sessionID: string; id: string; text: string }[] = [];
     historyMode: "uncertain" | "failure" | "running" = "running";

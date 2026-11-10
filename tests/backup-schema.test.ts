@@ -12,7 +12,7 @@ const included = [
   "export_intents", "export_reports", "import_namespaces", "import_documents", "import_locations", "import_document_parts", "import_document_seals",
   "markdown_imports", "markdown_import_files", "markdown_import_payloads", "media_store", "media_sources",
   "search_sessions", "search_turns", "search_messages", "search_discoveries", "search_content_dependencies", "search_composer_contexts",
-  "search_composer_dependencies", "search_revisions", "search_native_cleanup", "restore_fences",
+  "search_composer_dependencies", "search_revisions", "search_native_cleanup", "restore_fences", "agent_instructions",
 ].sort();
 const rowidTables = ["runs", "run_operation_receipts", "response_thoughts", "run_context", "markdown_import_files", "import_namespaces", "search_native_cleanup"].sort();
 
@@ -24,6 +24,8 @@ function fixture(action: (db: Database) => void): void {
 test("compiled inventory matches the fresh migrated schema, including closed columns and preserved rowids", () => fixture(db => {
   const inventory = validateSourceSchema(db);
   expect(inventory.map(table => table.name).sort()).toEqual(included);
+  expect(inventory.find(table => table.name === "agent_instructions")?.columns).toEqual(["evolve","export","revision","search","singleton","weaver"]);
+  expect(inventory.find(table => table.name === "run_steps")?.columns).toContain("guidance");
   expect(inventory.filter(table => table.preserveRowid).map(table => table.name).sort()).toEqual(rowidTables);
   for (const table of inventory) {
     const quoted = table.name.replaceAll('"', '""');

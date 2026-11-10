@@ -155,6 +155,26 @@ function validateApplicationIntegers(snapshot: SqlSnapshot): void {
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
 export function validateBytes(snapshot: SqlSnapshot): void {
   validateApplicationIntegers(snapshot);
+  const settings = snapshot.tables.find(value => value.shape.name === "agent_instructions");
+  if (settings) {
+    check(settings.rows.length <= 1,"inconsistent-source");
+    for (const row of settings.rows) {
+      check(integer(row,"singleton") === 1n && integer(row,"revision") >= 1n && integer(row,"revision") <= 9007199254740991n,"inconsistent-source");
+      for (const field of ["weaver","evolve","search","export"]) {
+        const cell = row.values[field];
+        check(cell?.storage === "text" && cell.bytes.length <= 16*1024,"inconsistent-source");
+        text(row,field);
+      }
+    }
+    for (const row of table(snapshot,"run_steps").rows) {
+      const guidance = row.values.guidance;
+      check(guidance !== undefined,"inconsistent-source");
+      if (guidance.storage !== "null") {
+        check(guidance.storage === "text" && guidance.bytes.length <= 16*1024 && integer(row,"position") === 0n && row.values.input.storage === "text","inconsistent-source");
+        text(row,"guidance");
+      }
+    }
+  }
   const thoughts = table(snapshot, "thoughts"), parents = new Map<string, string | null>();
   for (const row of thoughts.rows) parents.set(text(row, "id"), row.values.parent_id.storage === "null" ? null : text(row, "parent_id"));
   const visited = new Set<string>();

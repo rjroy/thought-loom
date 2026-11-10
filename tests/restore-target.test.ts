@@ -14,12 +14,17 @@ import { ExecutionOwnerLease } from "../src/storage/execution-owner";
 import { SqliteMarkdownImports } from "../src/storage/markdown-import";
 import { assertRestoreFenceSchema } from "../src/storage/restore-fences-schema";
 import { SqliteRunOperations } from "../src/storage/run-operations";
-import { SqliteStore } from "../src/storage/sqlite";
+import { migrate, SqliteStore } from "../src/storage/sqlite";
+import { SqliteAgentInstructions } from "../src/storage/agent-instructions";
+import { readSqlSnapshot } from "../src/backup/records";
+import { encodeTable } from "../src/backup/format";
 import { insertMediaSource, mediaBytes, mediaThought } from "./fixtures/media-source";
 
 const credentials = { user: "user-0123456789-0123456789-abcdef", ai: "agent-0123456789-0123456789-abcdef" };
 const logger = createLogger("verbose", () => {}), restoredAt = "2031-02-03T04:05:06.000Z";
 const thought = "\uFEFFownedrestoretargettoken\r\nprivate-owned-text";
+const guidance = "\uFEFF  retained per-run guidance café\r\n";
+const settings = {weaver:"\uFEFF  weaver café\r\n",evolve:"evolve",search:"search",export:"export"};
 
 interface Fixture { readonly dir: string; readonly source: string; readonly snapshot: CaptureResult; readonly runId: string }
 async function fixture(action: (fixture: Fixture) => Promise<void>): Promise<void> {
@@ -37,6 +42,10 @@ async function fixture(action: (fixture: Fixture) => Promise<void>): Promise<voi
       store.saveThought({ id: "root", text: thought, title: null, author: "user", kind: "captured-original",
         createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
       runId = new SqliteRunOperations(db, sources).admitWeave("user", { subjectId: "root", triggerId: "capture:root" }).id;
+      const instructions = new SqliteAgentInstructions(db,logger);
+      instructions.save({...settings,revision:0}); instructions.save({...settings,revision:1});
+      db.run("UPDATE run_steps SET input=?,guidance=CAST(? AS TEXT) WHERE run_id=? AND position=0",
+        ["owned exact prepared input",new TextEncoder().encode(guidance),runId]);
       db.run("UPDATE runs SET rowid=101 WHERE id=?", [runId]);
       await writeFile(join(`${source}.media`, "objects", mediaThought.mediaSource.id), mediaBytes, { mode: 0o600 });
       insertMediaSource(db);
@@ -65,6 +74,60 @@ function tables(path: string) {
   } finally { db.close(); }
 }
 
+function expectGuidance(path: string, runId: string): void {
+  const db = new Database(path,{readonly:true,create:false});
+  try {
+    expect(new SqliteAgentInstructions(db,logger).get()).toEqual({...settings,revision:2});
+    expect(db.query("SELECT hex(CAST(guidance AS BLOB)) AS bytes FROM run_steps WHERE run_id=? AND position=0").get(runId))
+      .toEqual({bytes:Buffer.from(guidance,"utf8").toString("hex").toUpperCase()});
+  } finally { db.close(); }
+}
+
+// The complete frozen logical-1 inventory, independent of the current compiled table list.
+const legacyNames = [
+  "thoughts","thought_titles","thought_sources","thought_source_seals","connections","connection_sources",
+  "responses","response_thoughts","response_seals","rejected_thoughts","rejected_connections",
+  "runs","run_steps","agent_bindings","run_context","run_operation_receipts","run_issued_thoughts","run_replies","execution_owners",
+  "export_intents","export_reports","import_namespaces","import_documents","import_locations","import_document_parts","import_document_seals",
+  "markdown_imports","markdown_import_files","markdown_import_payloads","media_store","media_sources",
+  "search_sessions","search_turns","search_messages","search_discoveries","search_content_dependencies","search_composer_contexts",
+  "search_composer_dependencies","search_revisions","search_native_cleanup","restore_fences",
+].sort();
+const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/** Construct canonical logical-1 files from controlled legacy-shaped records, not from a current backup. */
+async function legacySnapshot(root: string): Promise<string> {
+  const dbPath = join(root,"legacy-source.sqlite"), output = join(root,"legacy-snapshot");
+  const writer = new Database(dbPath);
+  try {
+    migrate(writer);
+    const store = new SqliteStore(writer);
+    store.saveThought({id:"legacy-root",text:"legacy controlled thought",title:null,author:"user",kind:"captured-original",createdAt:"2030",origin:"fixture",parentId:null,sourceIds:[]});
+    new SqliteRunOperations(writer,{id:(() => { let n=0; return () => `legacy-${++n}`; })(),now:() => "2030",logger})
+      .admitWeave("user",{subjectId:"legacy-root",triggerId:"legacy-trigger"});
+    writer.run("UPDATE run_steps SET input='legacy exact input' WHERE position=0");
+  } finally { writer.close(); }
+  const reader = new Database(dbPath,{readonly:true,create:false,safeIntegers:true});
+  try {
+    const shapes = backupTableShapes.filter(shape => legacyNames.includes(shape.name)).map(shape =>
+      shape.name === "run_steps" ? {...shape,columns:shape.columns.filter(column => column !== "guidance")} : shape);
+    expect(shapes.map(shape => shape.name).sort()).toEqual(legacyNames);
+    const snapshot = readSqlSnapshot(reader,() => {},shapes);
+    await mkdir(output,{mode:0o700}); await mkdir(join(output,"tables"),{mode:0o700});
+    const tables = [];
+    for (const table of snapshot.tables) {
+      const bytes = encodeTable(table.shape,table.rows), name = table.shape.name;
+      await writeFile(join(output,"tables",`${name}.json`),bytes,{mode:0o600});
+      tables.push({byteLength:String(bytes.length),name,path:`tables/${name}.json`,rowCount:String(table.rows.length),sha256:digest(bytes)});
+    }
+    tables.sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    const sequences = snapshot.sequences.map(entry => ({name:entry.name,value:{$integer:entry.value.toString()}}));
+    const manifest = {appSchema:"thoughtloom-logical-1",format:"thoughtloom-backup",mediaMarker:null,mediaStoreId:null,originals:[],sequences,tables,version:1};
+    await writeFile(join(output,"manifest.json"),`${JSON.stringify(manifest)}\n`,{mode:0o600});
+    return output;
+  } finally { reader.close(); }
+}
+
 function code(error: unknown): unknown { return error && typeof error === "object" && "code" in error ? error.code : null; }
 async function failure(promise: Promise<unknown>): Promise<unknown> { return promise.then(() => null, (error: unknown) => error); }
 
@@ -79,14 +142,61 @@ function competingOwner(path: string): number | null {
   return child.exitCode;
 }
 
+test("logical-1 snapshot restores into current schema with empty settings and null historical guidance", async () => {
+  const dir = await mkdtemp("/tmp/opencode/restore-legacy-guidance-");
+  try {
+    const snapshot = await legacySnapshot(dir), parent = join(dir,"stage"), target = join(dir,"target");
+    await mkdir(parent,{mode:0o700}); await mkdir(target,{mode:0o700});
+    function legacyDefaults(path: string): void {
+      const db = new Database(path,{readonly:true,create:false});
+      try {
+        expect(new SqliteAgentInstructions(db,logger).get()).toEqual({weaver:"",evolve:"",search:"",export:"",revision:0});
+        expect(db.query("SELECT input,guidance FROM run_steps WHERE position=0").all()).toEqual([{input:"legacy exact input",guidance:null}]);
+        expect(db.query("SELECT text FROM thoughts WHERE id='legacy-root'").get()).toEqual({text:"legacy controlled thought"});
+        expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+      } finally { db.close(); }
+    }
+    const stage = await stageRestoreSnapshot({snapshotDirectory:snapshot,stagingParentDirectory:parent,logger});
+    try {
+      legacyDefaults(stage.databasePath);
+      await recoverRestoreStage(stage,{restoredAt,logger});
+      legacyDefaults(stage.databasePath);
+    } finally { await stage.dispose(); }
+    const installed = await restoreBackup({snapshotDirectory:snapshot,targetDirectory:target,restoredAt,logger});
+    legacyDefaults(installed.databasePath);
+  } finally { await rm(dir,{recursive:true,force:true}); }
+},45000);
+
+test("unknown or mixed logical schema snapshots are rejected before staging", async () => {
+  const dir = await mkdtemp("/tmp/opencode/restore-mixed-guidance-");
+  try {
+    const snapshot = await legacySnapshot(dir), parent = join(dir,"stage");
+    await mkdir(parent,{mode:0o700});
+    for (const [name,schema] of [["unknown","thoughtloom-logical-999"],["mixed","thoughtloom-logical-2"]] as const) {
+      const copy = join(dir,name); await cp(snapshot,copy,{recursive:true,errorOnExist:true});
+      const path = join(copy,"manifest.json"), manifest = JSON.parse(await readFile(path,"utf8")) as {appSchema:string};
+      manifest.appSchema = schema; await writeFile(path,`${JSON.stringify(manifest)}\n`);
+      const result = await failure(stageRestoreSnapshot({snapshotDirectory:copy,stagingParentDirectory:parent,logger}));
+      expect(code(result)).toBe("invalid-snapshot");
+      expect(await readdir(parent)).toEqual([]);
+    }
+  } finally { await rm(dir,{recursive:true,force:true}); }
+},45000);
+
 test("final restore installs the exact recovered snapshot on one exclusively owned inode", async () => fixture(async f => {
   const referenceParent = join(f.dir, "reference"), target = join(f.dir, "target"), dbPath = join(target, "thoughtloom.sqlite");
   await mkdir(referenceParent, { mode: 0o700 }); await mkdir(target, { mode: 0o700 });
   const reference = await stageRestoreSnapshot({ snapshotDirectory: f.snapshot.snapshotDirectory, stagingParentDirectory: referenceParent, logger });
   let expected: ReturnType<typeof tables>;
-  try { await recoverRestoreStage(reference, { restoredAt, logger }); expected = tables(reference.databasePath); }
+  try {
+    expectGuidance(reference.databasePath,f.runId);
+    await recoverRestoreStage(reference, { restoredAt, logger });
+    expectGuidance(reference.databasePath,f.runId);
+    expected = tables(reference.databasePath);
+  }
   finally { await reference.dispose(); }
   const sourceBefore = tables(f.source), manifest = await readFile(join(f.snapshot.snapshotDirectory, "manifest.json"));
+  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-2");
   const boundaries: { message: string; inode: bigint; marker: boolean; competing?: number | null; schemaObjects?: number }[] = [];
   const boundaryLogger = createLogger("verbose", record => {
     if (["[restore] target ownership acquired", "[restore] target marker durable", "[restore] target database committed", "[restore] target validated"].includes(record.message)) {
@@ -120,6 +230,7 @@ test("final restore installs the exact recovered snapshot on one exclusively own
   expect((await lstat(dbPath, { bigint: true })).ino).toBe(first.inode);
   expect(existsSync(join(target, ".restore-in-progress"))).toBe(false);
   expect(tables(dbPath)).toEqual(expected); expect(tables(f.source)).toEqual(sourceBefore);
+  expectGuidance(dbPath,f.runId);
   expect(Array.from(await readFile(join(f.snapshot.snapshotDirectory, "manifest.json")))).toEqual(Array.from(manifest));
   expect(Array.from(await readFile(join(`${dbPath}.media`, "objects", mediaThought.mediaSource.id)))).toEqual(Array.from(mediaBytes));
   expect(await readdir(join(`${dbPath}.media`, "staging"))).toEqual([]);

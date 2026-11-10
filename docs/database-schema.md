@@ -162,6 +162,18 @@ A connection with a rejected endpoint is unavailable in normal reads even withou
 
 The existing user-only `RejectionService` and SQLite repository also update [search eligibility and active-work fences](#rejection-event-transactions) in the marker's transaction. This is a repository-command contract, not an invalidation trigger for arbitrary raw SQL marker writes.
 
+## Global additional agent instructions
+
+`agent_instructions` stores an optional singleton record containing the four
+additional instruction strings and a positive safe-integer revision. An absent
+record represents four empty strings and revision `0`; migration does not create
+a default row. The [user-only settings API](daemon-api.md#additional-agent-instructions)
+replaces the four values atomically using the last-read revision. Accepted text,
+including leading BOM and whitespace, is preserved through UTF-8 byte binding.
+
+Settings are mutable metadata, not thought content or operator model/tool
+configuration. Changing them never rewrites a previously prepared run.
+
 ## Durable execution tables
 
 These tables are initialized by core migration through [`run-schema.ts`](../src/storage/run-schema.ts) and the additive [`execution-owner-schema.ts`](../src/storage/execution-owner-schema.ts). Configured workers and public Evolve/status/Stop routes use the same run aggregate. Migration itself makes no model calls; with agent configuration present, the daemon supervisor can process supported queued jobs retained from an earlier run. Search has an [initial configured runtime](#initial-configured-search-runtime), separate from SQL acceptance of its kind and not yet a complete investigation workflow.
@@ -194,6 +206,7 @@ Evolve contribution creation and run admission commit together. The persisted in
 | `position` | `INTEGER` | Nonnegative step order; composite primary key with `run_id`. |
 | `prompt_id` | `TEXT` | Globally unique, immutable daemon-owned prompt identity. |
 | `input` | `TEXT`, nullable | Exact immutable input; null only until prepared or when legacy input is unknown. |
+| `guidance` | `TEXT`, nullable | Additional-instruction snapshot for a prepared initial step. `NULL` covers unprepared initial steps, successors, segmentation and legacy absence; an empty string records a newly prepared initial step with no extra guidance. |
 | `state` | `TEXT` | `prepared`, `submitting`, `uncertain`, `completed`, or `processed`. |
 | `native_state` | `TEXT` | `unknown`, `running`, or `completed`, local to this step. |
 | `envelope_json` | `TEXT`, nullable | Validated canonical request/completion envelope. |
@@ -201,6 +214,12 @@ Evolve contribution creation and run admission commit together. The persisted in
 | `submit_owner` | `TEXT`, nullable | Search submission owner attribution. New deployed authorizations use the registered held lease's ID; older strings and nulls remain unchanged. No FK is added to this legacy-compatible column. |
 
 Triggers enforce append order, immutable identities/input, durable completion, and immutable recorded envelopes/results. A run insert creates step zero. Preparation records its exact input once; migration never invents missing legacy input. A completed capability step can retain its confirmed result before advancement. Advancing atomically verifies or records that result and creates the successor's exact input and identity. Matching replay reuses that successor; a mismatch conflicts. Every successor begins with its own unknown native state.
+
+Initial preparation captures the applicable global additional instructions in
+the same guarded transaction. The snapshot is immutable after preparation and
+is reused through capability exchanges, retries and recovery. Import
+segmentation does not receive these settings. Schema rebuilds preserve existing
+snapshots exactly and leave historical absence as `NULL`.
 
 For an interrupted or failed weave, positive whole-journal native cancellation evidence can record submitted steps as `completed` with `native_state='completed'` in the same fenced transaction that settles cancellation. Here completion records that the native turn ended, including interruption; it does not manufacture a successful protocol envelope or result. Prompt identities/input and existing envelopes/results remain unchanged, processed steps and untouched prepared successors are preserved, and the run remains interrupted/failed. This durable evidence permits later reinterpretation or queued work after restart. A historical settlement flag without the corresponding evidence is still insufficient. Import and search retain their separate terminal-evidence contracts.
 

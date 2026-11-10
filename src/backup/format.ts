@@ -1,3 +1,5 @@
+import { shapesForSchema } from "./schema";
+
 export interface TableShape {
   readonly name: string;
   readonly columns: readonly string[];
@@ -17,6 +19,8 @@ export interface RawRow {
 }
 
 export interface BackupManifest {
+  /** Omitted only by older internal callers; their historical encoding remains logical-1. */
+  readonly appSchema?: "thoughtloom-logical-1" | "thoughtloom-logical-2";
   readonly mediaStoreId: string | null;
   readonly tables: readonly { readonly name: string; readonly path: string; readonly rowCount: string; readonly byteLength: string; readonly sha256: string }[];
   readonly sequences: readonly { readonly name: string; readonly value: bigint }[];
@@ -158,7 +162,9 @@ function file(entry: { readonly path: string; readonly byteLength: string; reado
 
 /** Validate closed manifest metadata; source/file membership and actual hashes belong to capture. */
 export function encodeManifest(manifest: BackupManifest): Uint8Array {
-  closed(manifest, ["mediaStoreId", "tables", "sequences", "mediaMarker", "originals"]);
+  closed(manifest, [...(manifest.appSchema === undefined ? [] : ["appSchema"]), "mediaStoreId", "tables", "sequences", "mediaMarker", "originals"]);
+  const appSchema = manifest.appSchema ?? "thoughtloom-logical-1";
+  if (appSchema !== "thoughtloom-logical-1" && appSchema !== "thoughtloom-logical-2") invalid();
   dense(manifest.tables); dense(manifest.sequences); dense(manifest.originals);
   const tables = manifest.tables.map(entry => {
     closed(entry, ["name", "path", "rowCount", "byteLength", "sha256"]);
@@ -168,6 +174,8 @@ export function encodeManifest(manifest: BackupManifest): Uint8Array {
     return { byteLength: entry.byteLength, name: entry.name, path: entry.path, rowCount: entry.rowCount, sha256: entry.sha256 };
   }).sort((left, right) => compareText(left.name, right.name));
   uniqueNames(tables.map(entry => entry.name), () => true);
+  const expected = shapesForSchema(appSchema);
+  if (tables.length !== expected.length || tables.some((table,index) => table.name !== expected[index]?.name)) invalid();
   const sequences = manifest.sequences.map(entry => {
     closed(entry, ["name", "value"]);
     if (!sequenceTables.has(entry.name)) invalid();
@@ -193,6 +201,6 @@ export function encodeManifest(manifest: BackupManifest): Uint8Array {
     mediaMarker = { byteLength: manifest.mediaMarker.byteLength, path: manifest.mediaMarker.path, sha256: manifest.mediaMarker.sha256 };
   }
   // Construct each object in ASCII key order; stored TEXT never passes a recursive JSON rewriter.
-  return jsonBytes({ appSchema: "thoughtloom-logical-1", format: "thoughtloom-backup", mediaMarker,
+  return jsonBytes({ appSchema, format: "thoughtloom-backup", mediaMarker,
     mediaStoreId: manifest.mediaStoreId, originals, sequences, tables, version: 1 });
 }

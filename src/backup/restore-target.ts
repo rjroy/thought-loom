@@ -378,9 +378,9 @@ export async function installRecoveredTarget(location: RestoreTargetLocation, so
     await writer.write(writer.root,markerName,marker,guard); await writer.root.handle.sync(); await location.parent.handle.sync();
     logger.info("[restore] target marker durable"); guard();
     const media = await copyOriginals(writer,source,guard);
-    const schema = loadRestoreDatabase({path:join(writer.root.path,databaseName),check:() => selected.checkDatabase(),refresh:() => selected.refreshDatabase()},
+    const loaded = loadRestoreDatabase({path:join(writer.root.path,databaseName),check:() => selected.checkDatabase(),refresh:() => selected.refreshDatabase()},
       source.records.tables,source.manifest,logger,guard);
-    requireTarget(schema === source.schema,"invalid-records"); logger.info("[restore] target database committed"); guard();
+    requireTarget(loaded.schema === source.schema,"invalid-records"); logger.info("[restore] target database committed"); guard();
     verifyTargetDatabase(writer,source,guard); await verifyRestoreMedia(media,source.manifest,guard); await source.verify();
     await writer.verify(guard); await writer.sync(guard); await location.parent.handle.sync();
     logger.info("[restore] target validated"); guard(); await writer.verify(guard);

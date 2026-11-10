@@ -207,6 +207,29 @@ The server's bind address is not configurable: it is `127.0.0.1`, not all interf
 
 Markdown and media upload routes each allow at most 4 KiB of UTF-8 metadata and 64 KiB of multipart framing/headers; the streamed aggregate is bounded before parsing. Each has two upload receivers; another receives `503 receiver-busy` with `Retry-After: 1`. Media admission shares one file-publication lane and one validator child lane. Its display filename is bounded to 1024 UTF-8 bytes and never selects a storage path. These capacities, metadata/header limits and filename bound are fixed, not environment settings. Configure any server-side proxy for the chosen file bound plus overhead without truncating bytes. These are technical resource bounds, not vault file-count, model-turn, token or cost quotas. Multipart/Markdown parsing remains in-process; its byte limits are not hard process-memory or latency guarantees. Media format decoding has the separate child limits above.
 
+### Additional agent instructions
+
+Open **Settings** (bookmarkable `/settings`) to edit the four optional fields
+and select **Save changes**. Clearing a field removes its extra guidance. Saving
+applies across the installation, not just the current browser.
+
+Fields remain editable while a save is pending. Confirmation preserves any
+newer edits rather than replacing them with the submitted snapshot. Failed
+saves retain the draft. A conflicting save from another browser requires a
+deliberate reload; copy any wanted draft text before reloading. There is no
+autosave or browser-persisted draft.
+
+Global [additional agent instructions](daemon-api.md#additional-agent-instructions)
+are stored in SQLite, separately from the operator configuration below. They
+supplement built-in instructions without changing model selection, effort,
+permissions or retrieval boundaries. A run captures them at initial prompt
+preparation; saving new settings does not alter an active or already-prepared
+run. Nonempty guidance is reconciled through OpenCode's keyed instruction-entry
+API before initial prompt submission. A synchronization failure prevents that
+submission; retry retains the original captured guidance. Empty and legacy
+snapshots do not require the instruction-entry endpoints. Guidance is private
+content, not diagnostic log data.
+
 ### Agent configuration
 
 OpenCode integration uses this explicit configuration shape:

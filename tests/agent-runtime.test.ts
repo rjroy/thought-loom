@@ -33,6 +33,9 @@ async function call(daemon: RunningDaemon, path: string, method = "GET", data?: 
 
 /** Decoded public-client fixture; no service discovery, HTTP or process outside this test. */
 class Client implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();
   readonly prompts: { sessionID: string; id: string; text: string }[] = [];

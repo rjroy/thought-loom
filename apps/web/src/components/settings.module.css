@@ -1,0 +1,84 @@
+.workspace { max-inline-size: 70rem; }
+.workspace h1 {
+  margin: 0 0 1.5rem;
+  color: var(--color-text);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.intro { max-inline-size: 75ch; }
+.intro h2 {
+  margin: 0 0 0.5rem;
+  color: var(--color-text);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.intro p { margin: 0 0 0.5rem; }
+.scope { color: var(--color-muted); font-size: 1rem; }
+.fields { margin-block-start: 1.75rem; border-block-start: 1px solid var(--color-line); }
+.field {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 2rem;
+  padding-block: 1.25rem;
+  border-block-end: 1px solid var(--color-line);
+}
+.field label { display: block; color: var(--color-text); font-weight: 600; }
+.field label span { color: var(--color-muted); font-size: 1rem; font-weight: 400; }
+.description { margin: 0.25rem 0 0; color: var(--color-muted); font-size: 1rem; }
+.field textarea {
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: 6rem;
+  min-block-size: 6rem;
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: var(--color-input);
+  color: var(--color-text);
+  caret-color: var(--brand-color-3);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+.field textarea::placeholder { color: var(--color-muted); opacity: 1; }
+.field textarea:disabled { color: var(--color-muted); }
+.field textarea[aria-invalid="true"] { border-color: var(--brand-color-9); }
+.actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-block-start: 1.5rem;
+}
+.timing { max-inline-size: 65ch; margin: 0; font-size: 1rem; }
+.actions button {
+  flex: none;
+  min-block-size: 3rem;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--brand-color-3);
+  border-radius: 0.5rem;
+  background: var(--brand-color-3);
+  color: var(--color-ground);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.actions button:hover:not(:disabled) { border-color: var(--brand-color-11); background: var(--brand-color-11); }
+.actions button:disabled { border-color: var(--color-line); background: var(--color-line); color: var(--color-body); cursor: default; }
+.status { margin: 0; color: var(--color-muted); font-size: 1rem; }
+.status:not(:empty) { margin-block-start: 1rem; }
+.saved { color: var(--brand-color-10); }
+.problem, .fieldError { max-inline-size: 75ch; margin: 1rem 0 0; color: var(--brand-color-9); font-size: 1rem; overflow-wrap: anywhere; }
+.fieldError { margin-block-start: 0.5rem; }
+
+@media (max-width: 48rem) {
+  .field { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+  .field textarea { block-size: 7.5rem; }
+  .actions { flex-direction: column; gap: 1.25rem; }
+  .actions button { inline-size: 100%; }
+}

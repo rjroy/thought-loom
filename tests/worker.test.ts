@@ -136,6 +136,9 @@ async function provenInterruptedWeave(f: ReturnType<typeof setup>) {
   const session = { id:saved.sessionId, location:saved.location, model:saved.model, permissions:saved.permissions,
     metadata:{owner:"thoughtloom",runId:run.id,protocolVersion:"1"} };
   const client: PublicClient = {
+    instructionList: async () => { throw new Error("Unexpected instruction list"); },
+    instructionPut: async () => { throw new Error("Unexpected instruction put"); },
+    instructionRemove: async () => { throw new Error("Unexpected instruction remove"); },
     serverInfo:async () => ({version:"fixture"}), sessionCreate:async () => session, sessionGet:async () => session,
     prompt:async () => { throw new Error("Cleanup must not submit"); }, inbox:async () => [], active:async () => ({}),
     history:async () => ({data:[{id:prompt.promptId,type:"user",time:{created:1},text:prompt.input},
@@ -486,6 +489,9 @@ test("a prepared successor cannot settle an earlier dispatched weave without nat
   const session = { id: owned.sessionId, location: owned.location, model: owned.model, permissions: owned.permissions,
     metadata: { owner: "thoughtloom", runId: run.id, protocolVersion: "1" } };
   const client: PublicClient = {
+    instructionList: async () => { throw new Error("Unexpected instruction list"); },
+    instructionPut: async () => { throw new Error("Unexpected instruction put"); },
+    instructionRemove: async () => { throw new Error("Unexpected instruction remove"); },
     serverInfo: async () => ({ version: "fixture" }), sessionCreate: async () => session, sessionGet: async () => session,
     prompt: async () => { throw new Error("Cancellation must not submit"); }, inbox: async () => [],
     history: async () => ({ data: [], cursor: {} }), active: async () => ({}),

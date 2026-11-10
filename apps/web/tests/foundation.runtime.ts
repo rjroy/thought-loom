@@ -13,6 +13,7 @@ import { checkRootSplash } from "./root-splash.runtime";
 import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture.runtime";
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
 import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./browse.runtime";
+import { settingsDaemon, checkSettingsRoutes, checkSettingsBrowser } from "./settings.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
@@ -54,6 +55,10 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
+    "apps/web/src/app/settings/page.tsx", "apps/web/src/app/api/settings/agent-instructions/route.ts",
+    "apps/web/src/components/settings-view.tsx", "apps/web/src/components/settings.module.css",
+    "apps/web/src/features/settings/types.ts", "apps/web/src/features/settings/request.ts", "apps/web/src/features/settings/controller.ts",
+    "apps/web/src/server/agent-instructions.ts",
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
     "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
     "apps/web/src/features/explore/query.ts", "apps/web/src/features/explore/results.ts", "apps/web/src/features/explore/request.ts",
@@ -254,13 +259,15 @@ async function main(): Promise<void> {
   const fixtureDaemon = captureDaemon(token);
   const fixtureSearch = searchDaemon(token);
   const fixtureBrowse = browseDaemon(token);
+  const fixtureSettings = settingsDaemon(token);
   const fixtureIdea = ideaDaemon(token);
   const fixtureEvolve = evolveDaemon(token);
   const fixtureExport = exportDaemon(token);
   const fixtureImport = importDaemon(token);
   const fixtureAgenticSearch = agenticSearchDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/browse/thoughts") || /^\/thoughts\/[^/]+\/neighborhood(?:\?|$)/.test(request.url ?? "")) void fixtureBrowse.handler(request, response);
+    if (request.url?.startsWith("/settings/agent-instructions")) void fixtureSettings.handler(request, response);
+    else if (request.url?.startsWith("/browse/thoughts") || /^\/thoughts\/[^/]+\/neighborhood(?:\?|$)/.test(request.url ?? "")) void fixtureBrowse.handler(request, response);
     else if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
@@ -365,6 +372,22 @@ async function main(): Promise<void> {
     }
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
+    const settingsCase = process.env.THOUGHTLOOM_TEST_SETTINGS_CASE;
+    if (settingsCase) {
+      assert.ok(["routes", "browser", "all"].includes(settingsCase), "Unknown focused Settings case");
+      if (settingsCase !== "browser") await checkSettingsRoutes({ origin, host, probe, daemon: fixtureSettings, token });
+      if (settingsCase !== "routes") {
+        const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+        try {
+          for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+            const page = await browser.newPage({ viewport });
+            try { await checkSettingsBrowser(page, fixtureSettings, { origin, daemonOrigin, token }); }
+            finally { fixtureSettings.release(); await page.close(); }
+          }
+        } finally { await browser.close(); }
+      }
+      return;
+    }
     if (process.env.THOUGHTLOOM_TEST_EXPLORE === "1") {
       const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
       try {
@@ -446,6 +469,7 @@ async function main(): Promise<void> {
     const allowed = await probe("POST", "/explore", `Host: ${host}\r\nOrigin: ${origin}\r\nContent-Length: 0\r\n`);
     assert.notEqual(allowed.status, 403, "same-origin mutation should reach Next's router");
     await checkCaptureRoute({ origin, host, probe, daemon: fixtureDaemon });
+    await checkSettingsRoutes({ origin, host, probe, daemon: fixtureSettings, token });
     await checkSearchRoute({ origin, host, probe, daemon: fixtureSearch });
     await checkIdeaRoute({ origin, host, probe, daemon: fixtureIdea });
     await checkIdeaReinterpretRoute({ origin, host, probe, daemon: fixtureIdea });
@@ -501,8 +525,7 @@ async function main(): Promise<void> {
           await page.keyboard.press("Enter");
           assert.equal(await page.evaluate(() => document.activeElement?.id), "main-content");
           assert.equal(await page.getByRole("heading", { name: "Explore" }).count(), 1);
-          assert.equal(await page.locator('[aria-disabled="true"]').filter({ hasText: "Settings" }).count(), 1);
-          assert.equal(await page.getByRole("link", { name: "Settings" }).count(), 0);
+          await checkSettingsBrowser(page, fixtureSettings, { origin, daemonOrigin, token });
           await page.getByRole("link", { name: "Capture", exact: true }).click();
           await page.waitForURL("**/capture");
           await noContextBack();

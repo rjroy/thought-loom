@@ -9,7 +9,7 @@ import { BackupCaptureError, childDirectory, fingerprint, newFile, openDirectory
   verifyDirectory, verifyFile, type Directory, type File, type Guard } from "./capture-files";
 import { decodeTable } from "./decode";
 import { BackupFormatError, encodeTable, type BackupManifest } from "./format";
-import { BackupSchemaError, backupTableShapes } from "./schema";
+import { BackupSchemaError, shapesForSchema } from "./schema";
 import { bytes, integer, readSqlSnapshot, table, text, validateBytes, type CapturedTable, type SqlSnapshot } from "./records";
 import { BackupSnapshotError, inspectSnapshot, payloadParent, readSnapshotFile, verifySnapshotMembership, type SnapshotTree } from "./snapshot";
 import { applyRestoreRecovery } from "./restore-recovery";
@@ -227,9 +227,10 @@ export async function stageRestoreSnapshot(options: RestoreStageOptions): Promis
     source = await inspectSnapshot(options.snapshotDirectory,options.expectedManifestSha256,guard,budgets);
     const captured: CapturedTable[] = [];
     for (const entry of source.manifest.tables) {
-      const raw = await readSnapshotFile(source,entry,budgets.tableBytes,guard), rows = decodeTable(entry.name,raw);
+      const schema = source.manifest.appSchema ?? "thoughtloom-logical-1";
+      const raw = await readSnapshotFile(source,entry,budgets.tableBytes,guard), rows = decodeTable(entry.name,raw,schema);
       requireStage(String(rows.length) === entry.rowCount,"invalid-records");
-      const shape = backupTableShapes.find(table => table.name === entry.name); requireStage(shape !== undefined,"invalid-snapshot");
+      const shape = shapesForSchema(schema).find(table => table.name === entry.name); requireStage(shape !== undefined,"invalid-snapshot");
       captured.push({shape,rows});
     }
     const decoded: SqlSnapshot = {tables:captured,sequences:source.manifest.sequences,
@@ -241,7 +242,7 @@ export async function stageRestoreSnapshot(options: RestoreStageOptions): Promis
     await work.root.handle.sync();
     const database = await work.file(work.root,"thoughtloom.sqlite"); await database.handle.close();
     const selected = work;
-    const schema = loadRestoreDatabase({ path:join(selected.root.path,"thoughtloom.sqlite"),check:() => selected.checkDatabase(),refresh:() => selected.refreshDatabase() },
+    const loaded = loadRestoreDatabase({ path:join(selected.root.path,"thoughtloom.sqlite"),check:() => selected.checkDatabase(),refresh:() => selected.refreshDatabase() },
       captured,source.manifest,logger,guard);
     const media = await copyMedia(work,source,guard);
     await verifySnapshotMembership(source,guard); guard();
@@ -249,7 +250,7 @@ export async function stageRestoreSnapshot(options: RestoreStageOptions): Promis
     await work.verify(); guard();
     for (const directory of [...work.directories].reverse()) await directory.handle.sync();
     await work.parent.handle.sync(); guard();
-    const owner: StageOwner = { work, manifest: closed.manifest, verified:closed.manifest, schema, poisoned: false };
+    const owner: StageOwner = { work, manifest: loaded.manifest, verified:loaded.manifest, schema:loaded.schema, poisoned: false };
     const result: RestoreStage = Object.freeze({stagingDirectory:work.root.path,
       databasePath:join(work.root.path,"thoughtloom.sqlite"),mediaDirectory:media.path,manifestSha256:closed.manifestSha256,
       dispose:async () => {

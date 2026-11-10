@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thoughtloom Settings · Design comp</title>
+  <style>
+    @font-face {
+      font-family: "Source Sans 3";
+      src: url("../../brand/fonts/SourceSans3-VariableFont_wght.ttf") format("truetype");
+      font-weight: 200 900;
+      font-display: block;
+    }
+    :root {
+      color-scheme: dark;
+      --ground: #031315;
+      --text: #fef6e1;
+      --body: #d5d3c5;
+      --muted: #a5a8a0;
+      --line: #344548;
+      --control-line: #7b837f;
+      --input: #0e1e20;
+      --gold: #efb83f;
+      --focus: #8eaef2;
+      --inset: clamp(1.25rem, 3.125vw, 3rem);
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      background: var(--ground);
+      color: var(--body);
+      scrollbar-color: var(--control-line) var(--ground);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-size: 1.125rem; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    ::selection { background: #35557f; color: var(--text); }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 5px; }
+    header { border-bottom: 1px solid var(--line); }
+    .header-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .25rem 2rem; min-height: 4.625rem; padding-inline: var(--inset); }
+    .brand { display: flex; align-items: baseline; gap: 1.5rem; }
+    .brand-name { color: var(--text); font-size: 1.75rem; font-weight: 700; line-height: 1.2; letter-spacing: -.02em; }
+    .tagline { font-size: 1rem; }
+    nav { display: flex; flex-wrap: wrap; align-self: stretch; gap: 1rem; }
+    nav span { display: inline-flex; align-items: center; justify-content: center; min-height: 3.5rem; padding: .625rem 1rem; border-bottom: 3px solid transparent; color: var(--text); font-weight: 600; line-height: 1.35; }
+    nav [aria-current] { color: var(--focus); border-bottom-color: var(--focus); }
+    main { padding: 2rem var(--inset) 3rem; }
+    .settings { max-width: 70rem; }
+    h1 { margin: 0 0 1.5rem; color: var(--text); font-size: 2rem; line-height: 1.2; letter-spacing: -.02em; }
+    h2 { margin: 0 0 .5rem; color: var(--text); font-size: 1.5rem; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; }
+    .intro { max-width: 75ch; }
+    .intro p { margin: 0 0 .5rem; }
+    .scope { color: var(--muted); font-size: 1rem; }
+    .fields { margin-top: 1.75rem; border-top: 1px solid var(--line); }
+    .field { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 2rem; padding-block: 1.25rem; border-bottom: 1px solid var(--line); }
+    label { display: block; color: var(--text); font-weight: 600; }
+    label span { color: var(--muted); font-weight: 400; font-size: 1rem; }
+    .description { margin: .25rem 0 0; color: var(--muted); font-size: 1rem; }
+    textarea { display: block; width: 100%; min-width: 0; height: 6rem; min-height: 6rem; padding: .625rem 1rem; border: 1px solid var(--control-line); border-radius: .5rem; background: var(--input); color: var(--text); caret-color: var(--gold); font: inherit; line-height: 1.5; resize: vertical; }
+    textarea::placeholder { color: var(--muted); opacity: 1; }
+    .actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; margin-top: 1.5rem; }
+    .timing { margin: 0; max-width: 65ch; color: var(--body); font-size: 1rem; }
+    button { flex: none; min-height: 3rem; padding: .5rem 1.25rem; border: 1px solid var(--gold); border-radius: .5rem; background: var(--gold); color: var(--ground); font: inherit; font-weight: 700; }
+    button:hover { background: #ffd477; border-color: #ffd477; }
+    .comp-note { max-width: 70rem; margin: 1.75rem 0 0; color: var(--muted); font-size: .875rem; }
+    @media (max-width: 48rem) {
+      .header-inner { flex-direction: column; align-items: stretch; gap: .75rem; padding-top: 1rem; }
+      .brand { flex-direction: column; align-items: flex-start; gap: 0; }
+      nav { justify-content: space-between; gap: .25rem; }
+      nav span { padding-inline: .375rem; }
+      main { padding-top: 1.75rem; }
+      .field { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+      textarea { height: 7.5rem; }
+      .actions { flex-direction: column; gap: 1.25rem; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand"><span class="brand-name">thoughtloom</span><span class="tagline">Where ideas take shape.</span></div>
+      <nav aria-label="Main navigation"><span>Explore</span><span>Browse</span><span>Capture</span><span aria-current="page">Settings</span></nav>
+    </div>
+  </header>
+  <main>
+    <section class="settings" aria-labelledby="settings-heading">
+      <h1 id="settings-heading">Settings</h1>
+      <div class="intro">
+        <h2>Additional agent instructions</h2>
+        <p>Add guidance for each agent. It supplements built-in instructions, without overriding permissions or data-protection rules.</p>
+        <p class="scope" id="scope">Applies across Thoughtloom, not just this browser. Leave a field empty for no extra guidance.</p>
+      </div>
+      <div class="fields">
+        <div class="field">
+          <div><label for="weaver">Weaver <span>(optional)</span></label><p class="description" id="weaver-description">Interpretations and connections</p></div>
+          <textarea id="weaver" aria-describedby="weaver-description scope" placeholder="No additional guidance" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+          <div><label for="evolve">Evolve <span>(optional)</span></label><p class="description" id="evolve-description">Developing ideas in conversation</p></div>
+          <textarea id="evolve" aria-describedby="evolve-description scope" placeholder="No additional guidance" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+          <div><label for="search">Agentic Search <span>(optional)</span></label><p class="description" id="search-description">Finding existing thinking</p></div>
+          <textarea id="search" aria-describedby="search-description scope" placeholder="No additional guidance" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+          <div><label for="export">Agentic Export <span>(optional)</span></label><p class="description" id="export-description">Writing a Markdown report</p></div>
+          <textarea id="export" aria-describedby="export-description scope" placeholder="No additional guidance" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="actions">
+        <p class="timing">Saved changes apply on the next agent turn, including in existing conversations. Running turns stay unchanged.</p>
+        <button type="button" aria-describedby="comp-note">Save changes</button>
+      </div>
+    </section>
+    <p class="comp-note" id="comp-note">Design comp only. Nothing is saved or sent.</p>
+  </main>
+</body>
+</html>

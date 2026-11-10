@@ -302,7 +302,7 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await page.goto(`${options.origin}/explore`, { waitUntil: "networkidle" });
   const nav = page.getByRole("navigation");
   await expect(page.getByText("Reserved", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Settings", exact: true })).toHaveAttribute("href", "/settings");
   const link = nav.getByRole("link", { name: "Browse", exact: true });
   await link.focus();
   await page.keyboard.press("Enter");

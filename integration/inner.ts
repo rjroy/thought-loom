@@ -30,10 +30,12 @@ async function bounded<T>(work: Promise<T>, label: string, ms = 15000): Promise<
   finally { if (timer) clearTimeout(timer); }
 }
 
+type InstructionValue = Parameters<PublicClient["instructionPut"]>[0]["value"];
 class FixtureClient implements PublicClient {
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();
   readonly prompts = new Map<string, string[]>();
+  private readonly instructions = new Map<string, Map<string, InstructionValue>>();
   private releaseHeld: (() => void) | undefined;
   holdEvolve = true;
   sourceId = "";
@@ -44,6 +46,16 @@ class FixtureClient implements PublicClient {
     this.sessions.set(input.id, value); this.messages.set(input.id, []); return value;
   }
   async sessionGet(input: { readonly sessionID: string }): Promise<NativeSession> { const value = this.sessions.get(input.sessionID); if (!value) throw new AgentSessionMissingError("Owned session absent"); return value; }
+  async instructionList(input: Parameters<PublicClient["instructionList"]>[0]): ReturnType<PublicClient["instructionList"]> {
+    return [...(this.instructions.get(input.sessionID)?.entries() ?? [])].map(([key, value]) => ({ key, value }));
+  }
+  async instructionPut(input: Parameters<PublicClient["instructionPut"]>[0]): Promise<void> {
+    const entries = this.instructions.get(input.sessionID) ?? new Map<string, InstructionValue>();
+    entries.set(input.key, input.value); this.instructions.set(input.sessionID, entries);
+  }
+  async instructionRemove(input: Parameters<PublicClient["instructionRemove"]>[0]): Promise<void> {
+    this.instructions.get(input.sessionID)?.delete(input.key);
+  }
   async prompt(input: Parameters<PublicClient["prompt"]>[0]): Promise<InboxItem> {
     const history = this.prompts.get(input.sessionID) ?? []; history.push(input.text); this.prompts.set(input.sessionID, history);
     const first = record(JSON.parse(history[0]));
@@ -107,6 +119,19 @@ class FixtureClient implements PublicClient {
   async active() { return {}; }
   async cancelInbox() {}
   async interrupt() { return { interrupted: true }; }
+}
+
+async function checkFixtureInstructions(): Promise<void> {
+  const client = new FixtureClient(), sessionID = "owned-session-a", other = "owned-session-b", key = "owned-key";
+  assert.deepEqual(await client.instructionList({ sessionID }), []);
+  await client.instructionPut({ sessionID, key, value: "first" });
+  await client.instructionPut({ sessionID: other, key, value: { nested: true } });
+  await client.instructionPut({ sessionID, key, value: "replacement" });
+  assert.deepEqual(await client.instructionList({ sessionID }), [{ key, value: "replacement" }]);
+  assert.deepEqual(await client.instructionList({ sessionID: other }), [{ key, value: { nested: true } }]);
+  await client.instructionRemove({ sessionID, key });
+  assert.deepEqual(await client.instructionList({ sessionID }), []);
+  assert.deepEqual(await client.instructionList({ sessionID: other }), [{ key, value: { nested: true } }]);
 }
 
 async function port(): Promise<number> {
@@ -708,5 +733,6 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
   }
 }
 
+await checkFixtureInstructions();
 await walkthrough({ width: 1440, height: 900 });
 await walkthrough({ width: 390, height: 844 });

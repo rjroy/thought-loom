@@ -6,6 +6,7 @@ import { SearchService } from "../src/domain/search";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteMediaAdmissions } from "../src/storage/media-admission";
 import { SqliteSearchRepository } from "../src/storage/search";
+import { SqliteAgentInstructions } from "../src/storage/agent-instructions";
 import { bounded } from "./fixtures/media-files";
 import { mediaPathFixture, pathBinding, pathComplete, pathRequest, promptStrings } from "./fixtures/media-path-worker";
 
@@ -245,6 +246,42 @@ test("Search Export and Markdown segmentation receive no original path or native
     expect(prompt.input).not.toContain(f.directory);
     expect(new SqliteAgentBindings(f.db).get(work.runId)?.permissions).toEqual([{action:"*",resource:"*",effect:"deny"}]);
     expect(f.requestedSources).toEqual([]);
+  } finally { segmenter.pause(); }
+}));
+
+for (const trigger of ["media-import", "reinterpret"] as const) test(`${trigger} weaving uses the Weaver guidance`, async () => mediaPathFixture(async f => {
+  new SqliteAgentInstructions(f.db).save({weaver:"MEDIA-WEAVER-GUIDANCE",evolve:"EVOLVE-GUIDANCE",search:"SEARCH-GUIDANCE",export:"EXPORT-GUIDANCE",revision:0});
+  const run = f.ops.admitWeave("user",{subjectId:f.source.id,triggerId:trigger === "reinterpret" ? "reinterpret:owned-test" : `media-import:${f.source.mediaSource.id}`});
+  const w = f.worker(() => pathComplete("owned result"));
+  const entries = new Map<string,string>();
+  w.client.instructionList = async () => [...entries].map(([key,value]) => ({key,value}));
+  w.client.instructionPut = async input => { if (typeof input.value !== "string") throw new Error("Expected text guidance"); entries.set(input.key,input.value); };
+  w.client.instructionRemove = async input => { entries.delete(input.key); };
+  let atPrompt: string[] | undefined;
+  const prompt = w.client.prompt.bind(w.client);
+  w.client.prompt = async input => { atPrompt = [...entries.values()]; return prompt(input); };
+  await f.until(w.instance,run.id,() => w.client.prompts.length === 1);
+  expect(atPrompt).toEqual(["MEDIA-WEAVER-GUIDANCE"]);
+  expect(w.client.sessions.get(w.client.prompts[0]?.sessionID ?? "")?.permissions).toEqual([{action:"*",resource:"*",effect:"allow"}]);
+},null));
+
+test("Markdown segmentation does not receive any saved agent guidance", async () => mediaPathFixture(async f => {
+  new SqliteAgentInstructions(f.db).save({weaver:"PRIVATE-WEAVER",evolve:"PRIVATE-EVOLVE",search:"PRIVATE-SEARCH",export:"PRIVATE-EXPORT",revision:0});
+  const batch = f.imports.createBatch("user","guidance-exclusion");
+  const file = f.imports.admitFile("user",batch.id,"markdown-file","note.md",new TextEncoder().encode("One test paragraph.\n\nAnother test paragraph."));
+  const submitted: PersistedPrompt[] = [];
+  const segmenter = new MarkdownImportWorker({db:f.db,...f.sources,native:bindings => ({
+    bindingFor:async run => pathBinding(run,"/tmp/opencode/segmentation-fixture"), ensureSession:async () => {},
+    submit:async (claim,_binding,prompt) => { bindings.assertImportPreparation(claim,[prompt]); bindings.recordImportSubmission(claim,prompt); submitted.push(prompt); },
+    observe:async (): Promise<ImportObservation> => ({state:"pending"}), cancel:async (): Promise<"pending" | "settled"> => "pending",
+  })});
+  try {
+    const work = segmenter.candidates(0,null,10).items.find(item => item.runId === file.runId);
+    if (!work) throw new Error("Expected test-owned segmentation work");
+    await bounded(segmenter.tick(work),"segmentation guidance exclusion");
+    expect(submitted).toHaveLength(1);
+    for (const sentinel of ["PRIVATE-WEAVER","PRIVATE-EVOLVE","PRIVATE-SEARCH","PRIVATE-EXPORT"]) expect(submitted[0]?.input).not.toContain(sentinel);
+    expect(new SqliteAgentBindings(f.db).get(work.runId)?.permissions).toEqual([{action:"*",resource:"*",effect:"deny"}]);
   } finally { segmenter.pause(); }
 }));
 

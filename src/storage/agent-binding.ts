@@ -166,6 +166,17 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       this.matchImportPrompts(step,[prompt]);
     });
   }
+  /** Read only the durable initial-step snapshot under the same claim and prompt fence as native submission. */
+  initialGuidance(claim: Claim, prompt: PersistedPrompt): string | null {
+    return this.guardedExecution("authorize initial guidance",claim,run => {
+      const step = this.currentStep(run.id);
+      if (run.kind === "import" || step.position !== 0 || step.promptId !== prompt.promptId || step.input !== prompt.input ||
+          step.state !== "prepared" || run.status !== "queued") throw new RunFenceError("Initial guidance requires the prepared prompt");
+      const row = this.db.query<{guidance:string|null},[string]>("SELECT guidance FROM run_steps WHERE run_id=? AND position=0").get(run.id);
+      if (!row) throw new RunFenceError("Initial guidance witness unavailable");
+      return row.guidance;
+    });
+  }
   /** Adapter callback: short transaction checks ownership/context and supplies immutable ordered inputs when requested. */
   assertActive(claim: Claim, prompt?: PersistedPrompt, phase?: NativePhase): readonly PersistedPrompt[] | void {
     return this.guardedExecution("authorize native call",claim,run => {

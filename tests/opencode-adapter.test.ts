@@ -42,6 +42,9 @@ class ImportBindings extends MemoryBindings {
 
 // Shapes mirror the SDK-decoded /session, /inbox and /message receipts, not fake wire envelopes.
 class FakeClient implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   session: NativeSession | null = null;
   queued: InboxItem[] = [];
   pages = new Map<string, { data: readonly NativeMessage[]; cursor: { next?: string } }>();

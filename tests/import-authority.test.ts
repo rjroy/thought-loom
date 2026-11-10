@@ -112,6 +112,9 @@ test("native-tool bindings allow Weaver/Evolve but storage refuses allow for Sea
 function fakeClient(runId: string, nativeBinding: AgentBinding, messages: readonly NativeMessage[]): PublicClient {
   const session: NativeSession = { id: nativeBinding.sessionId, location: nativeBinding.location, model: nativeBinding.model, permissions: nativeBinding.permissions, metadata: { owner: "thoughtloom", runId, protocolVersion: "1" } };
   return {
+    instructionList: async () => { throw new Error("Unexpected instruction list"); },
+    instructionPut: async () => { throw new Error("Unexpected instruction put"); },
+    instructionRemove: async () => { throw new Error("Unexpected instruction remove"); },
     serverInfo: async () => ({ version: "fixture" }), sessionCreate: async () => session, sessionGet: async () => session,
     prompt: async () => { throw new Error("Unexpected native submission"); }, inbox: async () => [],
     history: async () => ({ data: messages, cursor: {} }), active: async () => ({}),
@@ -120,6 +123,9 @@ function fakeClient(runId: string, nativeBinding: AgentBinding, messages: readon
 }
 
 class TrackedClient implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   calls: string[] = [];
   session: NativeSession | null = null;
   queue: InboxItem[] = [];

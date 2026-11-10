@@ -21,6 +21,8 @@ import { SearchConflictError, SearchForbiddenError, SearchNotFoundError, type Se
 import { parseSearchClockHeaders, type SearchClockReceipts } from "./search-clock-receipts";
 import { ReinterpretationConflictError, type ReinterpretationService } from "../domain/reinterpretation";
 import { createReinterpretationRoutes } from "./reinterpretation-routes";
+import { agentInstructionFields, agentInstructionMaxBytes, parseAgentInstructions, type AgentInstructionsRepository } from "../domain/agent-instructions";
+import { readBytes, strictObject, utf8 } from "./import-body";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -46,6 +48,7 @@ export interface AppOptions {
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
   readonly media?: { readonly commands: MediaImports; readonly maxBytes: number; readonly notify: () => void };
   readonly reinterpretations?: {readonly commands:Pick<ReinterpretationService,"admit"|"byKey">;readonly notify:() => void};
+  readonly agentInstructions?: AgentInstructionsRepository;
 }
 
 type AppEnv = SearchEnv;
@@ -98,6 +101,7 @@ function thoughtInput(data: Record<string, unknown>): ThoughtInput {
 function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
+  if (path === "/settings/agent-instructions") return path;
   if (path === "/browse/thoughts") return path;
   if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
@@ -162,7 +166,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
-    if (event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
+    if (event.path === "/settings/agent-instructions" || event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
@@ -179,6 +183,23 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
   if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics));
+
+  if (options.agentInstructions) {
+    const settings = options.agentInstructions;
+    app.get("/settings/agent-instructions", c => {
+      user(c); noQuery(c);
+      return c.json(settings.get());
+    });
+    app.put("/settings/agent-instructions", async c => {
+      user(c); noQuery(c);
+      if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(c.req.header("content-type") ?? "")) throw new ApiError(415);
+      // JSON can encode every single-byte character as a six-byte escape, plus object overhead.
+      const bytes = await readBytes(c.req.raw,4 * 6 * agentInstructionMaxBytes + 4096);
+      const bad = (): never => { throw new ValidationError("Invalid agent instructions"); };
+      const value = strictObject(utf8(bytes,bad),[...agentInstructionFields,"revision"],bad);
+      return c.json(settings.save(parseAgentInstructions(value)));
+    });
+  }
 
   if (options.search) {
     const search = options.search;

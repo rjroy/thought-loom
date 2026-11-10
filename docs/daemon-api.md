@@ -38,6 +38,37 @@ User `history` and `show-rejected` thought and connection reads add `rejected: b
 
 AI can still read an active descendant of a rejected thought, but its returned `parentId` becomes null and rejected source IDs are removed. Persisted ancestry is not changed by this projection.
 
+## Additional agent instructions
+
+`GET /settings/agent-instructions` and `PUT /settings/agent-instructions` are
+user-only routes. AI-role requests are forbidden. Responses use
+`Cache-Control: private, no-store`.
+
+GET returns the global server-side settings:
+
+```json
+{"weaver":"","evolve":"","search":"","export":"","revision":0}
+```
+
+PUT requires all five fields with no unknown properties. Each instruction is a
+string of at most 16 KiB of UTF-8 text. Accepted whitespace and leading BOM are
+preserved. Empty strings mean no additional guidance. The JSON request stream
+is independently limited to 397,312 bytes.
+
+Submit the revision returned by the last read. The daemon atomically replaces
+all four fields, increments the revision, and returns the complete saved object
+with status `200`. A stale revision returns `409` without changing settings.
+Invalid input returns `400`; oversized bodies return `413`; unsupported content
+types return `415`.
+
+These instructions supplement built-in instructions for Weaver, Evolve,
+Agentic Search and Agentic Export. They do not configure import segmentation,
+models, effort levels, tool permissions or data-access rules. Settings are read
+when a run prepares its initial prompt, then retained unchanged through that
+run's capability exchanges and recovery. An already-prepared run is not changed
+by a save; the next turn in an existing conversation uses the latest settings.
+See the [product agreement](../.lore/context/agent-instructions.md).
+
 ## Response records
 
 | Record | Fields |
