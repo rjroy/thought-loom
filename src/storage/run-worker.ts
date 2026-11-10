@@ -18,6 +18,7 @@ import { weaveDispatchAllowed } from "./weave-work";
 import { readAgentBinding } from "./run-record";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
+import { SqliteAgentInstructions } from "./agent-instructions";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunAggregate {
@@ -37,13 +38,17 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       if (clock && clock.context === null) throw new RunConflictError("Initial search clock attachment required");
       const search = clock?.context ? initialSearchContext(this.db,run,clock.context) : null;
       const context = search?.context ?? this.selectInitialContext(run);
+      const settings = new SqliteAgentInstructions(this.db,this.logger).get();
+      const guidance = run.kind === "weave" ? settings.weaver : run.kind === "evolve" ? settings.evolve :
+        run.kind === "search" ? settings.search : run.kind === "export" ? settings.export : null;
+      if (guidance === null) throw new RunForbiddenError("Ordinary agent guidance required");
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
       const input = nonEmpty(render(context),"initial input");
       if (search) for (const ref of search.dependencies) this.track(run.id,ref);
       for (const thought of context.thoughts) this.trackThought(run.id,thought);
       for (const connection of context.connections) this.trackConnection(run.id,connection);
       for (const response of context.responses) this.trackResponse(run.id,response);
-      this.db.run("UPDATE run_steps SET input=? WHERE run_id=? AND prompt_id=?",[input,run.id,step.promptId]);
+      this.db.run("UPDATE run_steps SET input=?,guidance=CAST(? AS TEXT) WHERE run_id=? AND prompt_id=?",[input,new TextEncoder().encode(guidance),run.id,step.promptId]);
       return { step: { ...step, input }, clock };
     });
     prepared.clock?.committed();

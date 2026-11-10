@@ -281,6 +281,9 @@ test("Stop fences queued and selected holders, releases waiters, and corrupt sta
 
 /** In-memory decoded SDK facade; neither discovery nor a native service is contacted. */
 class ImportClient implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();
   readonly prompts: Parameters<PublicClient["prompt"]>[0][] = [];

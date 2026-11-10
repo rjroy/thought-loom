@@ -1,5 +1,5 @@
 import { BackupFormatError, encodeManifest, encodeTable, type BackupManifest, type RawCell, type RawRow } from "./format";
-import { backupTableDefinitions, backupTableShapes } from "./schema";
+import { definitionsForSchema, shapesForSchema, type BackupAppSchema } from "./schema";
 
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }), encoder = new TextEncoder();
 function invalid(): never { throw new BackupFormatError(); }
@@ -30,14 +30,17 @@ export function decodeManifest(bytes: Uint8Array): BackupManifest {
   try {
     const parsed: unknown = JSON.parse(decoder.decode(bytes));
     const root = object(parsed,["appSchema","format","mediaMarker","mediaStoreId","originals","sequences","tables","version"]);
-    if (root.appSchema !== "thoughtloom-logical-1" || root.format !== "thoughtloom-backup" || root.version !== 1) invalid();
+    if ((root.appSchema !== "thoughtloom-logical-1" && root.appSchema !== "thoughtloom-logical-2") || root.format !== "thoughtloom-backup" || root.version !== 1) invalid();
+    const schema = root.appSchema;
     const tables = array(root.tables).map(value => {
       const entry = object(value,["name","path","rowCount","byteLength","sha256"]);
       return { name: string(entry.name), path: string(entry.path), rowCount: string(entry.rowCount),
         byteLength: string(entry.byteLength), sha256: string(entry.sha256) };
     });
-    if (tables.length !== backupTableShapes.length || tables.some((entry,index) => entry.name !== backupTableShapes[index].name)) invalid();
+    const shapes = shapesForSchema(schema);
+    if (tables.length !== shapes.length || tables.some((entry,index) => entry.name !== shapes[index].name)) invalid();
     const manifest: BackupManifest = {
+      ...(schema === "thoughtloom-logical-2" ? {appSchema:schema} : {}),
       tables,
       originals: array(root.originals).map(value => {
         const entry = object(value,["sourceId","path","byteLength","sha256"]);
@@ -53,9 +56,9 @@ export function decodeManifest(bytes: Uint8Array): BackupManifest {
   } catch { return invalid(); }
 }
 
-export function decodeTable(tableName: string, bytes: Uint8Array): readonly RawRow[] {
+export function decodeTable(tableName: string, bytes: Uint8Array, schema: BackupAppSchema = "thoughtloom-logical-2"): readonly RawRow[] {
   try {
-    const definition = backupTableDefinitions.find(table => table.shape.name === tableName);
+    const definition = definitionsForSchema(schema).find(table => table.shape.name === tableName);
     if (!definition) invalid();
     const parsed: unknown = JSON.parse(decoder.decode(bytes)), root = object(parsed,["columns","rows"]);
     const columns = array(root.columns).map(string), shape = definition.shape;

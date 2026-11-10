@@ -93,6 +93,9 @@ export function createPublicClient(config: ResolvedAgentService): PublicClient {
     serverInfo:() => request(async () => { const info = await client.server.info(requestOptions()); return {version:info.version}; }),
     sessionCreate:input => request(async () => session(await client.session.create(input,requestOptions()))),
     sessionGet:input => request(async () => session(await client.session.get(input,requestOptions()))),
+    instructionList:input => request(async () => (await client.experimental.session.instructions.entry.list(input,requestOptions())).map(({key,value}) => ({key,value}))),
+    instructionPut:input => request(() => client.experimental.session.instructions.entry.put(input,requestOptions())),
+    instructionRemove:input => request(() => client.experimental.session.instructions.entry.remove(input,requestOptions())),
     prompt:input => request(async () => inboxItem(await client.session.prompt({sessionID:input.sessionID,id:input.id,text:input.text},requestOptions()))),
     inbox:input => request(async () => (await client.session.inbox.list(input,requestOptions())).map(inboxItem)),
     history:input => request(async () => {

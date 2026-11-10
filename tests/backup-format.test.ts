@@ -10,6 +10,17 @@ const rows: RawRow[] = [
   { rowid: null, values: { id: text("z"), value: text("second"), digest: { storage: "blob", bytes: new Uint8Array() }, optional: integer(-9223372036854775808n) } },
 ];
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+// Frozen logical-1 inventory; do not derive the expected list from the encoder.
+const legacyNames = [
+  "thoughts", "thought_titles", "thought_sources", "thought_source_seals", "connections", "connection_sources",
+  "responses", "response_thoughts", "response_seals", "rejected_thoughts", "rejected_connections",
+  "runs", "run_steps", "agent_bindings", "run_context", "run_operation_receipts", "run_issued_thoughts", "run_replies", "execution_owners",
+  "export_intents", "export_reports", "import_namespaces", "import_documents", "import_locations", "import_document_parts", "import_document_seals",
+  "markdown_imports", "markdown_import_files", "markdown_import_payloads", "media_store", "media_sources", "search_sessions", "search_turns",
+  "search_messages", "search_discoveries", "search_content_dependencies", "search_composer_contexts", "search_composer_dependencies",
+  "search_revisions", "search_native_cleanup", "restore_fences",
+].sort();
+const fixtureTables = () => legacyNames.map(name => ({name,path:`tables/${name}.json`,rowCount:"0",byteLength:"2",sha256:"b".repeat(64)}));
 
 test("table bytes retain exact text and typed cells, sorted by UTF-8 key and ASCII column name", () => {
   const expected = '{"columns":["digest","id","optional","value"],"rows":[' +
@@ -50,15 +61,16 @@ test("table encoding refuses invalid UTF-8, REAL, out-of-range integers and inco
 
 test("manifest bytes have closed canonical keys, sorted entries and exact sequence high-water values", () => {
   const manifest: BackupManifest = {
-    mediaStoreId: null, tables: [
-      { name: "runs", path: "tables/runs.json", rowCount: "1", byteLength: "8", sha256: "a".repeat(64) },
-      { name: "thoughts", path: "tables/thoughts.json", rowCount: "0", byteLength: "2", sha256: "b".repeat(64) },
-    ],
+    mediaStoreId: null, tables: fixtureTables().map(table => table.name === "runs"
+      ? { ...table, rowCount:"1", byteLength:"8", sha256:"a".repeat(64) } : table),
     sequences: [{ name: "search_sessions", value: 9223372036854775807n }, { name: "import_documents", value: 2n }],
     mediaMarker: null, originals: [],
   };
   const encoded = encodeManifest(manifest);
-  const expected = `{"appSchema":"thoughtloom-logical-1","format":"thoughtloom-backup","mediaMarker":null,"mediaStoreId":null,"originals":[],"sequences":[{"name":"import_documents","value":{"$integer":"2"}},{"name":"search_sessions","value":{"$integer":"9223372036854775807"}}],"tables":[{"byteLength":"8","name":"runs","path":"tables/runs.json","rowCount":"1","sha256":"${"a".repeat(64)}"},{"byteLength":"2","name":"thoughts","path":"tables/thoughts.json","rowCount":"0","sha256":"${"b".repeat(64)}"}],"version":1}\n`;
+  const tableBytes = legacyNames.map(name => name === "runs"
+    ? `{"byteLength":"8","name":"runs","path":"tables/runs.json","rowCount":"1","sha256":"${"a".repeat(64)}"}`
+    : `{"byteLength":"2","name":"${name}","path":"tables/${name}.json","rowCount":"0","sha256":"${"b".repeat(64)}"}`).join(",");
+  const expected = `{"appSchema":"thoughtloom-logical-1","format":"thoughtloom-backup","mediaMarker":null,"mediaStoreId":null,"originals":[],"sequences":[{"name":"import_documents","value":{"$integer":"2"}},{"name":"search_sessions","value":{"$integer":"9223372036854775807"}}],"tables":[${tableBytes}],"version":1}\n`;
   expect(encoded).toEqual(utf8.encode(expected));
   expect(encodeManifest({ ...manifest, tables: [...manifest.tables].reverse(), sequences: [...manifest.sequences].reverse() })).toEqual(encoded);
 });
@@ -84,20 +96,22 @@ test("closed manifest rejects unsafe metadata and incoherent media without inven
   const table = { name: "runs", path: "tables/runs.json", rowCount: "1", byteLength: "8", sha256: digest };
   const marker = { path: "media/store.json", byteLength: "10", sha256: digest };
   const original = { sourceId: id, path: `media/objects/${id}`, byteLength: "1", sha256: digest };
-  const valid: BackupManifest = { mediaStoreId: id, mediaMarker: marker, originals: [original], tables: [table], sequences: [{ name: "search_sessions", value: 5n }] };
+  const tables = fixtureTables().map(entry => entry.name === "runs" ? table : entry);
+  const valid: BackupManifest = { mediaStoreId: id, mediaMarker: marker, originals: [original], tables, sequences: [{ name: "search_sessions", value: 5n }] };
   expect(encodeManifest(valid).byteLength).toBeGreaterThan(0);
   const extraTable = { ...table, timestamp: "2030" };
   const extraManifest = { ...valid, timestamp: "2030" };
   const invalid: BackupManifest[] = [
     { ...valid, sequences: [...valid.sequences, { name: "search_sessions", value: 6n }] },
     { ...valid, sequences: [{ name: "unexpected_table", value: 1n }] },
-    { ...valid, tables: [table, table] },
-    { ...valid, tables: [{ ...table, path: "tables/../runs.json" }] },
-    { ...valid, tables: [{ ...table, path: "tables/thoughts.json" }] },
-    { ...valid, tables: [{ ...table, rowCount: "01" }] },
-    { ...valid, tables: [{ ...table, byteLength: "-1" }] },
-    { ...valid, tables: [{ ...table, sha256: "A".repeat(64) }] },
-    { ...valid, tables: [extraTable] }, extraManifest,
+    { ...valid, tables: [...tables, table] },
+    { ...valid, tables: tables.filter(entry => entry.name !== "runs") },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? { ...table, path: "tables/../runs.json" } : entry) },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? { ...table, path: "tables/thoughts.json" } : entry) },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? { ...table, rowCount: "01" } : entry) },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? { ...table, byteLength: "-1" } : entry) },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? { ...table, sha256: "A".repeat(64) } : entry) },
+    { ...valid, tables: tables.map(entry => entry.name === "runs" ? extraTable : entry) }, extraManifest,
     { ...valid, mediaMarker: null },
     { ...valid, mediaStoreId: null },
     { ...valid, mediaMarker: { ...marker, path: "media/../store.json" } },

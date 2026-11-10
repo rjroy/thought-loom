@@ -15,6 +15,9 @@ import { createLogger } from "../src/logging";
 
 // Decoded native history only: the real adapter and worker own all persisted work.
 export class ScriptedClient implements PublicClient {
+  async instructionList(_input: Parameters<PublicClient["instructionList"]>[0]): ReturnType<PublicClient["instructionList"]> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(_input: Parameters<PublicClient["instructionPut"]>[0]): Promise<void> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(_input: Parameters<PublicClient["instructionRemove"]>[0]): Promise<void> { throw new Error("Unexpected instruction remove"); }
   serviceUrl?: string;
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();

@@ -28,7 +28,7 @@ const steps = `CREATE TABLE run_steps (
   prompt_id TEXT UNIQUE NOT NULL, input TEXT CHECK(input IS NULL OR length(input)>0),
   state TEXT NOT NULL CHECK(state IN ('prepared','submitting','uncertain','completed','processed')),
   native_state TEXT NOT NULL DEFAULT 'unknown' CHECK(native_state IN ('unknown','running','completed')),
-  envelope_json TEXT, result_json TEXT, PRIMARY KEY(run_id,position),
+  envelope_json TEXT, result_json TEXT, guidance TEXT, PRIMARY KEY(run_id,position),
   CHECK(state!='processed' OR (envelope_json IS NOT NULL AND result_json IS NOT NULL)),
   CHECK(envelope_json IS NULL OR state IN ('completed','processed')),
   CHECK(result_json IS NULL OR (state IN ('completed','processed') AND envelope_json IS NOT NULL)

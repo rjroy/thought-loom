@@ -60,6 +60,10 @@ class WorkerBindings extends SqliteAgentBindings {
     this.localFence(claim.runId);
     return super.assertActive(claim,prompt,phase);
   }
+  override initialGuidance(claim: Claim, prompt: PersistedPrompt): string | null {
+    this.localFence(claim.runId);
+    return super.initialGuidance(claim,prompt);
+  }
   override bind(runId: string, binding: AgentBinding, claim?: Claim): void {
     this.localFence(runId);
     super.bind(runId,binding,claim);

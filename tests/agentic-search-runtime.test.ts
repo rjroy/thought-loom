@@ -16,6 +16,9 @@ import { createLogger } from "../src/logging";
 // Decoded PublicClient fixture mirrors the native history correlation contract;
 // it does not start or contact a service and never directly completes SQL work.
 class OwnedClient implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();
   readonly prompts: Parameters<PublicClient["prompt"]>[0][] = [];

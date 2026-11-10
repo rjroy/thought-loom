@@ -95,6 +95,7 @@ export function migrateRunSchema(db: Database): void {
 function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
   const schema = db.query("SELECT sql FROM sqlite_schema WHERE type='table' AND name='run_steps'").get() as { sql: string } | null;
   const stagedResults = schema !== null && /CHECK\s*\(\s*result_json\s+IS\s+NULL\s+OR\s+state\s*=\s*'processed'\s*\)/i.test(schema.sql);
+  const stagedGuidance = stagedResults && db.query<{name:string},[]>("PRAGMA table_info(run_steps)").all().some(column => column.name === "guidance");
   if (stagedResults) {
     // Only the old CHECK changes: a completed request may now retain its dispatched result before successor preparation.
     // This predecessor has no incoming step FKs; search discovery FKs are installed after this upgrade.
@@ -117,8 +118,10 @@ function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
       CHECK ((native_state = 'completed') = (state IN ('completed','processed')))
     );
   `);
-  if (stagedResults) db.exec(`INSERT INTO run_steps (rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json)
-    SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps_legacy ORDER BY rowid;
+  const stepColumns = db.query<{name:string},[]>("PRAGMA table_info(run_steps)").all();
+  if (!stepColumns.some(column => column.name === "guidance")) db.exec("ALTER TABLE run_steps ADD COLUMN guidance TEXT");
+  if (stagedResults) db.exec(`INSERT INTO run_steps (rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json,guidance)
+    SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json,${stagedGuidance ? "guidance" : "NULL"} FROM run_steps_legacy ORDER BY rowid;
     DROP TABLE run_steps_legacy;`);
   // The legacy column is moved, not reset. Each later prompt starts with its own unknown native evidence.
   const native = hasLegacyNativeState ? "r.native_state" : "'unknown'";
@@ -144,6 +147,13 @@ function migrateSteps(db: Database, hasLegacyNativeState: boolean): void {
     CREATE TRIGGER IF NOT EXISTS run_steps_input_immutable BEFORE UPDATE OF input ON run_steps
     WHEN OLD.input IS NOT NULL OR NEW.input IS NULL OR OLD.state != 'prepared' OR OLD.native_state != 'unknown'
     BEGIN SELECT RAISE(ABORT,'step input immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS run_steps_guidance_insert BEFORE INSERT ON run_steps
+    WHEN NEW.guidance IS NOT NULL AND (NEW.position != 0 OR NEW.input IS NULL)
+    BEGIN SELECT RAISE(ABORT,'initial step guidance required'); END;
+    CREATE TRIGGER IF NOT EXISTS run_steps_guidance_immutable BEFORE UPDATE OF guidance ON run_steps
+    WHEN OLD.position != 0 OR OLD.input IS NOT NULL OR OLD.guidance IS NOT NULL OR NEW.guidance IS NULL
+      OR NEW.input IS NULL OR OLD.state != 'prepared' OR OLD.native_state != 'unknown'
+    BEGIN SELECT RAISE(ABORT,'step guidance immutable'); END;
     CREATE TRIGGER IF NOT EXISTS run_steps_envelope_immutable BEFORE UPDATE OF envelope_json ON run_steps
     WHEN OLD.envelope_json IS NOT NULL AND NEW.envelope_json IS NOT OLD.envelope_json
     BEGIN SELECT RAISE(ABORT,'step envelope immutable'); END;

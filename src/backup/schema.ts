@@ -45,7 +45,7 @@ function definition(name: string, columns: Definition["columns"], primaryKey: re
 }
 
 /** Versioned logical inventory, independent of whatever tables happen to exist in a source. */
-const definitions: readonly Definition[] = [
+const legacyDefinitions: readonly Definition[] = [
   definition("thoughts", { id: text, text: optionalText, author: text, kind: text, created_at: text, origin: text,
     parent_id: optionalText, import_document_id: optionalText }, ["id"], {
     unique: [unique(["import_document_id", "id"])], references: [reference(["parent_id"], "thoughts", ["id"]),
@@ -154,6 +154,12 @@ const definitions: readonly Definition[] = [
     evidence_json: optionalText, state: text, prompt_manifest_json: optionalText }, ["run_id"], {
     preserveRowid: true, references: [reference(["session_id"], "search_sessions", ["id"])] }),
   definition("restore_fences", { entity_kind: text, entity_id: text, snapshot_sha256: text, restored_at: text, original_state_json: text }, ["entity_kind", "entity_id"]),
+];
+
+const definitions: readonly Definition[] = [
+  ...legacyDefinitions.map(table => table.name === "run_steps"
+    ? {...table,columns:{...table.columns,guidance:optionalText}} : table),
+  definition("agent_instructions", {singleton:integerKey,weaver:text,evolve:text,search:text,export:text,revision:integer}, ["singleton"]),
 ];
 
 const spellingRevision = definition("search_revision", { id: integerKey, revision: integer }, ["id"]);
@@ -277,13 +283,22 @@ export function validateSourceSchema(db: Database): readonly TableShape[] {
 }
 
 /** Shared closed payload inventory; inspecting a file tree must not open or migrate an application database. */
-export const backupTableShapes: readonly TableShape[] = Object.freeze(definitions.map(table => Object.freeze({ name: table.name,
-  columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
-  .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+function tableShapes(items: readonly Definition[]): readonly TableShape[] {
+  return Object.freeze(items.map(table => Object.freeze({ name: table.name,
+    columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+}
+export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2";
+export const backupTableShapes = tableShapes(definitions);
+const legacyTableShapes = tableShapes(legacyDefinitions);
+export function shapesForSchema(schema: BackupAppSchema): readonly TableShape[] {
+  return schema === "thoughtloom-logical-1" ? legacyTableShapes : backupTableShapes;
+}
 
 /** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
-export const backupTableDefinitions: readonly BackupTableDefinition[] = Object.freeze(backupTableShapes.map(shape => {
-  const definition = definitions.find(table => table.name === shape.name);
+function tableDefinitions(items: readonly Definition[], shapes: readonly TableShape[]): readonly BackupTableDefinition[] {
+  return Object.freeze(shapes.map(shape => {
+  const definition = items.find(table => table.name === shape.name);
   if (!definition) invalid();
   const columns: Record<string, BackupColumn> = Object.create(null);
   for (const name of shape.columns) {
@@ -293,4 +308,10 @@ export const backupTableDefinitions: readonly BackupTableDefinition[] = Object.f
     columns[name] = Object.freeze({ storage, nullable: column.notNull === 0 && !shape.primaryKey.includes(name) });
   }
   return Object.freeze({ shape, columns: Object.freeze(columns), autoIncrement: definition.autoIncrement });
-}));
+  }));
+}
+export const backupTableDefinitions = tableDefinitions(definitions,backupTableShapes);
+const legacyTableDefinitions = tableDefinitions(legacyDefinitions,legacyTableShapes);
+export function definitionsForSchema(schema: BackupAppSchema): readonly BackupTableDefinition[] {
+  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : backupTableDefinitions;
+}

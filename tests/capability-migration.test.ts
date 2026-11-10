@@ -6,6 +6,7 @@ import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { requireMediaSchema } from "./fixtures/media-source";
+import { migrateRunSchema } from "../src/storage/run-schema";
 
 // Frozen predecessor schema: completed steps could not yet retain staged results,
 // and exposure rows had no evidence of a full read. Do not derive this from current DDL.
@@ -70,6 +71,74 @@ function closureSnapshot(db: Database): unknown {
     db.query("SELECT hex(CAST(input AS BLOB)) AS input,hex(CAST(envelope_json AS BLOB)) AS envelope,hex(CAST(result_json AS BLOB)) AS result FROM run_steps ORDER BY rowid").all(),
   ];
 }
+
+function seedGuidancePredecessor(db: Database): void {
+  seedClosure(db);
+  // Model a retained predecessor that already has the additive column, before either rebuild.
+  db.exec("ALTER TABLE run_steps ADD COLUMN guidance TEXT");
+  db.run("UPDATE run_steps SET guidance=CAST(? AS TEXT) WHERE run_id='run' AND position=0",
+    [new TextEncoder().encode("\uFEFF  retained café\r\n")]);
+}
+
+function guidanceRows(db: Database): unknown {
+  return db.query(`SELECT rowid,run_id,position,prompt_id,hex(CAST(input AS BLOB)) AS input_bytes,
+    CASE WHEN guidance IS NULL THEN NULL ELSE hex(CAST(guidance AS BLOB)) END AS guidance_bytes
+    FROM run_steps ORDER BY rowid`).all();
+}
+
+function assertGuidanceImmutable(db: Database): void {
+  const before = guidanceRows(db);
+  expect(() => db.run("UPDATE run_steps SET guidance=CAST(? AS TEXT) WHERE run_id='run' AND position=0",
+    [new TextEncoder().encode("replacement")])).toThrow(/guidance immutable/i);
+  // A legacy prepared input with no captured setting cannot be retroactively assigned current guidance.
+  expect(() => db.run("UPDATE run_steps SET guidance='' WHERE run_id='export' AND position=0")).toThrow(/guidance immutable/i);
+  expect(guidanceRows(db)).toEqual(before);
+}
+
+test("staged-results predecessor upgrade preserves captured guidance bytes and legacy null", () => {
+  const db = new Database(":memory:");
+  try {
+    seedGuidancePredecessor(db);
+    const before = guidanceRows(db);
+    expect(before).toEqual(expect.arrayContaining([
+      expect.objectContaining({run_id:"run",guidance_bytes:"EFBBBF202072657461696E656420636166C3A90D0A"}),
+      expect.objectContaining({run_id:"export",guidance_bytes:null}),
+    ]));
+    migrateRunSchema(db);
+    expect(guidanceRows(db)).toEqual(before);
+    assertGuidanceImmutable(db);
+    migrateRunSchema(db);
+    expect(guidanceRows(db)).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { db.close(); }
+});
+
+test("import closure rebuild preserves populated initial guidance and reinstates its immutability", () => {
+  const dir = mkdtempSync(join("/tmp/opencode","guidance-import-closure-"));
+  const path = join(dir,"owned.sqlite"), db = new Database(path);
+  try {
+    seedGuidancePredecessor(db);
+    // Complete the separate staged-results upgrade first, leaving the pre-import thought schema for the closure rebuild.
+    migrateRunSchema(db);
+    expect(db.query<{name:string},[]>("PRAGMA table_info(thoughts)").all().some(column => column.name === "import_document_id")).toBe(false);
+    const before = guidanceRows(db), journal = closureSnapshot(db);
+    expect(before).toEqual(expect.arrayContaining([
+      expect.objectContaining({run_id:"run",guidance_bytes:"EFBBBF202072657461696E656420636166C3A90D0A"}),
+      expect.objectContaining({run_id:"export",guidance_bytes:null}),
+    ]));
+    migrate(db);
+    expect(guidanceRows(db)).toEqual(before);
+    expect(closureSnapshot(db)).toEqual(journal);
+    assertGuidanceImmutable(db);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    const reopened = new Database(path);
+    try {
+      migrate(reopened);
+      expect(guidanceRows(reopened)).toEqual(before);
+      assertGuidanceImmutable(reopened);
+    } finally { reopened.close(); }
+  } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
+});
 
 test("populated predecessor closure and native journal bytes survive failure, retry and repeated reopen", () => {
   const dir = mkdtempSync(join("/tmp/opencode", "closure-predecessor-"));

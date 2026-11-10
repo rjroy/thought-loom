@@ -1,5 +1,5 @@
 import { createLogger, type Logger } from "../logging";
-import type { SessionMessageAssistantTool } from "@opencode/client";
+import type { JsonValue, SessionMessageAssistantTool } from "@opencode/client";
 import { RunFenceError, type Claim } from "../domain/run";
 import { AgentBindingError, assertNativeSessionBinding, assertNativeSessionOwner, normalizeBinding, sameBinding, type AgentBinding, type ModelRef } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError, AgentUnavailableError } from "./errors";
@@ -54,6 +54,9 @@ export interface PublicClient {
   serverInfo(): Promise<{ readonly version: string }>;
   sessionCreate(input: { readonly id: string; readonly location: AgentBinding["location"]; readonly model: ModelRef; readonly permissions: AgentBinding["permissions"]; readonly metadata: Readonly<Record<string, string>> }): Promise<NativeSession>;
   sessionGet(input: { readonly sessionID: string }): Promise<NativeSession>;
+  instructionList(input: { readonly sessionID: string }): Promise<readonly { readonly key: string; readonly value: JsonValue }[]>;
+  instructionPut(input: { readonly sessionID: string; readonly key: string; readonly value: JsonValue }): Promise<void>;
+  instructionRemove(input: { readonly sessionID: string; readonly key: string }): Promise<void>;
   prompt(input: { readonly sessionID: string; readonly id: string; readonly text: string }): Promise<InboxItem>;
   inbox(input: { readonly sessionID: string }): Promise<readonly InboxItem[]>;
   history(input: { readonly sessionID: string; readonly order?: "asc"; readonly cursor?: string }): Promise<{ readonly data: readonly NativeMessage[]; readonly cursor: { readonly next?: string } }>;
@@ -66,6 +69,8 @@ export interface ResolvedAgentService { readonly url: string; readonly headers?:
 export interface AgentBindings {
   bind(runId: string, binding: AgentBinding, claim?: Claim): void;
   get(runId: string): AgentBinding | null;
+  /** Optional for isolated legacy facades; production reads the immutable prepared initial-step witness. */
+  initialGuidance?(claim: Claim, prompt: PersistedPrompt): string | null;
   /** Concrete ordinary storage supplies the complete terminal journal and rechecks it around cleanup calls. */
   cancellationJournal?(runId: string, prompt: PersistedPrompt): OrdinaryCancellationJournal;
   assertCancellationJournal?(journal: OrdinaryCancellationJournal): void;
@@ -181,6 +186,28 @@ export class OpenCodeAdapter {
   private async history(binding: AgentBinding, read: (input: Parameters<PublicClient["history"]>[0]) => ReturnType<PublicClient["history"]>): Promise<readonly NativeMessage[]> {
     return readNativeHistory(binding.sessionId,read);
   }
+  private async syncInitialGuidance(claim: Claim, binding: AgentBinding, prompt: PersistedPrompt): Promise<void> {
+    const guidance = this.bindings.initialGuidance?.(claim,prompt) ?? null;
+    // Fresh run-owned sessions cannot contain our key; empty and legacy snapshots need no experimental endpoint.
+    if (guidance === null || guidance === "") return;
+    const key = "thoughtloom.agent-guidance", sessionID = binding.sessionId;
+    let operation = "instruction.list";
+    try {
+      const entries = await this.call(claim,operation,() => this.client.instructionList({sessionID}),prompt);
+      const existing = entries.filter(entry => entry.key === key);
+      if (existing.length > 1) throw new AgentBindingError("Duplicate native guidance entry");
+      if (existing[0]?.value === guidance) return;
+      operation = "instruction.put";
+      await this.call(claim,operation,() => this.client.instructionPut({sessionID,key,value:guidance}),prompt);
+      operation = "instruction.list";
+      const confirmed = await this.call(claim,operation,() => this.client.instructionList({sessionID}),prompt);
+      const matching = confirmed.filter(entry => entry.key === key);
+      if (matching.length !== 1 || matching[0]?.value !== guidance) throw new AgentBindingError("Native guidance readback differs");
+    } catch (error) {
+      this.logger.warning("[agent] instruction synchronization failed",{runId:claim.runId,operation});
+      throw error;
+    }
+  }
   async submit(claim: Claim, requested: AgentBinding, input: PersistedPrompt, onAdmission?: (fact: SearchAdmissionFact) => void): Promise<void> {
     const prompt = this.prompt(input);
     this.assertActive(claim,prompt);
@@ -198,6 +225,7 @@ export class OpenCodeAdapter {
       if (inbox.some(item => hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.sessionID !== binding.sessionId || item.payload.text !== prompt.input)) throw new AgentBindingError("Unexpected native pending input");
       if (inbox.length || Object.hasOwn(await this.call(claim,"session.active",() => this.client.active(),prompt),binding.sessionId)) throw new AgentUncertainError("Existing native work must be observed before submission");
       this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),prompt));
+      if (known.length === 1) await this.syncInitialGuidance(claim,binding,prompt);
       // The concrete storage callback records submitting in the existing run/step transaction before dispatch.
       this.assertActive(claim,prompt,"submit");
       try {

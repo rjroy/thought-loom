@@ -17,6 +17,9 @@ const quiet = { verbose: () => {}, info: () => {}, warning: () => {}, error: () 
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 class Client implements PublicClient {
+  async instructionList(): Promise<never> { throw new Error("Unexpected instruction list"); }
+  async instructionPut(): Promise<never> { throw new Error("Unexpected instruction put"); }
+  async instructionRemove(): Promise<never> { throw new Error("Unexpected instruction remove"); }
   readonly sessions = new Map<string, NativeSession>();
   readonly messages = new Map<string, NativeMessage[]>();
   readonly prompts: Parameters<PublicClient["prompt"]>[0][] = [];

@@ -6,8 +6,8 @@ import { rebuildResponseSearch, rebuildThoughtSearch } from "../storage/search-p
 import { assertRestoreFenceSchema } from "../storage/restore-fences-schema";
 import { BackupCaptureError, check, type Guard } from "./capture-files";
 import { encodeTable, type BackupManifest, type RawCell } from "./format";
-import { backupTableDefinitions, backupTableShapes, validateSourceSchema } from "./schema";
-import { readSqlSnapshot, validateBytes, type CapturedTable, type SqlSnapshot } from "./records";
+import { backupTableDefinitions, backupTableShapes, shapesForSchema, validateSourceSchema } from "./schema";
+import { readSqlSnapshot, table, validateBytes, type CapturedTable, type SqlSnapshot } from "./records";
 
 export class RestoreLoadError extends Error {
   constructor() { super("Invalid restore records"); }
@@ -36,6 +36,13 @@ export function compareRestoreRecords(snapshot: SqlSnapshot, manifest: BackupMan
   check(snapshot.sequences.length === manifest.sequences.length && snapshot.sequences.every((entry,index) =>
     entry.name === manifest.sequences[index].name && entry.value === manifest.sequences[index].value),"inconsistent-source");
 }
+/** Internal current-schema witness, generated only after validating the loaded source projection. */
+export function restoredManifest(snapshot: SqlSnapshot, source: BackupManifest): BackupManifest {
+  return {...source,appSchema:"thoughtloom-logical-2",tables:snapshot.tables.map(captured => {
+    const encoded = encodeTable(captured.shape,captured.rows);
+    return {name:captured.shape.name,path:`tables/${captured.shape.name}.json`,rowCount:String(captured.rows.length),byteLength:String(encoded.length),sha256:digest(encoded)};
+  })};
+}
 function binding(cell: RawCell): SQLQueryBindings {
   if (cell.storage === "null") return null;
   if (cell.storage === "integer") return cell.value;
@@ -44,7 +51,7 @@ function binding(cell: RawCell): SQLQueryBindings {
 }
 
 /** Newly created empty DB only. All schema/trigger SQL comes from current app migration, never the payload. */
-export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly CapturedTable[], manifest: BackupManifest, logger: Logger, guard: Guard): string {
+export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly CapturedTable[], manifest: BackupManifest, logger: Logger, guard: Guard): {schema:string;manifest:BackupManifest} {
   // Normal migration uses number-valued PRAGMAs; raw record loading uses a separate exact-integer connection.
   file.check(); const empty = new Database(file.path,{create:false,strict:true});
   try { file.check(); guard(); migrate(empty,logger); } finally { empty.close(true); file.refresh(); }
@@ -73,8 +80,16 @@ export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly
     for (const trigger of triggers) db.exec(trigger.sql);
     db.exec("ANALYZE");
     check(restoreSchemaFingerprint(db) === JSON.stringify(schema),"inconsistent-source"); assertRestoreFenceSchema(db);
-    const loaded = readSqlSnapshot(db,guard); validateBytes(loaded); compareRestoreRecords(loaded,manifest);
-    guard(); db.exec("COMMIT"); return JSON.stringify(schema);
+    const loaded = readSqlSnapshot(db,guard); validateBytes(loaded);
+    if ((manifest.appSchema ?? "thoughtloom-logical-1") === "thoughtloom-logical-1") {
+      // The original bytes are compared with the frozen inventory; only these two absent fields may default.
+      check(table(loaded,"agent_instructions").rows.length === 0,"inconsistent-source");
+      check(table(loaded,"run_steps").rows.every(row => row.values.guidance?.storage === "null"),"inconsistent-source");
+      const legacy = readSqlSnapshot(db,guard,shapesForSchema("thoughtloom-logical-1"));
+      validateBytes(legacy); compareRestoreRecords(legacy,manifest);
+    } else compareRestoreRecords(loaded,manifest);
+    const verified = restoredManifest(loaded,manifest);
+    guard(); db.exec("COMMIT"); return {schema:JSON.stringify(schema),manifest:verified};
   } catch (error) {
     if (db.inTransaction) db.exec("ROLLBACK");
     // Preserve lifetime/path refusals; sanitize SQL diagnostics without disclosing statements or raw values.

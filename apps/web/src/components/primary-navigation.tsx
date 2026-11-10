@@ -7,6 +7,7 @@ const destinations = [
   { href: "/explore", label: "Explore" },
   { href: "/browse", label: "Browse" },
   { href: "/capture", label: "Capture" },
+  { href: "/settings", label: "Settings" },
 ] as const;
 
 export function PrimaryNavigation() {
@@ -22,9 +23,6 @@ export function PrimaryNavigation() {
           </Link>
         );
       })}
-      <span className="navigation-reserved" aria-disabled="true">
-        Settings
-      </span>
     </nav>
   );
 }
