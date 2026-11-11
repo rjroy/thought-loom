@@ -154,7 +154,7 @@ describe("map workspace controller", () => {
     map.dispose();
   });
 
-  test("selection never fetches or recenters; explicit expansion merges unique nodes and role-distinct edges", async () => {
+  test("activation inspects immediately and reads one page, preserving camera and distinct relationship identities", async () => {
     const held = Promise.withResolvers<BrowseNeighborhoodResult>();
     const calls: Array<{ id: string; cursor?: string; limit: number }> = [];
     const client: BrowseNeighborhoodClient = { read: async input => {
@@ -170,16 +170,80 @@ describe("map workspace controller", () => {
     await map.expand("root");
     const camera = { x: 20, y: -10, scale: 1.25 }; map.setCamera(camera); map.setPresentation("linked-list");
     const before = map.getSnapshot(); map.select("child");
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(map.getSnapshot()).toMatchObject({ selectedId: "child", location, camera, presentation: "linked-list", positions: before.positions });
+    expect(map.getSnapshot().expansions.child?.phase).toBe("loading");
+    map.select("child");
     const load = map.expand("child"), duplicate = map.expand("child");
     expect(calls).toHaveLength(3);
     held.resolve({ kind: "success", page: childPage }); await Promise.all([load, duplicate]);
     expect(map.getSnapshot().nodes.map(node => node.id).sort()).toEqual(["child", "extra", "parent", "root"]);
     expect(map.getSnapshot().edges.map(edge => edge.id).sort()).toEqual(["edge-child", "edge-connection", "edge-evolution", "edge-extra", "edge-source-0", "edge-source-1"]);
     expect(map.getSnapshot().expansions.child).toMatchObject({ loaded: true, nextCursor: "child-next", exhausted: false });
-    await map.open(location); expect(calls).toHaveLength(3);
+    map.select("root"); map.select("child");
+    expect(calls).toHaveLength(3);
+    await map.expand("child");
+    expect(calls[3]).toMatchObject({ id: "child", cursor: "child-next" });
+    expect(map.getSnapshot().expansions.child).toMatchObject({ exhausted: true, nextCursor: null });
+    map.select("child"); await map.expand("child"); expect(calls).toHaveLength(4);
+    await map.open(location); expect(calls).toHaveLength(4);
     expect(map.getSnapshot()).toMatchObject({ selectedId: "child", camera, presentation: "linked-list" });
+    map.dispose();
+  });
+
+  test("walking successive branches reads each first page and merges incoming and outgoing roles without duplicates", async () => {
+    const calls: string[] = [];
+    const outConnection = { ...connection, id: "edge-out", fromId: "child", toId: "extra",
+      connection: { ...connection.connection, id: "out", fromId: "child", toId: "extra" } };
+    const pages: Record<string, BrowseNeighborhoodPage> = {
+      root: first,
+      parent: { thought: parent, nodes: [root, child], edges: [evolution, provenance(0), provenance(1), connection,
+        { kind: "provenance", id: "edge-parent-child", fromId: "parent", toId: "child", position: 0 }], nextCursor: null },
+      child: { ...childPage, edges: [...childPage.edges, outConnection], nextCursor: null },
+      extra: { thought: extra, nodes: [child], edges: [{ kind: "provenance", id: "edge-extra", fromId: "child", toId: "extra", position: 0 }, outConnection], nextCursor: null },
+    };
+    const map = createBrowseMapController(location, { read: async input => {
+      calls.push(input.id);
+      const page = pages[input.id]; if (!page) throw new Error("Unexpected read");
+      return { kind: "success", page };
+    } }, { geometry });
+    await map.open(location);
+    for (const id of ["parent", "child", "extra"]) {
+      map.select(id);
+      expect(calls.at(-1)).toBe(id);
+      await map.expand(id); // joins the first-page read, never starts a continuation
+    }
+    expect(calls).toEqual(["root", "parent", "child", "extra"]);
+    expect(map.getSnapshot().nodes.map(node => node.id).sort()).toEqual(["child", "extra", "parent", "root"]);
+    expect(map.getSnapshot().edges.map(edge => edge.id).sort()).toEqual(["edge-child", "edge-connection", "edge-evolution", "edge-extra", "edge-out", "edge-parent-child", "edge-source-0", "edge-source-1"]);
+    expect(map.getSnapshot().selectedId).toBe("extra");
+    map.dispose();
+  });
+
+  test("overlapping first-page reads retain the latest selection and failed reads require explicit retry", async () => {
+    const parentRead = Promise.withResolvers<BrowseNeighborhoodResult>();
+    const childRead = Promise.withResolvers<BrowseNeighborhoodResult>();
+    const calls: string[] = [];
+    const map = createBrowseMapController(location, { read: async input => {
+      calls.push(input.id);
+      if (input.id === "root") return { kind: "success", page: { ...first, nodes: [parent, child] } };
+      if (input.id === "parent" && calls.filter(id => id === "parent").length === 1) return parentRead.promise;
+      if (input.id === "child") return childRead.promise;
+      return { kind: "success", page: { thought: parent, nodes: [], edges: [], nextCursor: null } };
+    } });
+    await map.open(location);
+    map.select("parent"); map.select("child");
+    expect(calls).toEqual(["root", "parent", "child"]);
+    expect(map.getSnapshot().selectedId).toBe("child");
+    parentRead.resolve({ kind: "error", reason: "read-failed", message: "Retry" });
+    childRead.resolve({ kind: "success", page: childPage });
+    await Promise.all([parentRead.promise, childRead.promise]);
+    await Promise.resolve();
+    expect(map.getSnapshot().selectedId).toBe("child");
+    expect(map.getSnapshot().expansions.parent?.problem?.reason).toBe("read-failed");
+    map.select("parent"); expect(calls).toHaveLength(3);
+    await map.expand("parent"); expect(calls).toEqual(["root", "parent", "child", "parent"]);
+    expect(map.getSnapshot().expansions.parent).toMatchObject({ loaded: true, exhausted: true, problem: null });
     map.dispose();
   });
 

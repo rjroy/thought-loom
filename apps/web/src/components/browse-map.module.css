@@ -11,6 +11,10 @@
 .columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(20rem, 1fr); gap: 1.5rem; align-items: start; }
 .mapColumn { min-inline-size: 0; }
 .count { margin: 0 0 0.75rem; color: var(--color-muted); font-size: 1rem; }
+.phoneJump { display: none; }
+.readSelected { display: inline-flex; align-items: center; min-block-size: 2.75rem; }
+.mapFeedback { margin: 1rem 0 0; color: var(--color-muted); font-size: 1rem; }
+.mapFeedback:empty { margin: 0; }
 .surface { min-inline-size: 0; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-ground); }
 .cameraTools { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.5rem; padding: 0.75rem; }
 .button { min-block-size: 2.75rem; padding: 0.5rem 1rem; border: 1px solid var(--color-control-line); border-radius: 0.5rem; background: var(--color-ground); color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
@@ -37,7 +41,7 @@
 .evolutionLine, .connectionLine, .provenanceLine { inline-size: 2rem; border-block-start: 2px solid var(--color-link); }
 .connectionLine { border-block-start-style: dashed; border-color: var(--color-body); }
 .provenanceLine { border-block-start: 3px dotted var(--brand-color-12); }
-.inspector { min-inline-size: 0; padding: 1.5rem; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-card); overflow-wrap: anywhere; }
+.inspector { min-inline-size: 0; padding: 1.5rem; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-card); overflow-wrap: anywhere; scroll-margin-block-start: 1.5rem; }
 .inspector h2 { margin: 0 0 1rem; color: var(--color-text); font-size: 1.75rem; line-height: 1.2; letter-spacing: -0.02em; }
 .byline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0.75rem 0; color: var(--color-muted); font-size: 1rem; }
 .kind { display: inline-flex; align-items: center; gap: 0.5rem; }
@@ -48,7 +52,10 @@
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem; margin-block: 1.5rem; }
 .actions a { display: inline-flex; min-block-size: 2.75rem; align-items: center; }
 .inspector h3 { margin: 2rem 0 0.75rem; color: var(--color-text); font-size: 1.25rem; }
+.expansionStatus { margin: 0 0 1rem; color: var(--color-body); font-size: 1rem; }
+.statusLead { display: block; margin-block-end: 0.5rem; color: var(--brand-color-11); font-size: 1.125rem; }
 .relationships { margin: 0; padding: 0; list-style: none; }
+.inspector > button + .relationships { margin-block-start: 1.5rem; }
 .relationships li { padding-block: 1rem; border-block-start: 1px solid var(--color-line); }
 .relationships p { margin: 0.5rem 0; }
 .role { color: var(--color-body); }
@@ -65,6 +72,7 @@
 @media (max-width: 48rem) {
   .toolbar { gap: 0.75rem 1.25rem; }
   .columns { grid-template-columns: minmax(0, 1fr); }
+  .phoneJump { display: inline-flex; align-items: center; min-block-size: 2.75rem; margin-block-end: 0.75rem; }
   .canvas { block-size: 24rem; }
   .cameraTools { justify-content: start; }
   .cameraTools .button { padding-inline: 0.75rem; font-size: 1rem; }

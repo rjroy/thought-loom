@@ -327,10 +327,24 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await expect(page.getByText(content, { exact: false }).first()).toBeVisible();
     await page.locator("article").filter({ hasText: content }).getByRole("link").first().click();
     await expect(page).toHaveURL(url => url.pathname === `/browse/${encodeURIComponent(id)}`);
-    await page.getByRole("button", { name: "Inspect Owned integrated interpretation" }).click();
-    await expect(page.getByRole("region", { name: "Selected idea" })).toContainText("Owned integrated interpretation");
-    await page.getByRole("button", { name: "Show linked ideas", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Linked ideas shown" })).toBeDisabled();
+    const neighborhoodRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/browse/thoughts/${encodeURIComponent(interpretationId)}/neighborhood` && response.request().method() === "GET");
+    await page.getByRole("button", { name: "Inspect and explore Owned integrated interpretation" }).click();
+    const neighborhood = await neighborhoodRead;
+    assert.equal(neighborhood.status(), 200);
+    const neighborhoodPage = record(await neighborhood.json());
+    assert.equal(record(neighborhoodPage.thought).id, interpretationId);
+    assert.equal(neighborhoodPage.nextCursor, null);
+    assert.ok(Array.isArray(neighborhoodPage.nodes) && neighborhoodPage.nodes.map(record).some(node => node.id === id));
+    assert.ok(Array.isArray(neighborhoodPage.edges));
+    for (const kind of ["evolution", "provenance"]) {
+      assert.ok(neighborhoodPage.edges.map(record).some(edge => edge.kind === kind && edge.fromId === id && edge.toId === interpretationId), `first page must include incoming ${kind}`);
+    }
+    const browseInspector = page.getByRole("region", { name: "Selected idea" });
+    await expect(browseInspector).toContainText("Owned integrated interpretation");
+    await expect(browseInspector.getByText("All direct links in this view are shown.")).toBeVisible();
+    await expect(browseInspector.getByRole("listitem").filter({ hasText: "Developed from:" })).toContainText("Owned generated title");
+    await expect(browseInspector.getByRole("listitem").filter({ hasText: "Used as a source for this idea:" })).toContainText("Owned generated title");
+    await expect(browseInspector.getByRole("button", { name: "Load more linked ideas" })).toHaveCount(0);
     await page.getByRole("link", { name: "Open Idea" }).click();
     await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(interpretationId)}`);
     await page.goBack();

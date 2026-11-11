@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useId, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { browseMapHref, decodeBrowseMapLocation, type BrowseMapLocation } from "../features/browse/query";
 import { createBrowseMapController, type BrowseMapController, type BrowseMapState } from "../features/browse/map-controller";
 import { fetchBrowseNeighborhood } from "../features/browse/request";
 import type { NeighborhoodEdge } from "../features/browse/results";
 import type { IdeaThought } from "../features/idea/types";
 import { useBrowseMapMemory, type BrowseMapMemory } from "./browse-provider";
-import { BrowseMapSurface } from "./browse-map-surface";
+import { browseExpansionLabel, BrowseMapSurface } from "./browse-map-surface";
 import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
 import { ThoughtMarkdown } from "./thought-markdown";
@@ -18,6 +18,44 @@ import styles from "./browse-map.module.css";
 const browseThoughtTitle = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
 const kinds = { "captured-original": "Original capture", "user-contribution": "Contribution", "ai-interpretation": "Interpretation",
   "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Image or PDF" };
+
+function useMapAnnouncements(controller: BrowseMapController): string {
+  const [announcement, setAnnouncement] = useState("");
+  useLayoutEffect(() => {
+    let previous = controller.getSnapshot();
+    // Observe every publication, including overlapping reads React may render together.
+    return controller.subscribe(() => {
+      const next = controller.getSnapshot(), before = previous;
+      previous = next;
+      if (next.phase === "idle") { setAnnouncement(""); return; }
+      const messages: string[] = [];
+      for (const [id, expansion] of Object.entries(next.expansions)) {
+        const prior = before.expansions[id];
+        if (prior === expansion) continue;
+        const thought = next.nodes.find(node => node.id === id) ?? before.nodes.find(node => node.id === id);
+        if (!thought) continue;
+        const subject = browseThoughtTitle(thought);
+        if (expansion.phase === "loading" && prior?.phase !== "loading") {
+          messages.push(`${subject}: ${expansion.loaded ? "Loading more direct links…" : "Loading direct links…"}`);
+          continue;
+        }
+        if (prior?.phase !== "loading" || expansion.phase === "loading") continue;
+        if (expansion.problem) {
+          messages.push(`${subject}: ${expansion.problem.reason === "restart-required" ? "Restart the map to continue exploration." : "Direct links could not be loaded. Your explored map is still here."}`);
+        } else if (expansion.phase === "ready") {
+          const oldNodes = new Set(before.nodes.map(node => node.id)), oldEdges = new Set(before.edges.map(edge => edge.id));
+          const addedNodes = next.nodes.filter(node => !oldNodes.has(node.id)).length;
+          const addedEdges = next.edges.filter(edge => !oldEdges.has(edge.id)).length;
+          const additions = [addedNodes ? `${addedNodes} ${addedNodes === 1 ? "idea" : "ideas"}` : "",
+            addedEdges ? `${addedEdges} ${addedEdges === 1 ? "relationship" : "relationships"}` : ""].filter(Boolean);
+          messages.push(`${subject}: ${additions.length ? `${additions.join(" and ")} added.` : "No additional ideas or relationships added."} ${expansion.exhausted ? "All direct links in this view are shown." : "More direct links available."}`);
+        } else if (expansion.phase === "unavailable") messages.push(`${subject}: This idea is no longer available in this view.`);
+      }
+      if (messages.length) setAnnouncement(messages.join(" "));
+    });
+  }, [controller]);
+  return announcement;
+}
 
 export function BrowseMapView({ location }: { location: BrowseMapLocation | null }) {
   const wake = `${usePathname()}?${useSearchParams().toString()}`;
@@ -31,6 +69,8 @@ export function BrowseMapView({ location }: { location: BrowseMapLocation | null
     return value;
   });
   const controller = memory.controller;
+  const announcement = useMapAnnouncements(controller);
+  const inspectorId = `${useId()}-selected-idea`;
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [valid, setValid] = useState(location !== null);
   const [hiddenRoot, setHiddenRoot] = useState(false);
@@ -70,6 +110,7 @@ export function BrowseMapView({ location }: { location: BrowseMapLocation | null
     if (`${window.location.pathname}${window.location.search}` !== url) window.history.pushState(null, "", url);
   }
   const selected = valid ? state.nodes.find(node => node.id === state.selectedId) : undefined;
+  const linkedIds = new Set(state.edges.flatMap(edge => [edge.fromId, edge.toId]));
   const href = browseMapHref(state.location.rootId, state.location.returnTo, state.location.scope);
   return <section className={styles.view}>
     <h1 className={styles.srOnly}>Browse map</h1>
@@ -95,18 +136,24 @@ export function BrowseMapView({ location }: { location: BrowseMapLocation | null
             <button className={styles.button} type="button" onClick={() => void controller.refresh()}>Retry loading linked ideas</button></div>
             : <div className={styles.columns}>
               <div className={styles.mapColumn}>
-                <p className={styles.count} role="status">{state.nodes.length} {state.nodes.length === 1 ? "idea" : "ideas"} shown</p>
+                <p className={styles.count}>{state.nodes.length} {state.nodes.length === 1 ? "idea" : "ideas"} shown · Select an idea to read it and reveal its direct links.</p>
+                {selected && state.presentation === "map" && <a className={styles.phoneJump} href={`#${inspectorId}`}>Read selected idea</a>}
                 {state.presentation === "map" ? <BrowseMapSurface state={state} controller={controller} memory={memory} titleOf={browseThoughtTitle} />
                   : <ol className={styles.linkedList} aria-label="Explored ideas">{state.nodes.map(node => <li key={node.id}>
-                    <button className={styles.linkedNode} type="button" aria-label={`Inspect ${browseThoughtTitle(node)}`}
+                    <button className={styles.linkedNode} type="button" aria-label={`Inspect and explore ${browseThoughtTitle(node)}`}
+                      aria-describedby={`${inspectorId}-state-${encodeURIComponent(node.id)}`}
                       aria-pressed={state.selectedId === node.id} onClick={() => controller.select(node.id)}>{browseThoughtTitle(node)}</button>
                     <ThoughtByline thought={node} />
+                    <p id={`${inspectorId}-state-${encodeURIComponent(node.id)}`} className={styles.metadata}>{browseExpansionLabel(state.expansions[node.id], linkedIds.has(node.id))}</p>
                     {node.kind === "media-original" ? <MediaSourceDetails source={node.mediaSource} compact />
                       : <p>{node.text.slice(0, 160)}{node.text.length > 160 ? "…" : ""}</p>}
+                    {state.selectedId === node.id && <a className={styles.readSelected} href={`#${inspectorId}`}>Read selected idea</a>}
                   </li>)}</ol>}
+                {state.presentation === "map" && <p className={styles.mapFeedback}>New ideas may be outside the view. Use Fit map to see them.</p>}
               </div>
-              {selected && <MapInspector thought={selected} state={state} controller={controller} href={href} />}
+              {selected && <MapInspector thought={selected} state={state} controller={controller} href={href} id={inspectorId} />}
             </div>}
+    <p className={styles.mapFeedback} role="status" aria-atomic="true">{valid && state.phase === "ready" ? announcement : ""}</p>
   </section>;
 }
 
@@ -121,30 +168,36 @@ function ThoughtByline({ thought }: { thought: IdeaThought }) {
   </p>;
 }
 
-function MapInspector({ thought, state, controller, href }: {
-  thought: IdeaThought; state: BrowseMapState; controller: BrowseMapController; href: string;
+function MapInspector({ thought, state, controller, href, id }: {
+  thought: IdeaThought; state: BrowseMapState; controller: BrowseMapController; href: string; id: string;
 }) {
   const expansion = state.expansions[thought.id];
   const edges = state.edges.filter(edge => edge.fromId === thought.id || edge.toId === thought.id);
   const idea = `/ideas/${encodeURIComponent(thought.id)}?${new URLSearchParams({ scope: state.location.scope, returnTo: href })}`;
   const restart = expansion?.problem?.reason === "restart-required";
-  const label = expansion?.phase === "error" ? "Retry loading linked ideas" : expansion?.exhausted ? "Linked ideas shown"
-    : expansion?.loaded ? "Show more linked ideas" : "Show linked ideas";
-  return <section className={styles.inspector} aria-label="Selected idea">
+  const loading = expansion?.phase === "loading", failed = expansion?.phase === "error";
+  const status = restart ? "This continuation is no longer available. Restart from the starting idea to continue; this clears the explored map."
+    : failed ? "Direct links could not be loaded. Your explored map is still here."
+      : loading ? expansion.loaded ? "Loading more direct links…" : "Loading direct links…"
+        : expansion?.exhausted ? edges.length ? "All direct links in this view are shown." : "No direct links in this view."
+          : expansion?.loaded ? "More direct links are available." : "Select this idea to reveal its direct links.";
+  const label = loading ? expansion.loaded ? "Loading more links…" : "Loading links…"
+    : failed ? "Retry loading links" : expansion?.loaded ? "Load more linked ideas" : "Explore links";
+  return <section id={id} tabIndex={-1} className={styles.inspector} aria-label="Selected idea">
     <h2>{browseThoughtTitle(thought)}</h2>
     <ThoughtByline thought={thought} />
     {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} /> : <ThoughtMarkdown className={styles.actual} text={thought.text} headingLevel={3} />}
-    {expansion?.problem && <p className={styles.problem} role="status">{restart ? "Refresh the map to restart exploration from the starting idea."
-      : "Linked ideas could not be loaded. The confirmed map is still here."}</p>}
     <div className={styles.actions}>
-      {restart ? <button className={styles.button} type="button" onClick={() => void controller.refresh()}>Refresh map</button>
-        : <button className={`${styles.button} ${styles.primary}`} type="button" disabled={expansion?.phase === "loading" || expansion?.exhausted}
-          aria-busy={expansion?.phase === "loading"} onClick={() => void controller.expand(thought.id)}>{label}</button>}
       <Link href={idea} prefetch={false}>Open Idea</Link>
     </div>
-    {expansion?.phase === "loading" && <p role="status">Loading linked ideas…</p>}
-    {edges.length === 0 && expansion?.exhausted && <p>No visible linked ideas.</p>}
     <h3>Recorded relationships</h3>
+    <p id={`${id}-links-status`} className={failed ? styles.problem : styles.expansionStatus}>
+      {expansion?.loaded && !expansion.exhausted && !loading && !failed
+        ? <><span className={styles.statusLead}>{status}</span>{" "}Parent, child, source or connection links may still be on later pages.</> : status}
+    </p>
+    {restart ? <button className={styles.button} type="button" aria-describedby={`${id}-links-status`} onClick={() => void controller.refresh()}>Restart map</button>
+      : !expansion?.exhausted && <button className={`${styles.button} ${styles.primary}`} type="button" disabled={loading}
+        aria-busy={loading} aria-describedby={`${id}-links-status`} onClick={() => void controller.expand(thought.id)}>{label}</button>}
     <ul className={styles.relationships}>{edges.map(edge => <RelationshipRow key={edge.id} edge={edge} thought={thought} nodes={state.nodes} />)}</ul>
   </section>;
 }

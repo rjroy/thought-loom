@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browse expansion · approved design comp</title>
+  <link rel="stylesheet" href="../../../apps/web/src/app/globals.css">
+  <style>
+    @font-face { font-family: "Source Sans 3"; src: url("../../brand/fonts/SourceSans3-VariableFont_wght.ttf") format("truetype"); font-weight: 200 900; font-display: swap; }
+    :root { --font-source-sans: "Source Sans 3"; }
+    .proposal-note { margin: 0; padding: .75rem var(--page-inset); border-bottom: 1px solid var(--color-line); color: var(--brand-color-11); font-size: 1rem; }
+    .proposal-note a { margin-inline-start: 1rem; }
+    .view { max-width: 100rem; margin: auto; }
+    .toolbar, .switcher, .camera-tools, .legend, .byline { display: flex; flex-wrap: wrap; align-items: center; }
+    .toolbar { gap: 1rem 2rem; margin-bottom: 1.5rem; }
+    .toolbar > a, .scope { display: flex; align-items: center; min-height: 44px; }
+    .scope { gap: .75rem; }
+    .scope input { width: 18px; height: 18px; accent-color: var(--brand-color-3); }
+    .switcher { border: 1px solid var(--color-control-line); border-radius: 8px; }
+    button, .switcher a { min-height: 44px; padding: .5rem 1rem; color: var(--color-text); background: var(--color-ground); border: 1px solid var(--color-control-line); border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:hover:not(:disabled) { border-color: var(--color-link); }
+    .switcher a { border: none; text-decoration: none; font-weight: 400; }
+    .switcher a[aria-current="true"] { background: var(--color-selection); }
+    .columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(20rem, 1fr); gap: 1.5rem; align-items: start; }
+    .map-column { min-width: 0; }
+    .count { margin: 0 0 .75rem; color: var(--color-muted); font-size: 1rem; }
+    .surface { overflow: hidden; border: 1px solid var(--color-line); border-radius: 12px; }
+    .camera-tools { justify-content: end; gap: .5rem; padding: .75rem; }
+    .canvas { position: relative; height: clamp(28rem, 55vh, 40rem); overflow: hidden; }
+    .world { position: absolute; inset: 0 auto auto 0; width: 816px; height: 504px; }
+    .edges { position: absolute; inset: 0; width: 816px; height: 504px; pointer-events: none; }
+    .node { position: absolute; width: 208px; height: 104px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 12px; background: var(--color-card); border-radius: 12px; text-align: center; }
+    .node-meta { font-size: 12px; line-height: 1.15; color: var(--color-body); font-weight: 400; }
+    .node-title { font-size: 18px; line-height: 1.15; font-weight: 600; }
+    .starting { border-color: var(--brand-color-11); }
+    .selected { border: 2px solid var(--color-focus); background: var(--color-caption); }
+    .instructions { padding: .75rem 1rem; margin: 0; color: var(--color-body); font-size: 1rem; }
+    .legend { list-style: none; padding: 1rem; gap: .75rem 1.25rem; margin: 0; border-top: 1px solid var(--color-line); font-size: 1rem; }
+    .legend li { display: flex; align-items: center; gap: .5rem; }
+    .line { width: 32px; border-top: 2px solid var(--color-link); }
+    .connection { border-top: 2px dashed var(--color-body); }
+    .source { border-top: 3px dotted var(--color-focus); }
+    .map-feedback { margin: 1rem 0 0; color: var(--color-muted); font-size: 1rem; }
+    .inspector { min-width: 0; padding: 1.5rem; border: 1px solid var(--color-line); background: var(--color-card); border-radius: 12px; overflow-wrap: anywhere; }
+    h2 { font-size: 1.75rem; line-height: 1.2; letter-spacing: -.02em; color: var(--color-text); margin: 0 0 1rem; }
+    .byline { gap: .5rem 1rem; margin: .75rem 0; font-size: 1rem; color: var(--color-muted); }
+    .material { display: inline-flex; align-items: center; gap: 8px; }
+    .relationships img { display: inline-block; margin-right: 6px; vertical-align: -2px; }
+    .you { color: var(--brand-color-10); }
+    .actual { font-size: 1.25rem; line-height: 1.5; margin: 1.5rem 0; }
+    .open-idea { display: inline-flex; min-height: 44px; align-items: center; }
+    h3 { font-size: 1.25rem; margin: 2rem 0 .75rem; color: var(--color-text); }
+    .status { color: var(--brand-color-11); margin: 0 0 .5rem; }
+    .status-detail { font-size: 1rem; color: var(--color-body); margin: 0 0 1rem; }
+    .primary { color: var(--color-ground); background: var(--brand-color-3); border-color: var(--brand-color-3); }
+    .primary:hover { background: var(--brand-color-11); }
+    .relationships { list-style: none; padding: 0; margin: 1.5rem 0 0; }
+    .relationships li { border-top: 1px solid var(--color-line); padding: 1rem 0; }
+    .relationships p { margin: 0 0 .5rem; }
+    .relationships p:last-child { margin-bottom: 0; }
+    .metadata { font-size: 1rem; color: var(--color-muted); }
+    .linked-list { display: none; list-style: none; padding: 0; margin: 0; }
+    .linked-list li { margin-bottom: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-card); }
+    .linked-list button { padding: 0; border: 0; background: none; text-align: left; font-size: 1.25rem; }
+    .linked-list p { margin: .5rem 0; }
+    .linked-list .chosen button { color: var(--color-focus); text-decoration: underline; text-underline-offset: .2em; }
+    .row-state { color: var(--color-muted); font-size: 1rem; }
+    .linked-list a { display: inline-flex; align-items: center; min-height: 44px; }
+    .phone-jump { display: none; }
+    body.list .surface { display: none; }
+    body.list .linked-list { display: block; }
+    body.list .map-only { display: none; }
+    @media (max-width: 48rem) {
+      .columns { grid-template-columns: minmax(0, 1fr); }
+      .toolbar { gap: .75rem 1.25rem; }
+      .camera-tools { justify-content: start; }
+      .camera-tools button { padding-inline: .75rem; font-size: 1rem; }
+      .canvas { height: 24rem; }
+      .world { transform: translate(-220px, -90px); }
+      .legend { flex-direction: column; align-items: start; gap: .5rem; }
+      .inspector { padding: 1.25rem; }
+      h2 { font-size: 1.5rem; }
+      .phone-jump { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: .75rem; }
+      body.list .phone-jump { display: none; }
+      .proposal-note a { margin-inline-start: .5rem; }
+    }
+  </style>
+</head>
+<body>
+  <p class="proposal-note">Approved design comp · illustrative content · not connected to your library. <a href="README.md">Interaction notes</a></p>
+  <header class="site-header"><div class="site-header-inner">
+    <div class="brand"><span class="brand-name">thoughtloom</span><p class="brand-tagline">Where ideas take shape.</p></div>
+    <nav class="primary-navigation" aria-label="Illustrative main navigation"><span class="navigation-link">Explore</span><span class="navigation-link" aria-current="page">Browse</span><span class="navigation-link">Capture</span><span class="navigation-link">Settings</span></nav>
+  </div></header>
+  <main class="workspace"><div class="view">
+    <div class="toolbar">
+      <a href="../browse/selected.png">Back to list</a>
+      <div class="switcher" aria-label="Comp presentation"><a id="map-switch" href="?view=map" aria-current="true">Map</a><a id="list-switch" href="?view=list" aria-current="false">Linked list</a></div>
+      <label class="scope"><input type="checkbox" aria-label="Show rejected (illustrative control)">Show rejected</label>
+    </div>
+    <div class="columns">
+      <div class="map-column">
+        <p class="count">7 ideas shown · Select an idea to read it and reveal its direct links.</p>
+        <a class="phone-jump" href="#selected-idea">Read selected idea</a>
+        <div class="surface">
+          <div class="camera-tools"><button type="button">Fit map</button><button type="button">Zoom in</button><button type="button">Zoom out</button></div>
+          <div class="canvas" aria-label="Illustrative idea map"><div class="world">
+            <svg class="edges" viewBox="0 0 816 504" aria-hidden="true">
+              <defs>
+                <marker id="ev" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#65c4c5"/></marker>
+                <marker id="co" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#d5d3c5"/></marker>
+                <marker id="pr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#8eaef2"/></marker>
+              </defs>
+              <path d="M232 76 Q268 152 304 228" fill="none" stroke="#65c4c5" stroke-width="2" marker-end="url(#ev)"/>
+              <path d="M232 428 Q268 352 304 276" fill="none" stroke="#8eaef2" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7" marker-end="url(#pr)"/>
+              <path d="M232 252 L304 252" fill="none" stroke="#d5d3c5" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#co)"/>
+              <path d="M512 228 Q548 152 584 76" fill="none" stroke="#65c4c5" stroke-width="2" marker-end="url(#ev)"/>
+              <path d="M512 252 L584 252" fill="none" stroke="#d5d3c5" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#co)"/>
+              <path d="M512 276 Q548 352 584 428" fill="none" stroke="#8eaef2" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7" marker-end="url(#pr)"/>
+            </svg>
+            <button class="node" style="left:24px;top:24px" type="button"><span class="node-meta">You · Links shown</span><span class="node-title">Keep the question alive</span></button>
+            <button class="node starting" style="left:24px;top:376px" type="button"><span class="node-meta">Starting idea · Links shown</span><span class="node-title">A question is not a verdict</span></button>
+            <button class="node selected" style="left:304px;top:200px" type="button" aria-pressed="true" aria-label="Inspect and explore Questions before conclusions. More links."><span class="node-meta">You · More links</span><span class="node-title">Questions before conclusions</span></button>
+            <button class="node" style="left:24px;top:200px" type="button"><span class="node-meta">You · Explore links</span><span class="node-title">Listening changes the question</span></button>
+            <button class="node" style="left:584px;top:24px" type="button"><span class="node-meta">AI · Explore links</span><span class="node-title">Make room for another answer</span></button>
+            <button class="node" style="left:584px;top:200px" type="button"><span class="node-meta">You · Explore links</span><span class="node-title">Room to disagree</span></button>
+            <button class="node" style="left:584px;top:376px" type="button"><span class="node-meta">AI · Explore links</span><span class="node-title">Questions invite better disagreement</span></button>
+          </div></div>
+          <p class="instructions">Select to inspect and explore. Arrow keys move the focused map.</p>
+          <ul class="legend" aria-label="Relationship legend"><li><span class="line"></span>Evolution</li><li><span class="line connection"></span>Conceptual connection</li><li><span class="line source"></span>Used as a source</li></ul>
+        </div>
+        <ol class="linked-list" aria-label="Illustrative explored ideas">
+          <li><button type="button">Keep the question alive</button><p class="row-state">You · Original capture · Links shown</p><p>Leave room for an answer I did not expect.</p></li>
+          <li><button type="button">A question is not a verdict</button><p class="row-state">Starting idea · You · Links shown</p><p>I can ask without deciding in advance.</p></li>
+          <li class="chosen"><button type="button" aria-pressed="true">Questions before conclusions</button><p class="row-state">You · Original capture · More links</p><p>A question can make room for something I have not understood yet.</p><a href="#selected-idea">Read selected idea</a></li>
+          <li><button type="button">Listening changes the question</button><p class="row-state">You · Contribution · Explore links</p><p>What did I miss before I listened?</p></li>
+          <li><button type="button">Make room for another answer</button><p class="row-state">AI · Interpretation · Explore links</p><p>A useful question lets the answer change its direction.</p></li>
+          <li><button type="button">Room to disagree</button><p class="row-state">You · Original capture · Explore links</p><p>I can leave a question open without withholding my view.</p></li>
+          <li><button type="button">Questions invite better disagreement</button><p class="row-state">AI · Interpretation · Explore links</p><p>A question can hold uncertainty open long enough for someone else to add what I could not see.</p></li>
+        </ol>
+        <p class="map-feedback">Questions before conclusions: 2 ideas added.<span class="map-only"> New ideas may be outside the view. Use Fit map to see them.</span></p>
+      </div>
+      <section class="inspector" id="selected-idea" aria-label="Selected idea" tabindex="-1">
+        <h2>Questions before conclusions</h2>
+        <p class="byline"><span class="you">You</span><span class="material"><img src="../../../apps/web/public/glyphs/captured-original.svg" width="20" height="20" alt="">Original capture</span><span>Nov 6, 2026</span></p>
+        <p class="actual">A question can make room for something I have not understood yet.</p>
+        <a class="open-idea" href="#reader-note">Open Idea</a>
+        <h3>Recorded relationships</h3>
+        <p class="status">More direct links are available.</p>
+        <p class="status-detail">Parent, child, source or connection links may still be on later pages.</p>
+        <button class="primary" type="button">Load more linked ideas</button>
+        <ul class="relationships">
+          <li><p><img src="../../../apps/web/public/glyphs/evolution.svg" width="16" height="16" alt=""><strong>Developed from:</strong> Keep the question alive</p></li>
+          <li><p><img src="../../../apps/web/public/glyphs/evolution.svg" width="16" height="16" alt=""><strong>Developed into:</strong> Make room for another answer</p></li>
+          <li><p><img src="../../../apps/web/public/glyphs/used-as-source.png" width="16" height="16" alt=""><strong>Used as a source for this idea:</strong> A question is not a verdict</p><p class="metadata">Source reference 1</p></li>
+          <li><p><img src="../../../apps/web/public/glyphs/used-as-source.png" width="16" height="16" alt=""><strong>This idea was used as a source for:</strong> Questions invite better disagreement</p><p class="metadata">Source reference 1</p></li>
+          <li><p><img src="../../../apps/web/public/glyphs/connection.png" width="16" height="16" alt=""><strong>Conceptual connection · Supported by:</strong> Listening changes the question</p><p class="metadata">Proposed by AI</p><p>Listening keeps the question open to new information.</p></li>
+          <li><p><img src="../../../apps/web/public/glyphs/connection.png" width="16" height="16" alt=""><strong>Conceptual connection · Extends:</strong> Room to disagree</p><p class="metadata">Proposed by You</p><p>Asking first leaves space for a different view.</p></li>
+        </ul>
+      </section>
+    </div>
+    <p id="reader-note" class="map-feedback">Design comp only. Node, loading, camera and rejection controls are illustrative, not a working prototype. Open Idea continues to the existing reader for reject/restore actions.</p>
+  </div></main>
+  <script>
+    // Development-only presentation switch; no graph behavior, requests or storage.
+    const list = new URLSearchParams(location.search).get("view") === "list";
+    document.body.classList.toggle("list", list);
+    document.getElementById("map-switch").setAttribute("aria-current", String(!list));
+    document.getElementById("list-switch").setAttribute("aria-current", String(list));
+  </script>
+</body>
+</html>
