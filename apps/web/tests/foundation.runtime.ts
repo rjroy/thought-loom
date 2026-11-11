@@ -289,9 +289,12 @@ async function main(): Promise<void> {
   const port = (reservation.address() as AddressInfo).port;
   await new Promise<void>((resolveClose, reject) => reservation.close(error => error ? reject(error) : resolveClose()));
   const origin = `http://127.0.0.1:${port}`;
+  // The second authority is only a Host/Origin probe; no service is contacted on that port.
+  const additionalOrigin = `http://127.0.0.1:${port === 65535 ? port - 1 : port + 1}`;
   const daemonOrigin = `http://127.0.0.1:${(daemon.address() as AddressInfo).port}`;
   const secrets = [token, daemonOrigin];
   const env: NodeJS.ProcessEnv = { NODE_ENV: "production", PATH: process.env.PATH, HOME: temp, TMPDIR: temp, NEXT_TELEMETRY_DISABLED: "1", THOUGHTLOOM_WEB_ORIGIN: origin, THOUGHTLOOM_DAEMON_URL: daemonOrigin, THOUGHTLOOM_USER_TOKEN: token, THOUGHTLOOM_IMPORT_MAX_BYTES: String(12 * 1024 * 1024) };
+    if (process.env.THOUGHTLOOM_TEST_GUARDS === "1") env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS = additionalOrigin;
     if (process.env.THOUGHTLOOM_TEST_ROOT_SPLASH_CHUNKS === "1") {
       server = run(fixtureWeb, ["--no-env-file", "run", "--bun", "next", "dev", "--hostname", "127.0.0.1", "--port", String(port)], { ...env, NODE_ENV: "development" });
       const output = collect(server);
@@ -409,6 +412,18 @@ async function main(): Promise<void> {
     }
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
+    if (process.env.THOUGHTLOOM_TEST_GUARDS === "1") {
+      const additionalHost = new URL(additionalOrigin).host;
+      for (const [allowedOrigin, allowedHost, otherOrigin] of [[origin, host, additionalOrigin], [additionalOrigin, additionalHost, origin]] as const) {
+        assert.equal((await probe("GET", "/explore", `Host: ${allowedHost}\r\n`)).status, 200);
+        assert.notEqual((await probe("POST", "/explore", `Host: ${allowedHost}\r\nOrigin: ${allowedOrigin}\r\nContent-Length: 0\r\n`)).status, 403);
+        assert.equal((await probe("POST", "/explore", `Host: ${allowedHost}\r\nOrigin: ${otherOrigin}\r\nContent-Length: 0\r\n`)).status, 403);
+      }
+      assert.equal((await probe("GET", "/explore", `Host: foreign.invalid\r\nX-Forwarded-Host: ${additionalHost}\r\n`)).status, 403);
+      assert.equal((await probe("POST", "/explore", `Host: foreign.invalid\r\nOrigin: ${additionalOrigin}\r\nX-Forwarded-Host: ${additionalHost}\r\nX-Forwarded-Proto: http\r\nContent-Length: 0\r\n`)).status, 403);
+      console.log("Trusted origin guard runtime checks passed");
+      return;
+    }
     const settingsCase = process.env.THOUGHTLOOM_TEST_SETTINGS_CASE;
     if (settingsCase) {
       assert.ok(["routes", "browser", "all"].includes(settingsCase), "Unknown focused Settings case");

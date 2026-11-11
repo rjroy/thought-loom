@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 import { readWebConfig } from "./src/server/config";
 
-const webHostname = new URL(readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN }).webOrigin).hostname;
-// Next interprets asterisks as hostname patterns, not literal hostnames.
-if (webHostname.includes("*")) throw new Error("Invalid local origin");
+const webOrigins = readWebConfig({
+  THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN,
+  THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS,
+}).webOrigins;
+const webHostnames = [...new Set(webOrigins.map(value => new URL(value).hostname))];
 
 // The daemon allows up to 4096 metadata bytes in addition to multipart framing.
 const multipartAllowance = 4096 + 65536;
@@ -19,7 +21,7 @@ const importMaxBytes = uploadLimit("THOUGHTLOOM_IMPORT_MAX_BYTES",1048576);
 const mediaMaxBytes = uploadLimit("THOUGHTLOOM_MEDIA_MAX_BYTES",16777216);
 
 const config: NextConfig = {
-  allowedDevOrigins: [webHostname],
+  allowedDevOrigins: webHostnames,
   // Search and navigation URLs can contain private user input.
   logging: { incomingRequests: false },
   experimental: {

@@ -5,7 +5,7 @@ import { isTrustedRequest } from "../../../server/request-guard";
 
 export function POST(request: Request): Promise<Response> | Response {
   try {
-    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN });
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
     if (isTrustedRequest(config, request)) return handleCapture(request, { callDaemon });
   } catch {
     // Fail closed without exposing configuration values.

@@ -5,7 +5,7 @@ import { isTrustedRequest } from "./server/request-guard";
 /** Applies before routes, server components, and server actions; forwarded authority is ignored. */
 export function proxy(request: NextRequest): NextResponse {
   try {
-    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN });
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
     if (isTrustedRequest(config, request)) {
       const response = NextResponse.next();
       response.headers.set("Cache-Control", "private, no-store");

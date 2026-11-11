@@ -114,6 +114,16 @@ describe("web server configuration", () => {
     expect(second.daemonOrigin).toBe("http://[::1]:4569");
     expect([first.userToken, second.userToken]).toEqual(["first", "second"]);
   });
+
+  test("validates every additional web origin without changing the primary", () => {
+    const primary = "https://owned.example.test:45123";
+    const additional = "https://owned.example.test:45124";
+    const result = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: primary, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: `${additional},http://localhost:4321` });
+    expect(result.webOrigin).toBe(primary);
+    for (const value of ["not a url", "http://remote.example.test:4321", "https://user@owned.example.test", "https://owned.example.test/path", "https://owned.example.test/?q=1", "https://owned.example.test/#fragment", "file:///tmp/a", `${additional},`, `${additional},,http://localhost:4321`]) {
+      expect(() => readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: primary, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: value })).toThrow();
+    }
+  });
 });
 
 describe("browser request guard", () => {
@@ -149,6 +159,26 @@ describe("browser request guard", () => {
       expect(isTrustedRequest(served, request(method, { host, origin: "https://other.example.test:8443" }))).toBe(false);
       expect(isTrustedRequest(served, request(method, { host: "evil.test", origin: tailscaleOrigin, "x-forwarded-host": host }))).toBe(false);
     }
+  });
+  test("allows explicit ports independently and binds mutation Origin to the actual Host", () => {
+    const first = "https://owned.example.test:45123";
+    const second = "https://owned.example.test:45124";
+    const primaryOnly = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: first });
+    const served = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: first, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: `${second},https://another.example.test:45125` });
+    const firstHost = new URL(first).host, secondHost = new URL(second).host;
+    expect(isTrustedRequest(primaryOnly, request("GET", { host: secondHost }))).toBe(false);
+    expect(isTrustedRequest(served, request("GET", { host: "another.example.test:45125" }))).toBe(true);
+    for (const [origin, host, other] of [[first, firstHost, second], [second, secondHost, first]] as const) {
+      for (const method of ["GET", "HEAD"]) expect(isTrustedRequest(served, request(method, { host }))).toBe(true);
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+        expect(isTrustedRequest(served, request(method, { host, origin }))).toBe(true);
+        expect(isTrustedRequest(served, request(method, { host, origin: other }))).toBe(false);
+        expect(isTrustedRequest(served, request(method, { host }))).toBe(false);
+        expect(isTrustedRequest(served, request(method, { host, origin: other, "x-forwarded-host": new URL(other).host, "x-forwarded-proto": "https" }))).toBe(false);
+      }
+    }
+    expect(isTrustedRequest(served, request("GET", { host: "owned.example.test:12345", "x-forwarded-host": secondHost }))).toBe(false);
+    expect(isTrustedRequest(served, request("POST", { host: "foreign.invalid", origin: second, "x-forwarded-host": secondHost, "x-forwarded-proto": "https" }))).toBe(false);
   });
 });
 

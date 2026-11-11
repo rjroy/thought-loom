@@ -6,7 +6,7 @@ import { isTrustedRequest } from "../../../../../server/request-guard";
 type Context = { params: Promise<{ id: string }> };
 async function handle(request: Request, context: Context): Promise<Response> {
   try {
-    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN });
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
     if (isTrustedRequest(config, request)) {
       const { id } = await context.params;
       return request.method === "POST" ? handleEvolveAdmission(request, id, { callDaemon }) : handleEvolveThought(request, id, { callDaemon });

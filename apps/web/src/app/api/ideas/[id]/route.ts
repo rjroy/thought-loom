@@ -7,7 +7,7 @@ type Context = { params: Promise<{ id: string }> };
 
 async function handle(request: Request, context: Context, method: "read" | "command"): Promise<Response> {
   try {
-    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN });
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
     if (isTrustedRequest(config, request)) {
       const { id } = await context.params;
       return method === "read" ? handleIdeaRead(request, id, { callDaemon }) : handleIdeaCommand(request, id, { callDaemon });

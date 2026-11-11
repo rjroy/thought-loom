@@ -6,7 +6,7 @@ import { isTrustedRequest } from "../../../../server/request-guard";
 /** Credentials stay in the existing server-only client, behind the web authority guard. */
 function handle(request: Request): Promise<Response> | Response {
   try {
-    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN });
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
     if (isTrustedRequest(config, request)) return handleAgentInstructions(request, { callDaemon });
   } catch { /* Refuse without exposing configuration or request content. */ }
   return Response.json({ code: "agent-instructions-forbidden", message: "Forbidden." }, {
