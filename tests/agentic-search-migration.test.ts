@@ -137,6 +137,28 @@ test("legacy knowledge and execution survive migration and repeated file reopen"
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("search rebuild preserves mixed-case cascading incoming foreign keys", () => {
+  const db = new Database(":memory:");
+  try {
+    preSearch(db);
+    db.exec(`INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation)
+        VALUES ('owned-run','weave','queued','owned-session','owned-prompt','2030',0);
+      CREATE TABLE "Fixture_Ä" (id TEXT PRIMARY KEY, run_id TEXT REFERENCES RuNs(id) ON DELETE CASCADE, payload TEXT);
+      CREATE TABLE "Fixture_child" (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES "fIXTURE_Ä"(id) ON DELETE CASCADE);
+      CREATE INDEX fixture_incoming_idx ON "Fixture_Ä"(run_id);
+      INSERT INTO "Fixture_Ä"(rowid,id,run_id,payload) VALUES (81,'incoming','owned-run','café');
+      INSERT INTO "Fixture_child"(rowid,id,parent_id) VALUES (82,'child','incoming');`);
+    const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name IN ('Fixture_Ä','Fixture_child') ORDER BY type,name").all();
+    const rows = () => [db.query('SELECT rowid,* FROM "Fixture_Ä"').all(), db.query('SELECT rowid,* FROM "Fixture_child"').all()];
+    const fks = () => [db.query('PRAGMA foreign_key_list("Fixture_Ä")').all(), db.query('PRAGMA foreign_key_list("Fixture_child")').all()];
+    const before = { schema: schema(), rows: rows(), fks: fks() };
+    expect(before.rows).toEqual([[{ rowid: 81, id: 'incoming', run_id: 'owned-run', payload: 'café' }], [{ rowid: 82, id: 'child', parent_id: 'incoming' }]]);
+    migrate(db);
+    expect({ schema: schema(), rows: rows(), fks: fks() }).toEqual(before);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { db.close(); }
+});
+
 test("first search upgrade preserves populated import-era closure, and rolls back a failed copy", () => {
   const dir = mkdtempSync(join("/tmp/opencode", "search-current-"));
   const path = join(dir, "owned.sqlite"), db = new Database(path);

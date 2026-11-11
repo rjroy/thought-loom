@@ -9,6 +9,7 @@ interface SchemaEntry {
 }
 
 const quote = (name: string): string => '"' + name.replaceAll('"', '""') + '"';
+const identifierKey = (name: string): string => name.replace(/[A-Z]/g, letter => String.fromCharCode(letter.charCodeAt(0) + 32));
 
 /** Core migrate owns the transaction, predecessor upgrades and FK/recursive-trigger enforcement. */
 export function migrateSearchFoundation(db: Database): void {
@@ -37,8 +38,11 @@ export function migrateSearchFoundation(db: Database): void {
 function rebuildRunClosure(db: Database, runsSql: string): void {
   const schema = db.query("SELECT name,tbl_name,type,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all() as SchemaEntry[];
   const tables = schema.filter(entry => entry.type === "table");
+  // SQLite resolves ASCII case-insensitively; retain the actual schema names in the closure.
+  const actualNames = new Map(tables.map(table => [identifierKey(table.name), table.name]));
+  const resolveTable = (name: string): string => actualNames.get(identifierKey(name)) ?? name;
   const parents = new Map(tables.map(table => [table.name,
-    (db.query(`PRAGMA foreign_key_list(${quote(table.name)})`).all() as { table: string }[]).map(fk => fk.table)]));
+    (db.query(`PRAGMA foreign_key_list(${quote(table.name)})`).all() as { table: string }[]).map(fk => resolveTable(fk.table))]));
   const closure = new Set(["runs"]);
   for (let changed = true; changed;) {
     changed = false;
