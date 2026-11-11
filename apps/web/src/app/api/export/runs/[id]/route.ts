@@ -6,7 +6,7 @@ import { isTrustedRequest } from "../../../../../server/request-guard";
 type Context = { params: Promise<{ id: string }> };
 async function handle(request: Request, context: Context): Promise<Response> {
   try {
-    if (isTrustedRequest(readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN }), request)) return handleExportRun(request, (await context.params).id, { callDaemon });
+    if (isTrustedRequest(readWebConfig({ THOUGHTLOOM_WEB_ORIGIN: process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS: process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS }), request)) return handleExportRun(request, (await context.params).id, { callDaemon });
   } catch { /* Fail closed. */ }
   return Response.json({ message: "Forbidden." }, { status: 403, headers: { "cache-control": "private, no-store" } });
 }
