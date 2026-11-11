@@ -37,7 +37,7 @@ No SQLite database, WAL, journal, SHM or execution-owner sidecar belongs in this
 | --- | --- |
 | `format` | `"thoughtloom-backup"`. |
 | `version` | JSON integer `1`, the envelope/encoding version. |
-| `appSchema` | New captures use `"thoughtloom-logical-3"`; restore also accepts the frozen `"thoughtloom-logical-1"` and `"thoughtloom-logical-2"` contracts. These identify the application-table inventory below, not SQLite's `schema_version` or a service version. |
+| `appSchema` | New captures use `"thoughtloom-logical-4"`; restore also accepts the frozen `"thoughtloom-logical-1"`, `"thoughtloom-logical-2"` and `"thoughtloom-logical-3"` contracts. These identify the application-table inventory below, not SQLite's `schema_version` or a service version. |
 | `mediaStoreId` | Exact SQL `media_store.store_id`, or null when that table is empty. |
 | `tables` | Entries sorted by table name: exact `{name,path,rowCount,byteLength,sha256}` for every included table, even an empty one. |
 | `sequences` | Entries sorted by name: exact `{name,value}` for `sqlite_sequence` high-water values of `import_documents`, `markdown_imports` and `search_sessions`. Omit an entry only if SQLite has no entry for that table. `value` uses the integer cell encoding below. |
@@ -93,18 +93,18 @@ The implemented [`schema.ts`](../src/backup/schema.ts) checks a compiled invento
 
 ### Compatibility and evolution
 
-New captures use `thoughtloom-logical-3`, adding `export_intents.local_disposition`.
+New captures use `thoughtloom-logical-4`, adding `runs.weave_retired_at` and preserving explicit retirement. The frozen logical-3 contract added `export_intents.local_disposition`.
 The frozen logical-2 contract added `agent_instructions` and the initial-step
 `run_steps.guidance` snapshot. Saved settings and captured guidance are readable
 private backup content, not credentials or executable authority. Capture must
 not migrate a source database.
 
-Restore also accepts logical-1 and logical-2 against their frozen table and
-column inventories. Both default absent export dispositions to `retained`;
+Restore also accepts logical-1, logical-2 and logical-3 against their frozen table and
+column inventories. All default absent retirement times to `NULL`. Logical-1 and logical-2 default absent export dispositions to `retained`;
 logical-1 additionally defaults to no settings row (empty guidance, revision
 `0`) and `NULL` historical run guidance. The loader verifies these explicit
 defaults and each original byte against its legacy projection before establishing
-a logical-3 internal verification witness for recovery and installation. Existing
+a logical-4 internal verification witness for recovery and installation. Existing
 logical-3 `local-stopped` acknowledgements retain their exact bytes and associated
 fences. The reported snapshot digest continues to identify the original selected
 payload, not the upgraded internal witness.

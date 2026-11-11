@@ -95,6 +95,7 @@ export class RunWorker {
   private readonly exports: SqliteAgenticExports;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,RunFlight>();
+  private readonly retirements = new Map<string,Promise<unknown>>();
   private readonly cleanup: SqliteSearchCleanup;
   private retention: SqliteSearchRetention | undefined;
   private readonly cleanupListeners = new Set<() => void>();
@@ -117,7 +118,7 @@ export class RunWorker {
     this.cleanup = new SqliteSearchCleanup(db,dependencies.executionOwner,this.logger);
   }
   tick(runId: string, beforePoll?: () => Promise<void>): Promise<void> {
-    if (this.paused || !this.dependencies.native) return Promise.resolve();
+    if (this.paused || !this.dependencies.native || this.retirements.has(runId)) return Promise.resolve();
     const existing = this.flights.get(runId);
     if (existing) return existing.cleanupTail;
     // Defer execution until the in-flight entry exists; simultaneous polls share one boundary, not two submissions.
@@ -393,6 +394,20 @@ export class RunWorker {
   }
   /** Trusted retention hook; this is not cancellation or a change to execution ownership. */
   forgetSearchClock(runId: string): void { this.searchClock.forget(runId); }
+  /** Join this run's real execution, then commit synchronously while new ticks are excluded. */
+  retireWeave<T>(runId: string, commit: () => T): Promise<T> {
+    const preceding = this.retirements.get(runId);
+    const flight = this.flights.get(runId);
+    const operation = Promise.resolve().then(async () => {
+      if (preceding) await preceding.catch(() => {});
+      if (flight) await flight.execution;
+      if (this.paused) throw new RunFenceError("Worker is paused");
+      this.dependencies.executionOwner?.assertHeld();
+      return commit();
+    });
+    this.retirements.set(runId,operation);
+    return operation.finally(() => { if (this.retirements.get(runId) === operation) this.retirements.delete(runId); });
+  }
   /** Local ownership does not require a native port. A fixture without a deployed lease cannot authorize bound purge. */
   searchRetention(): SqliteSearchRetention | null {
     const owner = this.dependencies.executionOwner;

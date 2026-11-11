@@ -155,6 +155,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
     }
   }
   tick(runId: string): Promise<void> { return this.worker.tick(runId,() => this.beforePoll(runId)); }
+  retireWeave<T>(runId: string, commit: () => T): Promise<T> { return this.worker.retireWeave(runId,commit); }
   searchRetention(): SqliteSearchRetention | null { return this.worker.searchRetention(); }
   onSearchCleanupAvailable(notify: () => void): () => void { return this.worker.onSearchCleanupAvailable(notify); }
   pause(): void { this.paused = true; this.worker.pause(); this.importWorker.pause(); }

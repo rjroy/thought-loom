@@ -21,6 +21,7 @@ import { SearchConflictError, SearchForbiddenError, SearchNotFoundError, type Se
 import { parseSearchClockHeaders, type SearchClockReceipts } from "./search-clock-receipts";
 import { ReinterpretationConflictError, type ReinterpretationService } from "../domain/reinterpretation";
 import { createReinterpretationRoutes } from "./reinterpretation-routes";
+import type { RetirementSnapshot } from "../storage/reinterpretation";
 import { agentInstructionFields, agentInstructionMaxBytes, parseAgentInstructions, type AgentInstructionsRepository } from "../domain/agent-instructions";
 import { readBytes, strictObject, utf8 } from "./import-body";
 import { exportHistoryRequest, type ExportHistoryCursor, type ExportHistoryService } from "../domain/export-history";
@@ -49,7 +50,8 @@ export interface AppOptions {
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
   readonly media?: { readonly commands: MediaImports; readonly maxBytes: number; readonly notify: () => void };
-  readonly reinterpretations?: {readonly commands:Pick<ReinterpretationService,"admit"|"byKey">;readonly notify:() => void};
+  readonly reinterpretations?: {readonly commands:Pick<ReinterpretationService,"admit"|"byKey">;readonly notify:() => void;
+    readonly retirement?: {read(subjectId:string,runId:string):RetirementSnapshot;retire(subjectId:string,runId:string):Promise<RetirementSnapshot & {remoteState:"unknown"}>}};
   readonly agentInstructions?: AgentInstructionsRepository;
 }
 
@@ -184,7 +186,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   if (options.imports) app.route("/",createMarkdownImportRoutes(options.imports.commands,options.imports.inspection,options.imports.maxBytes));
   if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
-  if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics));
+  if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics,options.reinterpretations.retirement));
 
   if (options.agentInstructions) {
     const settings = options.agentInstructions;

@@ -9,7 +9,7 @@ const confirmed = (key: string): ReinterpretationSnapshot => ({ receipt: { subje
   eligibility: { eligible: false, reason: "work-active", blockingRun: run } });
 function storage() {
   const data = new Map<string,string>();
-  return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key,value); } };
+  return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key,value); }, values: () => [...data.values()] };
 }
 const responseFetch = (response: Response): typeof fetch => Object.assign(
   async (_input: RequestInfo | URL, _init?: RequestInit) => response,
@@ -17,7 +17,8 @@ const responseFetch = (response: Response): typeof fetch => Object.assign(
 );
 function client(overrides: Partial<ReinterpretationClient> = {}): ReinterpretationClient {
   return { lookup: async () => ({kind:"found",snapshot:eligible}), send: async () => ({kind:"uncertain"}),
-    readRun: async () => ({kind:"error"}), stop: async () => ({kind:"uncertain"}), ...overrides };
+    readRun: async () => ({kind:"error"}), stop: async () => ({kind:"uncertain"}),
+    readRetirement: async () => ({kind:"error"}), retire: async () => ({kind:"uncertain"}), ...overrides };
 }
 const options = (store: ReturnType<typeof storage>, keys = ["probe", "request-key"]) => {
   let index = 0;
@@ -224,4 +225,102 @@ test("malformed or mismatched successful responses are consumed and never treate
     expect(await item.invoke(api)).toEqual(item.result);
     expect(response.bodyUsed).toBe(true);
   }
+});
+
+// Proposed retirement seam: retirement is independent of the admission receipt.
+type Retirement = {runId:string; retiredAt:string | null; eligibility:ReinterpretationSnapshot["eligibility"]};
+type RetirementClient = ReinterpretationClient & {
+  readRetirement(subjectId:string, runId:string, signal?:AbortSignal):Promise<{kind:"found";retirement:Retirement} | {kind:"error"}>;
+  retire(subjectId:string, runId:string):Promise<{kind:"confirmed";retirement:Retirement & {retiredAt:string;remoteState:"unknown"}} | {kind:"uncertain"}>;
+};
+type RetirementController = ReturnType<typeof createReinterpretationController> & {
+  retire(runId:string):Promise<void>; checkRetirement():Promise<void>;
+  getSnapshot():ReturnType<ReturnType<typeof createReinterpretationController>["getSnapshot"]> & {retirement:{runId:string;status:"pending" | "uncertain" | "confirmed"} | null};
+};
+const retirementController = (api:RetirementClient, store:ReturnType<typeof storage>) =>
+  createReinterpretationController("subject",api,options(store)) as RetirementController;
+
+test("retirement uses the fresh blocking identity, preserves an unrelated receipt, and never starts new work", async () => {
+  const store = storage(), old = {...run,id:"old-receipt",status:"completed" as const,confirmedThoughtIds:["saved"],responseId:"saved-reply"};
+  const blocker = {...run,id:"actual-blocker",status:"interrupted" as const};
+  const blocked:ReinterpretationSnapshot = {receipt:{subjectId:"subject",requestKey:"request-key",runId:old.id},run:old,
+    eligibility:{eligible:false,reason:"work-unsettled",blockingRun:blocker}};
+  const calls:string[] = [];
+  const api:RetirementClient = {...client({lookup:async (_id,key) => ({kind:"found",snapshot:key === "probe" ? eligible : blocked}),
+    send:async () => ({kind:"confirmed",snapshot:blocked})}),
+    readRetirement:async () => ({kind:"error"}), retire:async (subject,id) => {
+      calls.push(id);
+      const stored = JSON.stringify(store.values());
+      expect(stored).toContain(subject); expect(stored).toContain(id); expect(stored).not.toContain("saved-reply");
+      return {kind:"confirmed",retirement:{runId:id,retiredAt:"2032-01-01T00:00:00Z",remoteState:"unknown",eligibility:eligible.eligibility}};
+    }};
+  const c = retirementController(api,store);
+  await c.prepare(); await c.request();
+  await c.retire(old.id); expect(calls).toEqual([]);
+  await c.retire(blocker.id);
+  expect(calls).toEqual([blocker.id]);
+  expect(c.getSnapshot()).toMatchObject({request:"confirmed",receipt:blocked.receipt,run:old,eligibility:eligible.eligibility});
+});
+
+test("an invalidated retirement read cannot apply a late eligibility", async () => {
+  const store = storage(), blocker = {...run,status:"failed" as const};
+  const blocked:ReinterpretationSnapshot = {receipt:null,run:null,eligibility:{eligible:false,reason:"work-unverified",blockingRun:blocker}};
+  const held = Promise.withResolvers<{kind:"found";retirement:Retirement}>();
+  const api:RetirementClient = {...client({lookup:async () => ({kind:"found",snapshot:blocked})}),
+    retire:async () => ({kind:"uncertain"}),readRetirement:async () => held.promise};
+  const c = retirementController(api,store); await c.prepare(); await c.retire(blocker.id);
+  const read = c.checkRetirement(); c.invalidate();
+  held.resolve({kind:"found",retirement:{runId:blocker.id,retiredAt:"2032-01-01T00:00:00Z",eligibility:eligible.eligibility}});
+  await read;
+  expect(c.getSnapshot()).toMatchObject({retirement:{runId:blocker.id,status:"uncertain"},eligibility:blocked.eligibility,fresh:false});
+});
+
+test("uncertain retirement survives reload and null reads without repeating the write", async () => {
+  const store = storage(), blocker = {...run,id:"blocked",status:"failed" as const};
+  const blocked:ReinterpretationSnapshot = {receipt:null,run:null,eligibility:{eligible:false,reason:"work-unverified",blockingRun:blocker}};
+  const writes:string[] = [], reads:string[] = [];
+  let retiredAt:string | null = null;
+  const api:RetirementClient = {...client({lookup:async () => ({kind:"found",snapshot:blocked})}),
+    retire:async (subject,id) => {writes.push(`${subject}:${id}`); return {kind:"uncertain"};},
+    readRetirement:async (subject,id) => {reads.push(`${subject}:${id}`); return {kind:"found",retirement:{runId:id,retiredAt,eligibility:retiredAt ? eligible.eligibility : blocked.eligibility}};}};
+  const first = retirementController(api,store); await first.prepare(); await first.retire(blocker.id);
+  expect(first.getSnapshot().retirement).toMatchObject({runId:blocker.id,status:"uncertain"});
+  const reloaded = retirementController(api,store); await reloaded.prepare(); await reloaded.checkRetirement();
+  expect(reads).toContain("subject:blocked"); expect(writes).toEqual(["subject:blocked"]);
+  expect(reloaded.getSnapshot().retirement).toMatchObject({runId:blocker.id,status:"uncertain"});
+  await reloaded.retire(blocker.id); expect(writes).toHaveLength(1);
+  retiredAt = "2032-01-01T00:00:00Z"; await reloaded.checkRetirement();
+  expect(reloaded.getSnapshot()).toMatchObject({retirement:{runId:blocker.id,status:"confirmed"},eligibility:eligible.eligibility});
+});
+
+test("retirement storage must be verified before dispatch", async () => {
+  for (const failure of ["throw","lost"] as const) {
+    const store = storage(), blocker = {...run,status:"interrupted" as const}; let writes = 0;
+    const api:RetirementClient = {...client({lookup:async () => ({kind:"found",snapshot:{receipt:null,run:null,eligibility:{eligible:false,reason:"work-unsettled",blockingRun:blocker}}})}),
+      readRetirement:async () => ({kind:"error"}),retire:async () => {writes++; return {kind:"uncertain"};}};
+    const c = retirementController(api,store); await c.prepare();
+    store.setItem = () => {if (failure === "throw") throw new Error("denied");};
+    await c.retire(blocker.id); expect(writes).toBe(0);
+  }
+});
+
+test("retirement client uses fixed no-store routes and rejects mismatched run identities", async () => {
+  const calls:{url:string;init:RequestInit | undefined}[] = [];
+  let responseId = "blocked";
+  const fetcher = Object.assign(async (input:RequestInfo | URL, init?:RequestInit) => {
+    calls.push({url:String(input),init});
+    return Response.json({runId:responseId,retiredAt:init?.method === "POST" ? "2032-01-01T00:00:00Z" : null,
+      ...(init?.method === "POST" ? {remoteState:"unknown"} : {}),eligibility:eligible.eligibility});
+  },{preconnect:() => {}}) as typeof fetch;
+  const api = createReinterpretationClient(fetcher) as RetirementClient;
+  expect(await api.readRetirement("subject","blocked")).toMatchObject({kind:"found",retirement:{runId:"blocked",retiredAt:null}});
+  expect(await api.retire("subject","blocked")).toMatchObject({kind:"confirmed",retirement:{runId:"blocked",remoteState:"unknown"}});
+  expect(calls.map(call => [call.url,call.init?.method,call.init?.cache])).toEqual([
+    ["/api/ideas/subject/reinterpret/retire/blocked","GET","no-store"],
+    ["/api/ideas/subject/reinterpret/retire/blocked","POST","no-store"],
+  ]);
+  expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({acknowledgeRemoteUncertainty:true});
+  responseId = "wrong";
+  expect(await api.readRetirement("subject","blocked")).toEqual({kind:"error"});
+  expect(await api.retire("subject","blocked")).toEqual({kind:"uncertain"});
 });

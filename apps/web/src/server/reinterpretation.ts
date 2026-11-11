@@ -1,5 +1,5 @@
 import type { DaemonRequest } from "./daemon";
-import { reinterpretationId, reinterpretationKey, reinterpretationSnapshot } from "../features/idea/reinterpretation";
+import { reinterpretationId, reinterpretationKey, reinterpretationSnapshot, interpretationRetirement, confirmedInterpretationRetirement } from "../features/idea/reinterpretation";
 
 export interface ReinterpretationDependencies { readonly callDaemon: (request: DaemonRequest) => Promise<Response> }
 const headers = {"cache-control":"private, no-store"};
@@ -59,5 +59,31 @@ export async function handleReinterpretation(request: Request, subjectId: string
     }
     if (!reinterpretationSnapshot(value,subjectId,key) || (request.method === "POST" && value.receipt === null)) return problem(502);
     return Response.json(value,{status:response.status,headers});
+  } catch { return problem(502); }
+}
+
+/** User-only local retirement, never an admission or remote cancellation command. */
+export async function handleInterpretationRetirement(request:Request, subjectId:string, runId:string, deps:ReinterpretationDependencies):Promise<Response> {
+  if (!reinterpretationId(subjectId) || !reinterpretationId(runId) || new URL(request.url).search
+    || (request.method !== "GET" && request.method !== "POST")) return problem(400);
+  if (request.method === "POST") {
+    if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(request.headers.get("content-type") ?? "")) return problem(415);
+    try {
+      const text = await bounded(request.body,4096);
+      if (text === null) return problem(413);
+      const data:unknown = JSON.parse(text);
+      if (!record(data) || Object.keys(data).length !== 1 || data.acknowledgeRemoteUncertainty !== true) return problem(400);
+    } catch { return problem(400); }
+  }
+  try {
+    const response = await deps.callDaemon({method:request.method,path:`/thoughts/${subjectId}/reinterpret/retire/${runId}`,
+      ...(request.method === "POST" ? {body:JSON.stringify({acknowledgeRemoteUncertainty:true})} : {}),preserveErrorBody:true});
+    if ([400,401,403,404,409,413,415].includes(response.status)) { discard(response); return problem(response.status); }
+    if (response.status !== 200) { discard(response); return problem(502); }
+    const text = await bounded(response.body,1024*1024);
+    if (text === null) return problem(502);
+    const value:unknown = JSON.parse(text);
+    if (!(request.method === "POST" ? confirmedInterpretationRetirement(value,runId) : interpretationRetirement(value,runId))) return problem(502);
+    return Response.json(value,{status:200,headers});
   } catch { return problem(502); }
 }

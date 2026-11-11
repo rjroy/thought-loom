@@ -18,7 +18,7 @@ const logger = createLogger("verbose", () => {}), timestamp = "2030-01-02T03:04:
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 interface Fixture { readonly dir: string; readonly dbPath: string; readonly snapshot: CaptureResult; readonly stagingParent: string; readonly markdown: Uint8Array }
 
-async function fixture(action: (f: Fixture) => Promise<void>): Promise<void> {
+async function fixture(action: (f: Fixture) => Promise<void>, retired = false): Promise<void> {
   const dir = await mkdtemp("/tmp/opencode/restore-stage-"), dbPath = join(dir, "source.sqlite"), media = `${dbPath}.media`;
   const output = join(dir, "capture"), stagingParent = join(dir, "stage"), markdown = new TextEncoder().encode("\uFEFFowned Markdown\r\n\r\nsecond paragraph\r\n");
   let daemon: RunningDaemon | undefined;
@@ -40,6 +40,7 @@ async function fixture(action: (f: Fixture) => Promise<void>): Promise<void> {
           VALUES (101,'historical-run','weave','running','native-history','prompt-history','2030',7,'root','capture:root');
         INSERT INTO run_context(rowid,run_id,kind,ref_id,full_read) VALUES (77,'historical-run','thought','root',1);
         INSERT INTO restore_fences VALUES ('run','historical-run','${"a".repeat(64)}','2030','{}');`);
+      if (retired) db.run("UPDATE runs SET status='interrupted',cancellation_state='pending',weave_retired_at=? WHERE id='historical-run'", [timestamp]);
       await writeFile(join(media, "objects", mediaThought.mediaSource.id), mediaBytes, { mode: 0o600 });
       insertMediaSource(db);
       let n = 0;
@@ -58,6 +59,18 @@ async function fixture(action: (f: Fixture) => Promise<void>): Promise<void> {
     await action({ dir, dbPath, snapshot, stagingParent, markdown });
   } finally { await daemon?.stop(); await rm(dir, { recursive: true, force: true }); }
 }
+
+test("backup and restore retain an acknowledged retirement separately from native cancellation", async () => fixture(async f => {
+  const stage = await stageRestoreSnapshot({ snapshotDirectory: f.snapshot.snapshotDirectory,
+    stagingParentDirectory: f.stagingParent, expectedManifestSha256: f.snapshot.manifestSha256, logger });
+  try {
+    const restored = new Database(stage.databasePath, { readonly: true });
+    try {
+      expect(restored.query("SELECT status,cancellation_state,weave_retired_at FROM runs WHERE id='historical-run'").get())
+        .toEqual({ status: "interrupted", cancellation_state: "pending", weave_retired_at: timestamp });
+    } finally { restored.close(); }
+  } finally { await stage.dispose(); }
+}, true), 30000);
 
 function rawTables(path: string) {
   const db = new Database(path, { readonly: true, create: false, safeIntegers: true });

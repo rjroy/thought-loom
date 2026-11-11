@@ -1,4 +1,5 @@
-import { reinterpretationId, reinterpretationKey, reinterpretationRun, reinterpretationSnapshot, type ReinterpretationRun, type ReinterpretationSnapshot } from "./reinterpretation";
+import { reinterpretationId, reinterpretationKey, reinterpretationRun, reinterpretationSnapshot, interpretationRetirement, confirmedInterpretationRetirement,
+  type ReinterpretationRun, type ReinterpretationSnapshot, type InterpretationRetirement, type ConfirmedInterpretationRetirement } from "./reinterpretation";
 
 export type ReinterpretationRead = {readonly kind:"found";readonly snapshot:ReinterpretationSnapshot} | {readonly kind:"error"};
 export type ReinterpretationWrite = {readonly kind:"confirmed";readonly snapshot:ReinterpretationSnapshot}
@@ -9,6 +10,8 @@ export interface ReinterpretationClient {
   send(subjectId:string,key:string): Promise<ReinterpretationWrite>;
   readRun(id:string,signal?:AbortSignal): Promise<{readonly kind:"found";readonly run:ReinterpretationRun} | {readonly kind:"error"}>;
   stop(id:string): Promise<{readonly kind:"confirmed";readonly run:ReinterpretationRun} | {readonly kind:"uncertain"}>;
+  readRetirement(subjectId:string,runId:string,signal?:AbortSignal): Promise<{readonly kind:"found";readonly retirement:InterpretationRetirement} | {readonly kind:"error"}>;
+  retire(subjectId:string,runId:string): Promise<{readonly kind:"confirmed";readonly retirement:ConfirmedInterpretationRetirement} | {readonly kind:"uncertain" | "refused"}>;
 }
 const object = (v:unknown): v is Record<string,unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // Cancellation is best-effort and must never delay or change the classified outcome.
@@ -20,6 +23,25 @@ function discard(response:Response): void {
 export function createReinterpretationClient(fetcher: typeof fetch = fetch): ReinterpretationClient {
   const base = (id:string) => `/api/ideas/${encodeURIComponent(id)}/reinterpret`;
   return {
+    async readRetirement(subjectId,runId,signal) {
+      if (!reinterpretationId(subjectId) || !reinterpretationId(runId)) return {kind:"error"};
+      try {
+        const response = await fetcher(`${base(subjectId)}/retire/${encodeURIComponent(runId)}`,{method:"GET",cache:"no-store",redirect:"error",signal});
+        if (response.status !== 200) { discard(response); return {kind:"error"}; }
+        const value:unknown = await response.json();
+        return interpretationRetirement(value,runId) ? {kind:"found",retirement:value} : {kind:"error"};
+      } catch { return {kind:"error"}; }
+    },
+    async retire(subjectId,runId) {
+      if (!reinterpretationId(subjectId) || !reinterpretationId(runId)) return {kind:"uncertain"};
+      try {
+        const response = await fetcher(`${base(subjectId)}/retire/${encodeURIComponent(runId)}`,{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({acknowledgeRemoteUncertainty:true}),cache:"no-store",redirect:"error"});
+        if (response.status !== 200) { discard(response); return {kind:[400,401,403,404,409,413,415].includes(response.status) ? "refused" : "uncertain"}; }
+        const value:unknown = await response.json();
+        return confirmedInterpretationRetirement(value,runId) ? {kind:"confirmed",retirement:value} : {kind:"uncertain"};
+      } catch { return {kind:"uncertain"}; }
+    },
     async lookup(subjectId,key,signal) {
       if (!reinterpretationId(subjectId) || !reinterpretationKey(key)) return {kind:"error"};
       try {

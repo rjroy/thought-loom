@@ -91,6 +91,8 @@
 .dialog { inline-size: min(44rem, calc(100% - 2rem)); max-block-size: calc(100dvh - 2rem); padding: 2rem; border: 1px solid var(--color-control-line); border-radius: 0.75rem; background: var(--color-ground); color: var(--color-body); }
 .dialog::backdrop { background: rgb(3 19 21 / 80%); }
 .dialog .warning { margin-block: 1rem; }
+.retirementAcknowledgment { display: flex; align-items: flex-start; gap: .75rem; min-block-size: 2.75rem; padding-block: .5rem; cursor: pointer; }
+.retirementAcknowledgment input { flex: none; inline-size: 1.25rem; block-size: 1.25rem; margin-block-start: .2rem; accent-color: var(--brand-color-3); }
 .previewCount { margin-block: 1.5rem 0.5rem; color: var(--color-text); font-size: 1.75rem; font-weight: 700; }
 .ids { padding-inline-start: 1.25rem; }
 

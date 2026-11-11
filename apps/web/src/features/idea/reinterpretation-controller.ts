@@ -1,9 +1,11 @@
-import { reinterpretationId, reinterpretationKey, type ReinterpretationEligibility, type ReinterpretationRun, type ReinterpretationSnapshot } from "./reinterpretation";
+import { reinterpretationId, reinterpretationKey, interpretationBlocker, retirementCandidate, type InterpretationRetirement, type ReinterpretationEligibility, type ReinterpretationRun, type ReinterpretationSnapshot } from "./reinterpretation";
 import type { ReinterpretationClient } from "./reinterpretation-request";
 
 type Identity = {readonly subjectId:string; readonly requestKey:string; readonly kind:"pending" | "confirmed"};
 interface Stored {readonly version:1; readonly entries:readonly Identity[]}
 export const reinterpretationStorageKey = "thoughtloom.reinterpretation.v1";
+export const retirementStorageKey = "thoughtloom.interpretation-retirement.v1";
+type RetirementIdentity = {readonly subjectId:string; readonly runId:string};
 export interface ReinterpretationState {
   readonly phase:"idle" | "ready" | "error" | "storage-error";
   readonly request:"idle" | "pending" | "uncertain" | "confirmed";
@@ -13,7 +15,8 @@ export interface ReinterpretationState {
   readonly eligibility:ReinterpretationEligibility | null;
   readonly fresh:boolean; readonly checking:boolean; readonly stopping:boolean;
   readonly unconfirmedStop:string | null;
-  readonly notice:"none" | "storage-error" | "request-refused" | "request-uncertain" | "conflict" | "read-error" | "stop-uncertain" | "stop-requested";
+  readonly retirement:{readonly runId:string; readonly status:"pending" | "uncertain" | "confirmed"} | null;
+  readonly notice:"none" | "storage-error" | "request-refused" | "request-uncertain" | "conflict" | "read-error" | "stop-uncertain" | "stop-requested" | "retirement-refused";
   /** Changes only when confirmed output identities change; caller refreshes the canonical Idea reader. */
   readonly outputRevision:number;
 }
@@ -25,7 +28,7 @@ export interface ReinterpretationOptions {
 }
 const terminal = (run:ReinterpretationRun) => ["completed","failed","interrupted"].includes(run.status);
 const initial = ():ReinterpretationState => ({phase:"idle",request:"idle",requestKey:null,receipt:null,run:null,eligibility:null,
-  fresh:false,checking:false,stopping:false,unconfirmedStop:null,notice:"none",outputRevision:0});
+  fresh:false,checking:false,stopping:false,unconfirmedStop:null,retirement:null,notice:"none",outputRevision:0});
 function parseStored(raw:string | null): Stored {
   if (raw === null) return {version:1,entries:[]};
   const value:unknown = JSON.parse(raw);
@@ -40,6 +43,20 @@ function parseStored(raw:string | null): Stored {
     seen.add(identity); entries.push({subjectId:item.subjectId,requestKey:item.requestKey,kind:item.kind});
   }
   return {version:1,entries};
+}
+function retirementIdentities(raw:string | null): readonly RetirementIdentity[] {
+  if (raw === null) return [];
+  const value:unknown = JSON.parse(raw);
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== 2
+    || !("version" in value) || value.version !== 1 || !("entries" in value) || !Array.isArray(value.entries)) throw new Error("Invalid retirement recovery");
+  const entries:RetirementIdentity[] = [], subjects = new Set<string>();
+  for (const item of value.entries) {
+    if (typeof item !== "object" || item === null || Array.isArray(item) || Object.keys(item).length !== 2
+      || !("subjectId" in item) || !reinterpretationId(item.subjectId) || !("runId" in item) || !reinterpretationId(item.runId)
+      || subjects.has(item.subjectId)) throw new Error("Invalid retirement identity");
+    subjects.add(item.subjectId); entries.push({subjectId:item.subjectId,runId:item.runId});
+  }
+  return entries;
 }
 
 /** One subject's command and observation state; no thought content is persisted or fetched here. */
@@ -68,9 +85,19 @@ export function createReinterpretationController(subjectId:string, client:Reinte
     const entries = identities().filter(item => item.subjectId !== subjectId);
     entries.push({subjectId,requestKey:key,kind:"confirmed"}); save(entries);
   }
+  const retirementUnresolved = () => state.retirement !== null && state.retirement.status !== "confirmed";
+  function saveRetirement(runId:string, clear = false) {
+    const target = storage(), stored = retirementIdentities(target.getItem(retirementStorageKey));
+    if (!clear && stored.some(item => item.subjectId === subjectId)) throw new Error("Retirement recovery already exists");
+    // A delayed write must not erase a newer same-subject recovery identity.
+    const entries = stored.filter(item => item.subjectId !== subjectId || item.runId !== runId);
+    if (!clear) entries.push({subjectId,runId});
+    const value = JSON.stringify({version:1,entries});
+    target.setItem(retirementStorageKey,value);
+    if (target.getItem(retirementStorageKey) !== value) throw new Error("Retirement storage verification failed");
+  }
   function currentRun():ReinterpretationRun | null {
-    const blocker = state.eligibility?.eligible === false ? state.eligibility.blockingRun : null;
-    return blocker && !terminal(blocker) ? blocker : state.run ?? blocker;
+    return interpretationBlocker(state.eligibility) ?? state.run;
   }
   function refreshOutput(run:ReinterpretationRun | null) {
     if (!run) return state.outputRevision;
@@ -94,7 +121,7 @@ export function createReinterpretationController(subjectId:string, client:Reinte
   function poll() {
     clearPoll();
     const observed = currentRun();
-    if (watchers && observed && !terminal(observed) && !state.checking && !state.stopping && state.request !== "pending")
+    if (watchers && observed && !terminal(observed) && !state.checking && !state.stopping && state.request !== "pending" && !retirementUnresolved())
       cancelPoll = schedule(() => {cancelPoll = null; void checkReceipt();},2000);
   }
   function invalidate() {
@@ -103,10 +130,12 @@ export function createReinterpretationController(subjectId:string, client:Reinte
   }
   function checkReceipt():Promise<void> {
     if (reading) return reading;
-    if (state.request === "pending" || state.stopping) return Promise.resolve();
+    if (state.request === "pending" || state.stopping || state.retirement?.status === "pending") return Promise.resolve();
     clearPoll();
     let pending:Identity | undefined, confirmed:Identity | undefined, key:string;
     try {
+      const recovery = retirementIdentities(storage().getItem(retirementStorageKey)).find(item => item.subjectId === subjectId);
+      if (recovery && state.retirement === null) update({retirement:{runId:recovery.runId,status:"uncertain"}});
       const entries = identities(); pending = entries.find(item => item.subjectId === subjectId && item.kind === "pending");
       confirmed = entries.find(item => item.subjectId === subjectId && item.kind === "confirmed");
       if (!pending && !confirmed && !probeKey) { const next = newKey(); if (!reinterpretationKey(next)) throw new Error("Invalid key"); probeKey = next; }
@@ -133,7 +162,7 @@ export function createReinterpretationController(subjectId:string, client:Reinte
     reading = work; return work;
   }
   async function send(recovering:boolean) {
-    if (state.checking || state.stopping || state.request === "pending" || state.unconfirmedStop !== null) return;
+    if (state.checking || state.stopping || state.request === "pending" || state.unconfirmedStop !== null || retirementUnresolved() || state.phase === "storage-error") return;
     if (recovering ? state.request !== "uncertain" || !state.requestKey : state.request === "uncertain" || !state.fresh || state.eligibility?.eligible !== true) return;
     let key:string;
     try {
@@ -167,7 +196,7 @@ export function createReinterpretationController(subjectId:string, client:Reinte
   }
   async function checkRun() {
     const run = currentRun();
-    if (!run || state.checking || state.stopping || state.request === "pending") return;
+    if (!run || state.checking || state.stopping || state.request === "pending" || retirementUnresolved()) return;
     const epoch = ++generation, controller = new AbortController(); abort = controller;
     const current = () => epoch === generation && !controller.signal.aborted;
     update({checking:true,fresh:false});
@@ -183,7 +212,7 @@ export function createReinterpretationController(subjectId:string, client:Reinte
   }
   async function stop() {
     const run = currentRun();
-    if (!run || terminal(run) || state.unconfirmedStop || state.checking || state.stopping || state.request === "pending") return;
+    if (!run || terminal(run) || state.unconfirmedStop || state.checking || state.stopping || state.request === "pending" || retirementUnresolved()) return;
     invalidate(); update({stopping:true,notice:"none"});
     try {
       const result = await client.stop(run.id);
@@ -195,8 +224,56 @@ export function createReinterpretationController(subjectId:string, client:Reinte
     } catch {update({unconfirmedStop:run.id,notice:"stop-uncertain"});}
     finally {update({stopping:false,fresh:false}); poll();}
   }
+  function applyRetirement(retirement:InterpretationRetirement, verified:boolean) {
+    const confirmed = retirement.retiredAt !== null;
+    update({retirement:{runId:retirement.runId,status:confirmed ? "confirmed" : "uncertain"},
+      ...(verified ? {eligibility:retirement.eligibility} : {}),fresh:verified,phase:"ready",notice:"none"});
+    if (confirmed) {
+      try { saveRetirement(retirement.runId,true); }
+      catch { update({phase:"storage-error",notice:"storage-error",fresh:false}); }
+    }
+  }
+  async function retire(runId:string) {
+    const candidate = retirementCandidate(state.eligibility);
+    if (!reinterpretationId(runId) || !candidate || candidate.id !== runId || !state.fresh || state.phase !== "ready"
+      || state.checking || state.stopping || state.request === "pending" || state.request === "uncertain" || state.unconfirmedStop || retirementUnresolved()) return;
+    try { saveRetirement(runId); }
+    catch { update({phase:"storage-error",notice:"storage-error",fresh:false}); return; }
+    invalidate(); update({retirement:{runId,status:"pending"},notice:"none"});
+    const epoch = generation;
+    try {
+      const result = await client.retire(subjectId,runId);
+      if (result.kind === "confirmed" && result.retirement.runId === runId && result.retirement.retiredAt !== null) applyRetirement(result.retirement,epoch === generation);
+      else if (result.kind === "refused") {
+        saveRetirement(runId,true);
+        update({retirement:null,fresh:false,notice:"retirement-refused"});
+      }
+      else update({retirement:{runId,status:"uncertain"},fresh:false});
+    } catch { update({retirement:{runId,status:"uncertain"},fresh:false}); }
+    poll();
+  }
+  async function checkRetirement() {
+    const retirement = state.retirement;
+    if (!retirement || retirement.status === "pending" || state.checking || state.stopping || state.request === "pending") return;
+    clearPoll(); abort?.abort();
+    const epoch = ++generation, controller = new AbortController(); abort = controller;
+    const current = () => epoch === generation && !controller.signal.aborted;
+    update({checking:true,fresh:false});
+    try {
+      const result = await client.readRetirement(subjectId,retirement.runId,controller.signal);
+      if (!current()) return;
+      if (result.kind === "found" && result.retirement.runId === retirement.runId) applyRetirement(result.retirement,true);
+      else update({notice:"read-error",fresh:false});
+    } catch { if (current()) update({notice:"read-error",fresh:false}); }
+    finally { if (current()) {abort = null; update({checking:false}); poll();} }
+  }
+  async function prepare() {
+    const work = checkReceipt(), epoch = generation;
+    await work;
+    if (epoch === generation && state.retirement?.status === "uncertain") await checkRetirement();
+  }
   return {getSnapshot:() => state,subscribe(listener:() => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
-    prepare:checkReceipt,checkReceipt,request:() => send(false),resend:() => send(true),checkRun,stop,invalidate,
-    watch() {watchers++; void checkReceipt(); return () => {watchers = Math.max(0,watchers-1); if (!watchers) invalidate();};}};
+    prepare,checkReceipt,request:() => send(false),resend:() => send(true),checkRun,stop,retire,checkRetirement,invalidate,
+    watch() {watchers++; void prepare(); return () => {watchers = Math.max(0,watchers-1); if (!watchers) invalidate();};}};
 }
 export type ReinterpretationController = ReturnType<typeof createReinterpretationController>;

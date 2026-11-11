@@ -17,6 +17,7 @@ const frozenTables = ["thoughts", "thought_titles", "thought_sources", "thought_
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 const frozenBytes = new Uint8Array(Buffer.from("efbbbf436166c3a90d0ae6bca2e5ad970d0a", "hex"));
 const frozenStepColumns = "rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json,submit_owner";
+const frozenRunColumns = "rowid,id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id,cancellation_state";
 
 function seedFrozen(db: Database): void {
   db.exec(readFileSync(new URL("./fixtures/pre-media-schema.sql", import.meta.url), "utf8"));
@@ -67,8 +68,8 @@ function preserved(db: Database, excludeNewMedia = false) {
   return frozenTables.map(table => {
     const where = !excludeNewMedia ? "" : table === "thoughts" ? " WHERE id!='media-root'" :
       ["thought_titles", "thought_source_seals"].includes(table) ? " WHERE thought_id!='media-root'" : "";
-    // Explicitly retain every predecessor step column.
-    const columns = table === "run_steps" ? frozenStepColumns : "rowid,*";
+    // Explicitly retain every predecessor run and step column.
+    const columns = table === "run_steps" ? frozenStepColumns : table === "runs" ? frozenRunColumns : "rowid,*";
     return { table, rows: db.query(`SELECT ${columns} FROM ${quote(table)}${where} ORDER BY rowid`).all(),
       fks: foreignKeyGroups(db,table) };
   });
@@ -84,6 +85,26 @@ function fileFixture(action: (db: Database, path: string) => void): void {
 }
 
 describe("media source migration and immutable metadata", () => {
+  test("legacy runs acquire a null retirement marker without changing historical facts", () => fileFixture((db, path) => {
+    seedFrozen(db);
+    const before = db.query("SELECT id,status,generation FROM runs ORDER BY id").all();
+    migrate(db);
+    expect(db.query("SELECT id,status,generation FROM runs ORDER BY id").all()).toEqual(before);
+    expect(db.query("SELECT id,weave_retired_at FROM runs ORDER BY id").all()).toEqual([
+      { id: "legacy-search", weave_retired_at: null }, { id: "legacy-weave", weave_retired_at: null },
+    ]);
+    const reopened = new Database(path);
+    try { migrate(reopened); expect(reopened.query("SELECT id,weave_retired_at FROM runs ORDER BY id").all()).toEqual([
+      { id: "legacy-search", weave_retired_at: null }, { id: "legacy-weave", weave_retired_at: null },
+    ]);
+      reopened.exec("INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation) VALUES ('new-weave','weave','queued','new-session','new-prompt','2032',0)");
+      expect(reopened.query("SELECT weave_retired_at FROM runs WHERE id='new-weave'").get()).toEqual({weave_retired_at:null});
+      migrate(reopened);
+      expect(reopened.query("SELECT id,weave_retired_at FROM runs ORDER BY id").all()).toEqual([
+        { id: "legacy-search", weave_retired_at: null }, { id: "legacy-weave", weave_retired_at: null }, { id: "new-weave", weave_retired_at: null },
+      ]);
+    } finally { reopened.close(); }
+  }));
   test("media file-run schema upgrade preserves core records, fences active work and rolls back an interrupted cleanup", () => fileFixture((db,path) => {
     seedFrozen(db); migrate(db); initializeSqlMediaStore(db); insertMediaSource(db);
     let sequence = 0;

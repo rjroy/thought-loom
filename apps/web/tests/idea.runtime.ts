@@ -27,6 +27,7 @@ export function ideaDaemon(token: string) {
   const reinterpretKeys = new Set<string>();
   let reinterpretMode: "normal" | "unknown-before" | "unknown-after" | "active" | "unsettled" | "unverified" = "normal";
   let reinterpretConflictObserved = false;
+  let retiredAt: string | null = null;
   let holdReinterpret = false, releaseReinterpret: (() => void) | undefined, reinterpretCompleted = false, stopped = false, uncertainStop = false;
   let title: string | null = thought.title, rootRejected = false, childEdgeRejected = false, branchAttempt = 0;
   let holdPreview = false, holdTitle = false, failure = false;
@@ -46,7 +47,7 @@ export function ideaDaemon(token: string) {
     connectionStatus(value: typeof connectionStatus) { connectionStatus = value; },
     holdConnection() { holdConnection = true; },
     releaseConnection() { releaseConnection?.(); releaseConnection = undefined; holdConnection = false; },
-    resetReinterpret(mode: typeof reinterpretMode = "normal") { reinterpretKeys.clear(); reinterpretMode = mode; reinterpretConflictObserved = false; reinterpretCompleted = false; stopped = false; uncertainStop = false; holdReinterpret = false; releaseReinterpret?.(); releaseReinterpret = undefined; },
+    resetReinterpret(mode: typeof reinterpretMode = "normal") { reinterpretKeys.clear(); reinterpretMode = mode; reinterpretConflictObserved = false; retiredAt = null; reinterpretCompleted = false; stopped = false; uncertainStop = false; holdReinterpret = false; releaseReinterpret?.(); releaseReinterpret = undefined; },
     holdReinterpret() { holdReinterpret = true; },
     releaseReinterpret() { releaseReinterpret?.(); releaseReinterpret = undefined; holdReinterpret = false; },
     completeReinterpret() { reinterpretCompleted = true; },
@@ -62,13 +63,21 @@ export function ideaDaemon(token: string) {
       const inspection = url.searchParams.get("scope") === "history" || url.searchParams.get("scope") === "show-rejected";
       const send = (value: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
       const run = { id: "owned-weave-run", kind: "weave", status: stopped || reinterpretMode === "unsettled" ? "interrupted" : reinterpretMode === "unverified" ? "failed" : reinterpretCompleted ? "completed" : "queued", confirmedThoughtIds: reinterpretCompleted ? [newChild.id] : [], responseId: null };
-      const eligibility = { eligible: false, reason: reinterpretMode === "unsettled" ? "work-unsettled" : reinterpretMode === "unverified" ? "work-unverified" : "work-active", blockingRun: run };
+      const eligibility = retiredAt ? {eligible:true,reason:null,blockingRun:null} : { eligible: false, reason: reinterpretMode === "unsettled" ? "work-unsettled" : reinterpretMode === "unverified" ? "work-unverified" : "work-active", blockingRun: run };
+      if (url.pathname === "/thoughts/idea-root/reinterpret/retire/owned-weave-run") {
+        if (method === "GET") { send({runId:run.id,retiredAt,eligibility}); return; }
+        if (method === "POST") {
+          if (body !== '{"acknowledgeRemoteUncertainty":true}') { res.writeHead(400).end(); return; }
+          retiredAt ??= "2032-01-01T00:00:00Z";
+          send({runId:run.id,retiredAt,remoteState:"unknown",eligibility:{eligible:true,reason:null,blockingRun:null}}); return;
+        }
+      }
       if (url.pathname === "/runs/owned-weave-run") { send(run); return; }
       if (url.pathname === "/runs/owned-weave-run/stop" && method === "POST") { if (uncertainStop) { res.writeHead(500).end(); return; } stopped = true; send({ ...run, status: "interrupted" }); return; }
       if (url.pathname === "/thoughts/idea-root/reinterpret" && method === "POST") {
         if (!key || body !== "{}") { res.writeHead(400).end(); return; }
         if (holdReinterpret) await new Promise<void>(resolve => { releaseReinterpret = resolve; });
-        if (reinterpretMode === "active" || reinterpretMode === "unsettled" || reinterpretMode === "unverified") {
+        if (!retiredAt && (reinterpretMode === "active" || reinterpretMode === "unsettled" || reinterpretMode === "unverified")) {
           reinterpretConflictObserved = true;
           send({ error:"Conflict", code:reinterpretMode === "active" ? "interpretation-active" : "interpretation-unsettled", receipt:null, run:null,
             eligibility },409); return;
@@ -263,6 +272,27 @@ export async function checkIdeaReinterpretRoute({ origin, host, probe, daemon }:
   assert.ok(calls.every(call => call.authorization === daemon.expectedAuthorization));
   assert.ok(calls.some(call => call.method === "POST" && call.path === "/thoughts/idea-root/reinterpret" && call.key === key && call.body === "{}"));
   assert.ok(calls.some(call => call.method === "GET" && decodeURIComponent(call.path) === `/thoughts/idea-root/reinterpret/by-key/${key}`));
+  daemon.resetReinterpret("unsettled");
+  const retire = `${base}/retire/owned-weave-run`, beforeRetire = daemon.attempts.length;
+  const acknowledgement = '{"acknowledgeRemoteUncertainty":true}';
+  const retireHeaders = `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(acknowledgement)}\r\n`;
+  assert.equal((await probe("POST", retire, `Host: ${host}\r\nOrigin: http://foreign.invalid\r\n${retireHeaders}`, acknowledgement)).status, 403);
+  assert.equal((await probe("GET", retire, "Host: foreign.invalid\r\n")).status, 403);
+  for (const invalid of ['{}','{"acknowledgeRemoteUncertainty":false}','{"acknowledgeRemoteUncertainty":true,"extra":1}']) {
+    assert.ok((await fetch(`${origin}${retire}`, {method:"POST",headers:{origin,"content-type":"application/json"},body:invalid})).status >= 400);
+  }
+  assert.equal(daemon.attempts.length, beforeRetire);
+  const read = await fetch(`${origin}${retire}`);
+  assert.equal(read.status,200); assert.match(read.headers.get("cache-control") ?? "",/no-store/i);
+  assert.equal((await read.json()).retiredAt,null);
+  const submit = () => fetch(`${origin}${retire}`,{method:"POST",headers:{origin,"content-type":"application/json"},body:acknowledgement});
+  const first = await submit(); assert.equal(first.status,200); assert.match(first.headers.get("cache-control") ?? "",/no-store/i);
+  const receipt = await first.json();
+  assert.equal(receipt.runId,"owned-weave-run"); assert.equal(receipt.remoteState,"unknown"); assert.ok(receipt.retiredAt);
+  assert.deepEqual(await (await submit()).json(),receipt);
+  assert.equal((await (await fetch(`${origin}${retire}`)).json()).retiredAt,receipt.retiredAt);
+  assert.ok(daemon.attempts.slice(beforeRetire).every(call => call.authorization === daemon.expectedAuthorization));
+  daemon.resetReinterpret();
 }
 
 export async function checkIdeaReinterpretBrowser(page: Page, daemon: Fixture, origin: string, selected = "all"): Promise<void> {
@@ -495,6 +525,36 @@ export async function checkIdeaReinterpretBrowser(page: Page, daemon: Fixture, o
     const action = page.getByRole("button", { name: /^reinterpret$/i });
     if (await action.count()) await expect(action).toBeDisabled();
     assert.ok(await page.getByRole("button", { name: /restore this idea/i }).isVisible());
+  }
+
+  if (selected === "all" || selected === "guards") {
+    daemon.resetReinterpret("unsettled"); await visit();
+    await (await open()).click();
+    const status = page.getByRole("region", {name:"Interpretation status"});
+    const retire = status.getByRole("button", {name:/retire this run/i});
+    await expect(retire).toBeVisible();
+    const retirementWrites = () => daemon.attempts.filter(call => call.method === "POST" && call.path === "/thoughts/idea-root/reinterpret/retire/owned-weave-run");
+    const before = retirementWrites().length, beforeReinterpret = writes().length;
+    await retire.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible(); await expect(dialog).toContainText("owned-weave-run");
+    await expect(dialog).toContainText(/interrupted/i);
+    await expect(dialog).toContainText(/(?:tools|native|agent).*(?:continue|running)/i);
+    await expect(dialog).toContainText(/(?:external|overlap)/i);
+    await expect(dialog).toContainText(/queued/i);
+    const cancel = dialog.getByRole("button",{name:/cancel/i}); await expect(cancel).toBeFocused();
+    const checkbox = dialog.getByRole("checkbox"); await expect(checkbox).not.toBeChecked();
+    const confirm = dialog.getByRole("button",{name:/retire/i}); await expect(confirm).toBeDisabled();
+    assert.equal(retirementWrites().length,before);
+    await checkbox.check(); await confirm.click();
+    await expect.poll(() => retirementWrites().length).toBe(before + 1);
+    assert.equal(retirementWrites().at(-1)?.body,'{"acknowledgeRemoteUncertainty":true}');
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText(original,{exact:true})).toBeVisible();
+    await expect(page.getByText(reply.text,{exact:true})).toBeVisible();
+    assert.equal(writes().length,beforeReinterpret,"retirement must not request a new interpretation");
+    await (await open()).click();
+    await expect.poll(() => writes().length).toBe(beforeReinterpret + 1);
   }
 }
 

@@ -194,12 +194,19 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       supervisor = new RunSupervisor({db,worker:configuredWorker,logger:diagnostics,startTimer});
       imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:configuredWorker.importWorker});
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
+    const reinterpretationStore = new SqliteReinterpretations(db,scheduling), runWorker = worker;
     const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       exportHistory:new ExportHistoryService(new SqliteAgenticExports(db,scheduling)),
       agentInstructions:new SqliteAgentInstructions(db,diagnostics),
       imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576},
-      reinterpretations:{commands:new ReinterpretationService(new SqliteReinterpretations(db,scheduling)),notify:() => supervisor?.notifyWork()},
+      reinterpretations:{commands:new ReinterpretationService(reinterpretationStore),notify:() => supervisor?.notifyWork(),retirement:{
+        read:(subjectId,runId) => reinterpretationStore.retirement(subjectId,runId),
+        retire:(subjectId,runId) => {
+          const commit = reinterpretationStore.prepareRetirement(subjectId,runId);
+          return runWorker.retireWeave(runId,() => { if (!acceptingRequests) throw new Error("Daemon stopping"); owner.assertHeld(); return commit(); });
+        },
+      }},
       media:{commands:new SqliteMediaImports(db,scheduling,files,rejection),maxBytes:mediaMaxBytes,notify:() => supervisor?.notifyWork()} });
     server = Bun.serve({ hostname: "127.0.0.1", port: valid.port, fetch: request => {
       if (!acceptingRequests) return new Response("Daemon stopping",{ status: 503 });

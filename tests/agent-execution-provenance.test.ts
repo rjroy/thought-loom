@@ -149,8 +149,9 @@ test("populated pre-provenance search journal keeps its unqualified submit owner
       .all().map(table => table.name);
     const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
     const bindingColumns = "rowid,run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version";
+    const historicalRunColumns = "rowid,id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id,cancellation_state";
     const snapshot = (connection: Database) => [tables.map(table => {
-      const columns = table === "run_steps" ? historicalStepColumns : table === "agent_bindings" ? bindingColumns : "rowid,*";
+      const columns = table === "run_steps" ? historicalStepColumns : table === "agent_bindings" ? bindingColumns : table === "runs" ? historicalRunColumns : "rowid,*";
       return connection.query(`SELECT ${columns} FROM ${quoted(table)} ORDER BY rowid`).all();
     }),
       connection.query("SELECT rowid,hex(CAST(text AS BLOB)) AS text_bytes FROM thoughts ORDER BY rowid").all(),
@@ -202,6 +203,7 @@ test("populated pre-provenance search journal keeps its unqualified submit owner
     expect(snapshot(db)).toEqual(before); expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     migrate(db, logger);
     expect(snapshot(db)).toEqual(before);
+    expect(db.query("SELECT id,weave_retired_at FROM runs ORDER BY rowid").all()).toEqual([{id:runId,weave_retired_at:null}]);
     expectUnqualifiedBindings(db);
     expect(db.query("SELECT submit_owner FROM run_steps WHERE run_id=?").get(runId)).toEqual({ submit_owner: "legacy-unqualified-owner" });
     expect(db.query("SELECT id FROM execution_owners WHERE id='legacy-unqualified-owner'").get()).toBeNull();
@@ -211,6 +213,7 @@ test("populated pre-provenance search journal keeps its unqualified submit owner
     const reopened = new Database(path);
     try {
       migrate(reopened, logger); expect(snapshot(reopened)).toEqual(before); expectUnqualifiedBindings(reopened);
+      expect(reopened.query("SELECT id,weave_retired_at FROM runs ORDER BY rowid").all()).toEqual([{id:runId,weave_retired_at:null}]);
       expectForeignKeys(reopened); expectHistoricalGuards(reopened);
       expect(snapshot(reopened)).toEqual(before);
       expect(reopened.query("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name").all())

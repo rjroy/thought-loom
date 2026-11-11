@@ -653,6 +653,29 @@ test("terminal pending cancellation retries until settled without reviving or re
   expect(f.runs.reply(run.id)).toBeNull();
 }));
 
+test("retired interrupted weave cannot publish a previously observed late result or submit again", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "retired-late-result" });
+  const w = worker(f, () => complete("late result must not be published"));
+  w.native.cancel = async () => "pending";
+  try {
+    for (let i = 0; i < 20; i++) {
+      const last = f.steps.steps(run.id).at(-1);
+      if (last?.state === "completed" && last.envelope?.kind === "complete") break;
+      await w.instance.tick(run.id);
+    }
+    expect(f.steps.steps(run.id).at(-1)?.envelope).toMatchObject({kind:"complete",reply:"late result must not be published"});
+    f.service.stop("user", run.id);
+    f.db.run("UPDATE runs SET weave_retired_at=? WHERE id=?", [now(),run.id]);
+    const before = f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(run.id);
+    const submitted = w.native.submitted.length;
+    await w.instance.tick(run.id);
+    expect(f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(run.id)).toEqual(before);
+    expect(f.runs.reply(run.id)).toBeNull();
+    expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root'").get()).toEqual({n:0});
+    expect(w.native.submitted).toHaveLength(submitted);
+  } finally { w.instance.pause(); await w.instance.drain(); }
+}));
+
 test("malformed completed model output cannot become a fallback reply", async () => fixture(async f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "question" });
   const w = worker(f, () => '{"version":1,"kind":"complete","reply":');

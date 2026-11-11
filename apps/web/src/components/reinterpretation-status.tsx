@@ -1,24 +1,26 @@
 "use client";
 
 import type { ReinterpretationState } from "../features/idea/reinterpretation-controller";
-import type { ReinterpretationRun } from "../features/idea/reinterpretation";
+import { interpretationBlocker, retirementCandidate, type ReinterpretationRun } from "../features/idea/reinterpretation";
 import styles from "./idea.module.css";
 
 const terminal = (run: ReinterpretationRun) => ["completed", "failed", "interrupted"].includes(run.status);
 
 /** A blocker is existing work, never a receipt for this user's request. */
 export function reinterpretationRunToShow(state: ReinterpretationState): ReinterpretationRun | null {
-  const blocker = state.eligibility?.eligible === false ? state.eligibility.blockingRun : null;
-  return blocker && !terminal(blocker) ? blocker : state.run ?? blocker;
+  return interpretationBlocker(state.eligibility) ?? state.run;
 }
 
 function presentation(state: ReinterpretationState, rejected: boolean, outputPublished: boolean) {
+  if (state.retirement?.status === "pending") return { title: "Retiring this run…", copy: "Waiting for local retirement confirmation. This does not stop the old agent or request a new interpretation.", tone: "warning" };
+  if (state.retirement?.status === "uncertain") return { title: "Retirement not confirmed", copy: "This run may already be retired locally. Check retirement reads the same run; no retirement or new interpretation will be sent automatically. Old agent work may still continue.", tone: "warning" };
   if (state.request === "pending") return { title: "Requesting reinterpretation…", copy: "Waiting for confirmation. The same request identity is retained; no other request will be sent.", tone: "warning" };
   if (state.request === "uncertain") return { title: "Request not confirmed", copy: "No admission receipt is confirmed for this request. It may still start. No replacement request will be sent automatically.", tone: "warning" };
   if (rejected || state.eligibility?.reason === "subject-rejected") return { title: "Restore this idea first", copy: "Rejected content is unavailable to AI. Restore the idea before requesting a fresh interpretation. Checking an earlier request does not restart it.", tone: "muted" };
   if (state.phase === "storage-error") return { title: "Request recovery unavailable", copy: "The request identity could not be safely stored or recovered in this tab. No new request will be sent while recovery is unavailable.", tone: "warning" };
   if (state.stopping) return { title: "Requesting Stop…", copy: "Stop requests cancellation of the known run. Saved work remains; cancellation may still need to settle.", tone: "warning" };
   if (state.unconfirmedStop) return { title: "Stop not confirmed", copy: "Check the known work before deciding what to do next. Stop will not be sent again automatically.", tone: "warning" };
+  if (state.retirement?.status === "confirmed" && state.eligibility?.eligible === true && (!state.run || state.run.id === state.retirement.runId)) return { title: "Run retired locally", copy: "Old agent status remains unknown. Already-started tools could still change external files or services and overlap new work. Reinterpret remains a separate action in More actions.", tone: "warning" };
   if (state.eligibility?.reason === "work-unsettled") return { title: "Earlier work may still be running", copy: "Thoughtloom has not confirmed that the earlier agent work has stopped. Another interpretation is blocked to avoid overlapping work. Check interpretation refreshes status; it does not restart or stop the agent. Your idea and saved output remain.", tone: "warning" };
   if (state.eligibility?.reason === "work-unverified") return { title: "Earlier work needs verification", copy: "The earlier run is marked interrupted or failed, but its records do not confirm that the agent stopped. Background verification may unblock a fresh interpretation. Check interpretation only refreshes status. Your idea and saved output remain. If this stays blocked, the earlier run needs investigation.", tone: "warning" };
   const run = reinterpretationRunToShow(state);
@@ -42,12 +44,15 @@ function presentation(state: ReinterpretationState, rejected: boolean, outputPub
   return { title: state.checking ? "Checking interpretation…" : "Ready to reinterpret", copy: "Reinterpret requests a fresh interpretation without changing this thought or its earlier output. Additional instructions belong in Evolve.", tone: "muted" };
 }
 
-export function ReinterpretationStatus({ state, rejected, disabled, outputPublished, contextError, onCheck, onResend, onStop }: {
+export function ReinterpretationStatus({ state, rejected, disabled, outputPublished, contextError, onCheck, onResend, onStop, onRetire }: {
   state: ReinterpretationState; rejected: boolean; disabled: boolean; outputPublished: boolean; contextError: boolean;
   onCheck: () => Promise<void>; onResend: () => Promise<void>; onStop: () => Promise<void>;
+  onRetire: (run:ReinterpretationRun) => void;
 }) {
   const item = presentation(state, rejected, outputPublished), run = reinterpretationRunToShow(state);
-  const readingBusy = state.checking || state.stopping || state.request === "pending";
+  const retirement = state.retirement, retirementUnresolved = !!retirement && retirement.status !== "confirmed";
+  const candidate = retirementCandidate(state.eligibility);
+  const readingBusy = state.checking || state.stopping || state.request === "pending" || retirement?.status === "pending";
   const busy = disabled || readingBusy;
   const unknown = state.request === "uncertain";
   const ownRun = state.receipt?.requestKey === state.requestKey && state.receipt?.runId === run?.id;
@@ -61,12 +66,16 @@ export function ReinterpretationStatus({ state, rejected, disabled, outputPublis
     {state.receipt && run && !ownRun && <p className={styles.metadata}>Your earlier request remains associated with run {state.receipt.runId}, not this existing work.</p>}
     {state.eligibility?.blockingRun && state.eligibility.blockingRun.id !== run?.id && <p className={styles.metadata}>Blocking work: run {state.eligibility.blockingRun.id} · {state.eligibility.blockingRun.status}. This is separate from your request's receipt.</p>}
     {state.phase === "storage-error" && state.request === "uncertain" && <p className={styles.metadata} role="status">The request identity could not be safely recovered or updated in this tab. Fresh work and resend are paused; no replacement key will be used.</p>}
-    {state.notice === "read-error" && <p className={styles.metadata} role="status">Could not check interpretation. The last confirmed status and saved output are retained. This read failure does not mean the run failed.</p>}
-    {state.checking && <p className={styles.metadata} role="status">Checking interpretation…</p>}
+    {state.notice === "read-error" && <p className={styles.metadata} role="status">{retirementUnresolved ? "Could not check retirement. The same run identity and last confirmed information are retained. No request was sent again." : "Could not check interpretation. The last confirmed status and saved output are retained. This read failure does not mean the run failed."}</p>}
+    {state.notice === "retirement-refused" && <p className={styles.metadata} role="status">This retirement request was refused. Check interpretation before making another decision; no different run will be retired automatically.</p>}
+    {retirement && <p className={styles.metadata} role="status">{retirement.status === "confirmed" ? `Run ${retirement.runId} retired locally. Old agent status remains unknown.` : `Retirement concerns run ${retirement.runId}, not another run or admission receipt.`}</p>}
+    {state.checking && <p className={styles.metadata} role="status">{retirementUnresolved ? "Checking retirement…" : "Checking interpretation…"}</p>}
     <div className={styles.sourceStatusActions}>
-      <button className={styles.textButton} type="button" disabled={readingBusy} onClick={() => void onCheck()}>{unknown ? "Check request" : "Check interpretation"}</button>
-      {unknown && <button className={styles.textButton} type="button" disabled={busy || rejected || state.phase === "storage-error" || state.unconfirmedStop !== null} onClick={() => void onResend()}>Send same request</button>}
-      {run && !terminal(run) && !state.unconfirmedStop && <button className={styles.textButton} type="button" disabled={busy} onClick={() => void onStop()}>Stop</button>}
+      <button id="idea-interpretation-check" className={styles.textButton} type="button" disabled={readingBusy} onClick={() => void onCheck()}>{retirementUnresolved ? "Check retirement" : unknown ? "Check request" : "Check interpretation"}</button>
+      {unknown && <button className={styles.textButton} type="button" disabled={busy || retirementUnresolved || rejected || state.phase === "storage-error" || state.unconfirmedStop !== null} onClick={() => void onResend()}>Send same request</button>}
+      {run && !terminal(run) && !state.unconfirmedStop && !retirementUnresolved && <button className={styles.textButton} type="button" disabled={busy} onClick={() => void onStop()}>Stop</button>}
+      {candidate && !unknown && !retirementUnresolved && !rejected && <button className={styles.textButton} type="button"
+        disabled={busy || !state.fresh || state.phase !== "ready" || state.unconfirmedStop !== null} onClick={() => onRetire(candidate)}>Retire this run…</button>}
     </div>
     {unknown && <p className={styles.metadata}>Check only reads this request's receipt. Sending the same request is an explicit write with the original key; it may start work if the earlier request never arrived. No new key will be used to recover it.</p>}
     {state.notice === "stop-requested" && <p className={styles.metadata}>Stop was acknowledged. Native cancellation may still be settling. Check interpretation before requesting fresh work.</p>}
