@@ -16,7 +16,7 @@ import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./b
 import { settingsDaemon, checkSettingsRoutes, checkSettingsBrowser } from "./settings.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
-import { exportDaemon, checkExportRoute, checkExportBrowser } from "./export.runtime";
+import { exportDaemon, checkExportRoute, checkExportBrowser, checkExportAdmissionRace } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
 import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface, checkMediaReinterpretStatusOwner } from "./media-import.runtime";
 import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
@@ -54,6 +54,10 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/components/connection-editor.tsx", "apps/web/src/components/connection-thought-picker.tsx", "apps/web/src/components/connection-editor.module.css",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
     "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
+    "apps/web/src/app/exports/page.tsx", "apps/web/src/app/exports/new/page.tsx", "apps/web/src/app/exports/[runId]/page.tsx",
+    "apps/web/src/components/exports-view.tsx", "apps/web/src/components/exports-detail.tsx", "apps/web/src/components/exports.module.css",
+    "apps/web/src/features/export/controller.ts", "apps/web/src/features/export/download.ts", "apps/web/src/features/export/location.ts",
+    "apps/web/src/app/api/export/agentic/[id]/metadata/route.ts",
     "apps/web/src/app/globals.css", "apps/web/src/app/layout.tsx", "apps/web/src/app/page.tsx",
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
     "apps/web/src/app/settings/page.tsx", "apps/web/src/app/api/settings/agent-instructions/route.ts",
@@ -419,6 +423,28 @@ async function main(): Promise<void> {
           }
         } finally { await browser.close(); }
       }
+      return;
+    }
+    const exportRace = process.env.THOUGHTLOOM_TEST_EXPORT_RACE;
+    if (exportRace) {
+      assert.ok(exportRace === "normal" || exportRace === "unknown-saved", "Unknown focused export race");
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+        try { await checkExportAdmissionRace(page, fixtureExport, origin, exportRace); }
+        finally { fixtureExport.release(); await page.close(); }
+      } finally { await browser.close(); }
+      return;
+    }
+    if (process.env.THOUGHTLOOM_TEST_EXPORT === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try { await checkExportBrowser(page, fixtureExport, { origin, daemonOrigin, token, narrow: viewport.width < 500 }); }
+          finally { fixtureExport.release(); await page.close(); }
+        }
+      } finally { await browser.close(); }
       return;
     }
     if (process.env.THOUGHTLOOM_TEST_EXPLORE === "1") {

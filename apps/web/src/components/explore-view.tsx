@@ -295,6 +295,7 @@ export function ExploreView({ presentationOnly = false }: { presentationOnly?: b
       <div className={styles.conversationalEntry} aria-label="Conversational search">
         <Link href={searchEntryHref} prefetch={false}>Ask your library</Link>
         <Link href={searchCatalogHref} prefetch={false}>Saved searches</Link>
+        <Link href="/exports" prefetch={false}>Exports</Link>
       </div>
 
       <div className={styles.narrowTools}>

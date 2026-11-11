@@ -37,8 +37,12 @@ This agent is strictly read-only. It must not create or change stored thoughts o
 
 ## Shared boundaries
 
-Preserve authorship, provenance, and uncertainty sufficiently to understand the exported material. Export does not rewrite or remove stored material. A collector, additional formats, or publishing integrations are not prerequisites for these two workflows.
+Preserve authorship, provenance, and uncertainty sufficiently to understand the exported material. Export does not rewrite or remove library thoughts or connections. A collector, additional formats, or publishing integrations are not prerequisites for these two workflows.
 
-## Still to decide
+## Entry points and saved reports
 
-The exact visual export entry points and preview/download UX remain for the client design phase. These do not reopen the agreed effort labels, Markdown format, tree-only Simple traversal, or read-only Agentic behavior.
+Idea's contextual Export is Simple-only. Explore's Exports workspace provides a separate Agentic request form, active and historical export listing, bookmarkable detail and report download. Reopening a saved export reads the existing investigation; it does not submit it again. Closing the browser does not stop admitted work.
+
+Users must stop live active exports before deleting them, and deletion remains unavailable while cancellation is unsettled. For restored inert snapshots, explicit local-discard acknowledgment permits deletion without contacting the old agent or asserting remote cancellation. Stop and Delete are separate actions.
+
+Deletion removes the local report, history entry and export-specific execution records, rather than retaining them for diagnostics. Library thoughts and unrelated records remain untouched. Previously downloaded files, backups, physical SQLite remnants and external provider history are outside this local deletion promise. These decisions do not reopen the agreed effort labels, Markdown format, tree-only Simple traversal, or read-only Agentic behavior.

@@ -176,6 +176,7 @@ export async function checkMediaExportSurface(page: Page, origin: string): Promi
     if (call.method === "GET" && url.pathname === `/api/export/thoughts/${source.id}`) { await route.fulfill({ json: source }); return true; }
     if (call.method === "POST" && url.pathname === "/api/export/simple") { await route.fulfill({ contentType: "text/markdown; charset=utf-8", body: simple }); return true; }
     if (call.method === "POST" && url.pathname === "/api/export/agentic") { await route.fulfill({ status: 201, json: { run } }); return true; }
+    if (call.method === "GET" && url.pathname === `/api/export/agentic/${run.id}/metadata`) { await route.fulfill({ json: {id:run.id,status:"completed",createdAt:"2032-01-01T00:00:00Z",request:"Owned report using recorded media context",effort:"quick",restored:false,deletionState:"ready"} }); return true; }
     if (call.method === "GET" && url.pathname === `/api/export/runs/${run.id}`) { await route.fulfill({ json: run }); return true; }
     if (call.method === "GET" && url.pathname === `/api/export/agentic/${run.id}`) { await route.fulfill({ contentType: "text/markdown; charset=utf-8", body: report }); return true; }
     return false;
@@ -183,12 +184,12 @@ export async function checkMediaExportSurface(page: Page, origin: string): Promi
   await page.goto(`${origin}/export?thoughtId=${source.id}`, { waitUntil: "networkidle" });
   const createSimple = page.getByRole("button", { name: "Create simple export", exact: true });
   await expect(createSimple).toBeEnabled(); // positive control: the actual normal root loaded
-  const simpleSection = page.getByRole("region", { name: "Simple", exact: true });
+  const simpleSection = page.getByRole("region", { name: "Simple export setup", exact: true });
   await expect(simpleSection.getByText(filename, { exact: true })).toBeVisible();
   await exactMediaDetails(simpleSection);
   await expect(simpleSection.getByText("Image or PDF", { exact: true })).toBeVisible();
   await expect(simpleSection.getByText(/descriptor and clarification.*not.*(?:binary|file contents)/i)).toBeVisible();
-  await expect(page.getByText(/(?:report|Agentic export).*cannot open the original file/i)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Request", exact: true })).toHaveCount(0);
   audit.assertReadsOnly();
   await page.getByRole("spinbutton", { name: /count/i }).fill("3");
   await createSimple.click();
@@ -202,10 +203,12 @@ export async function checkMediaExportSurface(page: Page, origin: string): Promi
   };
   assert.deepEqual(await readDownload(simplePreview.getByRole("button", { name: "Download Markdown", exact: true })), simple);
   const request = "Owned report using recorded media context";
+  await page.goto(`${origin}/exports/new`, { waitUntil: "networkidle" });
+  await expect(page.getByText(/not original image or PDF files/i)).toBeVisible();
   await page.getByRole("textbox", { name: "Request", exact: true }).fill(request);
   await page.getByRole("combobox", { name: "Effort", exact: true }).selectOption("quick");
   await page.getByRole("button", { name: "Create report", exact: true }).click();
-  const progress = page.getByRole("region", { name: "Report progress", exact: true });
+  const progress = page.locator("main");
   await expect(progress.getByRole("heading", { name: "Report ready", exact: true })).toBeVisible();
   await expect(progress.getByRole("heading", { name: "Owned media report", exact: true })).toBeVisible();
   await expect(progress.getByRole("link", { name: filename, exact: true })).toHaveAttribute("href", `/ideas/${source.id}`);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { admitExport, downloadBytes, observeExport, readExportThought, readReport, requestSimple, stopExport } from "../apps/web/src/features/export/request";
 import type { ExportRun } from "../apps/web/src/features/export/types";
-import { handleExportAdmission, handleExportArtifact, handleExportRun, handleExportThought, handleSimpleExport } from "../apps/web/src/server/export";
+import { handleExportAdmission, handleExportArtifact, handleExportDelete, handleExportHistory, handleExportMetadata, handleExportRun, handleExportThought, handleSimpleExport } from "../apps/web/src/server/export";
 import type { DaemonRequest } from "../apps/web/src/server/daemon";
 import type { IdeaThought } from "../apps/web/src/features/idea/types";
 
@@ -131,6 +131,77 @@ describe("Export run, artifact and root server reads", () => {
     let count = 0;
     const invalidScope = await handleExportThought(request("/api/export/thoughts/root-1?scope=history"), root.id, { callDaemon: async () => { count++; return json(root); } });
     expect(invalidScope.status).toBe(400); expect(count).toBe(0);
+  });
+});
+
+describe("Export history server boundary", () => {
+  const item = {id:"run-1",status:"completed",createdAt:"2032-01-01T00:00:00Z",request:"Owned question",effort:"quick",restored:false,deletionState:"ready"} as const;
+  test("forwards catalog and detail through the injected server transport and projects public metadata", async () => {
+    const calls: DaemonRequest[] = [];
+    const deps = {callDaemon:async (value:DaemonRequest) => { calls.push(value); return json(value.path.endsWith("/metadata") ? {...item,kind:"evolve",promptId:"private"} : {items:[{...item,sessionId:"private"}],nextCursor:"opaque"}); }};
+    const page = await handleExportHistory(request("/api/export/agentic?limit=2&cursor=opaque"),deps);
+    expect(page.status).toBe(200); expect(page.headers.get("cache-control")).toMatch(/private.*no-store/i);
+    expect(await page.json()).toEqual({items:[item],nextCursor:"opaque"});
+    const detail = await handleExportMetadata(request("/api/export/agentic/run-1/metadata"),"run-1",deps);
+    expect(detail.status).toBe(200); expect(detail.headers.get("cache-control")).toMatch(/no-store/i); expect(await detail.json()).toEqual(item);
+    expect(calls).toEqual([{method:"GET",path:"/exports/agentic?limit=2&cursor=opaque"},{method:"GET",path:"/exports/agentic/run-1/metadata"}]);
+  });
+  test("rejects invalid queries, IDs, methods and delete bodies before transport", async () => {
+    let calls = 0; const deps = {callDaemon:async () => { calls++; return json({items:[],nextCursor:null}); }};
+    for (const query of ["?limit=0","?limit=201","?limit=01","?limit=1.5","?limit=1&limit=2","?cursor=","?x=1"]) expect((await handleExportHistory(request(`/api/export/agentic${query}`),deps)).status).toBe(400);
+    for (const id of ["", "..", "x/y", "bad?query"]) {
+      expect((await handleExportMetadata(request("/api/export/agentic/a/metadata"),id,deps)).status).toBe(400);
+      expect((await handleExportDelete(request("/api/export/agentic/a","DELETE"),id,deps)).status).toBe(400);
+    }
+    expect((await handleExportMetadata(request("/api/export/agentic/a/metadata?x=1"),"a",deps)).status).toBe(400);
+    expect((await handleExportDelete(request("/api/export/agentic/a","DELETE","{}"),"a",deps)).status).toBe(400);
+    expect((await handleExportHistory(request("/api/export/agentic","POST","{}"),deps)).status).toBe(400);
+    expect(calls).toBe(0);
+  });
+  for (const bad of [null, [], {}, { ...run, kind:"evolve", sessionId:"private" }, { ...run, kind:"weave", promptId:"private" }, { ...item, id:"other" }, { ...item, status:"invented" },
+    { ...item, effort:"extreme" }, { ...item, restored:"false" }, { ...item, deletionState:"unknown" },
+    { ...item, status:"running", deletionState:"ready" }, { ...item, createdAt:"bad" }, { ...item, request:" " }]) {
+    test(`rejects malformed metadata ${JSON.stringify(bad)}`, async () => {
+      const response = await handleExportMetadata(request("/api/export/agentic/run-1/metadata"),"run-1",{callDaemon:async () => json(bad)});
+      expect(response.status).toBe(502); expect(await response.text()).not.toContain("private");
+    });
+  }
+  for (const bad of [null, [], {}, {items:"bad",nextCursor:null}, {items:[item,item],nextCursor:null},
+    {items:[item],nextCursor:5}, {items:[item],nextCursor:" "}, {items:[item],nextCursor:"x".repeat(8193)}, {items:[{...item,effort:"extreme"}],nextCursor:null},
+    {items:[{...run,kind:"evolve",sessionId:"private"}],nextCursor:null}, {items:[{...run,kind:"weave",promptId:"private"}],nextCursor:null}]) {
+    test(`rejects malformed collection ${JSON.stringify(bad)}`, async () => {
+      const response = await handleExportHistory(request("/api/export/agentic"),{callDaemon:async () => json(bad)});
+      expect(response.status).toBe(502); expect(await response.text()).not.toContain("private");
+    });
+  }
+  test("catalog and metadata sanitize definite authorization and unavailable responses", async () => {
+    for (const status of [400,401,403,503,500]) {
+      const response = await handleExportHistory(request("/api/export/agentic"),{callDaemon:async () => new Response("private-upstream",{status})});
+      expect(response.status).toBe([400,401,403].includes(status) ? status : 502);
+      expect(response.headers.get("cache-control")).toMatch(/no-store/i); expect(await response.text()).not.toContain("private-upstream");
+    }
+    for (const status of [401,403,404,503,500]) {
+      const response = await handleExportMetadata(request("/api/export/agentic/run-1/metadata"),"run-1",{callDaemon:async () => new Response("private-upstream",{status})});
+      expect(response.status).toBe([401,403,404].includes(status) ? status : 502);
+      expect(response.headers.get("cache-control")).toMatch(/no-store/i); expect(await response.text()).not.toContain("private-upstream");
+    }
+  });
+  test("forwards empty DELETE, preserves definite refusals, and sanitizes upstream failures", async () => {
+    const calls: DaemonRequest[] = [];
+    const ok = await handleExportDelete(request("/api/export/agentic/run-1","DELETE"),"run-1",{callDaemon:async value => {calls.push(value);return new Response(null,{status:204});}});
+    expect(ok.status).toBe(204); expect(ok.headers.get("cache-control")).toMatch(/no-store/i); expect(await ok.text()).toBe("");
+    expect(calls).toEqual([{method:"DELETE",path:"/exports/agentic/run-1"}]);
+    for (const status of [401,403,404,409]) {
+      const response = await handleExportDelete(request("/api/export/agentic/run-1","DELETE"),"run-1",{callDaemon:async () => new Response("private-upstream",{status})});
+      expect(response.status).toBe(status); expect(await response.text()).not.toContain("private-upstream");
+    }
+    for (const handler of [
+      () => handleExportHistory(request("/api/export/agentic"),{callDaemon:async () => {throw new Error("private-upstream");}}),
+      () => handleExportMetadata(request("/api/export/agentic/run-1/metadata"),"run-1",{callDaemon:async () => new Response("private-upstream",{status:503})}),
+      () => handleExportDelete(request("/api/export/agentic/run-1","DELETE"),"run-1",{callDaemon:async () => new Response("private-upstream",{status:500})}),
+    ]) { const response = await handler(); expect(response.status).toBe(502); expect(await response.text()).not.toContain("private-upstream"); }
+    const missing = await handleExportMetadata(request("/api/export/agentic/run-1/metadata"),"run-1",{callDaemon:async () => new Response("private-upstream",{status:404})});
+    expect(missing.status).toBe(404); expect(await missing.text()).not.toContain("private-upstream");
   });
 });
 
