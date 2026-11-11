@@ -33,6 +33,14 @@ Thoughtloom's application capabilities must retain scoped reads, rejection filte
 
 Existing sessions retain their saved permission bindings rather than gaining access implicitly on restart. A future discussion will explore System One/Jev-like decision models for tighter contextual permissions; that is not part of the initial permissive policy.
 
+### Native result attribution
+
+The saved endpoint and session identify the native conversation; its owner, run and protocol metadata must agree with the run. The saved binding remains immutable creation intent, not a requirement that mutable native model, directory, title, view time or unrelated metadata remain identical. Deny-bound execution still verifies its saved native permission rules. Search cleanup retains its separately sealed, stricter cancellation authority.
+
+The daemon reads the complete paginated parent-session history and compares actual user inputs, in order and byte-for-byte, with the persisted prompt journal. OpenCode supplies no assistant-to-input parent identifier: the daemon correlates the final parent assistant and successful idle boundary after the current owned input, with no active or inbox work, rather than inventing one. Only that final assistant's text becomes an application envelope. Native tool, child, intermediate and compaction text is not an application result. Opaque auxiliary history and unfamiliar assistant parts alone are not input conflicts. Missing decisive evidence remains uncertain and observation-only, without resend. A different actual user input is a conflict, not an application request; cancellation must not claim or intentionally interrupt unrelated foreign work. This is not mixed-conversation support or an atomic barrier against external writers.
+
+Ordinary cancellation requires a terminal boundary for every potentially dispatched journal step and an empty inbox/inactive session; an empty snapshot or interrupt acknowledgement is not proof. A queued non-user native item remains pending work, not an owned prompt to cancel or a reason to interrupt. Stop and rejection still fence late publication. Restricted Search, Export and import retain their deny policy and reject actual forbidden-tool or standalone shell execution evidence, as well as conflicting inputs. Previously interrupted runs are not automatically revived.
+
 ## Client and daemon boundary
 
 The browser client must never access the daemon directly. Browser requests that need daemon functionality go through the Next.js server, which communicates with the daemon.

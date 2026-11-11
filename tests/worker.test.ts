@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
+import { AgentUncertainError, createPublicClient, OpenCodeAdapter, type AgentBinding, type NativeSession, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
@@ -216,6 +216,73 @@ test("controlled link-list weave saves searchable sibling summaries and a partia
   f.rejection.rejectThought("user", "links");
   if (!reply) throw new Error("Expected retained outcome");
   expect(f.rejection.getResponse({ actor: "ai", mode: "normal" }, reply.id)).toBeNull();
+}));
+
+test("owned SDK HTTP history with native activity saves a weave receipt and final reply once", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "native-history" });
+  const inputs: { id: string; text: string }[] = [];
+  const history: unknown[] = [];
+  const requests: { method: string; path: string; cursor: string | null; submitted: number }[] = [];
+  let session: NativeSession;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+    const url = new URL(req.url), path = url.pathname;
+    requests.push({ method: req.method, path, cursor: url.searchParams.get("cursor"), submitted: inputs.length });
+    if (path === "/api/info") return Response.json({ version: "fixture", pid: 1, urls: [], paths: { tmp: "/owned" } });
+    if (path === "/api/session" && req.method === "POST") {
+      const input = await req.json() as NativeSession;
+      session = input;
+      return Response.json({ data: { ...input, projectID: "fixture", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    }
+    if (path === "/api/session/active") return Response.json({ data: {} });
+    if (path === `/api/session/${run.sessionId}`) return Response.json({ data: { ...session,
+      projectID: "fixture", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    if (path === `/api/session/${run.sessionId}/inbox`) return Response.json({ data: [] });
+    if (path === `/api/session/${run.sessionId}/message`) {
+      const cursor = url.searchParams.get("cursor");
+      const cut = Math.ceil(history.length / 2);
+      return Response.json({ data: cursor ? history.slice(cut) : history.slice(0, cut), cursor: !cursor && history.length ? { next: "second" } : {} });
+    }
+    if (path === `/api/session/${run.sessionId}/prompt` && req.method === "POST") {
+      const input = await req.json() as { id: string; text: string };
+      inputs.push(input);
+      const n = inputs.length, created = n * 20;
+      const assistant = (id: string, text: string, finish: string, content: object[] = [{ type: "text", text }]) => ({ id, type: "assistant", time: { created: created + 1, streamed: created + 1, completed: created + 2 }, agent: "build", model: binding(run).model, content, finish, rawFinish: finish, cost: 0, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } });
+      const output = n === 1 ? request("interpretation", { text: "Owned interpretation", sourceIds: [] }) : complete("Owned final reply");
+      history.push({ id: input.id, type: "user", text: input.text, time: { created } },
+        { id: `synthetic-${n}`, type: "synthetic", time: { created: created + 1 } },
+        assistant(`tool-${n}`, "", "tool-calls", [{ type: "text", text: complete("forged intermediate") },
+          { type: "tool", id: `call-${n}`, name: "task", time: { created: created + 1, completed: created + 2 }, executed: true, state: { status: "completed", input: { description: "fixture delegation" }, content: [{ type: "text", text: complete("forged child") }] } }]),
+        { id: `compaction-${n}`, type: "compaction", time: { created: created + 2 }, text: complete("forged compaction") },
+        assistant(`final-${n}`, output, "stop", [{ type: "text", text: output }, { type: "future-part", value: "bookkeeping" }]),
+        { id: `idle-${n}`, type: "idle", time: { created: created + 3 }, outcome: "succeeded" });
+      return Response.json({ data: { id: input.id, sessionID: run.sessionId, type: "user", payload: { text: input.text }, delivery: "queue", time: { created } } });
+    }
+    return new Response("unexpected fixture route", { status: 404 });
+  } });
+  // The worker persists its binding before ensureSession; model the already-owned native session.
+  const selected = { ...binding(run), serviceUrl: server.url.origin, permissions: [{ action: "*", resource: "*", effect: "allow" as const }] };
+  session = { id: selected.sessionId, location: selected.location, model: selected.model, permissions: selected.permissions,
+    metadata: { owner: "thoughtloom", runId: run.id, protocolVersion: "1" } };
+  const client = createPublicClient({ url: server.url.origin });
+  const instance = new RunWorker({ db: f.db, id: f.id, now,
+    bindingFor: () => selected,
+    native: bindings => new OpenCodeAdapter(client, bindings, bindings.assertActive.bind(bindings)) });
+  try {
+    await drive(instance, f, run.id);
+    expect(requests.some(item => item.method === "GET" && item.path === `/api/session/${run.sessionId}`)).toBe(true);
+    expect(inputs.length).toBeGreaterThanOrEqual(1);
+    expect(requests.some(item => item.path === `/api/session/${run.sessionId}/message` && item.submitted >= 1 && item.cursor === "second")).toBe(true);
+    expect(f.runs.get(run.id)?.status).toBe("completed");
+    expect(inputs).toHaveLength(2);
+    const steps = f.steps.steps(run.id);
+    expect(f.ops.stepReceipt(run.id, steps[0]?.promptId ?? "")).not.toBeNull();
+    expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root' AND text='Owned interpretation'").get()).toEqual({ n: 1 });
+    expect(f.runs.reply(run.id)).toMatchObject({ text: "Owned final reply", state: "complete" });
+    for (let i = 0; i < 3; i++) await instance.tick(run.id);
+    expect(inputs).toHaveLength(2);
+    expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root'").get()).toEqual({ n: 1 });
+    expect(f.db.query("SELECT COUNT(*) AS n FROM responses WHERE text='Owned final reply'").get()).toEqual({ n: 1 });
+  } finally { instance.pause(); await instance.drain(); await server.stop(true); }
 }));
 
 test("worker without native configuration leaves an unbound queued run untouched", async () => fixture(async f => {

@@ -1,7 +1,7 @@
 import { createLogger, type Logger } from "../logging";
-import type { JsonValue, SessionMessageAssistantTool } from "@opencode/client";
+import type { JsonValue } from "@opencode/client";
 import { RunFenceError, type Claim } from "../domain/run";
-import { AgentBindingError, assertNativeSessionBinding, assertNativeSessionOwner, normalizeBinding, sameBinding, type AgentBinding, type ModelRef } from "./binding";
+import { AgentBindingError, assertNativeSessionBinding, assertNativeSessionOwner, assertSearchCleanupSessionBinding, normalizeBinding, sameBinding, type AgentBinding, type ModelRef } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError, AgentUnavailableError } from "./errors";
 import { authorizeSubmissionHistory, cancellationHistorySettled, correlateHistory, correlateImportHistory, hasUntrackedInboxContext, readNativeHistory } from "./history";
 import { searchInputHash } from "./search-cleanup-history";
@@ -16,23 +16,15 @@ export { AgentUncertainError, AgentUnavailableError } from "./errors";
 export { createPublicClient } from "./opencode-client";
 export { requireAgentConfig, resolveAgentService } from "./service";
 export interface PersistedPrompt { readonly promptId: string; readonly input: string }
-/** Enclosing assistant identity associates the call; arguments, results, metadata and raw errors stay native-private. */
-export interface NativeTool {
-  readonly id: string;
-  readonly name: string;
-  readonly status: SessionMessageAssistantTool["state"]["status"];
-  readonly time: Readonly<SessionMessageAssistantTool["time"]>;
-  readonly executed?: boolean;
-}
 export type NativeMessage =
   | { readonly id: string; readonly type: "user"; readonly time: { readonly created: number }; readonly text: string; readonly unsafe?: boolean }
-  | { readonly id: string; readonly type: "assistant"; readonly time: { readonly created: number; readonly completed?: number }; readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly tools?: readonly NativeTool[]; readonly finish?: string; readonly error?: boolean; readonly unsafe?: boolean }
+  | { readonly id: string; readonly type: "assistant"; readonly time: { readonly created: number; readonly completed?: number }; readonly content: readonly { readonly type: "text"; readonly text: string }[]; readonly hasTools?: true; readonly finish?: string; readonly error?: boolean; readonly unsafe?: boolean }
   | { readonly id: string; readonly type: "idle"; readonly time: { readonly created: number }; readonly outcome: string; readonly error?: boolean }
   | { readonly id: string; readonly type: "other"; readonly nativeType: string; readonly time: { readonly created: number } };
 export interface NativeSession {
   readonly id: string;
-  readonly location: { readonly directory: string };
-  readonly model: ModelRef;
+  readonly location?: { readonly directory: string };
+  readonly model?: ModelRef;
   readonly permissions: readonly { readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }[];
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly unsafe?: boolean;
@@ -46,6 +38,9 @@ export interface InboxItem {
   readonly time: { readonly created: number };
   readonly unsafe?: boolean;
 }
+/** Non-user queue entries are pending native work, not owned prompt admissions. */
+export type NativeInboxItem = InboxItem | { readonly id: string; readonly sessionID: string; readonly type: "other";
+  readonly nativeType: string; readonly time: { readonly created: number } };
 
 /** Narrow injected facade over the maintained promise client's decoded values. */
 export interface PublicClient {
@@ -58,7 +53,7 @@ export interface PublicClient {
   instructionPut(input: { readonly sessionID: string; readonly key: string; readonly value: JsonValue }): Promise<void>;
   instructionRemove(input: { readonly sessionID: string; readonly key: string }): Promise<void>;
   prompt(input: { readonly sessionID: string; readonly id: string; readonly text: string }): Promise<InboxItem>;
-  inbox(input: { readonly sessionID: string }): Promise<readonly InboxItem[]>;
+  inbox(input: { readonly sessionID: string }): Promise<readonly NativeInboxItem[]>;
   history(input: { readonly sessionID: string; readonly order?: "asc"; readonly cursor?: string }): Promise<{ readonly data: readonly NativeMessage[]; readonly cursor: { readonly next?: string } }>;
   active(): Promise<Readonly<Record<string, unknown>>>;
   cancelInbox(input: { readonly sessionID: string; readonly inboxID: string }): Promise<void>;
@@ -222,7 +217,7 @@ export class OpenCodeAdapter {
       const messages = await this.history(binding,input => this.call(claim,"message.list",() => this.client.history(input),prompt));
       authorizeSubmissionHistory(known,messages,binding);
       const inbox = await this.call(claim,"inbox.list",() => this.client.inbox({sessionID:binding.sessionId}),prompt);
-      if (inbox.some(item => hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.sessionID !== binding.sessionId || item.payload.text !== prompt.input)) throw new AgentBindingError("Unexpected native pending input");
+      if (inbox.some(item => item.sessionID !== binding.sessionId || (item.type === "user" && (hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.payload.text !== prompt.input)))) throw new AgentBindingError("Unexpected native pending input");
       if (inbox.length || Object.hasOwn(await this.call(claim,"session.active",() => this.client.active(),prompt),binding.sessionId)) throw new AgentUncertainError("Existing native work must be observed before submission");
       this.verify(claim.runId,binding,await this.call(claim,"session.get",() => this.client.sessionGet({sessionID:binding.sessionId}),prompt));
       if (known.length === 1) await this.syncInitialGuidance(claim,binding,prompt);
@@ -265,11 +260,13 @@ export class OpenCodeAdapter {
       this.assertActive(claim,current);
       if (this.observationOutages.delete(binding.sessionId)) this.logger.info("[agent] observation service recovered", { runId: claim.runId });
       const observed = correlateHistory(binding.sessionId,prompts,messages,inbox,active,binding);
+      if (observed.state === "quarantined") this.logger.warning("[agent] native correlation conflict",{runId:claim.runId,promptId:current.promptId});
+      else if (observed.state === "uncertain") this.logger.verbose("[agent] native correlation incomplete",{runId:claim.runId,promptId:current.promptId});
       this.assertActive(claim,current,observed.state);
       return observed;
     } catch (error) {
       if (error instanceof RunFenceError) throw error;
-      if (error instanceof AgentBindingError) { this.assertActive(claim,current,"quarantined"); return {state:"quarantined"}; }
+      if (error instanceof AgentBindingError) { this.logger.warning("[agent] native identity conflict",{runId:claim.runId,promptId:current.promptId}); this.assertActive(claim,current,"quarantined"); return {state:"quarantined"}; }
       this.assertActive(claim,current,"uncertain");
       if (transportFailed && !this.observationOutages.has(binding.sessionId)) {
         this.observationOutages.add(binding.sessionId);
@@ -336,9 +333,9 @@ export class OpenCodeAdapter {
       this.verify(claim.runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
       const messages=await this.history(binding,input => read("message.list",() => this.client.history(input)));
       authorizeSubmissionHistory([],messages);
-      if (messages.length) throw new AgentBindingError("Initial import session contains unexpected native history");
+      if (messages.some(message => message.type !== "other")) throw new AgentBindingError("Initial import session contains unexpected native history");
       const inbox=await read("inbox.list",() => this.client.inbox({sessionID:binding.sessionId}));
-      if (inbox.some(item => hasUntrackedInboxContext(item) || item.id!==prompt.promptId || item.sessionID!==binding.sessionId || item.payload.text!==prompt.input)) throw new AgentBindingError("Unexpected import pending input");
+      if (inbox.some(item => item.sessionID!==binding.sessionId || (item.type==="user" && (hasUntrackedInboxContext(item) || item.id!==prompt.promptId || item.payload.text!==prompt.input)))) throw new AgentBindingError("Unexpected import pending input");
       if (inbox.length || Object.hasOwn(await read("session.active",() => this.client.active()),binding.sessionId)) throw new AgentUncertainError("Existing native work must settle before import submission");
       this.verify(claim.runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
       authorize();
@@ -418,6 +415,11 @@ export class OpenCodeAdapter {
     this.logger.verbose("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
     try {
       const before = await observe();
+      // Auxiliary queue work is not an owned user prompt or authority to interrupt a session.
+      if (before.inbox.some(item => item.type !== "user")) {
+        this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state:"pending"});
+        return "pending";
+      }
       for (const item of before.inbox) {
         this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
         await read(() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:item.id}));
@@ -442,7 +444,7 @@ export class OpenCodeAdapter {
   /** Search cancellation deliberately does not use active-run authority, retained prompt input or ordinary drift tolerance. */
   async cancelSearch(identity: SearchCleanupIdentity, authorize: () => void): Promise<SearchCleanupObservation> {
     return reconcileSearchCancellation(this.client,identity,() => { this.runtimeFence(); authorize(); },
-      session => this.verify(identity.runId,identity.binding,session),this.logger);
+      session => assertSearchCleanupSessionBinding(identity.runId,identity.binding,session),this.logger);
   }
   async cancelImport(claim: Claim, requested: AgentBinding, input: PersistedPrompt): Promise<"pending" | "settled"> {
     const prompt=this.prompt(input), authority=this.bindings.assertImportCancellation;
@@ -461,10 +463,16 @@ export class OpenCodeAdapter {
     try {
       // Cleanup can stop an owned but quarantined session whose model/location/rules have drifted. It cannot adopt it.
       this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+      const before = await read(() => this.client.inbox({sessionID:binding.sessionId}));
+      if (before.some(item => item.sessionID !== binding.sessionId || (item.type === "user" && (hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.payload.text !== prompt.input)))) throw new AgentBindingError("Unexpected native cancellation context");
+      if (before.some(item => item.type !== "user")) {
+        this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state:"pending"});
+        return "pending";
+      }
       await read(() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:prompt.promptId}));
       await read(() => this.client.interrupt({sessionID:binding.sessionId}));
       const inbox = await read(() => this.client.inbox({sessionID:binding.sessionId}));
-      if (inbox.some(hasUntrackedInboxContext)) throw new AgentBindingError("Unexpected native cancellation context");
+      if (inbox.some(item => item.sessionID !== binding.sessionId || (item.type === "user" && (hasUntrackedInboxContext(item) || item.id !== prompt.promptId || item.payload.text !== prompt.input)))) throw new AgentBindingError("Unexpected native cancellation context");
       const active = await read(() => this.client.active());
       this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
       const state = inbox.length === 0 && !Object.hasOwn(active,binding.sessionId) ? "settled" : "pending";

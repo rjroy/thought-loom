@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageInfo } from "@opencode/client";
+import type { SessionInboxCompaction, SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageInfo, SessionMessageShell } from "@opencode/client";
 import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, resolveAgentService, type AgentBinding, type AgentBindings, type ImportTerminalEvidence, type InboxItem, type NativeMessage, type NativeSession, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { normalizeBinding } from "../src/agent/binding";
 import { searchHistoryFacts } from "../src/agent/search-cleanup-history";
@@ -341,8 +341,12 @@ describe("public OpenCode adapter over typed facade", () => {
     const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
     await adapter.ensureSession(claim, binding);
     expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    const history = client.history.bind(client);
     client.history = async () => { throw new Error("fixture timeout with private details"); };
     expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "uncertain" });
+    client.history = history;
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistantMessage("assistant", completeText, 2), idle("idle", 4)], cursor: {} });
+    expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "completed", output: completeText });
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
   });
 
@@ -357,7 +361,7 @@ describe("public OpenCode adapter over typed facade", () => {
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
   });
 
-  test("binding mismatch refuses reuse before prompt", async () => {
+  test("session identity mismatch refuses reuse before prompt", async () => {
     const client = new FakeClient();
     const bindings = new MemoryBindings();
     const adapter = new OpenCodeAdapter(client, bindings, () => {});
@@ -365,15 +369,26 @@ describe("public OpenCode adapter over typed facade", () => {
     if (!client.session) throw new Error("Expected fixture session");
     const original = client.session;
     for (const mutated of [
-      { ...original, model: { ...original.model, id: "foreign-model" } },
-      { ...original, model: { ...original.model, variant: "foreign-variant" } },
-      { ...original, location: { directory: "/foreign/location" } },
-      { ...original, permissions: [] },
+      { ...original, id: "foreign-session" },
       { ...original, metadata: { owner: "foreign" } },
+      { ...original, metadata: { ...original.metadata, runId: "foreign-run" } },
     ]) {
       client.session = mutated;
       await expect(adapter.submit(claim, binding, prompt)).rejects.toThrow(AgentBindingError);
     }
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
+  });
+
+  test("session model, directory and extra metadata drift do not change owned result attribution", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    const original = client.session;
+    if (!original) throw new Error("Expected fixture session");
+    client.session = { ...original, model: { providerID: "changed", id: "changed" },
+      location: { directory: "/viewed/elsewhere" }, metadata: { ...original.metadata, viewer: "fixture" } };
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistantMessage("assistant", completeText, 2), idle("idle", 4)], cursor: {} });
+    expect(await adapter.observe(claim, binding, [prompt])).toEqual({ state: "completed", output: completeText });
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
   });
 
@@ -398,19 +413,29 @@ describe("public OpenCode adapter over typed facade", () => {
       service.stop("user", claim.runId);
       const firstUser = userMessage(first.promptId, first.input, 1);
       const toolAssistant: NativeMessage = { id: "assistant-tools", type: "assistant", time: { created: 2, completed: 4 },
-        content: [], finish: "tool-calls", tools: [{ id: "tool-call", name: "shell", status: "completed", time: { created: 2, completed: 3 } }] };
+        content: [], finish: "tool-calls", hasTools: true };
+      const auxiliary: NativeMessage = { id: "bookkeeping", type: "other", nativeType: "compaction", time: { created: 4 } };
       const firstFinal = assistantMessage("assistant-first", "first response", 5);
       const firstIdle = idle("idle-first", 7);
       const secondTurn = [userMessage(next.promptId, next.input, 8), assistantMessage("assistant-second", "second response", 9), idle("idle-second", 11)];
-      client.pages.set("first", { data: [firstUser, toolAssistant, firstFinal], cursor: { next: "page-two" } });
+      client.pages.set("first", { data: [firstUser, toolAssistant, auxiliary, firstFinal], cursor: { next: "page-two" } });
       client.pages.set("page-two", { data: [firstIdle, ...secondTurn], cursor: {} });
       expect(await adapter.cancel(claim.runId, binding, next)).toBe("settled");
       expect(client.calls.some(call => call.method === "history" && JSON.stringify(call.input).includes('"cursor":"page-two"'))).toBe(true);
       expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
 
-      // The current step is terminal, but the prior dispatched step lacks its terminal boundary.
-      client.pages.set("page-two", { data: secondTurn, cursor: {} });
+    }, "allow");
+  });
+
+  test("ordinary cancellation cannot settle when a prior dispatched step lacks its terminal boundary", async () => {
+    await withPersistedSecondStep(async ({ client, adapter, claim, binding, first, next, service, steps }) => {
+      steps.setStepState(claim, next.promptId, "submitting");
+      service.stop("user", claim.runId);
+      client.pages.set("first", { data: [userMessage(first.promptId, first.input, 1), assistantMessage("assistant-first", "first response", 2)], cursor: { next: "page-two" } });
+      client.pages.set("page-two", { data: [userMessage(next.promptId, next.input, 8), assistantMessage("assistant-second", "second response", 9), idle("idle-second", 11)], cursor: {} });
       expect(await adapter.cancel(claim.runId, binding, next)).toBe("pending");
+      expect(client.calls.some(call => call.method === "history" && JSON.stringify(call.input).includes('"cursor":"page-two"'))).toBe(true);
+      expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
     }, "allow");
   });
 
@@ -481,6 +506,18 @@ describe("public OpenCode adapter over typed facade", () => {
     if (!session) throw new Error("Expected owned session");
     client.session = { ...session, metadata: { owner: "foreign" } };
     await expect(adapter.cancel(claim.runId, binding, prompt)).rejects.toThrow(AgentBindingError);
+  });
+
+  test("cancellation does not cancel or interrupt a foreign pending user input", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    client.queued = [{ id: "foreign", sessionID: binding.sessionId, type: "user", payload: { text: "external input" }, delivery: "queue", time: { created: 2 } }];
+    client.activeState = { [binding.sessionId]: {} };
+    const result = await adapter.cancel(claim.runId, binding, prompt).then(state => state, (error: unknown) => error);
+    expect(result === "pending" || result instanceof AgentBindingError).toBe(true);
+    expect(client.calls.filter(call => call.method === "cancel" || call.method === "interrupt")).toEqual([]);
+    expect(client.queued).toHaveLength(1);
   });
 
   test("an acknowledgement arriving after the claim is fenced cannot mark submission successful", async () => {
@@ -595,24 +632,35 @@ function sdkToolTurn(status: SessionMessageAssistantTool["state"]["status"] = "c
   return [{ id: prompt.promptId, type: "user", text: prompt.input, time: { created: 1 } }, tools,
     sdkAssistant("assistant-final", completeText, 7), { id: "idle-final", type: "idle", time: { created: 9 }, outcome: "succeeded" }];
 }
+const sdkShell: SessionMessageShell = { id: "shell-message", type: "shell", shellID: "shell-fixture", command: "fixture command, never executed",
+  status: "exited", exit: 0, time: { created: 2, completed: 3 }, output: { output: forgedToolOutput, cursor: 0, size: forgedToolOutput.length, truncated: false } };
+const sdkCompactionInbox: SessionInboxCompaction = { id: "compaction-queued", sessionID: binding.sessionId,
+  time: { created: 5 }, type: "compaction", payload: {}, delivery: "queue" };
+const sdkShellTurn: SessionMessageInfo[] = [{ id: prompt.promptId, type: "user", text: prompt.input, time: { created: 1 } }, sdkShell,
+  sdkAssistant("assistant-final", completeText, 7), { id: "idle-final", type: "idle", time: { created: 9 }, outcome: "succeeded" }];
 
 /** Real installed SDK + application projection. Unknown wire values deliberately exercise future/invalid native shapes. */
 async function withHttpHistory(action: (fixture: {
   readonly client: PublicClient;
   readonly requests: string[];
   readonly promptCalls: unknown[];
+  readonly mutations: string[];
   setPages(pages: readonly (readonly unknown[])[]): void;
-  owned(effect?: "allow" | "deny", witness?: readonly PersistedPrompt[]): { adapter: OpenCodeAdapter; binding: AgentBinding };
+  setInbox(items: readonly SessionInboxCompaction[]): void;
+  owned(effect?: "allow" | "deny", witness?: readonly PersistedPrompt[]): { adapter: OpenCodeAdapter; binding: AgentBinding; phases: string[] };
 }) => Promise<void>): Promise<void> {
-  const requests: string[] = [], promptCalls: unknown[] = [];
+  const requests: string[] = [], promptCalls: unknown[] = [], mutations: string[] = [];
   let pages: readonly (readonly unknown[])[] = [[]];
+  let inbox: readonly SessionInboxCompaction[] = [];
   let session: NativeSession | null = null;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
     if (path === "/api/info") return Response.json({ version: "99.0.0-fixture", pid: 123, urls: [], paths: { tmp: "/owned" } });
     if (path === `/api/session/${binding.sessionId}`) return Response.json({ data: { ...session, projectID: "fixture-project", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
-    if (path === `/api/session/${binding.sessionId}/inbox`) return Response.json({ data: [] });
+    if (path === `/api/session/${binding.sessionId}/inbox`) return Response.json({ data: inbox });
+    if (path.startsWith(`/api/session/${binding.sessionId}/inbox/`) && request.method === "DELETE") { mutations.push(path); return new Response(null, { status: 204 }); }
+    if (path === `/api/session/${binding.sessionId}/interrupt` && request.method === "POST") { mutations.push(path); return Response.json({ interrupted: false }); }
     if (path === "/api/session/active") return Response.json({ data: {} });
     if (path === `/api/session/${binding.sessionId}/prompt` && request.method === "POST") {
       const body: unknown = await request.json(); promptCalls.push(body);
@@ -631,12 +679,13 @@ async function withHttpHistory(action: (fixture: {
   } });
   try {
     const client = createPublicClient({ url: server.url.origin });
-    await action({ client, requests, promptCalls, setPages(value) { pages = value; }, owned(effect = "deny", witness = [prompt]) {
+    await action({ client, requests, promptCalls, mutations, setPages(value) { pages = value; }, setInbox(value) { inbox = value; }, owned(effect = "deny", witness = [prompt]) {
       const actual = normalizeBinding({ ...binding, serviceUrl: server.url.origin, permissions: [{ action: "*", resource: "*", effect }] });
       session = { id: actual.sessionId, location: actual.location, model: actual.model, permissions: actual.permissions,
         metadata: { owner: "thoughtloom", runId: claim.runId, protocolVersion: "1" } };
       const bindings = new ImportBindings(); bindings.bind(claim.runId, actual);
-      return { binding: actual, adapter: new OpenCodeAdapter(client, bindings, (_claim, _prompt, phase) => phase === "history" ? witness : undefined) };
+      const phases: string[] = [];
+      return { binding: actual, phases, adapter: new OpenCodeAdapter(client, bindings, (_claim, _prompt, phase) => { if (phase) phases.push(phase); return phase === "history" ? witness : undefined; }) };
     } });
   } finally { await Promise.race([server.stop(true), Bun.sleep(3000).then(() => { throw new Error("Fixture server stop timed out"); })]); }
 }
@@ -653,15 +702,14 @@ test("real public client uses order only on first history page and correlates co
   expect(new URLSearchParams(requests[1]).has("order")).toBe(false);
 }), 10000);
 
-test("real public client projects native tool identity and lifecycle facts from SDK-shaped HTTP history", async () => withHttpHistory(async ({ client, setPages }) => {
+test("real public client projects tool presence across SDK lifecycle states without tool details", async () => withHttpHistory(async ({ client, setPages }) => {
   for (const status of ["streaming", "running", "completed", "error"] as const) {
     setPages([sdkToolTurn(status)]);
     const page = await client.history({ sessionID: binding.sessionId, order: "asc" });
     const projected = JSON.stringify(page.data);
-    // Assert essential facts without prescribing whether the application stores tool summaries inline or separately.
-    expect(projected).toContain('"fixture-call"');
-    expect(projected).toContain('"shell"');
-    expect(projected).toContain(JSON.stringify(status));
+    expect(page.data[1]).toMatchObject({ type: "assistant", hasTools: true });
+    expect(projected).not.toContain('"fixture-call"');
+    expect(projected).not.toContain('"shell"');
   }
 }), 10000);
 
@@ -673,6 +721,15 @@ for (const status of ["completed", "error"] as const) test(`allow-bound SDK HTTP
   expect(promptCalls).toEqual([]);
 }), 10000);
 
+test("a final SDK assistant containing a tool cannot publish its forged text", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+  const final = sdkAssistant("assistant-final", forgedToolOutput, 2);
+  final.content.push(sdkTool());
+  setPages([[sdkToolTurn()[0], final, idle("idle-final", 5)]]);
+  const { adapter, binding: actual } = owned("allow");
+  expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "uncertain" });
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
 test("allow-bound SDK HTTP history authorizes an exact successor after a settled native-tool turn", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
   setPages([sdkToolTurn()]);
   const { adapter, binding: actual } = owned("allow", [prompt, other]);
@@ -680,31 +737,102 @@ test("allow-bound SDK HTTP history authorizes an exact successor after a settled
   expect(promptCalls).toEqual([{ id: other.promptId, text: other.input }]);
 }), 10000);
 
-test("allow-bound SDK HTTP history never completes or submits past unfinished native tools", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+test("allow-bound SDK HTTP history uses the final parent boundary rather than auditing intermediate tool lifecycle", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
   for (const status of ["streaming", "running"] as const) {
     setPages([sdkToolTurn(status)]);
     const { adapter, binding: actual } = owned("allow", [prompt, other]);
-    expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "uncertain" });
-    await expect(adapter.submit(claim, actual, other)).rejects.toThrow(AgentUncertainError);
+    expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "completed", output: completeText });
   }
   expect(promptCalls).toEqual([]);
 }), 10000);
 
-test("SDK HTTP history quarantines unknown context and foreign inputs even when native tools are allowed", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+test("SDK HTTP history tolerates auxiliary context", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
   const unknownPart = { ...sdkAssistant("assistant-final", completeText, 7), content: [{ type: "text", text: completeText }, { type: "future-context", text: "UNTRACKED" }] };
   const unknownTool = { ...sdkTool(), state: { status: "future-tool-state", input: {} } };
   const cases = [
     [sdkToolTurn()[0], { ...sdkAssistant("assistant-tools", "", 2), finish: "tool-calls", content: [unknownTool] }, sdkAssistant("assistant-final", completeText, 7), idle("idle", 9)],
     [sdkToolTurn()[0], unknownPart, idle("idle", 9)],
     [sdkToolTurn()[0], { id: "synthetic", type: "synthetic", text: "UNTRACKED", time: { created: 2 } }, ...sdkToolTurn().slice(1)],
-    [{ id: "foreign", type: "user", text: prompt.input, time: { created: 1 } }, ...sdkToolTurn().slice(1)],
   ];
-  for (const effect of ["deny", "allow"] as const) for (const history of cases) {
+  for (const history of cases) {
     setPages([history]);
-    const { adapter, binding: actual } = owned(effect, [prompt, other]);
-    expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "quarantined" });
-    await expect(adapter.submit(claim, actual, other)).rejects.toThrow(AgentBindingError);
+    const { adapter, binding: actual } = owned("allow", [prompt, other]);
+    expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "completed", output: completeText });
   }
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("SDK HTTP history never adopts foreign user input", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+  setPages([[sdkToolTurn()[0], { id: "foreign", type: "user", text: "external input", time: { created: 2 } }, ...sdkToolTurn().slice(1)]]);
+  const { adapter, binding: actual } = owned("allow", [prompt, other]);
+  expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "quarantined" });
+  await expect(adapter.submit(claim, actual, other)).rejects.toThrow(AgentBindingError);
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("allow-bound SDK shell activity does not replace the final parent reply", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+  setPages([sdkShellTurn]);
+  const { adapter, binding: actual } = owned("allow");
+  expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "completed", output: completeText });
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("deny-bound ordinary observation rejects SDK shell execution evidence", async () => withHttpHistory(async ({ setPages, owned, promptCalls }) => {
+  setPages([sdkShellTurn]);
+  const { adapter, binding: actual } = owned("deny", [prompt, other]);
+  expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "quarantined" });
+  await expect(adapter.submit(claim, actual, other)).rejects.toThrow(AgentBindingError);
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("restricted import observation rejects SDK shell execution evidence", async () => withHttpHistory(async ({ setPages, owned }) => {
+  setPages([sdkShellTurn]);
+  const { adapter, binding: actual } = owned("deny");
+  expect(await adapter.observeImport(claim, actual, [prompt])).toEqual({ state: "quarantined" });
+}), 10000);
+
+test("Search cleanup cannot certify terminal history containing SDK shell execution", async () => withHttpHistory(async ({ client, setPages, owned }) => {
+  const { binding: actual } = owned("deny");
+  const manifest: SearchCleanupIdentity["manifest"] = { version: 1, runId: claim.runId, searchSessionId: "fixture-search", nativeSessionId: actual.sessionId,
+    fencedGeneration: 2, setupOwnerId: "fixture-owner", steps: [{ position: 0, promptId: prompt.promptId,
+      inputSha256: createHash("sha256").update(prompt.input).digest("hex"), submitOwnerId: "fixture-owner", authorization: "authorized-uncertain", state: "uncertain", nativeState: "unknown" }] };
+  const identity: SearchCleanupIdentity = { runId: claim.runId, sessionId: manifest.searchSessionId, binding: actual, bindingJson: JSON.stringify(actual), manifest, manifestJson: JSON.stringify(manifest) };
+  setPages([[sdkShellTurn[0], sdkAssistant("assistant-final", completeText, 7), idle("idle-final", 9)]]);
+  expect(searchHistoryFacts(identity, (await client.history({ sessionID: actual.sessionId, order: "asc" })).data, [], {}).terminal).toBe(true);
+  setPages([sdkShellTurn]);
+  const projected = await client.history({ sessionID: actual.sessionId, order: "asc" });
+  expect(() => searchHistoryFacts(identity, projected.data, [], {})).toThrow(AgentBindingError);
+}), 10000);
+
+test("queued SDK compaction delays observation without quarantine and recovers after draining", async () => withHttpHistory(async ({ setPages, setInbox, owned, promptCalls }) => {
+  setPages([[sdkShellTurn[0], sdkAssistant("assistant-final", completeText, 7), idle("idle-final", 9)]]);
+  setInbox([sdkCompactionInbox]);
+  const { adapter, binding: actual, phases } = owned("allow");
+  const pending = await adapter.observe(claim, actual, [prompt]);
+  expect(["pending", "running", "uncertain"]).toContain(pending.state);
+  expect(phases).not.toContain("quarantined");
+  setInbox([]);
+  expect(await adapter.observe(claim, actual, [prompt])).toEqual({ state: "completed", output: completeText });
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("queued SDK compaction blocks successor submission without quarantine or dispatch", async () => withHttpHistory(async ({ setPages, setInbox, owned, promptCalls }) => {
+  setPages([[sdkShellTurn[0], sdkAssistant("assistant-final", completeText, 7), idle("idle-final", 9)]]);
+  setInbox([sdkCompactionInbox]);
+  const { adapter, binding: actual, phases } = owned("allow", [prompt, other]);
+  await expect(adapter.submit(claim, actual, other)).rejects.toThrow(AgentUncertainError);
+  expect(phases).not.toContain("quarantined");
+  expect(promptCalls).toEqual([]);
+}), 10000);
+
+test("queued SDK compaction blocks cancellation settlement until it drains", async () => withHttpHistory(async ({ setPages, setInbox, owned, promptCalls, mutations }) => {
+  setPages([[sdkShellTurn[0], sdkAssistant("assistant-final", completeText, 7), idle("idle-final", 9)]]);
+  setInbox([sdkCompactionInbox]);
+  const { adapter, binding: actual } = owned("allow");
+  expect(await adapter.cancel(claim.runId, actual, prompt)).toBe("pending");
+  expect(mutations).toEqual([]);
+  setInbox([]);
+  expect(await adapter.cancel(claim.runId, actual, prompt)).toBe("settled");
   expect(promptCalls).toEqual([]);
 }), 10000);
 

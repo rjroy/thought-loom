@@ -47,7 +47,7 @@ export async function reconcileSearchCancellation(client: PublicClient, identity
     for (const inboxID of facts.inboxIds) {
       const fresh = await observe();
       if (!fresh.whollyOwned) return {state:"pending",admissions:fresh.admissions,prompts:fresh.prompts,
-        inactive:fresh.inactive,inboxEmpty:fresh.inboxIds.length === 0};
+        inactive:fresh.inactive,inboxEmpty:fresh.inboxEmpty};
       if (fresh.inboxIds.includes(inboxID)) await call("inbox.cancel",() => client.cancelInbox({sessionID:binding.sessionId,inboxID}));
     }
     if (!facts.inactive) {
@@ -57,9 +57,9 @@ export async function reconcileSearchCancellation(client: PublicClient, identity
         await call("session.interrupt",async () => { await client.interrupt({sessionID:binding.sessionId}); });
       }
     }
-    if (facts.inboxIds.length || !facts.inactive) facts = await observe();
+    if (!facts.inboxEmpty || !facts.inactive) facts = await observe();
     return {state:facts.terminal ? "terminal" : "pending",admissions:facts.admissions,prompts:facts.prompts,
-      inboxEmpty:facts.inboxIds.length === 0,inactive:facts.inactive};
+      inboxEmpty:facts.inboxEmpty,inactive:facts.inactive};
   } catch (error) {
     if (error instanceof RunFenceError) throw error;
     if (error instanceof AgentBindingError) return {state:"ownership-conflict"};

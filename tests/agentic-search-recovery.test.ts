@@ -78,7 +78,7 @@ test("lost ACK and missing or unavailable history reconcile on a reopened owned 
   });
 });
 
-for (const corruption of ["foreign", "altered", "compacted", "native-tool"] as const) test(`untrusted ${corruption} native history is quarantined without a reply`, async () => {
+for (const corruption of ["foreign", "altered", "native-tool"] as const) test(`untrusted ${corruption} native history is quarantined without a reply`, async () => {
   await fixture(() => find(), async (db, store, worker, client, id) => {
     const { runId } = setup(db, store, id), before = knowledge(db); client.holdOutput = true;
     for (let i = 0; i < 20 && !client.prompts.length; i++) await worker.tick(runId);
@@ -86,12 +86,27 @@ for (const corruption of ["foreign", "altered", "compacted", "native-tool"] as c
     const original = client.messages.get(prompt.sessionID); if (!original) throw new Error("missing owned native history");
     if (corruption === "foreign") original.push({ id: "foreign-message", type: "user", time: { created: 20 }, text: "FOREIGN-NATIVE-SECRET" });
     else if (corruption === "altered") original[0] = { id: prompt.id, type: "user", time: { created: 10 }, text: "ALTERED-NATIVE-SECRET" };
-    else original.push({ id: `other-${corruption}`, type: "other", nativeType: corruption === "compacted" ? "compaction" : "tool", time: { created: 20 } } satisfies NativeMessage);
+    else original.push({ id: "other-native-tool", type: "other", nativeType: "tool", time: { created: 20 } } satisfies NativeMessage);
     client.holdOutput = false; await drive(worker, db, runId);
     expect(status(db, runId)).toBe("failed");
     expect(db.query("SELECT outcome_reason FROM search_turns WHERE run_id=?").get(runId)).toEqual({ outcome_reason: "failed" });
     expect(db.query("SELECT count(*) AS n FROM search_messages WHERE run_id=? AND role='assistant'").get(runId)).toEqual({ n: 0 });
     expect(db.query("SELECT count(*) AS n FROM search_discoveries").get()).toEqual({ n: 0 });
     expect(client.prompts).toHaveLength(1); expect(knowledge(db)).toEqual(before);
+  });
+});
+
+test("restricted Search accepts compaction bookkeeping without permitting native tools", async () => {
+  await fixture(() => ({ version: 1, kind: "search-reply", reply: "Owned result.", disposition: "done", sourceThoughtIds: [] }), async (db, store, worker, client, id) => {
+    const { runId } = setup(db, store, id), before = knowledge(db); client.holdOutput = true;
+    for (let i = 0; i < 20 && !client.prompts.length; i++) await worker.tick(runId);
+    const prompt = client.prompts[0]; if (!prompt) throw new Error("missing admitted prompt");
+    const original = client.messages.get(prompt.sessionID); if (!original) throw new Error("missing native history");
+    original.splice(1, 0, { id: "compaction", type: "other", nativeType: "compaction", time: { created: 10 } } satisfies NativeMessage);
+    client.holdOutput = false; await drive(worker, db, runId);
+    expect(status(db, runId)).toBe("completed");
+    expect(client.prompts).toHaveLength(1);
+    expect(db.query("SELECT count(*) AS n FROM search_messages WHERE run_id=? AND role='assistant'").get(runId)).toEqual({ n: 1 });
+    expect(knowledge(db)).toEqual(before);
   });
 });
