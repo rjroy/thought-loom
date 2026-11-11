@@ -14,15 +14,6 @@ export class BackupCheckoutLease {
     readonly parent: Directory, readonly control: Directory, private readonly lock: Awaited<ReturnType<typeof open>>) {}
 
   static async acquire(config: BackupConfig, signal?: AbortSignal): Promise<BackupCheckoutLease> {
-    return this.acquireMode(config, signal, true);
-  }
-
-  /** Recovery never creates missing ownership/lock evidence, including after a preflight race. */
-  static async acquireExisting(config: BackupConfig, signal?: AbortSignal): Promise<BackupCheckoutLease> {
-    return this.acquireMode(config, signal, false);
-  }
-
-  private static async acquireMode(config: BackupConfig, signal: AbortSignal | undefined, create: boolean): Promise<BackupCheckoutLease> {
     const checkout = resolve(config.checkout);
     requireGit(checkout === config.checkout && basename(checkout) !== "." && checkout !== "/", "unsafe-path");
     await canonical(dirname(checkout));
@@ -30,21 +21,11 @@ export class BackupCheckoutLease {
     let control: Directory | undefined, lock: Awaited<ReturnType<typeof open>> | undefined;
     try {
       const controlPath = join(parent.path, `.${basename(checkout)}.thoughtloom-backup`);
-      if (create) {
-        try { await mkdir(controlPath, { mode: 0o700 }); await parent.handle.sync(); }
-        catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
-      }
+      try { await mkdir(controlPath, { mode: 0o700 }); await parent.handle.sync(); }
+      catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
       control = await openDirectory(controlPath);
       const path = join(control.anchor, "operation.lock");
-      try {
-        if (!create) {
-          owned(lstatSync(path, { bigint: true }), false);
-          lock = await open(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-        } else {
-          lock = await open(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-          await lock.sync(); await control.handle.sync();
-        }
-      }
+      try { lock = await open(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); await lock.sync(); await control.handle.sync(); }
       catch (error) {
         if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
         owned(lstatSync(path, { bigint: true }), false);

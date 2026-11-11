@@ -11,10 +11,10 @@ import type { BackupCheckoutLease } from "./git-lock";
 export type PendingUpdate = { readonly kind: "update"; readonly beforeHead: string | null; readonly beforeManifest: string | null; readonly afterManifest: string }
   | { readonly kind: "adopt"; readonly head: string; readonly manifest: string };
 export interface CheckoutState {
-  readonly version: 1;
+  readonly version: 2;
   readonly repositoryUrl: string;
   readonly branch: string;
-  readonly dev: string;
+  /** Secondary replacement veto on the supported inode-stable local filesystem. */
   readonly ino: string;
   readonly configSha256: string | null;
   readonly head: string | null;
@@ -24,14 +24,18 @@ export interface CheckoutState {
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const encoder = new TextEncoder();
 export const attributes = encoder.encode("** -filter -text -ident -working-tree-encoding -crlf\n");
-const stateKeys = ["version", "repositoryUrl", "branch", "dev", "ino", "configSha256", "head", "manifest", "pending"];
+const stateKeys = ["version", "repositoryUrl", "branch", "ino", "configSha256", "head", "manifest", "pending"];
+const legacyStateKeys = ["version", "repositoryUrl", "branch", "dev", "ino", "configSha256", "head", "manifest", "pending"];
 function nullable(value: unknown, pattern: RegExp): string | null {
   requireGit(value === null || (typeof value === "string" && pattern.test(value)), "invalid-checkout-record"); return value;
 }
 function parseState(bytes: Uint8Array): CheckoutState {
-  const value: unknown = JSON.parse(decoder.decode(bytes)), raw = object(value, stateKeys);
-  requireGit(raw.version === 1 && typeof raw.repositoryUrl === "string" && typeof raw.branch === "string" &&
-    typeof raw.dev === "string" && /^[0-9]+$/.test(raw.dev) && typeof raw.ino === "string" && /^[0-9]+$/.test(raw.ino), "invalid-checkout-record");
+  const value: unknown = JSON.parse(decoder.decode(bytes));
+  requireGit(typeof value === "object" && value !== null && "version" in value && (value.version === 1 || value.version === 2), "invalid-checkout-record");
+  const legacy = value.version === 1, raw = object(value, legacy ? legacyStateKeys : stateKeys);
+  requireGit(typeof raw.repositoryUrl === "string" && typeof raw.branch === "string" &&
+    typeof raw.ino === "string" && /^[0-9]+$/.test(raw.ino), "invalid-checkout-record");
+  if (legacy) requireGit(typeof raw.dev === "string" && /^[0-9]+$/.test(raw.dev), "invalid-checkout-record");
   let pending: PendingUpdate | null = null;
   if (raw.pending !== null) {
     requireGit(typeof raw.pending === "object" && raw.pending !== null && "kind" in raw.pending, "invalid-checkout-record");
@@ -46,15 +50,19 @@ function parseState(bytes: Uint8Array): CheckoutState {
       requireGit(adoption.kind === "adopt" && head !== null && manifest !== null, "invalid-checkout-record"); pending = { kind: "adopt", head, manifest };
     }
   }
-  const state: CheckoutState = { version: 1, repositoryUrl: raw.repositoryUrl, branch: raw.branch, dev: raw.dev, ino: raw.ino,
+  const state: CheckoutState = { version: 2, repositoryUrl: raw.repositoryUrl, branch: raw.branch, ino: raw.ino,
     configSha256: nullable(raw.configSha256, digestPattern), head: nullable(raw.head, oidPattern), manifest: nullable(raw.manifest, digestPattern), pending };
   requireGit((state.head === null) === (state.manifest === null) && (state.configSha256 !== null || (state.head === null && state.pending === null)), "invalid-checkout-record");
   if (pending?.kind === "update") requireGit(pending.beforeHead === state.head && pending.beforeManifest === state.manifest, "invalid-checkout-record");
   if (pending?.kind === "adopt") requireGit(state.head === null, "invalid-checkout-record");
-  requireGit(Buffer.from(bytes).equals(Buffer.from(encoder.encode(`${JSON.stringify(state)}\n`))), "invalid-checkout-record"); return state;
+  // Validate the original wire format before projecting v1 into v2. Legacy dev
+  // remains syntax-checked history, never ownership evidence or a write trigger.
+  const disk = legacy ? { version: 1, repositoryUrl: state.repositoryUrl, branch: state.branch, dev: raw.dev, ino: state.ino,
+    configSha256: state.configSha256, head: state.head, manifest: state.manifest, pending: state.pending } : state;
+  requireGit(Buffer.from(bytes).equals(Buffer.from(encoder.encode(`${JSON.stringify(disk)}\n`))), "invalid-checkout-record"); return state;
 }
 
-/** Atomic bounded bookkeeping; no payload or host credential is written here. */
+/** Atomic bounded v2 bookkeeping. Reading a legacy record never rewrites it. */
 export class CheckoutRecord {
   private constructor(readonly lease: BackupCheckoutLease, public value: CheckoutState | null, private hash: string | null) {}
   static async load(lease: BackupCheckoutLease): Promise<CheckoutRecord> {
@@ -63,6 +71,7 @@ export class CheckoutRecord {
       let value: CheckoutState;
       try { value = parseState(bytes); } catch { throw new BackupGitError("invalid-checkout-record"); }
       requireGit(value.repositoryUrl === lease.repositoryUrl && value.branch === lease.branch, "checkout-binding-conflict");
+      // Retain the raw v1/v2 hash, not the normalized encoding, for save's race guard.
       return new CheckoutRecord(lease, value, createHash("sha256").update(bytes).digest("hex"));
     } catch (error) { if (absent(error)) return new CheckoutRecord(lease, null, null); throw error; }
   }

@@ -4,7 +4,6 @@ import { createLogger, type Logger } from "../src/logging";
 import type { GitInvocation, GitResult } from "../src/backup/git";
 import { parseBackupConfig, validateBackupConfig } from "../src/backup/config";
 import { runBackupAttempt } from "../src/backup/run";
-import { recoverBackupIdentity } from "../src/backup/identity-recovery";
 
 export interface BackupCommandDependencies {
   readonly logger?: Logger;
@@ -23,7 +22,7 @@ export async function runBackupCommand(
   let failureReason = "invalid-command-input";
   try {
     if (!validLevel) throw new Error("Invalid log level");
-    if (args.length !== 0 && (args.length !== 1 || args[0] !== "--recover-identity")) throw new Error("Invalid backup arguments");
+    if (args.length !== 0) throw new Error("Invalid backup arguments");
     const raw = env.THOUGHTLOOM_BACKUP_CONFIG;
     const dbPath = env.THOUGHTLOOM_DB_PATH;
     const mediaDir = env.THOUGHTLOOM_MEDIA_DIR;
@@ -39,10 +38,6 @@ export async function runBackupCommand(
     failureReason = "media-path-unavailable";
     const mediaDirectory = await realpath(mediaDir ?? `${databasePath}.media`);
     failureReason = "backup-operation-failed";
-    if (args[0] === "--recover-identity") {
-      await recoverBackupIdentity({ databasePath, mediaDirectory, config, signal: deps.signal, logger }, { runGit: deps.runGit });
-      return 0;
-    }
     const result = await runBackupAttempt({ databasePath, mediaDirectory, config, signal: deps.signal, logger },
       { runGit: deps.runGit });
     if (!result.remoteConfirmed) {
