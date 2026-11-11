@@ -59,8 +59,10 @@ export class CheckoutRecord {
   private constructor(readonly lease: BackupCheckoutLease, public value: CheckoutState | null, private hash: string | null) {}
   static async load(lease: BackupCheckoutLease): Promise<CheckoutRecord> {
     try {
-      const bytes = await smallFile(lease.control, "state.json", 32768), value = parseState(bytes);
-      requireGit(value.repositoryUrl === lease.repositoryUrl && value.branch === lease.branch, "checkout-identity-conflict");
+      const bytes = await smallFile(lease.control, "state.json", 32768);
+      let value: CheckoutState;
+      try { value = parseState(bytes); } catch { throw new BackupGitError("invalid-checkout-record"); }
+      requireGit(value.repositoryUrl === lease.repositoryUrl && value.branch === lease.branch, "checkout-binding-conflict");
       return new CheckoutRecord(lease, value, createHash("sha256").update(bytes).digest("hex"));
     } catch (error) { if (absent(error)) return new CheckoutRecord(lease, null, null); throw error; }
   }
@@ -73,6 +75,7 @@ export class CheckoutRecord {
     await writeFile(this.lease.control, temporary, bytes, guard); guard();
     requireGit((await fingerprint(this.lease.control, temporary, guard)).sha256 === createHash("sha256").update(bytes).digest("hex"), "checkout-record-changed");
     if (this.hash !== null) requireGit((await fingerprint(this.lease.control, "state.json", guard)).sha256 === this.hash, "checkout-record-changed");
+    guard();
     if (this.hash === null) moveEntry(this.lease.control, temporary, this.lease.control, "state.json");
     else await rename(join(this.lease.control.anchor, temporary), join(this.lease.control.anchor, "state.json"));
     await this.lease.control.handle.sync(); this.value = value; this.hash = createHash("sha256").update(bytes).digest("hex");
@@ -110,9 +113,9 @@ export async function verifyMetadata(root: Directory, state: CheckoutState, guar
   const git = await openDirectory(join(root.path, ".git"), false);
   let info: Directory | undefined;
   try {
-    requireGit(state.configSha256 !== null && (await fingerprint(git, "config", guard)).sha256 === state.configSha256, "checkout-identity-conflict");
+    requireGit(state.configSha256 !== null && (await fingerprint(git, "config", guard)).sha256 === state.configSha256, "checkout-config-changed");
     const head = await smallFile(git, "HEAD", 4096);
-    requireGit(decoder.decode(head) === `ref: refs/heads/${state.branch}\n`, "checkout-identity-conflict");
+    requireGit(decoder.decode(head) === `ref: refs/heads/${state.branch}\n`, "checkout-branch-changed");
     info = await openDirectory(join(git.path, "info"), false);
     requireGit(Buffer.from(await smallFile(info, "attributes", 4096)).equals(Buffer.from(attributes)), "unsafe-git-metadata");
   } finally { await Promise.allSettled([info?.handle.close(), git.handle.close()]); }

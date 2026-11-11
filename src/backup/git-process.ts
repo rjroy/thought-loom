@@ -4,7 +4,7 @@ import { BackupGitError, gitBudgets, requireGit } from "./git-common";
 /** Host authentication is intentional; application/provider environment and executable Git extensions are not. */
 function environment(): Record<string, string> {
   const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C", GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never",
-    GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false", SSH_ASKPASS_REQUIRE: "never", GIT_ATTR_NOSYSTEM: "1", GIT_PAGER: "cat", GIT_NO_REPLACE_OBJECTS: "1", GIT_SSH_VARIANT: "ssh",
+    GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false", SSH_ASKPASS_REQUIRE: "never", GIT_ATTR_NOSYSTEM: "1", GIT_PAGER: "cat", GIT_NO_REPLACE_OBJECTS: "1", GIT_NO_LAZY_FETCH: "1", GIT_SSH_VARIANT: "ssh",
     GIT_SSH_COMMAND: "/usr/bin/ssh -oBatchMode=yes -oStrictHostKeyChecking=yes -oConnectTimeout=15 -oConnectionAttempts=1" };
   for (const name of ["HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]) {
     const value = process.env[name]; if (value !== undefined) env[name] = value;

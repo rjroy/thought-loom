@@ -5,8 +5,9 @@ import { validateBackupConfig } from "./config";
 import { createLogger } from "../logging";
 import { basename, dirname, join } from "node:path";
 import { lstatSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { childDirectory, fingerprint, openDirectory, sameInode, verifyDirectory, writeFile, type Directory, type Guard } from "./capture-files";
+import { mkdir, opendir, rm } from "node:fs/promises";
+import { childDirectory, fingerprint, openDirectory, openFile, sameInode, smallFile, verifyDirectory, verifyFile, writeFile,
+  type Directory, type File, type Guard } from "./capture-files";
 import { BackupCheckoutLease, pathExists } from "./git-lock";
 import { attributes, auditMetadata, CheckoutRecord, makeGitConfigPrivate, moveEntry, privateMaterializedTree, removeVerifiedDirectory,
   rootEntries, verifyMetadata, type CheckoutState, type PendingUpdate } from "./git-checkout";
@@ -84,18 +85,18 @@ async function noScratch(session: Session): Promise<void> {
 async function checkReferences(session: Session): Promise<void> {
   const refs = await successful(session, ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)"]);
   if (refs === "") return;
-  const lines = refs.split("\n"); requireGit(lines.pop() === "", "checkout-identity-conflict");
+  const lines = refs.split("\n"); requireGit(lines.pop() === "", "checkout-references-changed");
   const saved = state(session), seen = new Set<string>();
   const recordedHead = saved.pending?.kind === "adopt" ? saved.pending.head : saved.head;
   for (const line of lines) {
     const fields = line.split("\0"), [name, oid, symbolicTarget] = fields;
-    requireGit(fields.length === 3 && oidPattern.test(oid) && symbolicTarget === "" && !seen.has(name), "checkout-identity-conflict");
+    requireGit(fields.length === 3 && oidPattern.test(oid) && symbolicTarget === "" && !seen.has(name), "checkout-references-changed");
     seen.add(name);
     if (name === `refs/heads/${session.config.branch}`) continue; // HEAD itself is checked against the recovery record separately.
     // Git 2.56+ also updates this cache for direct-URL pushes matching origin. Older Git may leave it absent.
-    requireGit(name === `refs/remotes/origin/${session.config.branch}` && recordedHead !== null, "checkout-identity-conflict");
+    requireGit(name === `refs/remotes/origin/${session.config.branch}` && recordedHead !== null, "checkout-references-changed");
     // Offline local commits may advance beyond the last successful push. The cache is never remote confirmation.
-    requireGit(oid === recordedHead || (await session.git(["merge-base", "--is-ancestor", oid, recordedHead])).exitCode === 0, "checkout-identity-conflict");
+    requireGit(oid === recordedHead || (await session.git(["merge-base", "--is-ancestor", oid, recordedHead])).exitCode === 0, "checkout-references-changed");
   }
 }
 async function cleanCheckout(session: Session): Promise<void> {
@@ -113,6 +114,89 @@ async function cleanCheckout(session: Session): Promise<void> {
     requireGit(flags === "" || flags.split("\0").slice(0, -1).every(line => line.startsWith("H snapshot/")), "dirty-checkout");
     requireGit(await successful(session, ["status", "--porcelain=v1", "--untracked-files=all", "-z"]) === "", "dirty-checkout");
   } finally { await tree?.close(); }
+}
+
+export interface RecoveryCheckout {
+  assertHeld(): void;
+  verify(): Promise<void>;
+  recoverDevice(): Promise<boolean>;
+  close(): Promise<void>;
+}
+
+/** Retained read-only inspection reuses delivery's complete clean-checkout invariants.
+ * Only its explicit recoverDevice method can change the existing device field. */
+export async function inspectBackupCheckout(options: {
+  readonly config: BackupConfig; readonly lease: BackupCheckoutLease; readonly guard: Guard;
+  readonly logger: Logger; readonly signal?: AbortSignal; readonly runGit?: DeliveryDependencies["runGit"];
+}): Promise<RecoveryCheckout> {
+  const { config, lease, logger, signal } = options;
+  let root: Directory | undefined, metadata: Directory | undefined, recordFile: File | undefined, closed = false;
+  const guard = () => {
+    options.guard(); requireGit(!closed, "checkout-inspection-closed"); lease.assertHeld(config);
+    if (root) verifyDirectory(root); if (metadata) verifyDirectory(metadata);
+    if (recordFile) verifyFile(lease.control, "state.json", recordFile);
+  };
+  const close = async () => {
+    if (closed) return; closed = true;
+    const results = await Promise.allSettled([recordFile?.handle.close(), metadata?.handle.close(), root?.handle.close()]);
+    requireGit(results.every(result => result.status === "fulfilled"), "checkout-close-failed");
+  };
+  try {
+    guard(); const record = await CheckoutRecord.load(lease), saved = record.value;
+    requireGit(saved !== null, "missing-checkout-record");
+    requireGit(saved.pending === null, "identity-recovery-pending");
+    requireGit(saved.head !== null && saved.manifest !== null && saved.configSha256 !== null, "incomplete-checkout-record");
+    recordFile = await openFile(lease.control, "state.json");
+    requireGit(Buffer.from(await smallFile(lease.control, "state.json", 32768)).equals(Buffer.from(`${JSON.stringify(saved)}\n`)), "checkout-record-changed");
+    root = await openDirectory(lease.checkout);
+    requireGit(root.identity.ino.toString() === saved.ino, "checkout-inode-changed");
+    requireGit(root.identity.dev === lease.control.identity.dev, "unsupported-storage");
+    metadata = await openDirectory(join(root.path, ".git"), false); guard();
+    const heldRoot = root;
+    const session: Session = { config, lease, record, root, guard, logger, async git(args) {
+      guard(); const controller = new AbortController(), abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) abort();
+      let expired = false; const timer = setTimeout(() => { expired = true; controller.abort(); }, gitBudgets.commandMs);
+      const operation = args[0]; logger.verbose("[backup git] verification command attempt", { operation });
+      try {
+        const result = await (options.runGit ?? runBackupGit)({ args: [...safeGitArguments, "--no-optional-locks",
+          "-c", "protocol.allow=never", "-c", "protocol.https.allow=never", "-c", "protocol.ssh.allow=never", "-c", "protocol.file.allow=never",
+          `--git-dir=${heldRoot.path}/.git`, `--work-tree=${heldRoot.path}`, ...args], cwd: heldRoot.path, signal: controller.signal });
+        guard(); requireGit(!expired, "git-timeout"); checkGitResult(result);
+        logger.verbose("[backup git] verification command finished", { operation, exitCode: result.exitCode }); return result;
+      } catch (error) {
+        guard(); logger.verbose("[backup git] verification command failed", { operation });
+        throw expired ? new BackupGitError("git-timeout") : error instanceof BackupGitError ? error : new BackupGitError("git-process-failed");
+      } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
+    } };
+    const verify = async () => {
+      guard();
+      // Recovery cannot adopt/remove ambiguous control artifacts, including interrupted record writes.
+      const allowed = new Set(["operation.lock", "state.json", "capture-workspace.json", "empty-template"]);
+      for await (const entry of await opendir(lease.control.anchor)) {
+        guard(); requireGit(allowed.has(entry.name) && (entry.name === "empty-template" ? entry.isDirectory() : entry.isFile()), "unrecorded-workspace");
+      }
+      if (await pathExists(join(lease.control.path, "empty-template"))) {
+        const template = await childDirectory(lease.control, "empty-template");
+        try { await rootEntries(template, [], guard); } finally { await template.handle.close(); }
+      }
+      await cleanCheckout(session);
+      // No --lost-found, optional index refresh, fetch, or repair. Check the whole
+      // local object graph, including unpushed ancestors, without rewriting it.
+      requireGit((await session.git(["fsck", "--full", "--strict", "--no-reflogs"])).exitCode === 0, "checkout-history-invalid");
+      guard();
+    };
+    await verify();
+    return { assertHeld: guard, verify, close, async recoverDevice() {
+      guard(); const current = state(session), dev = heldRoot.identity.dev.toString();
+      if (current.dev === dev) return false;
+      await record.save({ ...current, dev }, guard);
+      const previous = recordFile; recordFile = undefined; await previous?.handle.close();
+      recordFile = await openFile(lease.control, "state.json");
+      requireGit(Buffer.from(await smallFile(lease.control, "state.json", 32768)).equals(Buffer.from(`${JSON.stringify(record.value)}\n`)), "checkout-record-changed");
+      guard(); return true;
+    } };
+  } catch (error) { await close(); throw error; }
 }
 
 async function initialize(session: Session): Promise<void> {
@@ -334,7 +418,8 @@ export async function deliverBackup(options: DeliveryOptions, deps: DeliveryDepe
         configSha256: null, head: null, manifest: null, pending: null }, guard);
     } else {
       root = await openDirectory(lease.checkout);
-      requireGit(root.identity.dev.toString() === record.value.dev && root.identity.ino.toString() === record.value.ino, "checkout-identity-conflict");
+      requireGit(root.identity.ino.toString() === record.value.ino, "checkout-inode-changed");
+      requireGit(root.identity.dev.toString() === record.value.dev, "checkout-device-changed");
     }
     requireGit(!hasAncestor(root.path, source.root) && !hasAncestor(source.root.path, root), "unsafe-path");
     requireGit(root.identity.dev === lease.control.identity.dev, "unsupported-storage");
