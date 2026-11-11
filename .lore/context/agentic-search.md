@@ -9,7 +9,7 @@ tags: [thoughtloom, search, product]
 
 ## Purpose
 
-Help the user find existing thinking, including ideas they cannot yet name precisely. Search narrows toward ideas already in the library; Weaver and Evolve expand ideas. This is a planned feature, not current ordinary Explore behavior.
+Help the user find existing thinking, including ideas they cannot yet name precisely. Search narrows toward ideas already in the library; Weaver and Evolve expand ideas. Conversational search is implemented through Explore's **Ask your library** and **Saved searches** links, separately from ordinary keyword Search. See the [current workflow](../../docs/user-guide.md#ask-your-library) and [API contract](../../docs/daemon-api.md#agentic-search-sessions).
 
 The agent steers the investigation: interpret the request, choose searches, read candidates, follow eligible connections, change direction, and ask clarifying questions when useful. The user need not choose a strategy or translate their request into keywords.
 
@@ -41,6 +41,6 @@ Record timestamps remain daemon-owned. Client time is context for interpreting u
 
 Rejected material remains unavailable to the AI, including when resuming a saved conversation. Filtering the discovery list alone is insufficient if old assistant messages, tool results or native history still contain rejected thought text or derived provenance. The technical design must provide a credible rejection-safe context and recovery path.
 
-Preserve the existing browser → Next.js server → Hono daemon boundary. Design the daemon model and API before client implementation, followed by a designer-led comp-led pass. Ordinary Explore must not silently invoke agents. Agentic export remains a separate read-only publication workflow.
+Preserve the existing browser → Next.js server → Hono daemon boundary. The daemon model/API and the designer-led comp-led client are implemented; future visual work retains the [per-screen design approval gate](architecture.md#visual-client-design-gate). Ordinary Explore must not silently invoke agents. Agentic export remains a separate read-only publication workflow.
 
-Durable task and design-decision tracking belongs in Beads issue `thought-loom-mus`. This context records product direction, not implementation authorization or a completed technical contract.
+Durable task and design-decision tracking belongs in Beads; `thought-loom-mus` records the original feature work. This context records product direction, not new implementation authorization. Current technical contracts and validation boundaries live in the [API](../../docs/daemon-api.md#agentic-search-sessions) and [testing documentation](../../docs/testing.md#agentic-search-foundation-checks).

@@ -144,6 +144,8 @@ For isolated pre-deployment browser checks, use the existing [`web:test:runtime`
 
 ## 5. Back up, upgrade and recover
 
+The stopped-file procedure below supports paired-copy inspection and upgrade rollback. It is not portable recovery with inert historical work: a raw database copy can resume retained jobs when agents are enabled. For portable backup and offline recovery, use [Backup and restore](backup-restore.md), including its [standalone restore command](backup-restore.md#standalone-offline-installation). Protect backup copies like the original library, including rejected material.
+
 1. Stop the web service, then the daemon, and verify both have exited cleanly before copying data or changing the active release:
    ```sh
    systemctl --user stop thoughtloom-web.service thoughtloom-daemon.service

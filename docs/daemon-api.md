@@ -14,14 +14,14 @@ Authorization: Bearer <configured-role-token>
 
 The daemon compares the credential with `THOUGHTLOOM_USER_TOKEN` or `THOUGHTLOOM_AI_TOKEN` and assigns the corresponding role. Body fields, query parameters, and `x-role` headers cannot select or elevate that role.
 
-These are server-side service credentials, not user accounts. The future browser must call through Next.js; neither credential belongs in browser code. No permissive CORS access is enabled.
+These are server-side service credentials, not user accounts. The browser client calls through Next.js; neither credential belongs in browser code. No permissive CORS access is enabled.
 
 ## Requests and responses
 
 - Commands with JSON input require an object. Unknown body properties are rejected rather than silently accepted.
 - Text and reference fields must satisfy domain validation. Most creation fields are assigned by commands, not supplied by clients.
 - Ordinary record read routes accept only the optional `scope` query parameter, once. Browse and Search have their own parameters below. The command routes below reject query parameters.
-- Successful creates normally return `201`; queued file admissions use the `202`/replay contracts below. Reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
+- Successful creates normally return `201`; queued file admissions and media interpretation retries use the `202`/replay contracts below. Reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
 - Ordinary record collections are plain arrays. Search returns results and filter counts; import and search-session catalogs have bounded pagination.
 
 ### Read scopes
@@ -83,7 +83,7 @@ Thought attribution also supports `author:'source'`, `kind:'imported-original'`,
 
 Retained media originals are the other source variant: `author:'source'`, `kind:'media-original'`, `text:null`, `origin:'media-import'`, `parentId:null`, `sourceIds:[]`. Their required `mediaSource` is `{id,name,mimeType,byteLength,fileAuthorship:'unverified',clarification,clarificationAuthor}`. Clarification is exact nonblank user wording or null, with `clarificationAuthor:'user'` exactly when present, otherwise null. An absent title uses the display filename, not invented thought text. Ordinary/scoped/inspection reads, nested search context and saved-search thought previews hydrate this variant with the same visibility rules; rejecting a source hides its descriptor from AI access, including through an active descendant's provenance.
 
-The [media import routes](#retained-media-import-and-source-inspection) retain and validate originals, admit normal weaving and support inspection/download/retry. `/thoughts` creation commands still create textual thoughts only. Daemon startup connects the private store, [bounded validators](server-startup.md#internal-media-validation) and normal Weaver/Evolve [shared-file path resolver](server-startup.md#retained-media-and-shared-filesystem). Paths are private model context, not public Thought or capability-result fields. Search and Agentic Export read eligible descriptors/clarification, not originals; Markdown whole-document exclusion is unchanged. The existing Next.js decoders remain text-only: no media upload/rendering client is implemented. See the [agreement](../.lore/context/media-import.md) and [storage contract](database-schema.md#media-source-storage-foundation).
+The [media import routes](#retained-media-import-and-source-inspection) retain and validate originals, admit normal weaving and support inspection/download/retry. `/thoughts` creation commands still create textual thoughts only. Daemon startup connects the private store, [bounded validators](server-startup.md#internal-media-validation) and normal Weaver/Evolve [shared-file path resolver](server-startup.md#retained-media-and-shared-filesystem). Paths are private model context, not public Thought or capability-result fields. Search and Agentic Export read eligible descriptors/clarification, not originals; Markdown whole-document exclusion is unchanged. The Next.js client implements media upload through its server boundary, decodes media descriptors and displays clarification and processing/recovery controls. Original download is explicit; the client does not render original binaries inline. See the [web workflow](server-startup.md#image-and-pdf-import-workflow), [agreement](../.lore/context/media-import.md) and [storage contract](database-schema.md#media-source-storage-foundation).
 
 A response has a nonempty, unique association list; a fallback has exactly one associated thought. Shared text is retained once. The state field describes that retained output. A completed Evolve reply links to its issued developments in order, or uses the admitted contribution as fallback when no separate development was recorded. Machine protocol envelopes and malformed output are not conversational replies.
 

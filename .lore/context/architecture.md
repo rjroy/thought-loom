@@ -51,7 +51,7 @@ The browser client must never access the daemon directly. Browser requests that 
 Browser (React) → Next.js server → Hono daemon
 ```
 
-The exact server-side interface and transport remain to be designed. This boundary applies regardless of those choices.
+The implemented Next.js server uses fixed application routes and server-side HTTP forwarding to the Hono daemon. Credentials remain server-side. See the [web setup and workflows](../../docs/server-startup.md) and [daemon API](../../docs/daemon-api.md). Preserve this boundary when extending either side.
 
 ## Working agreement
 
@@ -61,19 +61,19 @@ If visual/client work is blocked because the daemon does not support what is nee
 
 ## Daemon-first development
 
-Build and validate the daemon before the visual client. The first milestone establishes immutable thoughts, evolution trees, separate connections, and rejection/restoration through domain logic, SQL storage, and a Hono API, without real AI or UI work.
+The initial implementation sequence built and validated the daemon before the visual client. The first milestone established immutable thoughts, evolution trees, separate connections, and rejection/restoration through domain logic, SQL storage, and a Hono API, without real AI or UI work. Both agent integration and the Next.js client are now implemented; these phases describe the project's starting sequence, not unfinished prerequisites.
 
 Provide practical Bun scripts so the user can exercise daemon behavior without a visual client. These scripts do not need a polished CLI experience. They complement, rather than replace, automated tests of the business rules.
 
-Once the foundations work, add agent integration through the same domain operations, then build the Next.js client against the established contracts. Search and export must also be exercisable independently of the visual client.
+Agent integration and the Next.js client use the established domain operations and contracts. Search and export must remain exercisable independently of the visual client.
 
 The domain model describes thoughts and their behavior, not screen layouts or cards. A visual change may require a different query or response shape, but must not automatically trigger a domain-model rewrite. If it exposes a genuinely missing business capability, stop and discuss it under the working agreement above.
 
 ## Visual-client design gate
 
-Immediately before starting Next.js client implementation (Phase 5), go through an **Impeccable comp-led design phase for each screen** with the user. This follows the daemon/agent phases; it is not permission to start visual work during them.
+The original Phase 5 gate required an **Impeccable comp-led design phase for each screen** with the user before client implementation. The client now exists; the designer-led per-screen approval gate remains in force for future visual implementation. Use the [implemented design system](../../apps/web/DESIGN.md) and approved screen references as current context, not as blanket approval for new visual work.
 
-The designer owns this work using the Impeccable workflow. Establish the screen inventory and shared visual direction, then review and agree screen comps before implementing the client. The existing mockups establish desired layouts, not approved colors or imagery. Settings contents remain undecided rather than being invented to complete a comp.
+The designer owns this work using the Impeccable workflow. Establish the relevant screen inventory and shared visual direction, then review and agree screen comps before implementing visual changes. Mockup layout alone does not approve colors or imagery. Settings now implements installation-wide additional instructions for Weaver, Evolve, Agentic Search and Agentic Export, separately from operator model/tool configuration; see the [Settings agreement](agent-instructions.md). Do not invent additional Settings features to complete a comp.
 
 Any daemon capability gap exposed by design still requires discussion, not a silent domain rewrite or an out-of-scope daemon change.
 
