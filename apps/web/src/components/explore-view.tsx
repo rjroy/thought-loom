@@ -17,6 +17,7 @@ import { useExploreMemory, type ExploreState } from "./explore-provider";
 import styles from "./explore.module.css";
 import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 
 const authorOptions = [
   { value: "user", label: "You" },
@@ -487,14 +488,14 @@ function ResultCard({ result, returnTo, expanded, inspectRejection, rejected, on
           {date && <time dateTime={result.createdAt}>{date}</time>}
         </div>
         <h3><Link href={ideaHref(result, returnTo)} prefetch={false}>{result.title}</Link></h3>
-        {result.text === null ? <div className={styles.mediaDetails}><MediaSourceDetails source={result.mediaSource} compact /></div> : <p className={styles.excerpt}>
-          {expanded && result.text !== null ? result.text : result.snippet}
+        {result.text === null ? <div className={styles.mediaDetails}><MediaSourceDetails source={result.mediaSource} compact /></div> : <div className={styles.excerpt}>
+          {expanded ? <ThoughtMarkdown text={result.text} headingLevel={4} /> : result.snippet}
           {result.text !== null && result.text.length > result.snippet.length && (
             <> <button className={styles.expandButton} type="button" aria-expanded={expanded}
               aria-label={`${expanded ? "Collapse" : "Expand"} original text for ${result.title}`}
               onClick={onToggle}>{expanded ? "Show less" : "…"}</button></>
           )}
-        </p>}
+        </div>}
       </div>
       {context && (
         <div className={styles.context}>

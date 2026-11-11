@@ -4,6 +4,7 @@ import { useEffect, useRef, useSyncExternalStore, type FormEvent } from "react";
 import { downloadMarkdown } from "../features/export/download";
 import type { MarkdownArtifact } from "../features/export/types";
 import { ExportMarkdown } from "./export-markdown";
+import { ThoughtMarkdown } from "./thought-markdown";
 import { useExportStore } from "./export-provider";
 import styles from "./export.module.css";
 import { useContextualBack } from "./contextual-back";
@@ -59,7 +60,7 @@ export function ExportView({ thoughtId }: { thoughtId: string | null }) {
                 {workspace.root.kind === "media-original" ? <>
                   <p className={styles.rootByline}>Imported source · <span>Image or PDF</span></p>
                   <MediaSourceDetails source={workspace.root.mediaSource} compact />
-                </> : <><p>{workspace.root.text}</p>
+                </> : <><ThoughtMarkdown className={styles.rootText} text={workspace.root.text} headingLevel={4} />
                   <span>{workspace.root.author === "user" ? "You" : workspace.root.author === "ai" ? "AI" : "Imported source"} · {workspace.root.kind.replaceAll("-", " ")}</span></>}
               </div> : <p className={styles.warning}>Starting idea unavailable in this view. Simple export needs an available starting thought.</p>}
             </div>

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page, type Route } from "@playwright/test";
 import type { NeighborhoodEdge } from "../src/features/browse/results";
+import { markdownThought } from "./thought-markdown.runtime";
 
 const catSelector = 'img[src="/backgrounds/browse-cat.png"]';
 
@@ -60,7 +61,7 @@ export function browseDaemon(token: string) {
         const root = { ...selected, id: "idea-root", title: "Owned original title", text: "Owned root text", parentId: null, sourceIds: [] };
         const hidden = items.find(item => item.id === "browse-47");
         if (!hidden) throw new Error("Missing owned rejected node");
-        const focus = id === "browse-50" ? selected : id === "idea-child" ? child : id === "idea-root" ? root : id === "browse-47" ? hidden : undefined;
+        const focus = id === "browse-markdown" ? { ...selected, id, title: "Markdown fixture", text: markdownThought } : id === "browse-50" ? selected : id === "idea-child" ? child : id === "idea-root" ? root : id === "browse-47" ? hidden : undefined;
         if (!focus) { res.writeHead(404).end(); return; }
         const related = Array.from({ length: 51 }, (_, n) => ({ ...selected, id: `map-neighbor-${n}`, title: `Owned linked idea ${n}`, text: `Owned linked text ${n}`, sourceIds: [child.id] }));
         const links: Array<NeighborhoodEdge & { node: Omit<typeof child, "parentId"> & { parentId: string | null } }> = id === "browse-50" ? [

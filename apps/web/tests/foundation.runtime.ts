@@ -20,6 +20,7 @@ import { exportDaemon, checkExportRoute, checkExportBrowser, checkExportAdmissio
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
 import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface, checkMediaReinterpretStatusOwner } from "./media-import.runtime";
 import { agenticSearchDaemon, checkAgenticSearchRoutes, checkAgenticSearchEntry, checkAgenticSearchSaved, checkAgenticWorkspaceRoutes, checkAgenticTurnRoutes, checkAgenticRunRoutes, checkAgenticRecoveryKey, checkAgenticLargePreview, checkAgenticWorkspaceBrowser, checkAgenticUnknownAdmission, checkAgenticChangedContext, checkAgenticReturnNavigation, checkAgenticSessionActions, checkAgenticUnavailable, checkAgenticIdleReadRetry, checkAgenticActiveReadingPosition } from "./agentic-search.runtime";
+import { checkThoughtMarkdown } from "./thought-markdown.runtime";
 
 // Explicit opt-in: builds and starts the real application with test-owned configuration.
 const web = fileURLToPath(new URL("..", import.meta.url));
@@ -85,6 +86,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/api/export/runs/[id]/route.ts", "apps/web/src/app/api/export/thoughts/[id]/route.ts", "apps/web/src/server/export.ts",
     "apps/web/src/features/export/types.ts", "apps/web/src/features/export/request.ts", "apps/web/src/features/export/sources.ts",
     "apps/web/src/components/export-markdown.ts",
+    "apps/web/src/components/thought-markdown.tsx", "apps/web/src/components/thought-markdown.module.css",
     "apps/web/src/app/import/page.tsx", "apps/web/src/components/capture-provider.tsx", "apps/web/src/components/capture.module.css",
     "apps/web/src/app/import/media/page.tsx", "apps/web/src/components/media-import-provider.tsx", "apps/web/src/components/media-import-view.tsx", "apps/web/src/components/media-import.module.css",
     "apps/web/src/components/media-source-details.tsx", "apps/web/src/components/media-source-status.tsx",
@@ -339,6 +341,17 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    if (process.env.THOUGHTLOOM_TEST_THOUGHT_MARKDOWN === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const viewport of [{ width: 1440, height: 900 }, { width: 320, height: 812 }]) {
+          const page = await browser.newPage({ viewport });
+          try { fixtureEvolve.reset(); await checkThoughtMarkdown(page, origin, viewport.width < 500, fixtureEvolve); }
+          finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     if (process.env.THOUGHTLOOM_TEST_BROWSE === "1") {
       const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
       try {

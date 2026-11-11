@@ -7,6 +7,7 @@ import { readIdea } from "../features/idea/request";
 import type { IdeaThought } from "../features/idea/types";
 import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 import idea from "./idea.module.css";
 import styles from "./connection-editor.module.css";
 
@@ -25,7 +26,8 @@ export function ConnectionThought({ thought }: { thought: IdeaThought }) {
     <p className={idea.byline}><span className={thought.author === "user" ? idea.user : thought.author === "ai" ? idea.ai : idea.source}>{actor(thought.author)}</span>
       <span className={idea.materialLabel}><ContentGlyph kind={thought.kind} size={20} />{materials[thought.kind]}</span></p>
     {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} compact />
-      : <p className={styles.words}>{long && !expanded ? `${thought.text.slice(0, 320)}…` : thought.text}</p>}
+      : long && !expanded ? <p className={styles.words}>{thought.text.slice(0, 320)}…</p>
+        : <ThoughtMarkdown className={styles.words} text={thought.text} headingLevel={5} />}
     {long && <button type="button" className={idea.textButton} aria-expanded={expanded}
       onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Show full thought"}</button>}
   </div>;

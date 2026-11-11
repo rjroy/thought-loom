@@ -16,6 +16,9 @@
 .root strong { color: var(--color-text); font-size: 1.25rem; }
 .root p { white-space: pre-wrap; margin: .5rem 0; max-inline-size: 70ch; overflow-wrap: anywhere; }
 .root span, .root .rootByline { color: var(--color-muted); font-size: 1rem; }
+.rootText { margin-block: .5rem; }
+.root .rootText p { white-space: normal; }
+.root .rootText span { color: inherit; font-size: inherit; }
 .order { margin: 0; padding: 0; border: 0; }
 .order legend { padding: 0; margin-block-end: .25rem; }
 .order label { display: flex; align-items: center; gap: .625rem; min-block-size: 2.75rem; inline-size: fit-content; padding-inline-end: .5rem; }

@@ -1,0 +1,35 @@
+/* The repeated root keeps host screen typography from overriding document roles. */
+.markdown.markdown { min-inline-size: 0; max-inline-size: 72ch; white-space: normal; overflow-wrap: anywhere; }
+.markdown.markdown > :first-child { margin-block-start: 0; }
+.markdown.markdown > :last-child { margin-block-end: 0; }
+.markdown.markdown .heading { margin-block: 1.5em .5em; color: var(--color-text); font-size: 1em; font-weight: 700; line-height: 1.25; letter-spacing: -.01em; text-wrap: balance; }
+.markdown.markdown .heading[data-depth="1"] { font-size: 1.3em; }
+.markdown.markdown .heading[data-depth="2"] { font-size: 1.2em; }
+.markdown.markdown .heading[data-depth="3"] { font-size: 1.1em; }
+.markdown.markdown .heading[data-depth="6"] { font-weight: 650; }
+.markdown.markdown p { margin-block: .75em; text-wrap: pretty; }
+.markdown.markdown :is(ul,ol) { padding-inline-start: 1.35em; margin-block: .75em; list-style-position: outside; }
+.markdown.markdown ul { list-style-type: disc; }
+.markdown.markdown ol { list-style-type: decimal; }
+.markdown.markdown ul ul { list-style-type: circle; }
+.markdown.markdown li { margin-block: .25em; }
+.markdown.markdown li > :is(ul,ol) { margin-block: .25em; }
+.markdown.markdown li > p { margin-block: .5em; }
+.markdown.markdown blockquote { margin: 1em 0; padding-inline-start: 1rem; border-inline-start: 1px solid var(--color-control-line); color: var(--color-body); }
+.markdown.markdown strong { display: inline; color: inherit; font: inherit; font-weight: 700; }
+.markdown.markdown a { color: var(--color-link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; overflow-wrap: anywhere; }
+.markdown.markdown a:hover { color: var(--color-text); text-decoration-thickness: 2px; }
+.markdown.markdown a:active { text-decoration-thickness: 3px; }
+.markdown.markdown :not(pre) > code { padding: .1em .25em; background: var(--color-input); border-radius: .25rem; font-size: max(1rem, .9em); white-space: break-spaces; }
+.markdown.markdown pre { min-inline-size: 0; max-inline-size: 100%; margin-block: .5rem 1em; padding: 1rem; overflow: auto; border-radius: .375rem; background: var(--color-input); font-size: max(1rem, .9em); line-height: 1.5; white-space: pre; overflow-wrap: normal; }
+.markdown.markdown pre code { font: inherit; font-family: ui-monospace, monospace; }
+.markdown.markdown .scrollHelp { margin: 1rem 0 .375rem; color: var(--color-muted); font-size: 1rem; font-weight: 400; line-height: 1.5; }
+.tableScroll { min-inline-size: 0; max-inline-size: 100%; overflow-x: auto; margin-block-end: 1em; padding: .5rem; border: 1px solid var(--color-line); border-radius: .375rem; }
+.markdown.markdown table { inline-size: 100%; min-inline-size: 42rem; border-collapse: collapse; color: var(--color-body); font-size: 1.125rem; line-height: 1.5; overflow-wrap: normal; }
+.markdown.markdown :is(th,td) { min-inline-size: 9rem; vertical-align: top; text-align: start; padding: .625rem .75rem; border-block-end: 1px solid var(--color-line); }
+.markdown.markdown th { color: var(--color-text); font-weight: 650; }
+.markdown.markdown tbody tr:last-child td { border-block-end: 0; }
+.srOnly { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 48rem) {
+  .markdown.markdown table { font-size: 1rem; }
+}

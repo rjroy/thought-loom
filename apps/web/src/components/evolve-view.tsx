@@ -11,6 +11,7 @@ import styles from "./evolve.module.css";
 import { useContextualBack } from "./contextual-back";
 import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 
 const titleOf = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
 const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
@@ -83,7 +84,7 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
           {workspace.rootState === "loading" ? <p role="status">Reading the starting thought…</p>
             : workspace.root ? <>
               <h3>{titleOf(workspace.root)}</h3><Byline thought={workspace.root} />
-              {workspace.root.kind === "media-original" ? <MediaSourceDetails source={workspace.root.mediaSource} compact /> : <p className={styles.savedText}>{workspace.root.text}</p>}
+              {workspace.root.kind === "media-original" ? <MediaSourceDetails source={workspace.root.mediaSource} compact /> : <ThoughtMarkdown className={styles.savedText} text={workspace.root.text} headingLevel={4} />}
               <Link href={hrefOf(workspace.root.id)} prefetch={false}>Open idea</Link>
             </> : <><p>Starting thought unavailable.</p><p className={styles.muted}>No history scope will be opened automatically.</p></>}
         </aside>
@@ -143,7 +144,7 @@ function Exchange({ value, latest, workspace }: {
   const fallbackPoint = receipt && resolved?.reply?.role === "fallback" && resolved.reply.state === "complete";
   return <section className={styles.exchange}>
     {receipt ? <div className={styles.contribution}>
-      <Byline thought={receipt.contribution} /><p className={styles.message}>{receipt.contribution.text}</p>
+      <Byline thought={receipt.contribution} />{receipt.contribution.text !== null && <ThoughtMarkdown className={styles.message} text={receipt.contribution.text} />}
     </div> : <div className={styles.warning} role="status">
       <h2>{value.admission === "pending" ? "Waiting for admission" : value.admission === "not-started" ? "Evolve was not started" : "Admission unconfirmed"}</h2>
       <p>{value.admission === "pending" ? "Waiting for confirmation. No run ID is known yet."
@@ -174,7 +175,7 @@ function Exchange({ value, latest, workspace }: {
     </div>}
     {resolved?.reply && <div className={styles.reply}>
       <p className={styles.byline}><span className={styles.ai}>AI{resolved.reply.state === "interrupted" ? " · Interrupted reply" : ""}</span> · <span className={styles.materialLabel}><ContentGlyph kind="full-reply" size={20} />Full reply</span></p>
-      <p className={styles.message}>{resolved.reply.text}</p>
+      <ThoughtMarkdown className={styles.message} text={resolved.reply.text} />
     </div>}
     {resolved?.replyUnavailable && <p className={styles.muted}>The recorded reply is unavailable in the normal view.</p>}
     {resolved && (resolved.outputs.length > 0 || fallbackPoint) && <section className={styles.developments}>
@@ -199,11 +200,11 @@ function Development({ thought, unconfirmed = false }: { thought: IdeaThought; u
   return <article className={styles.development}>
     <Byline thought={thought} /><h3>{titleOf(thought)}</h3>
     {unconfirmed && <p className={styles.muted}>Last confirmed text · this idea could not be refreshed.</p>}
-    <p className={styles.savedText}>{abbreviated && !expanded ? thought.text?.slice(0, 240) : thought.text}
+    <div className={styles.savedText}>{abbreviated && !expanded ? thought.text?.slice(0, 240) : thought.text !== null && <ThoughtMarkdown text={thought.text} headingLevel={4} />}
       {abbreviated && <> <button className={styles.textButton} type="button" aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} saved development ${titleOf(thought)}`}
         onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "…"}</button></>}
-    </p>
+    </div>
     <Link href={hrefOf(thought.id)} prefetch={false}>Open idea</Link>
   </article>;
 }

@@ -12,6 +12,7 @@ import { useBrowseMapMemory, type BrowseMapMemory } from "./browse-provider";
 import { BrowseMapSurface } from "./browse-map-surface";
 import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 import styles from "./browse-map.module.css";
 
 const browseThoughtTitle = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
@@ -132,7 +133,7 @@ function MapInspector({ thought, state, controller, href }: {
   return <section className={styles.inspector} aria-label="Selected idea">
     <h2>{browseThoughtTitle(thought)}</h2>
     <ThoughtByline thought={thought} />
-    {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} /> : <p className={styles.actual}>{thought.text}</p>}
+    {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} /> : <ThoughtMarkdown className={styles.actual} text={thought.text} headingLevel={3} />}
     {expansion?.problem && <p className={styles.problem} role="status">{restart ? "Refresh the map to restart exploration from the starting idea."
       : "Linked ideas could not be loaded. The confirmed map is still here."}</p>}
     <div className={styles.actions}>

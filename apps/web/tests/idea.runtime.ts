@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
 import { expectGlyph } from "./explore.runtime";
+import { markdownThought } from "./thought-markdown.runtime";
 
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string; key: string | undefined };
 type CheckProbe = { receipts: number; canonical: number; held: boolean; aborted: boolean; release?: () => void; restore?: () => void };
@@ -117,6 +118,7 @@ export function ideaDaemon(token: string) {
         if (url.pathname === "/thoughts/idea-root") { if (rootRejected && !inspection) { res.writeHead(404).end(); return; } send({ ...thought, title, titleAuthor: title === null ? null : "user", ...(inspection ? { rejected: rootRejected } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-plain") { send({ ...plain, ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/idea-imported") { send({ ...imported, ...(inspection ? { rejected: false } : {}) }); return; }
+        if (url.pathname === "/thoughts/idea-markdown-user" || url.pathname === "/thoughts/idea-markdown-ai") { send({ ...plain, id: url.pathname.split("/").at(-1), text: markdownThought, title: "Markdown fixture", author: url.pathname.endsWith("-ai") ? "ai" : "user", kind: url.pathname.endsWith("-ai") ? "developing-idea" : "captured-original", ...(inspection ? { rejected: false } : {}) }); return; }
         if (url.pathname === "/thoughts/thought-1") { send({ ...plain, id: "thought-1", text: "Owned matching thought for contextual navigation", title: "Owned development", author: "ai", kind: "developing-idea" }); return; }
         if (/^\/thoughts\/thought-1\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
         if (url.pathname === "/thoughts/idea-source") { send({ ...source, ...(inspection ? { rejected: false } : {}) }); return; }

@@ -5,6 +5,7 @@ import { expect, type Download, type Page, type Request as BrowserRequest } from
 type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
 const root = { id: "export-root", text: "Owned export root", title: "Export root", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
+const markdownRoot = { ...root, id: "export-markdown", title: "Export Markdown fixture", text: "# Export reading heading\n\n[External source](https://example.com/export-source)" };
 const visible = { ...root, id: "export-visible", text: "Owned visible source", title: "Visible source" };
 const imported = { ...root, id: "export-imported", text: "Owned imported export root", title: "Imported export root", author: "source", kind: "imported-original", origin: "markdown-import" };
 const simple = Buffer.from("# Simple Café 雪\r\n\r\nOwned exact simple content.\r\n", "utf8");
@@ -80,6 +81,7 @@ export function exportDaemon(token: string) {
       if (url.searchParams.has("scope") && url.searchParams.get("scope") !== "normal") { res.writeHead(403).end(); return; }
       if (/^\/thoughts\/export-root\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
       if (url.pathname === "/thoughts/export-root") { send(root); return; }
+      if (url.pathname === "/thoughts/export-markdown") { send(markdownRoot); return; }
       if (url.pathname === "/thoughts/export-imported") { send(imported); return; }
       if (url.pathname === "/thoughts/export-visible") { send(visible); return; }
       res.writeHead(404).end();
