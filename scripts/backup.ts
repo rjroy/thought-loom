@@ -14,12 +14,15 @@ export interface BackupCommandDependencies {
 export async function runBackupCommand(
   env: Readonly<Record<string, string | undefined>>,
   deps: BackupCommandDependencies = {},
+  args: readonly string[] = [],
 ): Promise<number> {
   const level = env.THOUGHTLOOM_LOG_LEVEL?.trim().toLowerCase() ?? "info";
   const validLevel = level === "error" || level === "warning" || level === "info" || level === "verbose";
   const logger = deps.logger ?? createLogger(validLevel ? level : "error");
+  let failureReason = "invalid-command-input";
   try {
     if (!validLevel) throw new Error("Invalid log level");
+    if (args.length !== 0) throw new Error("Invalid backup arguments");
     const raw = env.THOUGHTLOOM_BACKUP_CONFIG;
     const dbPath = env.THOUGHTLOOM_DB_PATH;
     const mediaDir = env.THOUGHTLOOM_MEDIA_DIR;
@@ -30,8 +33,11 @@ export async function runBackupCommand(
     const db = resolve(dbPath);
     const config = validateBackupConfig(parseBackupConfig(raw), db, mediaDir);
     if (deps.signal?.aborted) throw new Error("Backup cancelled");
+    failureReason = "source-path-unavailable";
     const databasePath = await realpath(db);
+    failureReason = "media-path-unavailable";
     const mediaDirectory = await realpath(mediaDir ?? `${databasePath}.media`);
+    failureReason = "backup-operation-failed";
     const result = await runBackupAttempt({ databasePath, mediaDirectory, config, signal: deps.signal, logger },
       { runGit: deps.runGit });
     if (!result.remoteConfirmed) {
@@ -40,7 +46,7 @@ export async function runBackupCommand(
     }
     return 0;
   } catch {
-    logger.error("[backup] command failed");
+    logger.error("[backup] command failed", { reason: deps.signal?.aborted ? "aborted" : failureReason });
     return 1;
   }
 }
@@ -51,7 +57,7 @@ if (import.meta.main) {
   process.on("SIGINT", cancel);
   process.on("SIGTERM", cancel);
   try {
-    process.exitCode = await runBackupCommand(process.env, { signal: controller.signal });
+    process.exitCode = await runBackupCommand(process.env, { signal: controller.signal }, process.argv.slice(2));
   } catch {
     process.exitCode = 1;
   } finally {

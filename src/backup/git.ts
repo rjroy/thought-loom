@@ -84,18 +84,18 @@ async function noScratch(session: Session): Promise<void> {
 async function checkReferences(session: Session): Promise<void> {
   const refs = await successful(session, ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)"]);
   if (refs === "") return;
-  const lines = refs.split("\n"); requireGit(lines.pop() === "", "checkout-identity-conflict");
+  const lines = refs.split("\n"); requireGit(lines.pop() === "", "checkout-references-changed");
   const saved = state(session), seen = new Set<string>();
   const recordedHead = saved.pending?.kind === "adopt" ? saved.pending.head : saved.head;
   for (const line of lines) {
     const fields = line.split("\0"), [name, oid, symbolicTarget] = fields;
-    requireGit(fields.length === 3 && oidPattern.test(oid) && symbolicTarget === "" && !seen.has(name), "checkout-identity-conflict");
+    requireGit(fields.length === 3 && oidPattern.test(oid) && symbolicTarget === "" && !seen.has(name), "checkout-references-changed");
     seen.add(name);
     if (name === `refs/heads/${session.config.branch}`) continue; // HEAD itself is checked against the recovery record separately.
     // Git 2.56+ also updates this cache for direct-URL pushes matching origin. Older Git may leave it absent.
-    requireGit(name === `refs/remotes/origin/${session.config.branch}` && recordedHead !== null, "checkout-identity-conflict");
+    requireGit(name === `refs/remotes/origin/${session.config.branch}` && recordedHead !== null, "checkout-references-changed");
     // Offline local commits may advance beyond the last successful push. The cache is never remote confirmation.
-    requireGit(oid === recordedHead || (await session.git(["merge-base", "--is-ancestor", oid, recordedHead])).exitCode === 0, "checkout-identity-conflict");
+    requireGit(oid === recordedHead || (await session.git(["merge-base", "--is-ancestor", oid, recordedHead])).exitCode === 0, "checkout-references-changed");
   }
 }
 async function cleanCheckout(session: Session): Promise<void> {
@@ -330,11 +330,11 @@ export async function deliverBackup(options: DeliveryOptions, deps: DeliveryDepe
     if (record.value === null) {
       requireGit(!await pathExists(lease.checkout), "unrelated-checkout"); await mkdir(lease.checkout, { mode: 0o700 }); root = await openDirectory(lease.checkout);
       await lease.parent.handle.sync();
-      await record.save({ version: 1, repositoryUrl: config.repositoryUrl, branch: config.branch, dev: root.identity.dev.toString(), ino: root.identity.ino.toString(),
+      await record.save({ version: 2, repositoryUrl: config.repositoryUrl, branch: config.branch, ino: root.identity.ino.toString(),
         configSha256: null, head: null, manifest: null, pending: null }, guard);
     } else {
       root = await openDirectory(lease.checkout);
-      requireGit(root.identity.dev.toString() === record.value.dev && root.identity.ino.toString() === record.value.ino, "checkout-identity-conflict");
+      requireGit(root.identity.ino.toString() === record.value.ino, "checkout-inode-changed");
     }
     requireGit(!hasAncestor(root.path, source.root) && !hasAncestor(source.root.path, root), "unsafe-path");
     requireGit(root.identity.dev === lease.control.identity.dev, "unsupported-storage");
