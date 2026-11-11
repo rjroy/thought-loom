@@ -1,5 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { RunFenceError } from "../domain/run";
+import { exportPurgeSql } from "./export-lifecycle-sql";
+
+const legacyDelete = `CREATE TRIGGER IF NOT EXISTS restore_fences_immutable_delete BEFORE DELETE ON restore_fences
+    BEGIN SELECT RAISE(ABORT,'restore fence immutable'); END;`;
 
 const definitions = [
   { type: "table", name: "restore_fences", sql: `CREATE TABLE IF NOT EXISTS restore_fences (
@@ -13,6 +17,7 @@ const definitions = [
   { type: "trigger", name: "restore_fences_immutable_update", sql: `CREATE TRIGGER IF NOT EXISTS restore_fences_immutable_update BEFORE UPDATE ON restore_fences
     BEGIN SELECT RAISE(ABORT,'restore fence immutable'); END;` },
   { type: "trigger", name: "restore_fences_immutable_delete", sql: `CREATE TRIGGER IF NOT EXISTS restore_fences_immutable_delete BEFORE DELETE ON restore_fences
+    WHEN NOT (OLD.entity_kind='run' AND ${exportPurgeSql("OLD.entity_id")})
     BEGIN SELECT RAISE(ABORT,'restore fence immutable'); END;` },
   { type: "trigger", name: "restore_fences_no_replace", sql: `CREATE TRIGGER IF NOT EXISTS restore_fences_no_replace BEFORE INSERT ON restore_fences
     WHEN EXISTS(SELECT 1 FROM restore_fences WHERE rowid=NEW.rowid OR (entity_kind=NEW.entity_kind AND entity_id=NEW.entity_id))
@@ -40,6 +45,17 @@ export function assertRestoreFenceSchema(db: Database): void {
 
 /** Additive immutable history metadata. Migration creates no historical identities or recovery transitions. */
 export function migrateRestoreFences(db: Database): void {
+  const rows = db.query<{type:string;name:string;sql:string|null},[]>(
+    "SELECT type,name,sql FROM main.sqlite_schema WHERE tbl_name='restore_fences' AND type IN ('table','view','trigger')").all();
+  if (rows.length !== 0) {
+    // Only the exact supported predecessor may gain the export-purge exception. Unknown/missing guards fail closed.
+    const predecessor = expected.map(definition => definition.name === "restore_fences_immutable_delete"
+      ? {...definition,sql:normalized(legacyDelete)} : definition);
+    const matches = (definitions: typeof expected) => rows.length === definitions.length && definitions.every(definition =>
+      rows.some(row => row.type === definition.type && row.name === definition.name && row.sql !== null && normalized(row.sql) === definition.sql));
+    if (matches(predecessor)) db.exec("DROP TRIGGER restore_fences_immutable_delete");
+    else if (!matches(expected)) throw new RunFenceError("Restore fence schema is unavailable");
+  }
   for (const definition of definitions) db.exec(definition.sql);
   assertRestoreFenceSchema(db);
 }

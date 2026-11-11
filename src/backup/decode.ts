@@ -30,7 +30,7 @@ export function decodeManifest(bytes: Uint8Array): BackupManifest {
   try {
     const parsed: unknown = JSON.parse(decoder.decode(bytes));
     const root = object(parsed,["appSchema","format","mediaMarker","mediaStoreId","originals","sequences","tables","version"]);
-    if ((root.appSchema !== "thoughtloom-logical-1" && root.appSchema !== "thoughtloom-logical-2") || root.format !== "thoughtloom-backup" || root.version !== 1) invalid();
+    if ((root.appSchema !== "thoughtloom-logical-1" && root.appSchema !== "thoughtloom-logical-2" && root.appSchema !== "thoughtloom-logical-3") || root.format !== "thoughtloom-backup" || root.version !== 1) invalid();
     const schema = root.appSchema;
     const tables = array(root.tables).map(value => {
       const entry = object(value,["name","path","rowCount","byteLength","sha256"]);
@@ -40,7 +40,7 @@ export function decodeManifest(bytes: Uint8Array): BackupManifest {
     const shapes = shapesForSchema(schema);
     if (tables.length !== shapes.length || tables.some((entry,index) => entry.name !== shapes[index].name)) invalid();
     const manifest: BackupManifest = {
-      ...(schema === "thoughtloom-logical-2" ? {appSchema:schema} : {}),
+      ...(schema !== "thoughtloom-logical-1" ? {appSchema:schema} : {}),
       tables,
       originals: array(root.originals).map(value => {
         const entry = object(value,["sourceId","path","byteLength","sha256"]);
@@ -56,7 +56,7 @@ export function decodeManifest(bytes: Uint8Array): BackupManifest {
   } catch { return invalid(); }
 }
 
-export function decodeTable(tableName: string, bytes: Uint8Array, schema: BackupAppSchema = "thoughtloom-logical-2"): readonly RawRow[] {
+export function decodeTable(tableName: string, bytes: Uint8Array, schema: BackupAppSchema = "thoughtloom-logical-3"): readonly RawRow[] {
   try {
     const definition = definitionsForSchema(schema).find(table => table.shape.name === tableName);
     if (!definition) invalid();

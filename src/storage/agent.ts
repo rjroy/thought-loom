@@ -49,8 +49,10 @@ export class SqliteAgentRuns implements AgentRunRepository {
   status(id: string): AgentRunView | null { return this.db.transaction(() => this.read(id))(); }
   stop(id: string): AgentRunView {
     return this.db.transaction(() => {
-      if (!this.read(id)) throw new RunNotFoundError();
-      this.runs.stop(id);
+      const existing = this.read(id);
+      if (!existing) throw new RunNotFoundError();
+      if (existing.kind === "export" && this.exports.get("user",id)) this.exports.stop("user",id);
+      else this.runs.stop(id);
       const run = this.read(id);
       if (!run) throw new RunNotFoundError();
       return run;

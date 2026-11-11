@@ -46,6 +46,11 @@ export function validateRecords(db: Database): void {
   noRows(db, `SELECT 1 FROM main.run_operation_receipts r WHERE r.format='step' AND NOT EXISTS(
     SELECT 1 FROM main.run_steps s WHERE s.run_id=r.run_id AND s.prompt_id=r.operation_id) LIMIT 1`);
   noRows(db, `SELECT 1 FROM main.export_reports e WHERE NOT EXISTS(SELECT 1 FROM main.run_steps s WHERE s.run_id=e.run_id AND s.prompt_id=e.prompt_id) LIMIT 1`);
+  // Deleting is an uncommitted purge capability, never a portable or committed lifecycle state.
+  noRows(db, `SELECT 1 FROM main.export_intents i JOIN main.runs r ON r.id=i.run_id WHERE r.kind!='export'
+    OR i.local_disposition NOT IN ('retained','local-stopped')
+    OR (i.local_disposition='local-stopped' AND (r.status NOT IN ('completed','interrupted','failed') OR NOT EXISTS(
+      SELECT 1 FROM main.restore_fences f WHERE f.entity_kind='run' AND f.entity_id=r.id))) LIMIT 1`);
   noRows(db, `SELECT 1 FROM main.media_sources m JOIN main.thoughts t ON t.id=m.source_thought_id
     WHERE t.kind!='media-original' OR t.created_at!=m.created_at LIMIT 1`);
   noRows(db, `SELECT 1 FROM main.thoughts t WHERE (t.kind='media-original')!=EXISTS(SELECT 1 FROM main.media_sources m WHERE m.source_thought_id=t.id) LIMIT 1`);

@@ -38,6 +38,8 @@ import { SqliteReinterpretations } from "../storage/reinterpretation";
 import { BackupScheduler, systemBackupTimer, type BackupTimer } from "../backup/scheduler";
 import { runBackupAttempt } from "../backup/run";
 import { SqliteAgentInstructions } from "../storage/agent-instructions";
+import { ExportHistoryService } from "../domain/export-history";
+import { SqliteAgenticExports } from "../storage/agentic-export";
 
 /** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
@@ -194,6 +196,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
     const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
+      exportHistory:new ExportHistoryService(new SqliteAgenticExports(db,scheduling)),
       agentInstructions:new SqliteAgentInstructions(db,diagnostics),
       imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576},
       reinterpretations:{commands:new ReinterpretationService(new SqliteReinterpretations(db,scheduling)),notify:() => supervisor?.notifyWork()},

@@ -242,6 +242,20 @@ bun run api --role user POST /exports/simple '{"rootId":"<thought-id>","count":2
 
 ## Agentic export
 
+All Agentic export routes are user-only. AI credentials receive `403` and missing credentials receive `401`. Responses, including failures, use `Cache-Control: private, no-store`.
+
+### History and local deletion
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| GET | `/exports/agentic` | Optional singleton `limit` (1–200, default 50) and `cursor`; returns `{items,nextCursor}`. |
+| GET | `/exports/agentic/:runId/metadata` | Returns one history item, or `404` if absent or not an export with retained intent. No query parameters. |
+| DELETE | `/exports/agentic/:runId` | Deletes a ready export locally and returns `204` with no body; unknown or non-export IDs return `404`, and work requiring Stop or settlement returns `409`. No query parameters. |
+
+Each item contains `id`, `status`, `createdAt`, the original `request`, `effort`, `restored` and `deletionState` (`stop-required`, `settling`, or `ready`). Legacy export runs without retained intent are not catalog entries. History exposes neither native identity nor protocol input. Results use a live descending `(createdAt,id)` keyset, not a snapshot. The opaque process-authenticated cursor binds the endpoint and limit; omitting the limit on continuation preserves it. Restart requires a fresh listing. Unknown or repeated parameters, invalid limits and malformed or mismatched cursors return `400`.
+
+Use `POST /runs/:id/stop` before deleting active work, then wait for cancellation settlement until metadata says `ready`. For a restored export, Stop acknowledges local discard without contacting the old provider; it does not imply remote work stopped. Local deletion removes the export's execution history and Markdown while preserving thoughts and unrelated records. It does not erase provider history, backups, or SQLite free pages/WAL.
+
 ### Admission: `POST /exports/agentic`
 
 **Role:** user. **Body:** required nonempty `request`, optional `effort` (`quick`, `standard`, or `thorough`; default `standard`). Unknown fields and query parameters return `400`.
@@ -404,7 +418,7 @@ Native completion is not local completion: a response may still need validation 
 
 Body: `{}`. Returns the same run-status shape after local authority is fenced, without waiting for native cancellation to settle. Confirmed saved thoughts remain saved; Stop does not reject or undo them. Pending native cancellation is reconciled separately. A safely identified unfinished reply can remain interrupted; raw machine JSON is not published as partial prose. Weaver/Evolve native tools run in a trusted operator environment; Stop cannot undo their external side effects. See the [tool-access policy](server-startup.md#agent-configuration).
 
-For a run with a permanent [restore fence](backup-restore.md#small-durable-guard-not-a-second-execution-engine), or an import run whose file/batch is fenced, Stop is an idempotent history control read: it preserves the stored status and cancellation facts and authorizes no old native call. No fence field is added to the response. The standalone restore loader and complete recovered-installation walkthrough are not yet available.
+For a run with a [restore fence](backup-restore.md#small-durable-guard-not-a-second-execution-engine), or an import run whose file/batch is fenced, Stop preserves the stored execution status, generation and cancellation facts and authorizes no old native call. For a locally terminal, intent-backed restored export only, the application adapter additionally records an export-owned local-discard acknowledgement. This acknowledges local Stop, **not** remote cancellation: old remote work remains unknown/unaffected. Other fenced runs retain the idempotent history-read behavior. The Stop response shape is unchanged; use `GET /exports/agentic/:runId/metadata` to read export deletion eligibility before calling `DELETE /exports/agentic/:runId`. See [offline restore](backup-restore.md#standalone-offline-installation) for recovery.
 
 ```sh
 bun run api --role user POST '/thoughts/<thought-id>/evolve' '{"text":"What if we explore the opposite?"}'

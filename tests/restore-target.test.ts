@@ -19,6 +19,12 @@ import { SqliteAgentInstructions } from "../src/storage/agent-instructions";
 import { readSqlSnapshot } from "../src/backup/records";
 import { encodeTable } from "../src/backup/format";
 import { insertMediaSource, mediaBytes, mediaThought } from "./fixtures/media-source";
+import { SqliteAgenticExports } from "../src/storage/agentic-export";
+import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
+import { AgentService } from "../src/domain/agent";
+import { SqliteAgentRuns } from "../src/storage/agent";
+import { ConfiguredRunWorker } from "../src/agent/configured-worker";
 
 const credentials = { user: "user-0123456789-0123456789-abcdef", ai: "agent-0123456789-0123456789-abcdef" };
 const logger = createLogger("verbose", () => {}), restoredAt = "2031-02-03T04:05:06.000Z";
@@ -95,23 +101,34 @@ const legacyNames = [
 ].sort();
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-/** Construct canonical logical-1 files from controlled legacy-shaped records, not from a current backup. */
-async function legacySnapshot(root: string): Promise<string> {
+/** Freeze the changed historical table shapes; other controlled fixture tables use the shared inventory. */
+async function legacySnapshot(root: string, version: 1 | 2 = 1): Promise<string> {
   const dbPath = join(root,"legacy-source.sqlite"), output = join(root,"legacy-snapshot");
   const writer = new Database(dbPath);
   try {
     migrate(writer);
     const store = new SqliteStore(writer);
     store.saveThought({id:"legacy-root",text:"legacy controlled thought",title:null,author:"user",kind:"captured-original",createdAt:"2030",origin:"fixture",parentId:null,sourceIds:[]});
-    new SqliteRunOperations(writer,{id:(() => { let n=0; return () => `legacy-${++n}`; })(),now:() => "2030",logger})
+    const sources = {id:(() => { let n=0; return () => `legacy-${++n}`; })(),now:() => "2030",logger};
+    new SqliteRunOperations(writer,sources)
       .admitWeave("user",{subjectId:"legacy-root",triggerId:"legacy-trigger"});
     writer.run("UPDATE run_steps SET input='legacy exact input' WHERE position=0");
+    const exports = new SqliteAgenticExports(writer,sources), run = exports.admit("user",{request:"Legacy report question",effort:"quick"});
+    const claim = new SqliteRunRepository(writer,sources).claim(run.id), steps = new SqliteRunProtocolRepository(writer,logger);
+    steps.prepare(claim,{promptId:run.promptId,input:"legacy export input"});
+    steps.completeStep(claim,run.promptId,{version:1,kind:"report",markdown:"Legacy report body.",sourceThoughtIds:[]});
+    exports.finalize(claim,run.promptId);
+    if (version === 2) new SqliteAgentInstructions(writer,logger).save({...settings,revision:0});
   } finally { writer.close(); }
   const reader = new Database(dbPath,{readonly:true,create:false,safeIntegers:true});
   try {
-    const shapes = backupTableShapes.filter(shape => legacyNames.includes(shape.name)).map(shape =>
-      shape.name === "run_steps" ? {...shape,columns:shape.columns.filter(column => column !== "guidance")} : shape);
-    expect(shapes.map(shape => shape.name).sort()).toEqual(legacyNames);
+    const names = version === 1 ? legacyNames : [...legacyNames,"agent_instructions"].sort();
+    const oldSteps = ["envelope_json",...(version === 2 ? ["guidance"] : []),"input","native_state","position","prompt_id","result_json","run_id","state","submit_owner"];
+    const shapes = backupTableShapes.filter(shape => names.includes(shape.name)).map(shape => ({...shape,columns:
+      shape.name === "export_intents" ? ["effort","request","run_id"] : shape.name === "run_steps" ? oldSteps : shape.columns}));
+    expect(shapes.map(shape => shape.name).sort()).toEqual(names);
+    expect(shapes.find(shape => shape.name === "export_intents")?.columns).toEqual(["effort","request","run_id"]);
+    expect(shapes.find(shape => shape.name === "run_steps")?.columns.includes("guidance")).toBe(version === 2);
     const snapshot = readSqlSnapshot(reader,() => {},shapes);
     await mkdir(output,{mode:0o700}); await mkdir(join(output,"tables"),{mode:0o700});
     const tables = [];
@@ -122,7 +139,7 @@ async function legacySnapshot(root: string): Promise<string> {
     }
     tables.sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     const sequences = snapshot.sequences.map(entry => ({name:entry.name,value:{$integer:entry.value.toString()}}));
-    const manifest = {appSchema:"thoughtloom-logical-1",format:"thoughtloom-backup",mediaMarker:null,mediaStoreId:null,originals:[],sequences,tables,version:1};
+    const manifest = {appSchema:`thoughtloom-logical-${version}`,format:"thoughtloom-backup",mediaMarker:null,mediaStoreId:null,originals:[],sequences,tables,version:1};
     await writeFile(join(output,"manifest.json"),`${JSON.stringify(manifest)}\n`,{mode:0o600});
     return output;
   } finally { reader.close(); }
@@ -151,7 +168,10 @@ test("logical-1 snapshot restores into current schema with empty settings and nu
       const db = new Database(path,{readonly:true,create:false});
       try {
         expect(new SqliteAgentInstructions(db,logger).get()).toEqual({weaver:"",evolve:"",search:"",export:"",revision:0});
-        expect(db.query("SELECT input,guidance FROM run_steps WHERE position=0").all()).toEqual([{input:"legacy exact input",guidance:null}]);
+        expect(db.query("SELECT input,guidance FROM run_steps WHERE input='legacy exact input'").all()).toEqual([{input:"legacy exact input",guidance:null}]);
+        expect(db.query("SELECT request,effort,local_disposition FROM export_intents").get()).toEqual({request:"Legacy report question",effort:"quick",local_disposition:"retained"});
+        expect(db.query("SELECT markdown FROM export_reports").get()).toEqual({markdown:"Legacy report body.\n\n## Sources\n\nNo source thoughts were cited; this report has no validated thought citations.\n"});
+        expect(db.query("SELECT status FROM runs WHERE kind='export'").get()).toEqual({status:"completed"});
         expect(db.query("SELECT text FROM thoughts WHERE id='legacy-root'").get()).toEqual({text:"legacy controlled thought"});
         expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
       } finally { db.close(); }
@@ -166,6 +186,71 @@ test("logical-1 snapshot restores into current schema with empty settings and nu
     legacyDefaults(installed.databasePath);
   } finally { await rm(dir,{recursive:true,force:true}); }
 },45000);
+
+test("logical-2 export records restore with retained disposition and unchanged report", async () => {
+  const dir = await mkdtemp("/tmp/opencode/restore-legacy-export-");
+  try {
+    const snapshot = await legacySnapshot(dir,2), target = join(dir,"target");
+    const restored = await restoreBackup({snapshotDirectory:snapshot,targetDirectory:target,restoredAt,logger});
+    const db = new Database(restored.databasePath,{readonly:true,create:false});
+    try {
+      expect(new SqliteAgentInstructions(db,logger).get()).toEqual({...settings,revision:1});
+      expect(db.query("SELECT request,effort,local_disposition FROM export_intents").get()).toEqual({request:"Legacy report question",effort:"quick",local_disposition:"retained"});
+      expect(db.query("SELECT status FROM runs WHERE kind='export'").get()).toEqual({status:"completed"});
+      expect((db.query<{markdown:string},[]>("SELECT markdown FROM export_reports").get())?.markdown).toContain("Legacy report body.");
+      expect(db.query("SELECT text FROM thoughts WHERE id='legacy-root'").get()).toEqual({text:"legacy controlled thought"});
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { db.close(); }
+  } finally { await rm(dir,{recursive:true,force:true}); }
+},45000);
+
+test("logical-3 preserves restored export local Stop across capture and restore, then deletes without provider calls", async () => fixture(async f => {
+  let sequence = 0;
+  const sources = {id:() => `roundtrip-export-${++sequence}`,now:() => "2030",logger};
+  const source = new Database(f.source); let exportId: string;
+  try { exportId = new SqliteAgenticExports(source,sources).admit("user",{request:"Roundtrip export",effort:"thorough"}).id; }
+  finally { source.close(); }
+  const output = join(f.dir,"export-capture"); await mkdir(output,{mode:0o700});
+  const first = await captureBackup({databasePath:f.source,mediaDirectory:`${f.source}.media`,outputDirectory:output,logger});
+  expect((JSON.parse(await readFile(join(first.snapshotDirectory,"manifest.json"),"utf8")) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-3");
+  const restored = await restoreBackup({snapshotDirectory:first.snapshotDirectory,targetDirectory:join(f.dir,"export-first"),restoredAt,logger});
+  const firstDb = new Database(restored.databasePath);
+  let originalFence: unknown;
+  try {
+    firstDb.exec("PRAGMA journal_mode=WAL");
+    const exports = new SqliteAgenticExports(firstDb,sources);
+    expect(exports.get("user",exportId)).toMatchObject({status:"interrupted",restored:true,deletionState:"stop-required"});
+    const before = firstDb.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(exportId);
+    new AgentService(new SqliteAgentRuns(firstDb,sources),false).stop("user",exportId);
+    expect(firstDb.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(exportId)).toEqual(before);
+    expect(firstDb.query("SELECT local_disposition FROM export_intents WHERE run_id=?").get(exportId)).toEqual({local_disposition:"local-stopped"});
+    originalFence = firstDb.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(f.runId);
+  } finally { firstDb.close(); }
+  const nextOutput = join(f.dir,"export-recapture"); await mkdir(nextOutput,{mode:0o700});
+  const next = await captureBackup({databasePath:restored.databasePath,mediaDirectory:restored.mediaDirectory,outputDirectory:nextOutput,logger});
+  const intentTable = JSON.parse(await readFile(join(next.snapshotDirectory,"tables/export_intents.json"),"utf8")) as {columns:string[];rows:{values:unknown[]}[]};
+  const dispositionIndex = intentTable.columns.indexOf("local_disposition");
+  expect(dispositionIndex).toBeGreaterThanOrEqual(0);
+  expect(intentTable.rows.some(row => row.values[dispositionIndex] === "local-stopped")).toBe(true);
+  const second = await restoreBackup({snapshotDirectory:next.snapshotDirectory,targetDirectory:join(f.dir,"export-second"),restoredAt,logger});
+  const db = new Database(second.databasePath); let resolutions = 0, clients = 0;
+  const worker = new ConfiguredRunWorker({db,...sources,config:{service:{url:"http://127.0.0.1:44991"},directory:"/tmp/opencode/owned-restore-agent",
+    model:{providerID:"fixture",id:"fixture"},effort:{quick:null,standard:null,thorough:null}},
+    async resolve() { resolutions++; throw new Error("unexpected historical resolver"); }, client() { clients++; throw new Error("unexpected historical client"); }});
+  try {
+    const exports = new SqliteAgenticExports(db,sources);
+    expect(exports.get("user",exportId)).toMatchObject({restored:true,deletionState:"ready"});
+    await worker.tick(exportId);
+    exports.delete("user",exportId);
+    await worker.tick(exportId);
+    expect(resolutions).toBe(0); expect(clients).toBe(0);
+    expect(db.query("SELECT * FROM runs WHERE id=?").get(exportId)).toBeNull();
+    expect(db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(exportId)).toBeNull();
+    expect(db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(f.runId)).toEqual(originalFence);
+    expect(db.query("SELECT text FROM thoughts WHERE id='root'").get()).toEqual({text:thought});
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { worker.pause(); await worker.drain(); db.close(); }
+}),45000);
 
 test("unknown or mixed logical schema snapshots are rejected before staging", async () => {
   const dir = await mkdtemp("/tmp/opencode/restore-mixed-guidance-");
@@ -196,7 +281,7 @@ test("final restore installs the exact recovered snapshot on one exclusively own
   }
   finally { await reference.dispose(); }
   const sourceBefore = tables(f.source), manifest = await readFile(join(f.snapshot.snapshotDirectory, "manifest.json"));
-  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-2");
+  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-3");
   const boundaries: { message: string; inode: bigint; marker: boolean; competing?: number | null; schemaObjects?: number }[] = [];
   const boundaryLogger = createLogger("verbose", record => {
     if (["[restore] target ownership acquired", "[restore] target marker durable", "[restore] target database committed", "[restore] target validated"].includes(record.message)) {

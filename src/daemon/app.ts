@@ -23,6 +23,7 @@ import { ReinterpretationConflictError, type ReinterpretationService } from "../
 import { createReinterpretationRoutes } from "./reinterpretation-routes";
 import { agentInstructionFields, agentInstructionMaxBytes, parseAgentInstructions, type AgentInstructionsRepository } from "../domain/agent-instructions";
 import { readBytes, strictObject, utf8 } from "./import-body";
+import { exportHistoryRequest, type ExportHistoryCursor, type ExportHistoryService } from "../domain/export-history";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -43,6 +44,7 @@ export interface AppOptions {
   readonly notifySearchAdmission?: () => void;
   readonly searchClockReceipts?: SearchClockReceipts;
   readonly simpleExport?: SimpleExportService;
+  readonly exportHistory?: ExportHistoryService;
   readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
@@ -113,7 +115,7 @@ function safePath(path: string): string {
   if (parts[1] === "import-sources") return "/import-sources" + (parts.length > 2 ? "/:id" : "") + (["parts","raw"].includes(parts[3] ?? "") ? "/" + parts[3] : "");
   if (parts[1] === "thoughts" && parts.length === 4 && parts[3] === "import-source") return "/thoughts/:id/import-source";
   if (parts[1] === "thoughts" && parts[3] === "reinterpret") return "/thoughts/:id/reinterpret" + (parts[4] === "by-key" ? "/by-key/:key" : "");
-  if (parts.length === 4 && parts[1] === "exports" && parts[2] === "agentic") return "/exports/agentic/:id";
+  if (parts[1] === "exports" && parts[2] === "agentic" && parts.length >= 4) return "/exports/agentic/:id" + (parts[4] === "metadata" ? "/metadata" : "");
   if (!["thoughts", "connections", "responses", "runs"].includes(parts[1] ?? "")) return "/other";
   return "/" + parts[1] + (parts.length > 2 ? "/:id" : "") +
     (parts[3] === "branch" ? "/branch" : "") +
@@ -166,7 +168,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
-    if (event.path === "/settings/agent-instructions" || event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
+    if (event.path === "/settings/agent-instructions" || event.path.startsWith("/exports/agentic") || event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
@@ -228,6 +230,50 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     });
   }
 
+  app.get("/exports/agentic", c => {
+    user(c);
+    const params = new URL(c.req.url).searchParams;
+    if ([...params.keys()].some(key => key !== "limit" && key !== "cursor") || params.getAll("limit").length > 1 || params.getAll("cursor").length > 1) throw new ApiError(400);
+    const raw = params.get("limit"), token = params.get("cursor");
+    if (raw !== null && !/^[1-9]\d*$/.test(raw)) throw new ApiError(400);
+    const limit = raw === null ? undefined : Number(raw);
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit > 200)) throw new ApiError(400);
+    let cursor: ExportHistoryCursor | undefined;
+    if (token !== null) {
+      if (token.length > 2048) throw new ApiError(400);
+      const parts = token.split(".");
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]+$/.test(parts[1])) throw new ApiError(400);
+      const signature = Buffer.from(parts[1],"base64url"), expected = browseSign(parts[0]);
+      if (signature.toString("base64url") !== parts[1] || signature.length !== expected.length || !timingSafeEqual(signature,expected)) throw new ApiError(400);
+      try {
+        const payload = record(JSON.parse(Buffer.from(parts[0],"base64url").toString("utf8")));
+        if (payload.version !== 1 || payload.endpoint !== "export-history") throw new ApiError(400);
+        cursor = exportHistoryRequest({cursor:payload.cursor,...(limit === undefined ? {} : {limit})}).cursor ?? undefined;
+        if (!cursor) throw new ApiError(400);
+      } catch { throw new ApiError(400); }
+    }
+    if (!options.exportHistory) throw new ApiError(503);
+    const page = options.exportHistory.list("user",{...(limit === undefined ? {} : {limit}),...(cursor ? {cursor} : {})});
+    let nextCursor: string | null = null;
+    if (page.nextCursor) {
+      const value = Buffer.from(JSON.stringify({version:1,endpoint:"export-history",cursor:page.nextCursor})).toString("base64url");
+      nextCursor = `${value}.${browseSign(value).toString("base64url")}`;
+    }
+    return c.json({items:page.items,nextCursor});
+  });
+  app.get("/exports/agentic/:id/metadata", c => {
+    user(c); noQuery(c);
+    if (!options.exportHistory) throw new ApiError(503);
+    const item = options.exportHistory.get("user",c.req.param("id"));
+    if (!item) throw new ApiError(404);
+    return c.json(item);
+  });
+  app.delete("/exports/agentic/:id", c => {
+    user(c); noQuery(c);
+    if (!options.exportHistory) throw new ApiError(503);
+    options.exportHistory.delete("user",c.req.param("id"));
+    return c.body(null,204);
+  });
   app.post("/exports/agentic", async c => {
     user(c); noQuery(c);
     const data = await body(c,["request","effort"]);
