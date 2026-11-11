@@ -40,7 +40,7 @@ export interface BrowseMapController {
   subscribe(listener: () => void): () => void;
   /** First open reads one page; matching root/scope preserves exploration, selection and camera. */
   open(location: BrowseMapLocation): Promise<void>;
-  /** Loaded thought only. No fetch, expansion, route-root change or camera change. */
+  /** Inspect an encountered thought immediately, reading its first page only if not yet attempted. */
   select(id: string): void;
   /**
    * Exactly one page for this node; duplicate activation joins its in-flight read.
@@ -163,7 +163,12 @@ export function createBrowseMapController(
       if (next.returnTo !== state.location.returnTo) publish({ location: next });
       return state.phase === "idle" ? expand(next.rootId) : flights.get(next.rootId)?.promise ?? Promise.resolve();
     },
-    select(id) { if (!disposed && state.nodes.some(node => node.id === id)) publish({ selectedId: id }); },
+    select(id) {
+      if (disposed || !state.nodes.some(node => node.id === id)) return;
+      publish({ selectedId: id });
+      const expansion = expansionAt(id);
+      if (!expansion || (expansion.phase === "idle" && !expansion.loaded && !expansion.problem)) void expand(id);
+    },
     expand,
     refresh: () => disposed ? Promise.resolve() : restart(state.location, null),
     setPresentation(presentation) { if (!disposed) publish({ presentation }); },

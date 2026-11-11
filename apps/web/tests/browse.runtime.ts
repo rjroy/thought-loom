@@ -61,9 +61,10 @@ export function browseDaemon(token: string) {
         const root = { ...selected, id: "idea-root", title: "Owned original title", text: "Owned root text", parentId: null, sourceIds: [] };
         const hidden = items.find(item => item.id === "browse-47");
         if (!hidden) throw new Error("Missing owned rejected node");
-        const focus = id === "browse-markdown" ? { ...selected, id, title: "Markdown fixture", text: markdownThought } : id === "browse-50" ? selected : id === "idea-child" ? child : id === "idea-root" ? root : id === "browse-47" ? hidden : undefined;
-        if (!focus) { res.writeHead(404).end(); return; }
         const related = Array.from({ length: 51 }, (_, n) => ({ ...selected, id: `map-neighbor-${n}`, title: `Owned linked idea ${n}`, text: `Owned linked text ${n}`, sourceIds: [child.id] }));
+        const branch = { ...selected, id: "map-branch", title: "Owned branch idea", parentId: "map-neighbor-48", sourceIds: ["map-neighbor-48"] };
+        const focus = id === "browse-markdown" ? { ...selected, id, title: "Markdown fixture", text: markdownThought } : id === "browse-50" ? selected : id === "idea-child" ? child : id === "idea-root" ? root : id === "browse-47" ? hidden : id === branch.id ? branch : related.find(node => node.id === id);
+        if (!focus) { res.writeHead(404).end(); return; }
         const links: Array<NeighborhoodEdge & { node: Omit<typeof child, "parentId"> & { parentId: string | null } }> = id === "browse-50" ? [
           { kind: "evolution", id: "map-evolution", fromId: selected.id, toId: child.id, node: child },
           { kind: "provenance", id: "map-source", fromId: selected.id, toId: child.id, position: 0, node: child },
@@ -76,6 +77,11 @@ export function browseDaemon(token: string) {
               proposedBy: "user" as const, explanation: "Owned pending connection", sourceIds: [] },
             node: { ...selected, id: "thought-1", title: "Owned development", text: "Owned matching thought for contextual navigation", author: "ai", kind: "developing-idea" } }] : []),
           ...related.map((node, position) => ({ kind: "provenance" as const, id: `map-extra-${position}`, fromId: child.id, toId: node.id, position: 0, node })),
+        ] : id === "map-neighbor-48" ? [
+          { kind: "provenance", id: "map-extra-48", fromId: child.id, toId: focus.id, position: 0, node: child },
+          { kind: "evolution", id: "map-branch-edge", fromId: focus.id, toId: branch.id, node: branch },
+        ] : id === "map-branch" ? [
+          { kind: "evolution", id: "map-branch-edge", fromId: branch.parentId, toId: branch.id, node: related[48] ?? branch },
         ] : [];
         const start = Number(url.searchParams.get("cursor") ?? "0"), limit = Number(url.searchParams.get("limit") ?? "50");
         const chunk = links.slice(start, start + limit);
@@ -190,20 +196,63 @@ async function checkMapJourney(page: Page, fixture: ReturnType<typeof browseDaem
   await expect(conceptual).toContainText("Proposed by You");
   await expect(conceptual).toContainText("Owned connection");
   const before = fixture.attempts.filter(path => path.includes("/neighborhood")).length;
-  await page.getByRole("button", { name: "Inspect Owned interpretation" }).click();
-  await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
+  const childNode = page.getByRole("button", { name: "Inspect and explore Owned interpretation" });
+  await childNode.focus();
   expect(fixture.attempts.filter(path => path.includes("/neighborhood"))).toHaveLength(before);
+  const release = Promise.withResolvers<void>();
+  let pending: Promise<void> | undefined;
+  const pattern = "**/api/browse/thoughts/idea-child/neighborhood?*";
+  const hold = (route: Route) => {
+    pending = (async () => { await release.promise; await route.continue(); })();
+    return pending;
+  };
+  await page.route(pattern, hold);
+  try {
+    await page.keyboard.press("Enter");
+    await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
+    await expect(inspector.getByText("Loading direct links…")).toBeVisible();
+  } finally {
+    release.resolve();
+    if (pending) await pending;
+    await page.unroute(pattern, hold);
+  }
+  await expect.poll(() => fixture.attempts.filter(path => path.includes("/neighborhood")).length).toBe(before + 1);
+  await expect(page.getByText("More direct links are available. Parent, child, source or connection links may still be on later pages.")).toBeVisible();
   await page.getByRole("button", { name: "Linked list", exact: true }).click();
   await expect(page.getByRole("button", { name: "Linked list", exact: true })).toHaveAttribute("aria-pressed", "true");
-  const selected = page.getByRole("button", { name: "Inspect Owned interpretation" });
+  const selected = page.getByRole("button", { name: "Inspect and explore Owned interpretation" });
   await selected.focus(); await page.keyboard.press("Enter");
   await expect(selected).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Show linked ideas", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Inspect Owned linked idea 48" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Show more linked ideas" })).toBeEnabled();
-  await page.getByRole("button", { name: "Show more linked ideas" }).click();
-  await expect(page.getByRole("button", { name: "Inspect Owned linked idea 50" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Linked ideas shown" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned linked idea 48" })).toBeVisible();
+  expect(fixture.attempts.filter(path => path.includes("/neighborhood"))).toHaveLength(before + 1);
+  await expect(page.getByRole("link", { name: "Read selected idea" }).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more linked ideas" })).toBeEnabled();
+  await page.getByRole("button", { name: "Load more linked ideas" }).click();
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned linked idea 50" })).toBeVisible();
+  await expect(inspector.getByText("All direct links in this view are shown.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more linked ideas" })).toHaveCount(0);
+  let failed = false;
+  const branchPattern = "**/api/browse/thoughts/map-neighbor-48/neighborhood?*";
+  const failOnce = (route: Route) => {
+    if (failed) return route.continue();
+    failed = true;
+    return route.fulfill({ status: 502, contentType: "application/json", body: "{}" });
+  };
+  await page.route(branchPattern, failOnce);
+  try {
+    const next = page.getByRole("button", { name: "Inspect and explore Owned linked idea 48" });
+    await next.click();
+    await expect(inspector.getByRole("heading", { name: "Owned linked idea 48" })).toBeVisible();
+    await expect(inspector.getByText("Direct links could not be loaded. Your explored map is still here.")).toBeVisible();
+    await next.click();
+    await expect(inspector.getByRole("button", { name: "Retry loading links" })).toBeVisible();
+    await inspector.getByRole("button", { name: "Retry loading links" }).click();
+    await expect(page.getByRole("button", { name: "Inspect and explore Owned branch idea" })).toBeVisible();
+    await page.getByRole("button", { name: "Inspect and explore Owned branch idea" }).click();
+    await expect(inspector.getByRole("heading", { name: "Owned branch idea" })).toBeVisible();
+    await expect(inspector.getByText("All direct links in this view are shown.")).toBeVisible();
+    await page.getByRole("button", { name: "Inspect and explore Owned interpretation" }).click();
+  } finally { await page.unroute(branchPattern, failOnce); }
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await page.getByRole("button", { name: "Fit map" }).click();
   await page.getByRole("button", { name: "Zoom in" }).click();
@@ -213,7 +262,7 @@ async function checkMapJourney(page: Page, fixture: ReturnType<typeof browseDaem
   await page.goBack();
   await expect(page).toHaveURL(url => url.pathname === "/browse/browse-50");
   await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Inspect Owned linked idea 50" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned linked idea 50" })).toBeVisible();
   // Both workspaces remain mounted until an actual document reload.
   await page.getByRole("link", { name: "Back to list" }).click();
   await expect(page).toHaveURL(url => url.pathname === listUrl.pathname && url.searchParams.get("sort") === listUrl.searchParams.get("sort")
@@ -224,15 +273,15 @@ async function checkMapJourney(page: Page, fixture: ReturnType<typeof browseDaem
   await page.getByRole("link", { name: "Owned browse title 50", exact: true }).click();
   await expect(page).toHaveURL(url => url.pathname === "/browse/browse-50");
   await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Inspect Owned linked idea 50" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned linked idea 50" })).toBeVisible();
   await page.reload({ waitUntil: "networkidle" });
   await expect(inspector.getByRole("heading", { name: "Owned browse title 50" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Inspect Owned linked idea 50" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned linked idea 50" })).toHaveCount(0);
   await page.getByRole("checkbox", { name: "Show rejected" }).check();
-  await expect(page.getByRole("button", { name: "Inspect Owned browse title 47" })).toBeVisible();
-  await page.getByRole("button", { name: "Inspect Owned browse title 47" }).click();
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned browse title 47" })).toBeVisible();
+  await page.getByRole("button", { name: "Inspect and explore Owned browse title 47" }).click();
   await page.getByRole("checkbox", { name: "Show rejected" }).uncheck();
-  await expect(page.getByRole("button", { name: "Inspect Owned browse title 47" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Inspect and explore Owned browse title 47" })).toHaveCount(0);
   await expect(inspector.getByRole("heading", { name: "Owned browse title 50" })).toBeVisible();
   await page.getByRole("link", { name: "Back to list" }).click();
   await expect(page).toHaveURL(url => url.pathname === listUrl.pathname && url.searchParams.get("sort") === listUrl.searchParams.get("sort")
@@ -252,7 +301,7 @@ async function checkMapJourney(page: Page, fixture: ReturnType<typeof browseDaem
   expect(fixture.attempts.slice(attemptsBefore).filter(path => path.startsWith("/thoughts/browse-47/neighborhood"))).toHaveLength(1);
   await page.getByRole("checkbox", { name: "Show rejected" }).check();
   await expect(inspector.getByRole("heading", { name: "Owned browse title 47" })).toBeVisible();
-  await expect(page.getByText("No visible linked ideas.")).toBeVisible();
+  await expect(page.getByText("No direct links in this view.")).toBeVisible();
   await page.getByRole("checkbox", { name: "Show rejected" }).uncheck();
   await expect(page.getByRole("heading", { name: "Starting idea unavailable" })).toBeVisible();
 
@@ -288,9 +337,9 @@ export async function checkPendingConnectionMap(page: Page, fixture: ReturnType<
     await page.goto(`${origin}/browse/idea-child`, { waitUntil: "networkidle" });
     const inspector = page.getByRole("region", { name: "Selected idea" });
     await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
-    await page.getByRole("button", { name: "Show more linked ideas" }).click();
-    await expect(page.getByRole("button", { name: "Linked ideas shown" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Inspect Owned development" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Load more linked ideas" }).click();
+    await expect(inspector.getByText("All direct links in this view are shown.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Inspect and explore Owned development" })).toHaveCount(0);
     await page.getByRole("link", { name: "Open Idea" }).click();
     await expect(page).toHaveURL(url => url.pathname === "/ideas/idea-child");
     await page.getByRole("button", { name: /connect to another thought/i }).click();
@@ -309,13 +358,13 @@ export async function checkPendingConnectionMap(page: Page, fixture: ReturnType<
     await page.getByRole("link", { name: "Browse from here" }).click();
     await expect(page).toHaveURL(url => url.pathname === "/browse/idea-child");
     await expect(inspector.getByRole("heading", { name: "Owned interpretation" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Inspect Owned development" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Inspect and explore Owned development" })).toHaveCount(0);
     gate.resolve();
     if (inflight) await inflight;
     assert.equal(failure, undefined, "Owned connection request must settle");
     assert.equal(responseStatus, 201, "Owned connection must be confirmed before map assertion");
     // No manual refresh or expansion: settlement must invalidate the currently mounted map.
-    await expect(page.getByRole("button", { name: "Inspect Owned development" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Inspect and explore Owned development" })).toBeVisible();
     await expect(inspector.getByRole("listitem").filter({ hasText: "Owned pending connection" })).toBeVisible();
   } finally {
     gate.resolve();

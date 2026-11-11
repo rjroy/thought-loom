@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useLayoutEffect, useRef } from "react";
-import type { BrowseMapController, BrowseMapState } from "../features/browse/map-controller";
+import type { BrowseMapController, BrowseMapExpansion, BrowseMapState } from "../features/browse/map-controller";
 import { browseMapGeometry as geometry, fitMapCamera, type MapCamera } from "../features/browse/map-layout";
 import type { NeighborhoodEdge } from "../features/browse/results";
 import type { IdeaThought } from "../features/idea/types";
@@ -13,6 +13,15 @@ const color = (edge: NeighborhoodEdge) => edge.kind === "connection" && edge.con
 const panKeys: Readonly<Record<string, readonly [number, number]>> = {
   ArrowLeft: [48, 0], ArrowRight: [-48, 0], ArrowUp: [0, 48], ArrowDown: [0, -48],
 };
+
+/** Shared wording for the spatial and non-spatial representations of an explored thought. */
+export function browseExpansionLabel(expansion: BrowseMapExpansion | undefined, hasLinks: boolean): string {
+  if (expansion?.phase === "loading") return "Loading links…";
+  if (expansion?.problem?.reason === "restart-required") return "Restart needed";
+  if (expansion?.phase === "error") return "Retry links";
+  if (expansion?.exhausted) return hasLinks ? "Links shown" : "No visible links";
+  return expansion?.loaded ? "More links" : "Explore links";
+}
 
 export function BrowseMapSurface({ state, controller, memory, titleOf }: {
   state: BrowseMapState; controller: BrowseMapController; memory: BrowseMapMemory; titleOf: (thought: IdeaThought) => string;
@@ -42,7 +51,9 @@ export function BrowseMapSurface({ state, controller, memory, titleOf }: {
     controller.setCamera({ scale, x: x - (x - camera.x) * ratio, y: y - (y - camera.y) * ratio });
   }
   const pairs = new Map<string, string[]>();
+  const linkedIds = new Set<string>();
   for (const edge of state.edges) {
+    linkedIds.add(edge.fromId); linkedIds.add(edge.toId);
     const key = JSON.stringify([edge.fromId, edge.toId].sort());
     const ids = pairs.get(key) ?? []; ids.push(edge.id); pairs.set(key, ids);
   }
@@ -104,16 +115,19 @@ export function BrowseMapSurface({ state, controller, memory, titleOf }: {
         </svg>
         {state.nodes.map(node => {
           const point = state.positions[node.id];
+          const description = `${uid}-node-${encodeURIComponent(node.id)}`;
           return point && <button key={node.id} type="button" className={`${styles.node} ${node.id === state.location.rootId ? styles.startingNode : ""} ${node.rejected === true ? styles.rejectedNode : ""}`}
             style={{ left: point.x, top: point.y, width: geometry.nodeWidth, height: geometry.nodeHeight }}
-            aria-label={`Inspect ${titleOf(node)}`} aria-pressed={state.selectedId === node.id} onClick={() => controller.select(node.id)}>
-            <span className={styles.nodeMeta}>{node.rejected === true ? "Rejected" : node.id === state.location.rootId ? "Starting idea" : node.author === "ai" ? "AI" : node.author === "user" ? "You" : "Imported source"}</span>
+            aria-label={`Inspect and explore ${titleOf(node)}`} aria-describedby={description}
+            aria-pressed={state.selectedId === node.id} onClick={() => controller.select(node.id)}>
+            <span id={description} className={styles.nodeMeta}>{node.rejected === true ? "Rejected" : node.id === state.location.rootId ? "Starting idea" : node.author === "ai" ? "AI" : node.author === "user" ? "You" : "Imported source"}
+              {" · "}{browseExpansionLabel(state.expansions[node.id], linkedIds.has(node.id))}</span>
             <span className={styles.nodeTitle}>{titleOf(node)}</span>
           </button>;
         })}
       </div>
     </div>
-    <p id={instructions} className={styles.instructions}>Use arrow keys to move the map. Select a thought to read it.</p>
+    <p id={instructions} className={styles.instructions}>Select to inspect and explore. Arrow keys move the focused map.</p>
     <ul className={styles.legend} aria-label="Relationship legend">
       <li><span className={styles.evolutionLine} aria-hidden="true" />Evolution</li>
       <li><span className={styles.connectionLine} aria-hidden="true" />Conceptual connection</li>
