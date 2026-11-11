@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { OpenCodeAdapter } from "../src/agent/opencode-adapter";
+import { RunSupervisor } from "../src/agent/supervisor";
+import { RunWorker } from "../src/agent/worker";
+import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteStore } from "../src/storage/sqlite";
 import { admitWeave } from "../src/storage/weave-admission";
 import { body, mediaApiFixture, object, text, type MediaApiFixture } from "./fixtures/media-import-api";
@@ -32,34 +36,34 @@ function terminal(f: MediaApiFixture, runId: string, status: "completed" | "fail
   write(f, db => { db.query("UPDATE runs SET status=?, cancellation_state=? WHERE id=?").run(status, cancellation, runId); });
 }
 
-test("keyed reinterpretation admits an AI subject, replays, and creates distinct work after completion", async () => mediaApiFixture(async f => {
+for (const subject of ["root", "subject"] as const) test(`keyed reinterpretation admits the ${subject === "root" ? "user-authored root" : "AI subject"}, replays, and creates distinct work after completion`, async () => mediaApiFixture(async f => {
   seed(f);
   expect((await f.request("/thoughts/prior/reject", { method: "POST" })).status).toBe(204);
-  const absent = await f.request(`${endpoint()}/by-key/First.Key`);
+  const absent = await f.request(`${endpoint(subject)}/by-key/First.Key`);
   expect(absent.status).toBe(200);
   const missing = await body(absent);
   expect(missing.receipt).toBeNull(); expect(missing.run).toBeNull();
   expect(object(missing.eligibility).eligible).toBe(true);
   expect(f.read(db => db.query("SELECT count(*) AS n FROM runs").get())).toEqual({ n: 0 });
 
-  const response = await f.request(endpoint(), command("First.Key"));
+  const response = await f.request(endpoint(subject), command("First.Key"));
   expect(response.status).toBe(202);
   const first = control(await body(response));
-  expect(first.receipt).toEqual({ subjectId: "subject", requestKey: "First.Key", runId: first.runId });
+  expect(first.receipt).toEqual({ subjectId: subject, requestKey: "First.Key", runId: first.runId });
   expect(first.run).toEqual(expect.objectContaining({ kind: "weave", status: "queued" }));
   expect(f.read(db => db.query("SELECT weave_subject_id AS subject, weave_trigger_id AS trigger FROM runs WHERE id=?").get(first.runId)))
-    .toEqual({ subject: "subject", trigger: "reinterpret:First.Key" });
-  const replay = await f.request(endpoint(), command("First.Key"));
+    .toEqual({ subject, trigger: "reinterpret:First.Key" });
+  const replay = await f.request(endpoint(subject), command("First.Key"));
   expect(replay.status).toBe(200); expect(control(await body(replay)).receipt).toEqual(first.receipt);
-  const lookup = await f.request(`${endpoint()}/by-key/First.Key`);
+  const lookup = await f.request(`${endpoint(subject)}/by-key/First.Key`);
   expect(lookup.status).toBe(200); expect(control(await body(lookup)).receipt).toEqual(first.receipt);
   terminal(f, first.runId, "completed");
-  const secondResponse = await f.request(endpoint(), command("second"));
+  const secondResponse = await f.request(endpoint(subject), command("second"));
   expect(secondResponse.status).toBe(202);
   const second = control(await body(secondResponse));
   expect(second.runId).not.toBe(first.runId);
   expect(f.read(db => db.query("SELECT weave_trigger_id AS trigger FROM runs WHERE id=?").get(second.runId))).toEqual({ trigger: "reinterpret:second" });
-  const oldReplay = await f.request(endpoint(), command("First.Key"));
+  const oldReplay = await f.request(endpoint(subject), command("First.Key"));
   expect(oldReplay.status).toBe(200); expect(control(await body(oldReplay)).receipt).toEqual(first.receipt);
   expect(f.read(db => db.query("SELECT id,parent_id AS parent FROM thoughts ORDER BY id").all())).toEqual([
     { id: "prior", parent: "subject" }, { id: "root", parent: null }, { id: "subject", parent: "root" },
@@ -238,6 +242,107 @@ test("positively reconciled interrupted submission permits a fresh receipt and n
   expect(f.client.prompts[1]?.sessionID).not.toBe(prompt.sessionID);
   expect(f.client.scriptErrors).toEqual([]);
 },{configured:true,script:() => ({version:1,kind:"complete",reply:"Owned fixture outcome"})}),20000);
+
+async function historicalSettledWeave(f: MediaApiFixture, status: "failed" | "interrupted") {
+  seed(f); f.client.holdOutput = true;
+  const response = await f.request(endpoint("root"), command("historical"));
+  expect(response.status).toBe(202);
+  const first = control(await body(response));
+  await f.until(() => f.client.prompts.length === 1, "historical native submission");
+  const prompt = f.client.prompts[0]; if (!prompt) throw new Error("Expected owned native prompt");
+  await f.stop();
+  write(f, db => {
+    const store = new SqliteStore(db);
+    store.saveResponse({ id: "historical-reply", text: "PRIVATE RETAINED OUTCOME", role: "addendum", state: "complete", thoughtIds: ["root", "subject"] });
+    db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?)", [first.runId, "historical-reply"]);
+    db.run("UPDATE run_steps SET state='submitting',native_state='unknown' WHERE run_id=?", [first.runId]);
+    db.run("UPDATE runs SET status=?,cancellation_state='settled' WHERE id=?", [status, first.runId]);
+  });
+  f.client.holdOutput = false;
+  f.client.messages.set(prompt.sessionID, [
+    { id: prompt.id, type: "user", time: { created: 10 }, text: prompt.text },
+    { id: "owned-terminal", type: "idle", time: { created: 11 }, outcome: "interrupted" },
+  ]);
+  await f.start({ THOUGHTLOOM_AGENT_CONFIG: undefined });
+  return { first, prompt };
+}
+
+function historicalSupervisor(db: Database, f: MediaApiFixture) {
+  let sequence = 0;
+  const worker = new RunWorker({ db, id: () => `cleanup-owned-${++sequence}`, now: () => stamp, bindingFor: () => null,
+    native: bindings => new OpenCodeAdapter(f.client, bindings, bindings.assertActive.bind(bindings)) });
+  return new RunSupervisor({ db, worker, startTimer: () => () => {} });
+}
+
+for (const status of ["failed", "interrupted"] as const) test(`supervisor re-verifies a ${status} historical settled weave before a fresh root request`, async () => mediaApiFixture(async f => {
+  const { first, prompt } = await historicalSettledWeave(f, status);
+  const tables = ["thoughts", "thought_titles", "thought_sources", "responses", "response_thoughts", "run_operation_receipts", "run_issued_thoughts", "run_replies"];
+  const preserved = () => f.read(db => tables.map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()));
+  const before = preserved();
+  const runBefore = f.read(db => db.query("SELECT * FROM runs WHERE id=?").get(first.runId));
+  const stepBefore = f.read(db => db.query("SELECT * FROM run_steps WHERE run_id=?").get(first.runId));
+  expect(object((await body(await f.request(`${endpoint("root")}/by-key/fresh`))).eligibility)).toMatchObject({ eligible: false, reason: "work-unverified" });
+  const db = new Database(f.dbPath), supervisor = historicalSupervisor(db, f);
+  const historyReads = f.client.historyRequests.length;
+  try {
+    await supervisor.poll();
+    expect(f.client.historyRequests.slice(historyReads)).toContain(prompt.sessionID);
+    expect(f.read(db => db.query("SELECT state,native_state FROM run_steps WHERE run_id=?").get(first.runId))).toEqual({ state: "completed", native_state: "completed" });
+    expect(f.read(db => db.query("SELECT * FROM runs WHERE id=?").get(first.runId))).toEqual(runBefore);
+    const afterStep = f.read(db => db.query("SELECT * FROM run_steps WHERE run_id=?").get(first.runId));
+    expect(afterStep).toEqual({ ...object(stepBefore), state: "completed", native_state: "completed" });
+    expect(preserved()).toEqual(before);
+    expect(f.client.prompts).toHaveLength(1);
+    expect(object((await body(await f.request(`${endpoint("root")}/by-key/fresh`))).eligibility)).toEqual({ eligible: true, reason: null, blockingRun: null });
+    const replay = await f.request(endpoint("root"), command("historical"));
+    expect(replay.status).toBe(200); expect(control(await body(replay)).receipt).toEqual(first.receipt);
+  } finally { await supervisor.stop(); db.close(); }
+  await f.stop(); await f.start();
+  const replacement = await f.request(endpoint("root"), command("fresh"));
+  expect(replacement.status).toBe(202);
+  expect(control(await body(replacement)).runId).not.toBe(first.runId);
+  expect(f.client.prompts).toHaveLength(1);
+  expect(preserved()).toEqual(before);
+}, { configured: true, script: () => ({ version: 1, kind: "complete", reply: "Unused" }) }), 20000);
+
+for (const evidence of ["missing", "foreign", "active"] as const) test(`unverified settled weave remains blocked with ${evidence} native evidence`, async () => mediaApiFixture(async f => {
+  const { first, prompt } = await historicalSettledWeave(f, "failed");
+  if (evidence === "missing") f.client.messages.set(prompt.sessionID, []);
+  if (evidence === "foreign") f.client.messages.set(prompt.sessionID, [{ id: "foreign", type: "user", time: { created: 10 }, text: "foreign input" }, { id: "foreign-idle", type: "idle", time: { created: 11 }, outcome: "interrupted" }]);
+  if (evidence === "active") f.client.activeSessions.add(prompt.sessionID);
+  const before = f.read(db => ({ run: db.query("SELECT * FROM runs WHERE id=?").get(first.runId), steps: db.query("SELECT * FROM run_steps WHERE run_id=?").all(first.runId) }));
+  const db = new Database(f.dbPath), bindings = new SqliteAgentBindings(db), saved = bindings.get(first.runId);
+  if (!saved) throw new Error("Expected saved binding");
+  const adapter = new OpenCodeAdapter(f.client, bindings, bindings.assertActive.bind(bindings));
+  const supervisor = historicalSupervisor(db, f);
+  try {
+    const result = await adapter.cancel(first.runId, saved, { promptId: prompt.id, input: prompt.text }).then(value => value, () => "conflict");
+    expect(["pending", "conflict"]).toContain(result);
+    const historyReads = f.client.historyRequests.length;
+    const interrupts = f.client.interrupts.length;
+    const cancellations = f.client.inboxCancellations.length;
+    const preserved = f.graph();
+    const responses = f.read(db => ["responses", "response_thoughts"].map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()));
+    await supervisor.poll();
+    expect(f.client.historyRequests.slice(historyReads)).toContain(prompt.sessionID);
+    expect(f.client.inboxCancellations.slice(cancellations)).toEqual([]);
+    // The existing cleanup may interrupt its own represented work (or an idle session), never foreign work.
+    const newInterrupts = f.client.interrupts.slice(interrupts);
+    if (evidence === "foreign") expect(newInterrupts).toEqual([]);
+    else expect(newInterrupts.every(sessionID => sessionID === prompt.sessionID)).toBe(true);
+    expect(f.graph()).toEqual(preserved);
+    expect(f.read(db => ["responses", "response_thoughts"].map(table => db.query(`SELECT rowid,* FROM ${table} ORDER BY rowid`).all()))).toEqual(responses);
+    expect(f.read(db => ({ run: db.query("SELECT * FROM runs WHERE id=?").get(first.runId), steps: db.query("SELECT * FROM run_steps WHERE run_id=?").all(first.runId) }))).toEqual(before);
+    expect(object((await body(await f.request(`${endpoint("root")}/by-key/fresh`))).eligibility)).toMatchObject({ eligible: false, reason: "work-unverified" });
+    expect(f.client.prompts).toHaveLength(1);
+    if (evidence === "foreign") expect(f.client.interrupts).toEqual([]);
+  } finally { await supervisor.stop(); db.close(); }
+  await f.stop(); await f.start();
+  const blocked = await f.request(endpoint("root"), command("fresh"));
+  expect(blocked.status).toBe(409);
+  expect((await body(blocked)).code).toBe("interpretation-unsettled");
+  expect(f.client.prompts).toHaveLength(1);
+}, { configured: true, script: () => ({ version: 1, kind: "complete", reply: "Unused" }) }), 20000);
 
 for (const sameKey of [true, false]) test(`simultaneous ${sameKey ? "same" : "different"}-key commands retain one durable admission`, async () => mediaApiFixture(async f => {
   seed(f);

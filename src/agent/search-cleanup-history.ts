@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchTerminalCertificate } from "./search-cleanup-contract";
 import { AgentBindingError, assertBindingPermissions } from "./binding";
-import type { InboxItem, NativeMessage } from "./opencode-adapter";
+import type { NativeInboxItem, NativeMessage } from "./opencode-adapter";
 import { hasUntrackedInboxContext, hasUntrackedNativeContext } from "./history";
 
 export interface SearchHistoryFacts {
   readonly admissions: readonly SearchAdmissionFact[];
   readonly prompts: readonly SearchTerminalCertificate[];
   readonly inboxIds: readonly string[];
+  readonly inboxEmpty: boolean;
   readonly inactive: boolean;
   readonly whollyOwned: boolean;
   readonly terminal: boolean;
@@ -15,7 +16,7 @@ export interface SearchHistoryFacts {
 export const searchInputHash = (input: string): string => createHash("sha256").update(input,"utf8").digest("hex");
 
 /** Inspect IDs/hashes and terminal boundaries only. Never interpret or retain assistant prose. */
-export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: readonly NativeMessage[], inbox: readonly InboxItem[],
+export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: readonly NativeMessage[], inbox: readonly NativeInboxItem[],
   active: Readonly<Record<string,unknown>>): SearchHistoryFacts {
   assertBindingPermissions("search",identity.binding);
   const authorized = identity.manifest.steps.filter(step => step.authorization === "authorized-uncertain");
@@ -52,21 +53,23 @@ export function searchHistoryFacts(identity: SearchCleanupIdentity, messages: re
       if (!owned || owned.inputSha256 === null || owned !== authorized[admissions.length] || hash !== owned.inputSha256) conflict();
       current = owned; userCreated = message.time.created; turn = [];
       admissions.push(Object.freeze({runId:identity.runId,nativeSessionId:identity.binding.sessionId,promptId:message.id,inputSha256:hash}));
-    } else {
+    } else if (message.type !== "other") {
       if (!current) conflict();
       turn.push(message);
     }
   }
   finish();
   for (const item of inbox) {
+    if (item.sessionID !== identity.binding.sessionId || !Number.isFinite(item.time.created)) conflict();
+    if (item.type !== "user") continue;
     const owned = known.get(item.id);
-    if (hasUntrackedInboxContext(item) || item.type !== "user" || item.sessionID !== identity.binding.sessionId || !Number.isFinite(item.time.created) || !owned ||
+    if (hasUntrackedInboxContext(item) || !owned ||
       owned.inputSha256 === null || searchInputHash(item.payload.text) !== owned.inputSha256 || inboxIds.has(item.id)) conflict();
     inboxIds.add(item.id);
   }
   const represented = new Set([...admissions.map(item => item.promptId),...inboxIds]);
-  const whollyOwned = authorized.length > 0 && authorized.every(step => represented.has(step.promptId));
+  const whollyOwned = !inbox.some(item => item.type !== "user") && authorized.length > 0 && authorized.every(step => represented.has(step.promptId));
   const inactive = !Object.hasOwn(active,identity.binding.sessionId);
-  return Object.freeze({admissions:Object.freeze(admissions),prompts:Object.freeze(prompts),inboxIds:Object.freeze([...inboxIds]),inactive,whollyOwned,
-    terminal:admissions.length === authorized.length && prompts.length === authorized.length && inboxIds.size === 0 && inactive});
+  return Object.freeze({admissions:Object.freeze(admissions),prompts:Object.freeze(prompts),inboxIds:Object.freeze([...inboxIds]),inboxEmpty:inbox.length === 0,inactive,whollyOwned,
+    terminal:admissions.length === authorized.length && prompts.length === authorized.length && inbox.length === 0 && inactive});
 }

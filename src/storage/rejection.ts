@@ -7,6 +7,7 @@ import { immediate } from "./transaction";
 import { readRejectionState } from "./rejection-state";
 import { recordMediaSourceRejection, recordSearchEligibilityChange } from "./search-invalidation";
 import { storedThoughts } from "./media-source";
+import { logCommittedInterruption, type InterruptionDiagnostic } from "./run-fences";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[rejection storage] ${operation} attempt`);
@@ -188,7 +189,7 @@ export class SqliteRejectionRepository implements RejectionRepository {
     return boundary(this.logger, "target state", () => this.db.transaction(() => readRejectionState(this.db, target))());
   }
 
-  private setRejected(kind: "thought" | "connection", id: string, rejected: boolean): void {
+  private setRejected(kind: "thought" | "connection", id: string, rejected: boolean, diagnostics: InterruptionDiagnostic[]): void {
     const operation = `${kind} ${rejected ? "reject" : "restore"}`;
     this.logger.verbose(`[rejection storage] ${operation} attempt`);
     const table = kind === "thought" ? "rejected_thoughts" : "rejected_connections", column = `${kind}_id`;
@@ -202,16 +203,20 @@ export class SqliteRejectionRepository implements RejectionRepository {
     }
     const invalidated = recordSearchEligibilityChange(this.db, kind, id, rejected);
     const interruptedMediaRuns = rejected && kind === "thought"
-      ? recordMediaSourceRejection(this.db,id,new RejectionService(this),this.logger) : 0;
+      ? recordMediaSourceRejection(this.db,id,new RejectionService(this),this.logger,diagnostics) : 0;
     this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns });
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {
-    return boundary(this.logger, "transaction", () => immediate(this.db, () => action({
+    const outerTransaction = this.db.inTransaction;
+    const diagnostics: InterruptionDiagnostic[] = [];
+    const result = boundary(this.logger, "transaction", () => immediate(this.db, () => action({
       snapshot: () => this.readSnapshot(),
       state: target => readRejectionState(this.db, target),
-      setThoughtRejected: (id, rejected) => this.setRejected("thought", id, rejected),
-      setConnectionRejected: (id, rejected) => this.setRejected("connection", id, rejected),
+      setThoughtRejected: (id, rejected) => this.setRejected("thought", id, rejected,diagnostics),
+      setConnectionRejected: (id, rejected) => this.setRejected("connection", id, rejected,diagnostics),
     })));
+    if (!outerTransaction) for (const diagnostic of diagnostics) logCommittedInterruption(this.db,this.logger,diagnostic);
+    return result;
   }
 }

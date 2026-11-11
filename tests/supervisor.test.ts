@@ -40,7 +40,7 @@ function gate() {
 }
 async function flush() { for (let i = 0; i < 5; i++) await Promise.resolve(); }
 
-test("scans queued, active, uncertain and terminal pending cancellation, not settled or completed", async () => fixture(async f => {
+test("scans active and pending work plus unverified settled weaves, not proven or restore-fenced history", async () => fixture(async f => {
   const queued = f.admit("queued");
   let exportSequence = 0;
   const exportRun = new SqliteAgenticExports(f.db, { id: () => `export-${++exportSequence}`, now }).admit("user", { request: "Find related thinking" });
@@ -59,6 +59,15 @@ test("scans queued, active, uncertain and terminal pending cancellation, not set
   const settled = f.admit("settled cancellation");
   f.service.stop("user", settled.id);
   f.steps.settleCancellation(settled.id);
+  const unverified = [f.admit("failed unverified"), f.admit("interrupted unverified")];
+  for (const [index, run] of unverified.entries()) {
+    f.db.run("UPDATE run_steps SET input=?,state='submitting' WHERE run_id=?", ["owned historical input", run.id]);
+    f.db.run("UPDATE runs SET status=?,cancellation_state='settled' WHERE id=?", [index === 0 ? "failed" : "interrupted", run.id]);
+  }
+  const fenced = f.admit("fenced unverified");
+  f.db.run("UPDATE run_steps SET input=?,state='uncertain' WHERE run_id=?", ["owned fenced input", fenced.id]);
+  f.db.run("UPDATE runs SET status='failed',cancellation_state='settled' WHERE id=?", [fenced.id]);
+  f.db.run("INSERT INTO restore_fences VALUES ('run',?,?,?,?)", [fenced.id, "a".repeat(64), now(), "{}"]);
   const finished = f.admit("finished");
   const doneClaim = f.service.claim(finished.id);
   f.steps.prepare(doneClaim, { promptId: finished.promptId, input: "done input" });
@@ -69,7 +78,7 @@ test("scans queued, active, uncertain and terminal pending cancellation, not set
   const supervisor = new RunSupervisor({ db: f.db, worker, startTimer: () => () => {} });
   try {
     await supervisor.poll();
-    expect(seen.sort()).toEqual([queued.id, active.id, uncertain.id, pending.id, exportRun.id].sort());
+    expect(seen.sort()).toEqual([queued.id, active.id, uncertain.id, pending.id, exportRun.id, ...unverified.map(run => run.id)].sort());
     expect(f.runs.get(active.id)?.generation).toBe(activeClaim.generation);
     expect(f.runs.get(uncertain.id)?.generation).toBe(uncertainClaim.generation);
   } finally { await supervisor.stop(); }

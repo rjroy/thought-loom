@@ -1,6 +1,7 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { isAbsolute } from "node:path";
+import { recordedWeaveCancellationSafe } from "../storage/run-cancellation";
 import { RunConflictError, RunFenceError, RunNotFoundError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, ProtocolValidationError, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
 import type { Thought } from "../domain/thought";
@@ -343,8 +344,10 @@ export class RunWorker {
   private async cancel(run: RunRecord): Promise<void> {
     // Called only by this run's registered cleanup tail after its actual execution promise has joined.
     if (run.kind === "search") return;
-    if (this.paused || !["interrupted","failed"].includes(run.status) || this.steps.cancellation(run.id) !== "pending") return;
+    if (this.paused || !["interrupted","failed"].includes(run.status)) return;
     if (isRunRestoreFenced(this.dependencies.db,run.id)) return;
+    const cancellation = this.steps.cancellation(run.id);
+    if (cancellation !== "pending" && !(run.kind === "weave" && cancellation === "settled" && !recordedWeaveCancellationSafe(this.dependencies.db,run.id))) return;
     if (this.state.settleUnsubmitted(run.id)) return;
     const binding = this.bindings.get(run.id);
     if (!binding) return;

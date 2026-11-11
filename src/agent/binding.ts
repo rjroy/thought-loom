@@ -4,6 +4,7 @@ import { nonEmpty, record } from "../domain/validation";
 import { protocolJson } from "../domain/run-protocol";
 import type { RunKind } from "../domain/run";
 import type { NativeSession } from "./opencode-adapter";
+import { AgentUncertainError } from "./errors";
 
 export type ModelRef = Readonly<SdkModelRef>;
 export interface AgentBinding {
@@ -72,15 +73,26 @@ export function sameModel(left: ModelRef, right: ModelRef): boolean {
 
 /** Shared owned-session identity. Cancellation may use this without adopting drifted execution settings. */
 export function assertNativeSessionOwner(runId: string, binding: AgentBinding, session: NativeSession): void {
-  if (session.id !== binding.sessionId || session.metadata.owner !== "thoughtloom" || session.metadata.runId !== runId || session.metadata.protocolVersion !== "1") {
+  const {owner,runId:ownerRun,protocolVersion} = session.metadata;
+  if ((session.id && session.id !== binding.sessionId) || (owner !== undefined && owner !== "thoughtloom") ||
+      (ownerRun !== undefined && ownerRun !== runId) || (protocolVersion !== undefined && protocolVersion !== "1")) {
     throw new AgentBindingError("Native session ownership differs");
+  }
+  if (!session.id || owner === undefined || ownerRun === undefined || protocolVersion === undefined) throw new AgentUncertainError("Native session ownership is incomplete");
+}
+
+/** Ownership and the saved deny policy are required; mutable native execution settings are not identity. */
+export function assertNativeSessionBinding(runId: string, binding: AgentBinding, session: NativeSession): void {
+  assertNativeSessionOwner(runId,binding,session);
+  if (!allowsNativeTools(binding) && protocolJson(session.permissions) !== protocolJson(binding.permissions)) {
+    throw new AgentBindingError("Native session deny policy differs");
   }
 }
 
-/** Exact execution/read binding, independent of the transport operation or terminal interpretation. */
-export function assertNativeSessionBinding(runId: string, binding: AgentBinding, session: NativeSession): void {
+/** Search cleanup retains its sealed, stricter cancellation authority. */
+export function assertSearchCleanupSessionBinding(runId: string, binding: AgentBinding, session: NativeSession): void {
   assertNativeSessionOwner(runId,binding,session);
-  if (session.unsafe || session.location.directory !== binding.location.directory || !sameModel(binding.model,session.model) ||
+  if (session.unsafe || session.location?.directory !== binding.location.directory || !session.model || !sameModel(binding.model,session.model) ||
       protocolJson(session.permissions) !== protocolJson(binding.permissions) ||
       protocolJson(session.metadata) !== protocolJson({owner:"thoughtloom",runId,protocolVersion:"1"})) {
     throw new AgentBindingError("Native session does not match its owned binding");

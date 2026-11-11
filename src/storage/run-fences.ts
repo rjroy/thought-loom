@@ -9,6 +9,18 @@ import type { Logger } from "../logging";
 import { SqliteSharedResponses } from "./shared-response";
 
 export type RunVisibility = (ref: ContextRef) => ContextValue | null;
+export type InterruptionReason = "stopped" | "context-invalidated" | "quarantined" | "interrupted-reply";
+export interface InterruptionDiagnostic { readonly run: RunRecord; readonly reason: InterruptionReason }
+
+/** Called only after the owning transaction commits. Ignore temporary transitions superseded within it. */
+export function logCommittedInterruption(db: Database, logger: Logger, diagnostic: InterruptionDiagnostic): void {
+  const { run, reason } = diagnostic;
+  const current = db.query<{ status: string; generation: number; cancellationState: string }, [string]>(
+    "SELECT status,generation,cancellation_state AS cancellationState FROM runs WHERE id=?").get(run.id);
+  if (current?.status !== "interrupted" || current.generation !== run.generation + 1) return;
+  logger.info("[run storage] interruption committed", { runId: run.id, reason, previousStatus: run.status, status: current.status,
+    previousGeneration: run.generation, generation: current.generation, cancellationState: current.cancellationState });
+}
 
 export function issuedRunThoughts(db: Database, runId: string): readonly string[] {
   return db.query<{ id: string }, [string]>("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position")

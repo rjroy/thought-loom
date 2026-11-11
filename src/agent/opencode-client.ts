@@ -1,7 +1,7 @@
-import { OpenCode, isSessionNotFoundError, type SessionInfo, type SessionMessageInfo, type SessionInboxInfo, type SessionMessageAssistantTool } from "@opencode/client";
+import { OpenCode, isSessionNotFoundError, type SessionInfo, type SessionMessageInfo, type SessionInboxInfo } from "@opencode/client";
 import { AgentBindingError, validateServiceUrl } from "./binding";
 import { AgentSessionMissingError, AgentUncertainError } from "./errors";
-import type { InboxItem, NativeMessage, NativeSession, NativeTool, PublicClient, ResolvedAgentService } from "./opencode-adapter";
+import type { NativeInboxItem, NativeMessage, NativeSession, PublicClient, ResolvedAgentService } from "./opencode-adapter";
 
 // Per-HTTP-request transport timeout. It neither interrupts model execution nor imposes an effort budget.
 const requestOptions = () => ({signal:AbortSignal.timeout(10_000)});
@@ -15,37 +15,22 @@ async function request<T>(action: () => Promise<T>): Promise<T> {
 }
 
 function session(value: SessionInfo): NativeSession {
-  if (!value.model || !value.metadata) throw new AgentBindingError("Native session identity is incomplete");
+  if (!value.metadata) throw new AgentUncertainError("Native session identity is incomplete");
   const permissions = (value.permissions ?? []).map(rule => ({action:rule.action,resource:rule.resource,effect:rule.effect}));
-  return {id:value.id,location:{directory:value.location.directory},model:{...value.model},permissions,metadata:{...value.metadata},
+  return {id:value.id,...(value.location ? {location:{directory:value.location.directory}} : {}),...(value.model ? {model:{...value.model}} : {}),permissions,metadata:{...value.metadata},
     ...(value.parentID || value.fork || value.revert || value.time?.archived ? {unsafe:true} : {})};
 }
 
-function inboxItem(value: SessionInboxInfo): InboxItem {
-  if (value.type !== "user" || value.payload.files?.length || value.payload.agents?.length || value.payload.skills?.length || Object.keys(value.payload.metadata ?? {}).length) throw new AgentBindingError("Unexpected native inbox context");
+function inboxItem(value: SessionInboxInfo): NativeInboxItem {
+  if (value.type !== "user") return {id:value.id,sessionID:value.sessionID,type:"other",nativeType:value.type,time:{created:value.time.created}};
+  if (value.payload.files?.length || value.payload.agents?.length || value.payload.skills?.length || Object.keys(value.payload.metadata ?? {}).length) throw new AgentBindingError("Unexpected native inbox context");
   return {id:value.id,sessionID:value.sessionID,type:"user",payload:{text:value.payload.text},delivery:value.delivery,time:{created:value.time.created}};
-}
-
-function tool(value: SessionMessageAssistantTool): NativeTool {
-  if (typeof value.id !== "string" || !value.id.trim() || typeof value.name !== "string" || !value.name.trim() ||
-      !value.time || !Number.isFinite(value.time.created) ||
-      (value.time.ran !== undefined && !Number.isFinite(value.time.ran)) ||
-      (value.time.completed !== undefined && !Number.isFinite(value.time.completed)) ||
-      (value.executed !== undefined && typeof value.executed !== "boolean")) throw new AgentBindingError("Unexpected native tool context");
-  switch (value.state?.status) {
-    case "streaming": case "running": case "completed": case "error": break;
-    default: throw new AgentBindingError("Unknown native tool state");
-  }
-  return {id:value.id,name:value.name,status:value.state.status,time:{created:value.time.created,
-    ...(value.time.ran === undefined ? {} : {ran:value.time.ran}),
-    ...(value.time.completed === undefined ? {} : {completed:value.time.completed})},
-    ...(value.executed === undefined ? {} : {executed:value.executed})};
 }
 
 function assistant(value: Extract<SessionMessageInfo,{type:"assistant"}>): NativeMessage {
   if (!Array.isArray(value.content)) throw new AgentBindingError("Unexpected native assistant context");
-  const content: {type:"text";text:string}[] = [], tools: NativeTool[] = [];
-  let unsafe = false;
+  const content: {type:"text";text:string}[] = [];
+  let unsafe = false, hasTools = false;
   for (const item of value.content) {
     if (!item || typeof item !== "object") { unsafe = true; continue; }
     switch (item.type) {
@@ -54,12 +39,12 @@ function assistant(value: Extract<SessionMessageInfo,{type:"assistant"}>): Nativ
         else content.push({type:"text",text:item.text});
         break;
       case "reasoning": break; // Known private reasoning is not application output.
-      case "tool": tools.push(tool(item)); break;
-      default: unsafe = true;
+      case "tool": hasTools = true; break;
+      default: break; // Opaque native parts are not application reply text.
     }
   }
   return {id:value.id,type:"assistant",time:{created:value.time.created,...(value.time.completed === undefined ? {} : {completed:value.time.completed})},
-    content,...(tools.length ? {tools} : {}),...(value.finish === undefined ? {} : {finish:value.finish}),
+    content,...(hasTools ? {hasTools:true as const} : {}),...(value.finish === undefined ? {} : {finish:value.finish}),
     ...(value.error ? {error:true} : {}),...(unsafe ? {unsafe:true} : {})};
 }
 
@@ -96,7 +81,8 @@ export function createPublicClient(config: ResolvedAgentService): PublicClient {
     instructionList:input => request(async () => (await client.experimental.session.instructions.entry.list(input,requestOptions())).map(({key,value}) => ({key,value}))),
     instructionPut:input => request(() => client.experimental.session.instructions.entry.put(input,requestOptions())),
     instructionRemove:input => request(() => client.experimental.session.instructions.entry.remove(input,requestOptions())),
-    prompt:input => request(async () => inboxItem(await client.session.prompt({sessionID:input.sessionID,id:input.id,text:input.text},requestOptions()))),
+    prompt:input => request(async () => { const receipt=inboxItem(await client.session.prompt({sessionID:input.sessionID,id:input.id,text:input.text},requestOptions()));
+      if (receipt.type !== "user") throw new AgentBindingError("Unexpected native admission receipt"); return receipt; }),
     inbox:input => request(async () => (await client.session.inbox.list(input,requestOptions())).map(inboxItem)),
     history:input => request(async () => {
       const page = await client.message.list(input,requestOptions());

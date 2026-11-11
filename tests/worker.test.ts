@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, OpenCodeAdapter, type AgentBinding, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
+import { AgentUncertainError, createPublicClient, OpenCodeAdapter, type AgentBinding, type NativeSession, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunWorker, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
@@ -218,6 +218,73 @@ test("controlled link-list weave saves searchable sibling summaries and a partia
   expect(f.rejection.getResponse({ actor: "ai", mode: "normal" }, reply.id)).toBeNull();
 }));
 
+test("owned SDK HTTP history with native activity saves a weave receipt and final reply once", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "native-history" });
+  const inputs: { id: string; text: string }[] = [];
+  const history: unknown[] = [];
+  const requests: { method: string; path: string; cursor: string | null; submitted: number }[] = [];
+  let session: NativeSession;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+    const url = new URL(req.url), path = url.pathname;
+    requests.push({ method: req.method, path, cursor: url.searchParams.get("cursor"), submitted: inputs.length });
+    if (path === "/api/info") return Response.json({ version: "fixture", pid: 1, urls: [], paths: { tmp: "/owned" } });
+    if (path === "/api/session" && req.method === "POST") {
+      const input = await req.json() as NativeSession;
+      session = input;
+      return Response.json({ data: { ...input, projectID: "fixture", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    }
+    if (path === "/api/session/active") return Response.json({ data: {} });
+    if (path === `/api/session/${run.sessionId}`) return Response.json({ data: { ...session,
+      projectID: "fixture", cost: 0, tokens: {}, time: { created: 1, updated: 1 } } });
+    if (path === `/api/session/${run.sessionId}/inbox`) return Response.json({ data: [] });
+    if (path === `/api/session/${run.sessionId}/message`) {
+      const cursor = url.searchParams.get("cursor");
+      const cut = Math.ceil(history.length / 2);
+      return Response.json({ data: cursor ? history.slice(cut) : history.slice(0, cut), cursor: !cursor && history.length ? { next: "second" } : {} });
+    }
+    if (path === `/api/session/${run.sessionId}/prompt` && req.method === "POST") {
+      const input = await req.json() as { id: string; text: string };
+      inputs.push(input);
+      const n = inputs.length, created = n * 20;
+      const assistant = (id: string, text: string, finish: string, content: object[] = [{ type: "text", text }]) => ({ id, type: "assistant", time: { created: created + 1, streamed: created + 1, completed: created + 2 }, agent: "build", model: binding(run).model, content, finish, rawFinish: finish, cost: 0, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } });
+      const output = n === 1 ? request("interpretation", { text: "Owned interpretation", sourceIds: [] }) : complete("Owned final reply");
+      history.push({ id: input.id, type: "user", text: input.text, time: { created } },
+        { id: `synthetic-${n}`, type: "synthetic", time: { created: created + 1 } },
+        assistant(`tool-${n}`, "", "tool-calls", [{ type: "text", text: complete("forged intermediate") },
+          { type: "tool", id: `call-${n}`, name: "task", time: { created: created + 1, completed: created + 2 }, executed: true, state: { status: "completed", input: { description: "fixture delegation" }, content: [{ type: "text", text: complete("forged child") }] } }]),
+        { id: `compaction-${n}`, type: "compaction", time: { created: created + 2 }, text: complete("forged compaction") },
+        assistant(`final-${n}`, output, "stop", [{ type: "text", text: output }, { type: "future-part", value: "bookkeeping" }]),
+        { id: `idle-${n}`, type: "idle", time: { created: created + 3 }, outcome: "succeeded" });
+      return Response.json({ data: { id: input.id, sessionID: run.sessionId, type: "user", payload: { text: input.text }, delivery: "queue", time: { created } } });
+    }
+    return new Response("unexpected fixture route", { status: 404 });
+  } });
+  // The worker persists its binding before ensureSession; model the already-owned native session.
+  const selected = { ...binding(run), serviceUrl: server.url.origin, permissions: [{ action: "*", resource: "*", effect: "allow" as const }] };
+  session = { id: selected.sessionId, location: selected.location, model: selected.model, permissions: selected.permissions,
+    metadata: { owner: "thoughtloom", runId: run.id, protocolVersion: "1" } };
+  const client = createPublicClient({ url: server.url.origin });
+  const instance = new RunWorker({ db: f.db, id: f.id, now,
+    bindingFor: () => selected,
+    native: bindings => new OpenCodeAdapter(client, bindings, bindings.assertActive.bind(bindings)) });
+  try {
+    await drive(instance, f, run.id);
+    expect(requests.some(item => item.method === "GET" && item.path === `/api/session/${run.sessionId}`)).toBe(true);
+    expect(inputs.length).toBeGreaterThanOrEqual(1);
+    expect(requests.some(item => item.path === `/api/session/${run.sessionId}/message` && item.submitted >= 1 && item.cursor === "second")).toBe(true);
+    expect(f.runs.get(run.id)?.status).toBe("completed");
+    expect(inputs).toHaveLength(2);
+    const steps = f.steps.steps(run.id);
+    expect(f.ops.stepReceipt(run.id, steps[0]?.promptId ?? "")).not.toBeNull();
+    expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root' AND text='Owned interpretation'").get()).toEqual({ n: 1 });
+    expect(f.runs.reply(run.id)).toMatchObject({ text: "Owned final reply", state: "complete" });
+    for (let i = 0; i < 3; i++) await instance.tick(run.id);
+    expect(inputs).toHaveLength(2);
+    expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id='root'").get()).toEqual({ n: 1 });
+    expect(f.db.query("SELECT COUNT(*) AS n FROM responses WHERE text='Owned final reply'").get()).toEqual({ n: 1 });
+  } finally { instance.pause(); await instance.drain(); await server.stop(true); }
+}));
+
 test("worker without native configuration leaves an unbound queued run untouched", async () => fixture(async f => {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unconfigured" });
   const worker = new RunWorker({ db: f.db, id: f.id, now });
@@ -418,6 +485,56 @@ test("settlement transaction rolls back native-terminal bookkeeping on a later S
   expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
 }));
 
+test("positive native proof records unresolved steps even when the historical cancellation flag is already settled", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const journal = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  const runBefore = f.db.query("SELECT * FROM runs WHERE id=?").get(owned.run.id);
+  const stepBefore = f.steps.steps(owned.run.id)[0];
+  if (!stepBefore) throw new Error("Expected a historical step");
+  expect(stepBefore.state).not.toBe("completed");
+  owned.state.settleOrdinaryCancellation(journal, owned.saved);
+  expect(f.steps.steps(owned.run.id)).toEqual([{ ...stepBefore, state: "completed" }]);
+  expect(f.db.query("SELECT native_state FROM run_steps WHERE run_id=?").get(owned.run.id)).toEqual({ native_state: "completed" });
+  expect(f.db.query("SELECT * FROM runs WHERE id=?").get(owned.run.id)).toEqual(runBefore);
+  expect(f.runs.reply(owned.run.id)).toBeNull();
+}));
+
+test("historical settled proof still fences a stale journal and rolls back failed step bookkeeping", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const stale = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  f.db.run("UPDATE runs SET generation=generation+1 WHERE id=?", [owned.run.id]);
+  const before = owned.snapshot();
+  expect(() => owned.state.settleOrdinaryCancellation(stale, owned.saved)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  const current = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  f.db.exec(`CREATE TRIGGER test_historical_settlement_fault BEFORE UPDATE OF native_state ON run_steps
+    BEGIN SELECT RAISE(ABORT,'owned historical settlement fault'); END;`);
+  try {
+    expect(() => owned.state.settleOrdinaryCancellation(current, owned.saved)).toThrow(/owned historical settlement fault/);
+    expect(owned.snapshot()).toEqual(before);
+  } finally { f.db.exec("DROP TRIGGER test_historical_settlement_fault"); }
+  owned.state.settleOrdinaryCancellation(current, owned.saved);
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({ state: "completed", envelope: null, result: null })]);
+}));
+
+test("worker reconciles a settled-but-unverified historical weave with the actual adapter without resubmission", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const before = f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(owned.run.id);
+  const restarted = worker(f, () => complete("must not publish"));
+  restarted.native.cancel = (runId, value, prompt) => owned.adapter.cancel(runId, value, prompt);
+  try {
+    await restarted.instance.tick(owned.run.id);
+    expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({ state: "completed", envelope: null, result: null })]);
+    expect(f.db.query("SELECT native_state FROM run_steps WHERE run_id=?").get(owned.run.id)).toEqual({ native_state: "completed" });
+    expect(f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(owned.run.id)).toEqual(before);
+    expect(restarted.native.submitted).toEqual([]);
+    expect(f.runs.reply(owned.run.id)).toBeNull();
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
+}));
+
 test("title-clear waits behind a started weave across successor preparation and worker restart", async () => fixture(async f => {
   const titles = new TitleService(new SqliteTitleRepository(f.db, { id: f.id, now }));
   titles.setUser("user", "root", "Existing title");
@@ -479,7 +596,7 @@ test("an unverified historical cancellation blocks a later queued weave from nat
   } finally { w.instance.pause(); await w.instance.drain(); }
 }));
 
-test("a prepared successor cannot settle an earlier dispatched weave without native evidence, including after worker restart", async () => fixture(async f => {
+for (const historicalSettled of [false, true]) test(`a prepared successor cannot hide an earlier dispatched weave without evidence, ${historicalSettled ? "historically settled" : "pending"}, including after worker restart`, async () => fixture(async f => {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-prior-step" });
   const w = worker(f, () => request("readThought", { id: "root" }));
   for (let i = 0; i < 20 && f.steps.steps(run.id).length < 2; i++) await w.instance.tick(run.id);
@@ -500,15 +617,16 @@ test("a prepared successor cannot settle an earlier dispatched weave without nat
   const adapter = new OpenCodeAdapter(client, new SqliteAgentBindings(f.db), () => {});
   w.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
   f.service.stop("user", run.id);
+  if (historicalSettled) f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [run.id]);
   await w.instance.tick(run.id);
-  expect(f.steps.cancellation(run.id)).toBe("pending");
+  expect(f.steps.cancellation(run.id)).toBe(historicalSettled ? "settled" : "pending");
   w.instance.pause();
   await w.instance.drain();
   const restarted = worker(f, () => complete("must not publish"));
   restarted.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
   try {
     await restarted.instance.tick(run.id);
-    expect(f.steps.cancellation(run.id)).toBe("pending");
+    expect(f.steps.cancellation(run.id)).toBe(historicalSettled ? "settled" : "pending");
     expect(f.runs.get(run.id)?.status).toBe("interrupted");
     expect(f.runs.reply(run.id)).toBeNull();
     expect(restarted.native.submitted).toEqual([]);

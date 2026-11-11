@@ -1,4 +1,4 @@
-import type { InboxItem, NativeMessage, Observation, PersistedPrompt, ImportObservation, ImportTerminalEvidence, PublicClient } from "./opencode-adapter";
+import type { InboxItem, NativeInboxItem, NativeMessage, Observation, PersistedPrompt, ImportObservation, ImportTerminalEvidence, PublicClient } from "./opencode-adapter";
 import { createHash } from "node:crypto";
 import { AgentBindingError, allowsNativeTools, type AgentBinding } from "./binding";
 import { AgentUncertainError } from "./errors";
@@ -20,9 +20,9 @@ export async function readNativeHistory(sessionId: string, read: PublicClient["h
 
 /** Restricted protocols and cleanup use the deny-tools default, regardless of any other caller's binding. */
 export function hasUntrackedNativeContext(message: NativeMessage, nativeTools = false): boolean {
-  if (message.type === "other") return true;
+  if (message.type === "other") return !nativeTools && (message.nativeType === "tool" || message.nativeType === "shell");
   if (message.type === "user") return Boolean(message.unsafe);
-  return message.type === "assistant" && (Boolean(message.unsafe) || (!nativeTools && (message.tools?.length ?? 0) > 0));
+  return message.type === "assistant" && !nativeTools && message.hasTools === true;
 }
 
 /** Unexpected pending context cannot be admitted by text matching alone. */
@@ -30,25 +30,15 @@ export function hasUntrackedInboxContext(item: InboxItem): boolean {
   return Boolean(item.unsafe);
 }
 
-/** Native has no assistant-to-user parent field. Only a closed, contiguous owned turn supplies output. */
-function completedOutput(turn: readonly NativeMessage[], nativeTools: boolean): string | null {
-  const terminal = turn.at(-1);
-  if (turn.length < 2 || (!nativeTools && turn.length !== 2) || terminal?.type !== "idle" || terminal.error || terminal.outcome !== "succeeded") return null;
-  let final: Extract<NativeMessage,{type:"assistant"}> | undefined;
-  for (let index = 0; index < turn.length - 1; index++) {
-    const message = turn[index];
-    if (!message || message.type !== "assistant" || message.error || !Number.isFinite(message.time.completed)) return null;
-    const tools = message.tools ?? [], seen = new Set<string>();
-    for (const tool of tools) {
-      // A tool error is settled; a later assistant can recover without turning it into a run failure.
-      if (!nativeTools || typeof tool.id !== "string" || !tool.id.trim() || typeof tool.name !== "string" || !tool.name.trim() || seen.has(tool.id) ||
-          (tool.status !== "completed" && tool.status !== "error") || !tool.time || !Number.isFinite(tool.time.created) || !Number.isFinite(tool.time.completed)) return null;
-      seen.add(tool.id); // Call IDs belong to this assistant, not a session-global namespace.
-    }
-    const last = index === turn.length - 2;
-    if (last ? message.finish !== "stop" : message.finish !== "tool-calls" || tools.length === 0) return null;
-    final = message;
-  }
+/** Native has no assistant-to-user parent field; the last parent assistant and its idle close the owned turn. */
+function completedOutput(turn: readonly NativeMessage[]): string | null {
+  const boundaries = turn.filter(message => message.type === "assistant" || message.type === "idle");
+  const terminal = boundaries.at(-1), final = boundaries.at(-2);
+  if (terminal?.type !== "idle" || terminal.error || terminal.outcome !== "succeeded" ||
+      boundaries.filter(message => message.type === "idle").length !== 1 || final?.type !== "assistant" ||
+      final.error || final.unsafe || typeof final.time.completed !== "number" || !Number.isFinite(final.time.completed) ||
+      final.time.completed < final.time.created || final.time.completed > terminal.time.created ||
+      final.finish !== "stop" || final.hasTools) return null;
   const output = final?.content.map(item => item.text).join("") ?? "";
   return output.trim() ? output : null;
 }
@@ -58,27 +48,23 @@ export function authorizeSubmissionHistory(prompts: readonly PersistedPrompt[], 
   const nativeTools = binding !== undefined && allowsNativeTools(binding);
   const known = new Map(prompts.map((prompt,index) => [prompt.promptId,{...prompt,index}]));
   const seen = new Set<string>();
-  let users = 0, turnStart = -1;
+  let users = 0;
   let uncertain = false;
-  for (const [index,message] of messages.entries()) {
+  for (const message of messages) {
     if (hasUntrackedNativeContext(message,nativeTools)) throw new AgentBindingError("Session contains untracked native context");
     if (typeof message.id !== "string" || !message.id || !Number.isFinite(message.time.created)) uncertain = true;
     const duplicate = seen.has(message.id);
     if (duplicate) uncertain = true;
     seen.add(message.id);
     if (message.type !== "user") {
-      if (users === 0) uncertain = true;
       continue;
     }
     const owned = known.get(message.id);
     if (!owned || owned.input !== message.text) throw new AgentBindingError("Native input differs from the persisted run history");
     if (duplicate) continue;
     if (owned.index !== users) throw new AgentBindingError("Native input order differs from the persisted run history");
-    if (nativeTools && turnStart >= 0 && completedOutput(messages.slice(turnStart+1,index),true) === null) uncertain = true;
-    turnStart = index;
     users++;
   }
-  if (nativeTools && turnStart >= 0 && completedOutput(messages.slice(turnStart+1),true) === null) uncertain = true;
   if (uncertain || users < prompts.length-1) throw new AgentUncertainError("Native prior context is not fully reconciled");
   if (prompts.length > 0 && users === prompts.length) throw new AgentUncertainError("Prompt already admitted; observe the existing step");
 }
@@ -87,83 +73,69 @@ type CorrelatedTurn = {readonly state:"pending"|"running"|"uncertain"|"quarantin
   | {readonly state:"idle";readonly current:PersistedPrompt;readonly turn:readonly NativeMessage[]};
 
 /** Shared identity/context/inbox gates; terminal interpretation belongs to each protocol. */
-function correlateTurn(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>, nativeTools = false): CorrelatedTurn {
+function correlateTurn(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly NativeInboxItem[], active: Readonly<Record<string,unknown>>, nativeTools = false): CorrelatedTurn {
   const current = prompts.at(-1);
   if (!current || new Set(prompts.map(item => item.promptId)).size !== prompts.length) return {state:"quarantined"};
   const known = new Map(prompts.map((item,index) => [item.promptId,{...item,index}]));
   const seen = new Set<string>();
   let userCount = 0;
-  let currentIndex = -1, turnStart = -1;
-  let priorUncertain = false;
+  let currentIndex = -1;
   for (const [index,message] of messages.entries()) {
     if (typeof message.id !== "string" || !message.id || !Number.isFinite(message.time.created)) return {state:"uncertain"};
     if (seen.has(message.id)) return {state:"uncertain"};
     if (hasUntrackedNativeContext(message,nativeTools)) return {state:"quarantined"};
     seen.add(message.id);
     if (message.type !== "user") {
-      if (userCount === 0) return {state:"uncertain"};
       continue;
     }
     const owned = known.get(message.id);
     if (!owned || owned.input !== message.text || owned.index !== userCount) return {state:"quarantined"};
-    if (nativeTools && turnStart >= 0 && completedOutput(messages.slice(turnStart+1,index),true) === null) priorUncertain = true;
-    turnStart = index;
     userCount++;
     if (message.id === current.promptId) currentIndex = index;
   }
   const queued = new Set<string>();
+  let auxiliary = false;
   for (const item of inbox) {
-    if (hasUntrackedInboxContext(item) || item.sessionID !== sessionId || item.type !== "user" || !known.has(item.id) || known.get(item.id)?.input !== item.payload.text || queued.has(item.id)) return {state:"quarantined"};
+    if (item.sessionID !== sessionId) return {state:"quarantined"};
+    if (item.type !== "user") { auxiliary = true; continue; }
+    if (hasUntrackedInboxContext(item) || !known.has(item.id) || known.get(item.id)?.input !== item.payload.text || queued.has(item.id)) return {state:"quarantined"};
     queued.add(item.id);
     // Earlier prompts cannot still be pending while this later daemon step is outstanding.
     if (item.id !== current.promptId) return {state:"uncertain"};
   }
-  if (priorUncertain) return {state:"uncertain"};
-  if (queued.has(current.promptId)) return {state:"pending"};
+  if (auxiliary || queued.has(current.promptId)) return {state:"pending"};
   if (Object.hasOwn(active,sessionId)) return {state:currentIndex >= 0 ? "running" : "uncertain"};
   if (currentIndex < 0 || userCount !== prompts.length) return {state:"uncertain"};
   return {state:"idle",current,turn:messages.slice(currentIndex+1)};
 }
 
-/** Only permissive bindings accept tool-calling intermediate assistants; failed/empty final output stays uncertain. */
-export function correlateHistory(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>, binding?: AgentBinding): Observation {
+/** Deny-bound sessions reject tool evidence separately from output correlation. */
+export function correlateHistory(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly NativeInboxItem[], active: Readonly<Record<string,unknown>>, binding?: AgentBinding): Observation {
   const nativeTools = binding !== undefined && allowsNativeTools(binding);
   const correlated=correlateTurn(sessionId,prompts,messages,inbox,active,nativeTools);
   if (correlated.state!=="idle") return correlated;
-  const output = completedOutput(correlated.turn,nativeTools);
+  const output = completedOutput(correlated.turn);
   return output === null ? {state:"uncertain"} : {state:"completed",output};
 }
 
 /** Cancellation needs terminal execution facts for every dispatched input, not a successful protocol reply. */
 export function cancellationHistorySettled(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[],
-  inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>, binding: AgentBinding): boolean {
+  inbox: readonly NativeInboxItem[], active: Readonly<Record<string,unknown>>, binding: AgentBinding): boolean {
   const nativeTools = allowsNativeTools(binding), seen = new Set<string>();
   const known = new Map(prompts.map((prompt,index) => [prompt.promptId,{...prompt,index}]));
   if (known.size !== prompts.length) throw new AgentBindingError("Cancellation prompt identity is duplicated");
   let users = 0, userCreated = 0, turn: NativeMessage[] = [], terminal = true, previous = -Infinity;
   const finished = (): boolean => {
-    const idle = turn.at(-1);
+    const boundaries = turn.filter(message => message.type === "assistant" || message.type === "idle");
+    const idle = boundaries.at(-1);
     if (!idle || idle.type !== "idle" || !["succeeded","failed","interrupted"].includes(idle.outcome) || idle.time.created < userCreated) return false;
-    const assistants = turn.slice(0,-1);
-    if (!nativeTools && assistants.length > 1) return false;
-    for (const assistant of assistants) {
-      if (assistant.type !== "assistant" || (assistant.time.completed !== undefined &&
-          (!Number.isFinite(assistant.time.completed) || assistant.time.completed < assistant.time.created || assistant.time.completed > idle.time.created))) return false;
-    }
+    if (boundaries.filter(message => message.type === "idle").length !== 1) return false;
     // Interrupted/failed execution can terminate before an assistant is complete, or before one exists at all.
     if (idle.outcome !== "succeeded") return true;
-    return assistants.length > 0 && assistants.every((assistant,index) => {
-      if (assistant.type !== "assistant" || assistant.time.completed === undefined || !Number.isFinite(assistant.time.completed)) return false;
-      const tools = assistant.tools ?? [], toolIds = new Set<string>();
-      for (const tool of tools) {
-        if (!tool.id.trim() || !tool.name.trim() || toolIds.has(tool.id) || (tool.status !== "completed" && tool.status !== "error") ||
-            !Number.isFinite(tool.time.created) || tool.time.completed === undefined || !Number.isFinite(tool.time.completed) ||
-            tool.time.completed < tool.time.created || tool.time.completed > assistant.time.completed) return false;
-        toolIds.add(tool.id);
-      }
-      return index < assistants.length-1 ? assistant.finish === "tool-calls" && tools.length > 0 :
-        assistant.finish === "stop" || assistant.finish === "length" || assistant.finish === "error";
-    });
+    const final = boundaries.at(-2);
+    return final?.type === "assistant" && typeof final.time.completed === "number" && Number.isFinite(final.time.completed) &&
+      final.time.completed >= final.time.created && final.time.completed <= idle.time.created &&
+      !final.hasTools && ["stop","length","error"].includes(final.finish ?? "");
   };
   for (const message of messages) {
     if (hasUntrackedNativeContext(message,nativeTools)) throw new AgentBindingError("Cancellation history contains untracked native context");
@@ -176,25 +148,26 @@ export function cancellationHistorySettled(sessionId: string, prompts: readonly 
       if (users > 0 && !finished()) terminal = false;
       users++; userCreated = message.time.created; turn = [];
     } else {
-      if (users === 0) terminal = false;
-      turn.push(message);
+      if (users > 0) turn.push(message);
     }
   }
   const queued = new Set<string>();
   for (const item of inbox) {
+    if (item.sessionID !== sessionId) throw new AgentBindingError("Cancellation native inbox differs from the run journal");
+    if (item.type !== "user") continue;
     const expected = known.get(item.id);
-    if (hasUntrackedInboxContext(item) || item.type !== "user" || item.sessionID !== sessionId || !expected ||
+    if (hasUntrackedInboxContext(item) || !expected ||
         expected.input !== item.payload.text || queued.has(item.id) || !Number.isFinite(item.time.created)) {
       throw new AgentBindingError("Cancellation native inbox differs from the run journal");
     }
     queued.add(item.id);
   }
   return prompts.length > 0 && terminal && users === prompts.length && finished() &&
-    queued.size === 0 && !Object.hasOwn(active,sessionId);
+    inbox.length === 0 && !Object.hasOwn(active,sessionId);
 }
 
 /** Import-only terminal facts. These do not validate segmentation or authorize canonical writes. */
-export function correlateImportHistory(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly InboxItem[], active: Readonly<Record<string,unknown>>): ImportObservation {
+export function correlateImportHistory(sessionId: string, prompts: readonly PersistedPrompt[], messages: readonly NativeMessage[], inbox: readonly NativeInboxItem[], active: Readonly<Record<string,unknown>>): ImportObservation {
   if (messages.some(message => hasUntrackedNativeContext(message))) return {state:"quarantined"};
   const correlated=correlateTurn(sessionId,prompts,messages,inbox,active);
   if (correlated.state!=="idle") return correlated;
@@ -203,7 +176,8 @@ export function correlateImportHistory(sessionId: string, prompts: readonly Pers
     if (message.time.created<previous) return {state:"uncertain"};
     previous=message.time.created;
   }
-  const {turn,current}=correlated;
+  const {current}=correlated;
+  const turn=correlated.turn.filter(message => message.type !== "other");
   const terminal=turn.at(-1);
   const first=turn[0];
   const assistant=first?.type==="assistant" ? first : undefined;
