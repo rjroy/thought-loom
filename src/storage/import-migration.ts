@@ -36,6 +36,7 @@ const steps = `CREATE TABLE run_steps (
   CHECK((native_state='completed')=(state IN ('completed','processed')))
 )`;
 const quote = (name: string): string => '"' + name.replaceAll('"','""') + '"';
+const identifierKey = (name: string): string => name.replace(/[A-Z]/g, letter => String.fromCharCode(letter.charCodeAt(0) + 32));
 interface Schema { readonly name: string; readonly tbl_name: string; readonly type: string; readonly sql: string }
 
 /** Called after predecessor upgrades, inside core migrate's transaction, with FKs ON throughout. */
@@ -52,7 +53,10 @@ export function migrateImportFoundation(db: Database): void {
 function rebuildClosure(db: Database): void {
   const schema = db.query("SELECT name,tbl_name,type,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all() as Schema[];
   const tables = schema.filter(item => item.type === "table");
-  const parents = new Map(tables.map(table => [table.name,(db.query(`PRAGMA foreign_key_list(${quote(table.name)})`).all() as {table:string}[]).map(fk => fk.table)]));
+  // SQLite resolves ASCII case-insensitively; retain the actual schema names in the closure.
+  const actualNames = new Map(tables.map(table => [identifierKey(table.name),table.name]));
+  const resolveTable = (name: string): string => actualNames.get(identifierKey(name)) ?? name;
+  const parents = new Map(tables.map(table => [table.name,(db.query(`PRAGMA foreign_key_list(${quote(table.name)})`).all() as {table:string}[]).map(fk => resolveTable(fk.table))]));
   const closure = new Set(["thoughts","runs","run_steps"]);
   for (let changed = true; changed;) {
     changed = false;
