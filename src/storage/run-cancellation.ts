@@ -46,29 +46,33 @@ export function assertOrdinaryCancellationJournal(db: Database, journal: Ordinar
   }
 }
 
+/** SQL predicate over a runs row named r. Shared by admission and the bounded supervisor scan. */
+export const recordedWeaveCancellationSafeSql = `(
+  EXISTS(SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND s.position=0 AND s.prompt_id=r.prompt_id)
+  AND (
+    (SELECT COUNT(*) FROM run_steps s WHERE s.run_id=r.id)=1 AND EXISTS(
+      SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND s.position=0 AND s.state='prepared' AND s.native_state='unknown'
+        AND s.envelope_json IS NULL AND s.result_json IS NULL
+        AND ((s.input IS NOT NULL AND length(trim(s.input))>0) OR r.status='interrupted'))
+    OR (
+      (SELECT COUNT(*) FROM run_steps s WHERE s.run_id=r.id)=(SELECT MAX(s.position)+1 FROM run_steps s WHERE s.run_id=r.id)
+      AND EXISTS(SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND s.state IN ('completed','processed'))
+      AND NOT EXISTS(SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND (
+        length(trim(s.prompt_id,char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))=0
+        OR s.input IS NULL OR length(trim(s.input))=0
+        OR (s.state='prepared' AND (s.position!=(SELECT MAX(last.position) FROM run_steps last WHERE last.run_id=r.id)
+          OR s.native_state!='unknown' OR s.envelope_json IS NOT NULL OR s.result_json IS NOT NULL))
+        OR (s.state!='prepared' AND (s.native_state!='completed' OR s.state NOT IN ('completed','processed')
+          OR (s.position!=(SELECT MAX(last.position) FROM run_steps last WHERE last.run_id=r.id)
+            AND (s.state!='processed' OR s.envelope_json IS NULL OR s.result_json IS NULL))))
+      ))
+    )
+  )
+)`;
+
 /** Read-only admission proof. Historical settlement alone says nothing about a possibly dispatched prompt. */
 export function recordedWeaveCancellationSafe(db: Database, runId: string): boolean {
-  const run = db.query<{status:string;initialPromptId:string},[string]>(`SELECT status,prompt_id AS initialPromptId FROM runs
-    WHERE id=? AND kind='weave' AND status IN ('interrupted','failed') AND cancellation_state='settled'`).get(runId);
-  if (!run) return false;
-  // Inspect existence and protocol facts only; a control read does not need private prompt bytes.
-  const rows = db.query<Omit<JournalRow,"input"> & {hasInput:number},[string]>(`SELECT position,prompt_id AS promptId,
-    input IS NOT NULL AND length(trim(input))>0 AS hasInput,state,native_state AS nativeState,
-    envelope_json IS NOT NULL AS hasEnvelope,result_json IS NOT NULL AS hasResult FROM run_steps WHERE run_id=? ORDER BY position`).all(runId);
-  if (!rows.length || rows[0]?.promptId !== run.initialPromptId || new Set(rows.map(row => row.promptId)).size !== rows.length) return false;
-  const initial = rows[0];
-  if (rows.length === 1 && initial?.position === 0 && initial.state === "prepared" && initial.nativeState === "unknown" &&
-      !initial.hasEnvelope && !initial.hasResult && (initial.hasInput || run.status === "interrupted")) return true;
-  let submitted = 0;
-  for (const [index,step] of rows.entries()) {
-    if (step.position !== index || !step.promptId.trim() || !step.hasInput) return false;
-    if (step.state === "prepared") {
-      if (index !== rows.length-1 || step.nativeState !== "unknown" || step.hasEnvelope || step.hasResult) return false;
-    } else {
-      if (step.nativeState !== "completed" || (step.state !== "completed" && step.state !== "processed") ||
-          (index < rows.length-1 && (step.state !== "processed" || !step.hasEnvelope || !step.hasResult))) return false;
-      submitted++;
-    }
-  }
-  return submitted > 0;
+  const row = db.query<{safe:number},[string]>(`SELECT EXISTS(SELECT 1 FROM runs r WHERE r.id=? AND r.kind='weave'
+    AND r.status IN ('interrupted','failed') AND r.cancellation_state='settled' AND ${recordedWeaveCancellationSafeSql}) AS safe`).get(runId);
+  return row?.safe === 1;
 }

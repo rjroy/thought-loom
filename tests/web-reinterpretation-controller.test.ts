@@ -128,6 +128,48 @@ test("uncertain Stop is not repeated and a failed check retains confirmed work",
   expect(stops).toBe(1); expect(c.getSnapshot()).toMatchObject({unconfirmedStop:run.id,run,notice:"read-error"});
 });
 
+for (const reason of ["work-unsettled", "work-unverified"] as const) {
+  for (const status of ["interrupted", "failed"] as const) {
+    test(`${reason} preserves ${status} work until refreshed eligibility permits an explicit new request`, async () => {
+      const blocker:ReinterpretationRun = {...run,status,confirmedThoughtIds:["saved-interpretation"],responseId:"saved-reply"};
+      const blocked:ReinterpretationSnapshot = {receipt:null,run:null,eligibility:{eligible:false,reason,blockingRun:blocker}};
+      let snapshot = blocked, lookups = 0, reads = 0, stops = 0, polls = 0;
+      const sent:string[] = [];
+      const c = createReinterpretationController("subject",client({
+        lookup:async () => {lookups++; return {kind:"found",snapshot};},
+        readRun:async id => {expect(id).toBe(blocker.id); reads++; return {kind:"found",run:blocker};},
+        stop:async () => {stops++; return {kind:"confirmed",run:blocker};},
+        send:async (_id,key) => {sent.push(key); return {kind:"confirmed",snapshot:confirmed(key)};},
+      }),{...options(storage()),schedule:() => {polls++; return () => {};}});
+      const unwatch = c.watch();
+      try {
+        await c.checkReceipt();
+        expect(c.getSnapshot()).toMatchObject({request:"idle",receipt:null,run:null,fresh:true,eligibility:blocked.eligibility});
+        await c.request(); await c.resend(); await c.stop();
+        expect(sent).toEqual([]); expect(stops).toBe(0); expect(polls).toBe(0);
+
+        const beforeCheck = lookups;
+        await c.checkRun(); await c.checkReceipt();
+        expect(reads).toBe(1); expect(lookups).toBe(beforeCheck + 1);
+        expect(c.getSnapshot().eligibility).toEqual(blocked.eligibility);
+        expect(sent).toEqual([]); expect(stops).toBe(0); expect(polls).toBe(0);
+
+        snapshot = eligible;
+        await c.request();
+        expect(sent).toEqual([]); // A changed server snapshot has not been read yet.
+        await c.checkReceipt();
+        expect(c.getSnapshot()).toMatchObject({fresh:true,eligibility:eligible.eligibility,receipt:null});
+        expect(sent).toEqual([]); expect(stops).toBe(0); expect(polls).toBe(0);
+        expect(blocker).toMatchObject({status,confirmedThoughtIds:["saved-interpretation"],responseId:"saved-reply"});
+
+        await c.request();
+        expect(sent).toEqual(["request-key"]);
+        expect(c.getSnapshot()).toMatchObject({request:"confirmed",requestKey:"request-key",receipt:{runId:run.id}});
+      } finally {unwatch();}
+    });
+  }
+}
+
 test("request client rejects mismatched receipt and run identities without exposing them as success", async () => {
   const calls: string[] = [];
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {

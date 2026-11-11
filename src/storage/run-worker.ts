@@ -169,7 +169,8 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
       assertOrdinaryCancellationJournal(this.db,journal);
       const binding = readAgentBinding(this.db,journal.runId);
       if (!binding || !sameBinding(binding,expectedBinding)) throw new RunFenceError("Cancellation binding changed during reconciliation");
-      if (this.require(journal.runId).kind === "weave" && journal.cancellation === "pending") {
+      let verifiedSteps = 0;
+      if (this.require(journal.runId).kind === "weave") {
         for (const step of journal.steps) {
           if (step.state !== "submitting" && step.state !== "uncertain") continue;
           // The turn ended, including interruption/failure. The paired state is required by the SQL CHECK;
@@ -178,11 +179,13 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
             WHERE run_id=? AND prompt_id=? AND input=? AND state=? AND native_state=?`,
           [journal.runId,step.promptId,step.input,step.state,step.nativeState]);
           if (updated.changes !== 1) throw new RunFenceError("Cancellation step changed during reconciliation");
+          verifiedSteps++;
         }
       }
       this.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=? AND cancellation_state='pending'",[journal.runId]);
-      return journal.cancellation === "pending";
+      return {settled:journal.cancellation === "pending",verifiedSteps};
     });
-    if (changed) this.logger.info("[worker] native cancellation settled",{runId:journal.runId,generation:journal.generation});
+    if (changed.settled || changed.verifiedSteps > 0) this.logger.info("[worker] native cancellation settled",{runId:journal.runId,generation:journal.generation,
+      reason:changed.settled ? "pending-cancellation" : "historical-terminal-verification"});
   }
 }

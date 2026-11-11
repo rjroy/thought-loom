@@ -25,7 +25,8 @@ const preview4 = { rootId: "idea-root", branchIds: [...preview3.branchIds, "idea
 export function ideaDaemon(token: string) {
   const attempts: Attempt[] = [];
   const reinterpretKeys = new Set<string>();
-  let reinterpretMode: "normal" | "unknown-before" | "unknown-after" | "active" | "unsettled" = "normal";
+  let reinterpretMode: "normal" | "unknown-before" | "unknown-after" | "active" | "unsettled" | "unverified" = "normal";
+  let reinterpretConflictObserved = false;
   let holdReinterpret = false, releaseReinterpret: (() => void) | undefined, reinterpretCompleted = false, stopped = false, uncertainStop = false;
   let title: string | null = thought.title, rootRejected = false, childEdgeRejected = false, branchAttempt = 0;
   let holdPreview = false, holdTitle = false, failure = false;
@@ -45,7 +46,7 @@ export function ideaDaemon(token: string) {
     connectionStatus(value: typeof connectionStatus) { connectionStatus = value; },
     holdConnection() { holdConnection = true; },
     releaseConnection() { releaseConnection?.(); releaseConnection = undefined; holdConnection = false; },
-    resetReinterpret(mode: typeof reinterpretMode = "normal") { reinterpretKeys.clear(); reinterpretMode = mode; reinterpretCompleted = false; stopped = false; uncertainStop = false; holdReinterpret = false; releaseReinterpret?.(); releaseReinterpret = undefined; },
+    resetReinterpret(mode: typeof reinterpretMode = "normal") { reinterpretKeys.clear(); reinterpretMode = mode; reinterpretConflictObserved = false; reinterpretCompleted = false; stopped = false; uncertainStop = false; holdReinterpret = false; releaseReinterpret?.(); releaseReinterpret = undefined; },
     holdReinterpret() { holdReinterpret = true; },
     releaseReinterpret() { releaseReinterpret?.(); releaseReinterpret = undefined; holdReinterpret = false; },
     completeReinterpret() { reinterpretCompleted = true; },
@@ -60,22 +61,24 @@ export function ideaDaemon(token: string) {
       const url = new URL(path, "http://fixture.invalid");
       const inspection = url.searchParams.get("scope") === "history" || url.searchParams.get("scope") === "show-rejected";
       const send = (value: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
-      const run = { id: "owned-weave-run", kind: "weave", status: stopped ? "interrupted" : reinterpretCompleted ? "completed" : "queued", confirmedThoughtIds: reinterpretCompleted ? [newChild.id] : [], responseId: null };
-      const eligibility = { eligible: false, reason: "work-active", blockingRun: run };
+      const run = { id: "owned-weave-run", kind: "weave", status: stopped || reinterpretMode === "unsettled" ? "interrupted" : reinterpretMode === "unverified" ? "failed" : reinterpretCompleted ? "completed" : "queued", confirmedThoughtIds: reinterpretCompleted ? [newChild.id] : [], responseId: null };
+      const eligibility = { eligible: false, reason: reinterpretMode === "unsettled" ? "work-unsettled" : reinterpretMode === "unverified" ? "work-unverified" : "work-active", blockingRun: run };
       if (url.pathname === "/runs/owned-weave-run") { send(run); return; }
       if (url.pathname === "/runs/owned-weave-run/stop" && method === "POST") { if (uncertainStop) { res.writeHead(500).end(); return; } stopped = true; send({ ...run, status: "interrupted" }); return; }
       if (url.pathname === "/thoughts/idea-root/reinterpret" && method === "POST") {
         if (!key || body !== "{}") { res.writeHead(400).end(); return; }
         if (holdReinterpret) await new Promise<void>(resolve => { releaseReinterpret = resolve; });
-        if (reinterpretMode === "active" || reinterpretMode === "unsettled") {
-          send({ error:"Conflict", code:`interpretation-${reinterpretMode}`, receipt:null, run:null,
-            eligibility:{...eligibility,reason:reinterpretMode === "active" ? "work-active" : "work-unverified"} },409); return;
+        if (reinterpretMode === "active" || reinterpretMode === "unsettled" || reinterpretMode === "unverified") {
+          reinterpretConflictObserved = true;
+          send({ error:"Conflict", code:reinterpretMode === "active" ? "interpretation-active" : "interpretation-unsettled", receipt:null, run:null,
+            eligibility },409); return;
         }
         if (reinterpretMode === "unknown-before") { res.writeHead(500).end(); return; }
         if (reinterpretMode === "unknown-after") { reinterpretKeys.add(key); res.writeHead(500).end(); return; }
-        if (key === "active" || key === "unsettled") {
-          send({ error: "Conflict", code: `interpretation-${key}`, receipt: null, run: null,
-            eligibility: { ...eligibility, reason: key === "active" ? "work-active" : "work-unverified" } }, 409); return;
+        if (key === "active" || key === "unsettled" || key === "unverified") {
+          send({ error: "Conflict", code: key === "active" ? "interpretation-active" : "interpretation-unsettled", receipt: null, run: null,
+            eligibility: { eligible:false, reason: key === "active" ? "work-active" : key === "unsettled" ? "work-unsettled" : "work-unverified",
+              blockingRun: { ...run, status:key === "active" ? "queued" : key === "unsettled" ? "interrupted" : "failed" } } }, 409); return;
         }
         if (key === "private-error") { res.writeHead(500).end("PRIVATE-UPSTREAM-PATH /private/native"); return; }
         if (key === "redirect") { res.writeHead(302, { location: "http://foreign.invalid/private" }).end(); return; }
@@ -93,7 +96,7 @@ export function ideaDaemon(token: string) {
             eligibility: { eligible: false, reason: "subject-rejected", blockingRun: null } }); return;
         }
         if (!reinterpretKeys.has(requestKey)) {
-          send({ receipt:null,run:null,eligibility:reinterpretKeys.size ? eligibility : {eligible:true,reason:null,blockingRun:null} }); return;
+          send({ receipt:null,run:null,eligibility:reinterpretKeys.size || reinterpretConflictObserved ? eligibility : {eligible:true,reason:null,blockingRun:null} }); return;
         }
         send({ receipt: { subjectId: "idea-root", requestKey, runId: run.id }, run, eligibility }); return;
       }
@@ -231,12 +234,18 @@ export async function checkIdeaReinterpretRoute({ origin, host, probe, daemon }:
   const rejectedBody = await rejected.json();
   assert.equal(rejectedBody.eligibility.reason, "subject-rejected");
   assert.equal(rejectedBody.receipt.requestKey, "rejected");
-  for (const code of ["active", "unsettled"]) {
-    const conflict = await post(code);
+  for (const [key, code, reason, status] of [
+    ["active", "interpretation-active", "work-active", "queued"],
+    ["unsettled", "interpretation-unsettled", "work-unsettled", "interrupted"],
+    ["unverified", "interpretation-unsettled", "work-unverified", "failed"],
+  ] as const) {
+    const conflict = await post(key);
     assert.equal(conflict.status, 409);
     assert.match(conflict.headers.get("cache-control") ?? "", /private.*no-store/i);
     const body = await conflict.json();
-    assert.equal(body.code, `interpretation-${code}`); assert.equal(body.receipt, null);
+    assert.equal(body.code, code); assert.equal(body.receipt, null);
+    assert.equal(body.eligibility.reason, reason);
+    assert.equal(body.eligibility.blockingRun.status, status);
     assert.equal(body.eligibility.blockingRun.id, "owned-weave-run");
   }
   const unsafe = await get("unsafe");
@@ -437,20 +446,43 @@ export async function checkIdeaReinterpretBrowser(page: Page, daemon: Fixture, o
   }
 
   if (selected === "all" || selected === "guards") {
-    for (const mode of ["active", "unsettled"] as const) {
+    const unsettledCopy = "Thoughtloom has not confirmed that the earlier agent work has stopped. Another interpretation is blocked to avoid overlapping work. Check interpretation refreshes status; it does not restart or stop the agent. Your idea and saved output remain.";
+    const unverifiedCopy = "The earlier run is marked interrupted or failed, but its records do not confirm that the agent stopped. Background verification may unblock a fresh interpretation. Check interpretation only refreshes status. Your idea and saved output remain. If this stays blocked, the earlier run needs investigation.";
+    const interruptedCopy = "Thoughtloom marked this run interrupted. The cause is not shown here, and this status does not confirm whether the agent stopped. Your idea and saved output remain. Check interpretation refreshes whether a new interpretation is allowed; it does not restart this run.";
+    for (const mode of ["unsettled", "unverified", "active"] as const) {
       daemon.resetReinterpret(mode); await visit();
       const start = writes().length;
       await (await open()).click();
       await expect.poll(() => writes().length).toBe(start + 1);
       const status = page.getByRole("region", { name: "Interpretation status" });
-      await expect(status.getByRole("heading", { name: mode === "active" ? /interpretation.*queued/i : "Earlier work is unresolved" })).toBeVisible();
+      const heading = mode === "active" ? /interpretation.*queued/i : mode === "unsettled" ? "Earlier work may still be running" : "Earlier work needs verification";
+      await expect(status.getByRole("heading", { name: heading })).toBeVisible();
       assert.equal(writes().length, start + 1);
       await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+      await expect(page.getByText(original, { exact: true })).toBeVisible();
       if (mode === "active") {
         const beforeStop = daemon.attempts.filter(call => call.method === "POST" && call.path === "/runs/owned-weave-run/stop").length;
         await page.getByRole("button", { name: /^stop(?: work| interpretation)?$/i }).click();
         await expect.poll(() => daemon.attempts.filter(call => call.method === "POST" && call.path === "/runs/owned-weave-run/stop").length).toBe(beforeStop + 1);
+        await expect(status.getByRole("heading", { name: "Interpretation · Interrupted" })).toBeVisible();
+        await expect(status.getByText(interruptedCopy, { exact: true })).toBeVisible();
+        await expect(status.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
         await expect(page.getByText(original, { exact: true })).toBeVisible();
+      } else {
+        await expect(status.getByText(mode === "unsettled" ? unsettledCopy : unverifiedCopy, { exact: true })).toBeVisible();
+        await expect(status.getByText(`Existing work · ${mode === "unsettled" ? "Interrupted" : "Failed"}`, { exact: true })).toBeVisible();
+        await expect(status.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+        const beforeCheck = daemon.attempts.length;
+        const check = status.getByRole("button", { name: "Check interpretation", exact: true });
+        await check.click();
+        await expect.poll(() => daemon.attempts.slice(beforeCheck).some(call => call.method === "GET" && call.path === "/runs/owned-weave-run")).toBe(true);
+        await expect.poll(() => daemon.attempts.slice(beforeCheck).some(call => call.method === "GET" && call.path.includes("/reinterpret/by-key/"))).toBe(true);
+        await expect(check).toBeEnabled();
+        await expect(status.getByRole("heading", { name: heading })).toBeVisible();
+        await expect(page.getByText(original, { exact: true })).toBeVisible();
+        await expect(page.getByText(reply.text, { exact: true })).toBeVisible();
+        assert.equal(daemon.attempts.slice(beforeCheck).filter(call => call.method !== "GET").length, 0, "Check must not submit reinterpretation or Stop");
+        assert.equal(writes().length, start + 1, "terminal blockers must not trigger automatic reinterpretation");
       }
     }
     daemon.resetReinterpret(); daemon.reset();

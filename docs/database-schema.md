@@ -233,6 +233,8 @@ A write-once `result_json` with `type:'import-partition'` is allowed only for it
 
 Stop fences local execution before remote cancellation settles. Pending settlement remains durable even after local interruption; marking cancellation settled never restores execution authority. For ordinary runs, a binding alone is not evidence of submission: an untouched initial step proven never submitted can settle locally without native cleanup. Submitted steps and ambiguous legacy history still require reconciliation. Search cannot use these ordinary settlement methods; its separate [retained cleanup tail](#retained-search-cancellation) requires joined execution and positive admission/terminal evidence. Configured workers process supported steps through the daemon-owned supervisor.
 
+For a failed or interrupted weave whose historical cancellation flag is already `settled` but whose journal does not prove safety, the existing bounded supervisor scan schedules the same joined ordinary cleanup path. It excludes already-proven and restore-fenced history. The adapter must establish terminal boundaries for every potentially dispatched step and current empty inbox/inactive state; missing, foreign or active evidence cannot authorize settlement. The commit rechecks the complete journal, generation, binding and restore fence, then records terminal step bookkeeping without changing the run's terminal status or generation, saved input, protocol output, receipts or knowledge. This neither resubmits nor revives the old run. No schema change or separate recovery job is involved.
+
 ### `agent_bindings`
 
 | Column | Type | Constraint / meaning |

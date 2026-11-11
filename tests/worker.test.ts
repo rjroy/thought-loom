@@ -485,6 +485,56 @@ test("settlement transaction rolls back native-terminal bookkeeping on a later S
   expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({state:"completed",envelope:null,result:null})]);
 }));
 
+test("positive native proof records unresolved steps even when the historical cancellation flag is already settled", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const journal = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  const runBefore = f.db.query("SELECT * FROM runs WHERE id=?").get(owned.run.id);
+  const stepBefore = f.steps.steps(owned.run.id)[0];
+  if (!stepBefore) throw new Error("Expected a historical step");
+  expect(stepBefore.state).not.toBe("completed");
+  owned.state.settleOrdinaryCancellation(journal, owned.saved);
+  expect(f.steps.steps(owned.run.id)).toEqual([{ ...stepBefore, state: "completed" }]);
+  expect(f.db.query("SELECT native_state FROM run_steps WHERE run_id=?").get(owned.run.id)).toEqual({ native_state: "completed" });
+  expect(f.db.query("SELECT * FROM runs WHERE id=?").get(owned.run.id)).toEqual(runBefore);
+  expect(f.runs.reply(owned.run.id)).toBeNull();
+}));
+
+test("historical settled proof still fences a stale journal and rolls back failed step bookkeeping", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const stale = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  f.db.run("UPDATE runs SET generation=generation+1 WHERE id=?", [owned.run.id]);
+  const before = owned.snapshot();
+  expect(() => owned.state.settleOrdinaryCancellation(stale, owned.saved)).toThrow(RunFenceError);
+  expect(owned.snapshot()).toEqual(before);
+  const current = owned.bindings.cancellationJournal(owned.run.id, owned.prompt);
+  f.db.exec(`CREATE TRIGGER test_historical_settlement_fault BEFORE UPDATE OF native_state ON run_steps
+    BEGIN SELECT RAISE(ABORT,'owned historical settlement fault'); END;`);
+  try {
+    expect(() => owned.state.settleOrdinaryCancellation(current, owned.saved)).toThrow(/owned historical settlement fault/);
+    expect(owned.snapshot()).toEqual(before);
+  } finally { f.db.exec("DROP TRIGGER test_historical_settlement_fault"); }
+  owned.state.settleOrdinaryCancellation(current, owned.saved);
+  expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({ state: "completed", envelope: null, result: null })]);
+}));
+
+test("worker reconciles a settled-but-unverified historical weave with the actual adapter without resubmission", async () => fixture(async f => {
+  const owned = await provenInterruptedWeave(f);
+  f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [owned.run.id]);
+  const before = f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(owned.run.id);
+  const restarted = worker(f, () => complete("must not publish"));
+  restarted.native.cancel = (runId, value, prompt) => owned.adapter.cancel(runId, value, prompt);
+  try {
+    await restarted.instance.tick(owned.run.id);
+    expect(f.steps.steps(owned.run.id)).toEqual([expect.objectContaining({ state: "completed", envelope: null, result: null })]);
+    expect(f.db.query("SELECT native_state FROM run_steps WHERE run_id=?").get(owned.run.id)).toEqual({ native_state: "completed" });
+    expect(f.db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(owned.run.id)).toEqual(before);
+    expect(restarted.native.submitted).toEqual([]);
+    expect(f.runs.reply(owned.run.id)).toBeNull();
+  } finally { restarted.instance.pause(); await restarted.instance.drain(); }
+}));
+
 test("title-clear waits behind a started weave across successor preparation and worker restart", async () => fixture(async f => {
   const titles = new TitleService(new SqliteTitleRepository(f.db, { id: f.id, now }));
   titles.setUser("user", "root", "Existing title");
@@ -546,7 +596,7 @@ test("an unverified historical cancellation blocks a later queued weave from nat
   } finally { w.instance.pause(); await w.instance.drain(); }
 }));
 
-test("a prepared successor cannot settle an earlier dispatched weave without native evidence, including after worker restart", async () => fixture(async f => {
+for (const historicalSettled of [false, true]) test(`a prepared successor cannot hide an earlier dispatched weave without evidence, ${historicalSettled ? "historically settled" : "pending"}, including after worker restart`, async () => fixture(async f => {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "unverified-prior-step" });
   const w = worker(f, () => request("readThought", { id: "root" }));
   for (let i = 0; i < 20 && f.steps.steps(run.id).length < 2; i++) await w.instance.tick(run.id);
@@ -567,15 +617,16 @@ test("a prepared successor cannot settle an earlier dispatched weave without nat
   const adapter = new OpenCodeAdapter(client, new SqliteAgentBindings(f.db), () => {});
   w.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
   f.service.stop("user", run.id);
+  if (historicalSettled) f.db.run("UPDATE runs SET cancellation_state='settled' WHERE id=?", [run.id]);
   await w.instance.tick(run.id);
-  expect(f.steps.cancellation(run.id)).toBe("pending");
+  expect(f.steps.cancellation(run.id)).toBe(historicalSettled ? "settled" : "pending");
   w.instance.pause();
   await w.instance.drain();
   const restarted = worker(f, () => complete("must not publish"));
   restarted.native.cancel = (runId, value, prompt) => adapter.cancel(runId, value, prompt);
   try {
     await restarted.instance.tick(run.id);
-    expect(f.steps.cancellation(run.id)).toBe("pending");
+    expect(f.steps.cancellation(run.id)).toBe(historicalSettled ? "settled" : "pending");
     expect(f.runs.get(run.id)?.status).toBe("interrupted");
     expect(f.runs.reply(run.id)).toBeNull();
     expect(restarted.native.submitted).toEqual([]);
