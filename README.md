@@ -4,43 +4,58 @@
 
 Thoughtloom explores a question: can AI help someone discover and develop thinking they would otherwise have missed?
 
-The goal is to capture rough thoughts without ceremony, find meaningful connections, and develop ideas through dialogue. The thinking should remain useful outside the application, not become another chat transcript to reread.
+Capture rough thoughts, find meaningful connections, and develop ideas through dialogue. Your original thinking stays intact as new ideas branch from it. Export the results as Markdown so they remain useful outside the application.
 
 ## Principles
 
 - Preserve original thinking. Development adds new thoughts to a branching chain rather than rewriting the past.
 - Keep titles editable, separate from immutable thought content and ancestry.
 - Attribute AI contributions. Reading a suggestion does not mean agreeing with it.
-- Give users control. Rejected material stays available for deliberate inspection but is excluded from AI use.
-- Keep business rules independent of screens. The daemon comes first; visual changes must not silently reshape the domain model.
+- Give users control. Rejected material stays available for deliberate inspection but is excluded from the app's AI retrieval and context.
 
 ## Start here
+
+**Using Thoughtloom?** Open your installation's web address and follow the [illustrated user guide](docs/user-guide.md). It covers everyday workflows, limitations and recovery when a request cannot be confirmed.
+
+**Running your own installation?** Follow [Server startup](docs/server-startup.md), then [Production deployment](docs/production-deployment.md) for persistent services and access configuration. See [Backup and restore](docs/backup-restore.md) to protect your library and retained originals.
+
+## What you can do today
+
+- **Capture** a thought with an optional title. Change its title later without rewriting the original.
+- **Find and browse** your thinking with keyword search, chronological lists and connected maps.
+- **Connect ideas** yourself, or let background AI weaving suggest interpretations and relationships. **Reinterpret** requests a fresh interpretation without replacing earlier work.
+- **Develop ideas** through Evolve, keeping your contributions, AI developments and Full replies distinct.
+- **Import Markdown, images and PDFs.** Markdown wording is preserved; image/PDF originals are retained separately from AI interpretations.
+- **Ask your library** questions in saved search conversations that rediscover existing ideas without adding new thoughts.
+- **Export Markdown**, either directly from an idea's development branches or as an AI-written report across your library.
+- **Control AI use** by rejecting and restoring thoughts or connections. Add installation-wide agent guidance in Settings.
+
+Capture, ordinary search, Browse, manual connections and Simple export work without a configured model. Markdown import can use structural grouping without AI; images and PDFs can be retained while interpretation waits. Background weaving stays queued until agents are configured. Evolve, new conversational-search turns and AI report generation require agent configuration by the operator.
+
+AI output is a contribution to assess, not a verified conclusion. URL retrieval depends on available tools and source access; linked web pages are not archived. For image/PDF interpretation, Thoughtloom and its agent service must share access to retained originals. See the [user guide](docs/user-guide.md) for workflow details and [agent setup](docs/server-startup.md#agent-configuration) for configuration.
+
+Weaver and Evolve can use tools provided by the operator. Those tools are not sandboxed by Thoughtloom's retrieval rules, and stopping a run cannot undo external changes. Operators should review the [tool-access policy](.lore/context/architecture.md#agent-tool-access-policy) before enabling them.
+
+## Documentation
+
+### Using and running Thoughtloom
 
 | Document | What it covers |
 | --- | --- |
 | [User guide](docs/user-guide.md) | Start using Thoughtloom: capture, find, connect and develop ideas, import files, and export your thinking. Includes screenshots. |
-| [Server startup](docs/server-startup.md) | Install and run the daemon and web client; configure their server-side boundary. |
-| [Production deployment](docs/production-deployment.md) | Build and supervise persistent loopback-bound services, with optional private HTTPS access; manage credentials, backups and upgrades. |
-| [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
-| [Daemon API](docs/daemon-api.md) | Authentication, request and response shapes, routes, and examples. |
-| [Database schema](docs/database-schema.md) | SQLite tables, relationships, constraints, and migrations. |
-| [Portable backup and restore](docs/backup-restore.md) | Online JSON/original-media capture, Git backup and offline empty-target restore; contracts and validation boundaries. |
-| [Client design system](apps/web/DESIGN.md) | Implemented palette, typography, layout, interaction patterns, and responsive rules. |
+| [Server startup](docs/server-startup.md) | Install and run Thoughtloom; configure agents and troubleshoot startup. |
+| [Production deployment](docs/production-deployment.md) | Run persistent services; manage access, credentials, backups and upgrades. |
+| [Backup and restore](docs/backup-restore.md) | Capture the library and original files, deliver backups through Git, and restore to an empty installation. |
 
-## Current state
+### Developing Thoughtloom
 
-The Bun/TypeScript daemon provides SQLite persistence, immutable evolution trees, editable titles, rejection/restoration, FTS5 search with spellfix1 typo handling, both Markdown export modes, and manual test scripts. Configured OpenCode integration supports background weaving, conversational development, and read-only report investigation through scoped application capabilities.
+Thoughtloom uses Bun and TypeScript, a Next.js/React web client, and a Hono daemon backed by SQLite. AI features attach to an operator-managed OpenCode service. Browser requests pass through the web server; credentials stay server-side.
 
-Weaver instructions support URL summaries and source-informed interpretations through available native/MCP tools. Bare link lists can produce separately searchable sibling summaries with inline source links; completed weaving retains a Full reply with outcome and access limitations. Retrieval depends on the operator's tools and source access; Thoughtloom does not archive fetched source snapshots. See [URL-aware weaving](.lore/context/url-weaving.md).
-
-Idea's [Reinterpret action](docs/server-startup.md#reinterpret-an-idea) requests fresh weaving without replacing earlier interpretations, replies or branches. It also provides a recovery path after source access changes.
-
-Lossless Markdown import is available from Capture through a separate import workspace, with queued execution, restricted configured segmentation or local structural fallback, bookmarkable reports, and user-only original-byte inspection. Imported wording is preserved; document order does not create an evolution chain.
-
-Retained image/PDF import is available from Capture's **Import → Image or PDF** workspace and through the user-only [backend API](docs/daemon-api.md#retained-media-import-and-source-inspection). The client separates original retention from AI interpretation and supports receipt recovery, source inspection/download, run status and deliberate retry. Originals stay outside SQLite; normal Weaver/Evolve receives a managed absolute path for OpenCode's tools. **The daemon and OpenCode must share filesystem access.** See the [web workflow](docs/server-startup.md#image-and-pdf-import-workflow) and [setup and paired backups](docs/server-startup.md#retained-media-and-shared-filesystem).
-
-Conversational agentic search is available from Explore's **Ask your library** and **Saved searches** links: saved conversations rediscover existing thoughts without creating new knowledge. Sessions have bookmarkable links and remain until explicitly deleted. See the [web workflow](docs/server-startup.md#conversational-search) or try the [isolated daemon walkthrough](docs/testing.md#isolated-agentic-search-walkthrough) without a provider. Explore's **Exports** workspace starts Agentic reports and lists active and historical exports with bookmarkable detail pages and deliberate deletion; Idea's contextual Export remains Simple-only. See the [export workflow](docs/server-startup.md#export-workspace).
-
-The separate Next.js/React client provides Capture, bookmarkable Explore searches, query-free **Browse**, Idea reading with title metadata, user-created connections and rejection/restoration controls, Evolve with recorded developments and known-run status/Stop, and Simple/Agentic Markdown exports. Browse lists user/AI thoughts with chronological sorting, authorship filters, deliberate rejected-material inspection and bounded loading. List titles and Idea's **Browse from here** open a local connected map with a linked-list alternative and actual-text inspection. Selecting a new node reveals its first page of direct links; **Load more linked ideas** continues that node's neighborhood without moving the map. Browser requests use a server-only daemon boundary. Without agent configuration, capture, search, Browse, user-created connections and Simple export remain usable; weaving jobs stay queued and titles use the display fallback. Evolve and Agentic export require explicit server-side agent configuration. [Settings](docs/server-startup.md#additional-agent-instructions) provides global additional instructions for Weaver, Evolve, Agentic Search and Agentic Export, separately from operator model and tool configuration.
-
-Product intent and working agreements live in [`.lore/context/`](.lore/context/). The documents above distinguish implemented behavior from explicitly marked planned contracts.
+| Document | What it covers |
+| --- | --- |
+| [Testing concepts](docs/testing.md) | Test commands, isolated fixtures, browser checks and manual walkthroughs. |
+| [Daemon API](docs/daemon-api.md) | Authentication, routes, request/response shapes and examples. |
+| [Database schema](docs/database-schema.md) | Persistence, relationships, constraints and migrations. |
+| [Client design system](apps/web/DESIGN.md) | Implemented visual and interaction patterns. |
+| [Product context](.lore/context/) | Product intent and working agreements; check implementation contracts for current behavior. |
+| [Agent instructions](AGENTS.md) | Repository guidance for AI contributors. |
