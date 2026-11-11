@@ -19,6 +19,7 @@ import { ContentGlyph } from "./content-glyph";
 import { ConnectionEditor } from "./connection-editor";
 import { sourceController, useMediaSourceMemory } from "./media-import-provider";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 import { MediaSourceStatus } from "./media-source-status";
 import type { MediaRun, MediaScope } from "../features/media/types";
 import { createReinterpretationController } from "../features/idea/reinterpretation-controller";
@@ -654,7 +655,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
             <div className={styles.thought}>
               <Byline thought={thought} focal />
               <h1>{titleOf(thought)}</h1>
-              {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} /> : <p className={styles.original}>{thought.text}</p>}
+              {thought.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} /> : <ThoughtMarkdown className={styles.original} text={thought.text} />}
             </div>
             {thought.rejected === true || (inspection && thought.rejected !== false) || mediaState?.rejected === true || mediaState?.phase === "unavailable"
               ? <button className={`${styles.button} ${styles.primary}`} disabled aria-disabled="true">Evolve this idea</button>
@@ -760,7 +761,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
                   {view.responses.map((item, index) => <option key={item.id} value={item.id}>Reply {index + 1} · {item.state}</option>)}
                 </select>
               </label>}
-              <p className={styles.retained}>{reply.text}</p>
+              <ThoughtMarkdown className={styles.retained} text={reply.text} headingLevel={3} />
               <p className={styles.metadata}>A retained response is not a new development or an endorsement.</p>
             </>}
           </div>
@@ -871,12 +872,12 @@ function ContextRow({ item, location, focus, inspection, disabled, onReject, onR
       {!thought && <p className={styles.metadata}>{item.id}</p>}
     </div>
     <div>
-      {thought?.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} compact /> : thought && <p className={styles.contextText}>
-        {abbreviate && !expanded ? thought.text?.slice(0, 240) : thought.text}
+      {thought?.kind === "media-original" ? <MediaSourceDetails source={thought.mediaSource} compact /> : thought && <div className={styles.contextText}>
+        {abbreviate && !expanded ? thought.text?.slice(0, 240) : <ThoughtMarkdown text={thought.text} headingLevel={4} />}
         {abbreviate && <> <button className={styles.textButton} aria-expanded={expanded}
           aria-label={`${expanded ? "Collapse" : "Expand"} context text for ${titleOf(thought)}`}
           onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "…"}</button></>}
-      </p>}
+      </div>}
       {item.child && <p className={`${styles.relationship} ${styles.directRelationship}`}><span className={styles.relationLabel}><ContentGlyph kind="evolution" size={16} />Developed from this idea</span></p>}
       {item.source && <p className={`${styles.relationship} ${styles.directRelationship}`}><span className={styles.relationLabel}><ContentGlyph kind="used-as-source" size={16} />Used as a source for this idea</span></p>}
       {item.connections.map(connection => <RecordedConnection key={connection.id} connection={connection}

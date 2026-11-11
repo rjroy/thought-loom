@@ -113,7 +113,9 @@ export async function checkMediaEvolveSurface(page: Page, origin: string): Promi
   assert.equal((await admission).status(), 201);
   const savedContribution = page.locator("main").getByText("You · Contribution", { exact: true }).locator("..").getByText(contributionText, { exact: true });
   await expect(savedContribution).toBeVisible();
-  await expect(savedContribution).toHaveJSProperty("textContent", contributionText);
+  await expect(savedContribution).toContainText("Owned new media question");
+  await expect(savedContribution).toContainText("without replacing the clarification.");
+  await expect(savedContribution.locator("br")).toHaveCount(1);
   await expect(field).toHaveValue("");
   const commands = audit.attempts.filter(call => call.method !== "GET");
   assert.equal(commands.length, 1); assert.equal(commands[0]?.path, rootPath);

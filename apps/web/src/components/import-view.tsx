@@ -9,6 +9,7 @@ import type { IdeaThought } from "../features/idea/types";
 import { useContextualBack } from "./contextual-back";
 import { useImportStore } from "./import-provider";
 import { ImportInspection } from "./import-inspection";
+import { ThoughtMarkdown } from "./thought-markdown";
 import styles from "./import.module.css";
 
 const byteLabel = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(bytes / 1024)} KB`;
@@ -139,7 +140,7 @@ export function ImportView() {
               <p className={styles.reportFoot}>One failed file does not stop the others. Leaving does not stop this batch. Unsent files are not included in these totals.</p>
               {sample && <article className={styles.sample}>
                 <p className={styles.small}>From {sample.source.originalPath}</p><p className={styles.small}>Imported source · Original authorship unverified</p>
-                <p className={styles.sampleText}>{sample.thought.text}</p>
+                {sample.thought.text !== null && <ThoughtMarkdown className={styles.sampleText} text={sample.thought.text} />}
                 <div className={styles.actions}><Link className={styles.action} href={`/ideas/${encodeURIComponent(sample.thought.id)}`} prefetch={false}>Open idea</Link><button className={styles.action} type="button" onClick={() => inspect(sample.source.id)}>Inspect original</button></div>
               </article>}
             </>}

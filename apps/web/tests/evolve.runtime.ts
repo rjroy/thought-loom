@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { expect, type Page } from "@playwright/test";
 import { expectGlyph } from "./explore.runtime";
+import { markdownThought } from "./thought-markdown.runtime";
 
 type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
@@ -9,6 +10,7 @@ type Run = { id: string; kind: "evolve"; status: Status; confirmedThoughtIds: st
 const start = { id: "evolve-start", text: "Owned starting thought", title: "Starting thought", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
 const earlier = { ...start, id: "evolve-earlier", text: "Owned earlier thought", title: "Earlier thought" };
 const imported = { ...start, id: "evolve-imported", text: "Owned imported starting thought", title: "Imported starting thought", author: "source", kind: "imported-original", origin: "markdown-import" };
+const markdown = { ...start, id: "evolve-markdown", text: markdownThought, title: "Markdown fixture" };
 
 export function evolveDaemon(token: string) {
   const attempts: Attempt[] = [], runs = new Map<string, Run>();
@@ -16,7 +18,7 @@ export function evolveDaemon(token: string) {
   const rejected = new Set<string>();
   const fallbackStates = new Map<string, "complete" | "interrupted">();
   let admission: "normal" | "unknown" = "normal", stopFailure = false, resolutionFailure = false, failedResolutionReads = 0, next = 0;
-  const reset = () => { runs.clear(); thoughts.clear(); rejected.clear(); fallbackStates.clear(); thoughts.set(start.id, start); thoughts.set(earlier.id, earlier); thoughts.set(imported.id, imported); admission = "normal"; stopFailure = false; resolutionFailure = false; failedResolutionReads = 0; next = 0; };
+  const reset = () => { runs.clear(); thoughts.clear(); rejected.clear(); fallbackStates.clear(); thoughts.set(start.id, start); thoughts.set(earlier.id, earlier); thoughts.set(imported.id, imported); thoughts.set(markdown.id, markdown); admission = "normal"; stopFailure = false; resolutionFailure = false; failedResolutionReads = 0; next = 0; };
   reset();
   const publicRun = (run: Run) => ({ id: run.id, kind: run.kind, status: run.status, confirmedThoughtIds: run.confirmedThoughtIds, responseId: run.responseId });
   return {
@@ -25,11 +27,11 @@ export function evolveDaemon(token: string) {
     setStopFailure(value: boolean) { stopFailure = value; },
     setResolutionFailure(value: boolean) { resolutionFailure = value; },
     failedResolutionReads() { return failedResolutionReads; },
-    setStatus(id: string, status: Status, options: { outputs?: number; fallback?: "complete" | "interrupted" } = {}) {
+    setStatus(id: string, status: Status, options: { outputs?: number; fallback?: "complete" | "interrupted"; outputText?: string } = {}) {
       const run = runs.get(id); assert.ok(run, "fixture needs a known admitted run");
       run.status = status;
       run.confirmedThoughtIds = Array.from({ length: options.outputs ?? 0 }, (_, index) => `evolve-output-${id}-${index + 1}`);
-      for (const [index, outputId] of run.confirmedThoughtIds.entries()) thoughts.set(outputId, { ...start, id: outputId, text: `Owned saved development ${index + 1}`, title: `Development ${index + 1}`, author: "ai", kind: "developing-idea", origin: "development", parentId: run.contributionId });
+      for (const [index, outputId] of run.confirmedThoughtIds.entries()) thoughts.set(outputId, { ...start, id: outputId, text: options.outputText ?? `Owned saved development ${index + 1}`, title: `Development ${index + 1}`, author: "ai", kind: "developing-idea", origin: "development", parentId: run.contributionId });
       run.responseId = options.fallback || (run.confirmedThoughtIds.length && status !== "failed") ? `evolve-reply-${id}` : null;
       if (options.fallback) fallbackStates.set(id, options.fallback); else fallbackStates.delete(id);
     },
@@ -95,7 +97,7 @@ export async function checkEvolveGlyphs(page: Page, daemon: Fixture, origin: str
   await page.getByRole("textbox", { name: "Your contribution" }).fill("Owned glyph contribution");
   await page.getByRole("button", { name: /^send$/i }).click();
   await expect(page.getByText("evolve-run-1", { exact: false }).first()).toBeVisible();
-  const contribution = page.getByText("Owned glyph contribution", { exact: true }).locator("..");
+  const contribution = page.getByText("Owned glyph contribution", { exact: true }).locator("../..");
   await expect(contribution).toContainText("You");
   await expectGlyph(contribution, "user-contribution.svg", 20);
   daemon.setStatus("evolve-run-1", "completed", { outputs: 1 });
@@ -104,7 +106,7 @@ export async function checkEvolveGlyphs(page: Page, daemon: Fixture, origin: str
   await expect(development).toContainText("AI");
   await expect(development).toContainText("Developing idea");
   await expectGlyph(development, "developing-idea.svg", 20);
-  const reply = page.getByText("Owned canonical reply", { exact: true }).locator("..");
+  const reply = page.getByText("Owned canonical reply", { exact: true }).locator("../..");
   await expect(reply).toContainText("AI");
   await expectGlyph(reply, "full-reply.svg", 20);
 }
@@ -223,13 +225,13 @@ export async function checkEvolveBrowser(page: Page, daemon: Fixture, options: {
     const observed: Array<{ method: string; path: string; body: string }> = [];
     (window as typeof window & { __ownedEvolveRequests?: typeof observed }).__ownedEvolveRequests = observed;
     const original = window.fetch.bind(window);
-    window.fetch = (input, init) => {
+    window.fetch = Object.assign((input: Parameters<typeof window.fetch>[0], init?: Parameters<typeof window.fetch>[1]) => {
       const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
       if (url.origin === window.location.origin && url.pathname.startsWith("/api/evolve/")) {
         observed.push({ method: (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase(), path: url.pathname + url.search, body: typeof init?.body === "string" ? init.body : "" });
       }
       return original(input, init);
-    };
+    }, window.fetch);
   });
   const beforeReload = daemon.attempts.length;
   await page.reload({ waitUntil: "networkidle" });

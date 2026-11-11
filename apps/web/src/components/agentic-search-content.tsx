@@ -7,6 +7,7 @@ import { searchHistoryHref, searchSessionHref } from "../features/agentic-search
 import { useAgenticSearchController } from "./agentic-search-provider";
 import styles from "./agentic-search.module.css";
 import { MediaSourceDetails } from "./media-source-details";
+import { ThoughtMarkdown } from "./thought-markdown";
 
 const kinds = {
   "captured-original": "Original capture", "user-contribution": "Contribution", "ai-interpretation": "Interpretation",
@@ -65,7 +66,7 @@ export function SearchDiscoveries({ id, workspace, history, rememberPosition }: 
         {preview.thought.kind === "media-original" ? <>
           <MediaSourceDetails source={preview.thought.mediaSource} compact />
           <p className={styles.metadata}>Search can read this descriptor, clarification and recorded interpretations. It cannot open the original file.</p>
-        </> : <p className={styles.message}>{preview.thought.text}</p>}
+        </> : <ThoughtMarkdown className={styles.message} text={preview.thought.text} headingLevel={5} />}
       </section>}
     </li>)}</ol>
     {notice && <p role="status" className={styles.metadata}>{notice}</p>}

@@ -101,7 +101,13 @@ The body is 18px with 27px line height at the default root size. Secondary copy 
 | Exports / New export / Export / Simple export heading | `2rem`, weight 700, line height 1.2 | Same |
 | Export request / status heading | Request text `1.25rem`, line height 1.5 / status `1.5rem`, line height 1.25 | Same |
 
-Explore has a visually hidden page heading and a visible search label on narrow screens. Most heading tracking is −0.02em, including Export. Thought text preserves whitespace and wraps long words rather than acquiring formatting from the generated comps. Counts use tabular numerals. Markdown code uses the browser's monospace fallback, not an additional brand font.
+Explore has a visually hidden page heading and a visible search label on narrow screens. Most heading tracking is −0.02em, including Export. Full thought bodies use the shared Markdown reading treatment approved on 2026-11-11, within the existing Quiet Night layouts and body sizes. Single source newlines remain visible breaks; blank lines separate paragraphs. Bounded excerpts remain plain text rather than parsing truncated Markdown. Counts use tabular numerals. Markdown code uses the browser's monospace fallback, not an additional brand font.
+
+### Markdown thought reading
+
+The shared treatment supports headings, paragraphs, emphasis, nested lists, quotations, inline and fenced code, and GFM tables. Content headings sit below their surrounding title and stop at H6. Underlined cyan HTTP(S) links have visible keyboard focus and an accessible new-tab indication; they open a new tab with safe `rel` attributes. Long links wrap; code and tables scroll inside their own containers without widening the page.
+
+Raw HTML is skipped, non-HTTP(S) links are inert, and images display alternative text without fetching remote content. Rendering never rewrites stored text. Copy, downloads and original-source inspection retain their existing source contracts. Export previews keep their separate, deliberately inert body-link policy.
 
 ## Layout
 
