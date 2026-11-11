@@ -18,6 +18,7 @@ The goal is to capture rough thoughts without ceremony, find meaningful connecti
 
 | Document | What it covers |
 | --- | --- |
+| [User guide](docs/user-guide.md) | Start using Thoughtloom: capture, find, connect and develop ideas, import files, and export your thinking. Includes screenshots. |
 | [Server startup](docs/server-startup.md) | Install and run the daemon and web client; configure their server-side boundary. |
 | [Production deployment](docs/production-deployment.md) | Build and supervise persistent loopback-bound services, with optional private HTTPS access; manage credentials, backups and upgrades. |
 | [Testing concepts](docs/testing.md) | Automated test boundaries, isolated fixtures, the walkthrough, and manual testing. |
