@@ -32,7 +32,7 @@ const sources = {
   "apps/web/src/app/api/imports/media": ["route.ts", "by-key/[key]/route.ts"],
   "apps/web/src/app/api/imports/media-sources": ["[id]/route.ts", "[id]/raw/route.ts", "[id]/retry/route.ts"],
   "apps/web/src/app/api/imports/media-runs": ["[id]/route.ts", "[id]/stop/route.ts"],
-  "apps/web/src/app/api/ideas/[id]/reinterpret": ["route.ts", "by-key/[key]/route.ts"],
+  "apps/web/src/app/api/ideas/[id]/reinterpret": ["route.ts", "by-key/[key]/route.ts", "retire/[runId]/route.ts"],
   "apps/web/src/app/explore/ask": ["page.tsx", "saved/page.tsx", "[id]/page.tsx", "[id]/history/page.tsx"],
   "apps/web/src/app/api/search-sessions": ["route.ts", "[id]/route.ts", "[id]/composer-contexts/route.ts", "[id]/composer-contexts/[composerId]/route.ts", "[id]/messages/route.ts", "[id]/discoveries/route.ts", "[id]/discoveries/[entryId]/route.ts", "[id]/composer-contexts/[composerId]/thoughts/[thoughtId]/route.ts", "[id]/turns/route.ts", "[id]/turns/by-key/[requestKey]/route.ts"],
   "apps/web/src/app/api/search-runs": ["[id]/route.ts", "[id]/stop/route.ts"],

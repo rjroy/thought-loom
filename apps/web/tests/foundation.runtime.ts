@@ -74,6 +74,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/browse/[id]/page.tsx", "apps/web/src/components/browse-map-view.tsx", "apps/web/src/components/browse-map-surface.tsx", "apps/web/src/components/browse-map.module.css",
     "apps/web/src/app/api/ideas/[id]/route.ts", "apps/web/src/server/idea.ts",
     "apps/web/src/app/api/ideas/[id]/reinterpret/route.ts", "apps/web/src/app/api/ideas/[id]/reinterpret/by-key/[key]/route.ts",
+    "apps/web/src/app/api/ideas/[id]/reinterpret/retire/[runId]/route.ts",
     "apps/web/src/features/idea/reinterpretation.ts", "apps/web/src/server/reinterpretation.ts", "apps/web/src/server/reinterpretation-route.ts",
     "apps/web/src/features/idea/reinterpretation-controller.ts", "apps/web/src/features/idea/reinterpretation-request.ts", "apps/web/src/components/reinterpretation-status.tsx",
     "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts", "apps/web/src/features/idea/media.ts",

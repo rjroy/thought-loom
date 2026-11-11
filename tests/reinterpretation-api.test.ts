@@ -6,7 +6,8 @@ import { RunWorker } from "../src/agent/worker";
 import { SqliteAgentBindings } from "../src/storage/agent-binding";
 import { SqliteStore } from "../src/storage/sqlite";
 import { admitWeave } from "../src/storage/weave-admission";
-import { body, mediaApiFixture, object, text, type MediaApiFixture } from "./fixtures/media-import-api";
+import { body, bounded, mediaApiFixture, object, text, type MediaApiFixture } from "./fixtures/media-import-api";
+import { insertMediaSource, mediaThought } from "./fixtures/media-source";
 
 const stamp = "2030-01-01T00:00:00.000Z";
 const endpoint = (subject = "subject") => `/thoughts/${subject}/reinterpret`;
@@ -35,6 +36,189 @@ function control(value: Record<string, unknown>) {
 function terminal(f: MediaApiFixture, runId: string, status: "completed" | "failed", cancellation = "none"): void {
   write(f, db => { db.query("UPDATE runs SET status=?, cancellation_state=? WHERE id=?").run(status, cancellation, runId); });
 }
+
+const retirement = (subject: string, runId: string) => `${endpoint(subject)}/retire/${runId}`;
+const acknowledge = (raw = '{"acknowledgeRemoteUncertainty":true}'): RequestInit => ({
+  method: "POST", headers: { "content-type": "application/json" }, body: raw,
+});
+
+for (const status of ["failed", "interrupted"] as const) test(`explicitly retired ${status} legacy work admits and dispatches a fresh weave without changing native facts`, async () => mediaApiFixture(async f => {
+  seed(f);
+  const oldResponse = await f.request(endpoint(), command("legacy"));
+  expect(oldResponse.status).toBe(202);
+  const old = control(await body(oldResponse));
+  expect(f.read(db => db.query("SELECT input,state,native_state FROM run_steps WHERE run_id=?").get(old.runId)))
+    .toEqual({ input: null, state: "prepared", native_state: "unknown" });
+  write(f, db => {
+    db.run("UPDATE run_steps SET state='uncertain' WHERE run_id=?", [old.runId]);
+    db.run("UPDATE runs SET status=?,cancellation_state='pending' WHERE id=?", [status, old.runId]);
+  });
+  const facts = () => f.read(db => ({
+    run: db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(old.runId),
+    steps: db.query("SELECT * FROM run_steps WHERE run_id=?").all(old.runId),
+  }));
+  const before = facts(), graph = f.read(db => db.query("SELECT * FROM thoughts ORDER BY id").all());
+  expect((await f.request(endpoint(), command("fresh"))).status).toBe(409);
+  const lookup = await f.request(retirement("subject", old.runId));
+  expect(lookup.status).toBe(200);
+  expect(lookup.headers.get("cache-control")).toContain("no-store");
+  const initial = await body(lookup);
+  expect(initial.runId).toBe(old.runId); expect(initial.retiredAt).toBeNull();
+  expect(object(initial.eligibility).eligible).toBe(false);
+  const response = await f.request(retirement("subject", old.runId), acknowledge());
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toContain("no-store");
+  const retired = await body(response), retiredAt = text(retired.retiredAt);
+  expect(retired).toMatchObject({ runId: old.runId, retiredAt, remoteState: "unknown" });
+  expect(object(retired.eligibility).eligible).toBe(true);
+  expect(facts()).toEqual(before);
+  expect(f.read(db => db.query("SELECT count(*) AS n FROM runs").get())).toEqual({ n: 1 });
+  const replay = await body(await f.request(retirement("subject", old.runId), acknowledge()));
+  expect(replay.retiredAt).toBe(retiredAt);
+  const readBack = await body(await f.request(retirement("subject", old.runId)));
+  expect(readBack.retiredAt).toBe(retiredAt);
+  expect(f.read(db => db.query("SELECT weave_retired_at FROM runs WHERE id=?").get(old.runId))).toEqual({ weave_retired_at: retiredAt });
+  expect(() => write(f, db => db.run("UPDATE runs SET weave_retired_at=NULL WHERE id=?", [old.runId]))).toThrow();
+  expect(() => write(f, db => db.run("UPDATE runs SET weave_retired_at='2040-01-01T00:00:00.000Z' WHERE id=?", [old.runId]))).toThrow();
+  expect(f.read(db => db.query("SELECT * FROM thoughts ORDER BY id").all())).toEqual(graph);
+  const replacement = await f.request(endpoint(), command("fresh"));
+  expect(replacement.status).toBe(202);
+  const next = control(await body(replacement));
+  expect(next.runId).not.toBe(old.runId);
+  await f.stop();
+  await f.start({ THOUGHTLOOM_AGENT_CONFIG: JSON.stringify(f.agent) });
+  await f.until(() => f.client.prompts.length === 1, "replacement native dispatch");
+  expect(f.client.prompts).toHaveLength(1);
+  expect(facts()).toEqual(before);
+  expect(f.client.scriptErrors).toEqual([]);
+}, { script: () => ({ version: 1, kind: "complete", reply: "Owned replacement" }) }), 20000);
+
+test("retirement requires user authority, exact acknowledgement, terminal eligible work and the matching subject", async () => mediaApiFixture(async f => {
+  seed(f);
+  const created = await f.request(endpoint(), command("old"));
+  const old = control(await body(created)), url = retirement("subject", old.runId);
+  for (const actor of ["anonymous", "ai"] as const) {
+    const status = actor === "anonymous" ? 401 : 403;
+    expect((await f.request(url, {}, actor)).status).toBe(status);
+    expect((await f.request(url, acknowledge(), actor)).status).toBe(status);
+  }
+  for (const invalid of ["{}", '{"acknowledgeRemoteUncertainty":false}', '{"acknowledgeRemoteUncertainty":true,"extra":1}', "[]", "{"]) {
+    expect((await f.request(url, acknowledge(invalid))).status).toBe(400);
+  }
+  for (const status of ["queued", "submitting", "running", "uncertain", "completed"] as const) {
+    write(f, db => db.run("UPDATE runs SET status=? WHERE id=?", [status, old.runId]));
+    expect((await f.request(url, acknowledge())).status).toBe(409);
+  }
+  write(f, db => db.run("UPDATE runs SET status='failed',cancellation_state='pending' WHERE id=?", [old.runId]));
+  expect([404, 409]).toContain((await f.request(retirement("root", old.runId), acknowledge())).status);
+  expect((await f.request(retirement("subject", "missing"), acknowledge())).status).toBe(404);
+  expect(f.read(db => db.query("SELECT count(*) AS n FROM runs").get())).toEqual({ n: 1 });
+}));
+
+test("retiring one historical weave does not release an independent blocker", async () => mediaApiFixture(async f => {
+  seed(f);
+  const first = control(await body(await f.request(endpoint(), command("first"))));
+  write(f, db => {
+    db.run("UPDATE runs SET status='failed',cancellation_state='pending' WHERE id=?", [first.runId]);
+    let n = 0;
+    const second = admitWeave(db, { id: () => `independent-${++n}`, now: () => stamp }, { subjectId: "subject", triggerId: "independent" });
+    db.run("UPDATE runs SET status='interrupted',cancellation_state='pending' WHERE id=?", [second.id]);
+  });
+  const retired = await f.request(retirement("subject", first.runId), acknowledge());
+  expect(retired.status).toBe(200);
+  expect(object((await body(retired)).eligibility).eligible).toBe(false);
+  const fresh = await f.request(endpoint(), command("fresh"));
+  expect(fresh.status).toBe(409);
+  expect((await body(fresh)).code).toBe("interpretation-unsettled");
+  expect(f.read(db => db.query("SELECT count(*) AS n FROM runs").get())).toEqual({ n: 2 });
+}));
+
+test("retirement waits for the actual native execution flight and fences its late result", async () => mediaApiFixture(async f => {
+  seed(f);
+  let entered = false;
+  const release = Promise.withResolvers<void>();
+  f.client.beforePrompt = async () => { entered = true; await release.promise; };
+  try {
+    const old = control(await body(await f.request(endpoint(), command("held-execution"))));
+    await f.until(() => entered, "native prompt flight entered");
+    expect((await f.request(`/runs/${old.runId}/stop`, {method:"POST",headers:{"content-type":"application/json"},body:"{}"})).status).toBe(200);
+    f.client.historyMode = "outage"; // Keep best-effort cleanup unsettled while the held result arrives.
+    const before = f.read(db => ({
+      run: db.query("SELECT status,generation,cancellation_state,weave_retired_at FROM runs WHERE id=?").get(old.runId),
+      steps: db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(old.runId),
+      thoughts: db.query("SELECT id,parent_id,text FROM thoughts ORDER BY id").all(),
+      replies: db.query("SELECT * FROM run_replies WHERE run_id=?").all(old.runId),
+    }));
+    let returned = false;
+    const pending = f.request(retirement("subject", old.runId), acknowledge()).then(response => { returned = true; return response; });
+    await f.until(() => f.logs.some(record => record.message === "[reinterpretation] retirement attempt" && record.context?.runId === old.runId), "retirement request entered");
+    expect(returned).toBe(false);
+    expect(f.read(db => db.query("SELECT weave_retired_at FROM runs WHERE id=?").get(old.runId))).toEqual({weave_retired_at:null});
+    expect((await f.request(endpoint(), command("while-held"))).status).toBe(409);
+    release.resolve();
+    const response = await bounded(pending, "retirement after execution drain");
+    expect(response.status).toBe(200);
+    expect(text((await body(response)).retiredAt)).toBeTruthy();
+    expect(f.client.prompts).toHaveLength(1);
+    const after = f.read(db => ({
+      run: db.query("SELECT status,generation,cancellation_state FROM runs WHERE id=?").get(old.runId),
+      steps: db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(old.runId),
+      thoughts: db.query("SELECT id,parent_id,text FROM thoughts ORDER BY id").all(),
+      replies: db.query("SELECT * FROM run_replies WHERE run_id=?").all(old.runId),
+    }));
+    const beforeRun = object(before.run);
+    expect(after.run).toEqual({status:beforeRun.status,generation:beforeRun.generation,cancellation_state:beforeRun.cancellation_state});
+    expect(after.steps).toEqual(before.steps);
+    expect(after.thoughts).toEqual(before.thoughts); expect(after.replies).toEqual(before.replies);
+    expect(after.steps).toHaveLength(1);
+  } finally { release.resolve(); f.client.beforePrompt = undefined; }
+}, {configured:true,script:() => ({version:1,kind:"complete",reply:"late owned output must not publish"})}), 20000);
+
+test("shutdown while retirement waits for an execution flight refuses the retirement write", async () => mediaApiFixture(async f => {
+  seed(f);
+  let entered = false;
+  const release = Promise.withResolvers<void>();
+  f.client.beforePrompt = async () => { entered = true; await release.promise; };
+  let stopping: Promise<void> | undefined;
+  try {
+    const old = control(await body(await f.request(endpoint(), command("shutdown-held"))));
+    await f.until(() => entered, "native prompt flight entered");
+    expect((await f.request(`/runs/${old.runId}/stop`, {method:"POST",headers:{"content-type":"application/json"},body:"{}"})).status).toBe(200);
+    f.client.historyMode = "outage";
+    const pending = f.request(retirement("subject",old.runId),acknowledge()).then(response => response.status, () => null);
+    await f.until(() => f.logs.some(record => record.message === "[reinterpretation] retirement attempt" && record.context?.runId === old.runId), "retirement request entered");
+    stopping = f.stop();
+    await f.until(() => f.logs.some(record => record.message === "[worker] paused"), "worker pause during shutdown");
+    expect(f.read(db => db.query("SELECT weave_retired_at FROM runs WHERE id=?").get(old.runId))).toEqual({weave_retired_at:null});
+    release.resolve();
+    expect(await bounded(pending,"retirement response after shutdown")).not.toBe(200);
+    await bounded(stopping,"daemon shutdown after flight drain"); stopping = undefined;
+    expect(f.read(db => db.query("SELECT status,weave_retired_at FROM runs WHERE id=?").get(old.runId)))
+      .toEqual({status:"interrupted",weave_retired_at:null});
+  } finally { release.resolve(); f.client.beforePrompt = undefined; if (stopping) await stopping; }
+}, {configured:true,script:() => ({version:1,kind:"complete",reply:"late output"})}), 20000);
+
+test("media title-only and missing-intent runs cannot be retired or change interpretation eligibility", async () => mediaApiFixture(async f => {
+  seed(f);
+  let titleRun = "";
+  write(f, db => {
+    insertMediaSource(db);
+    let n = 0;
+    titleRun = admitWeave(db,{id:() => `title-only-${++n}`,now:() => stamp},
+      {subjectId:mediaThought.id,triggerId:"title-clear:owned"}).id;
+    db.run("UPDATE runs SET status='failed',cancellation_state='pending' WHERE id=?",[titleRun]);
+    db.run("INSERT INTO runs(id,kind,status,session_id,prompt_id,created_at,generation,cancellation_state) VALUES ('missing-intent','weave','interrupted','missing-session','missing-prompt',?,0,'pending')",[stamp]);
+  });
+  const eligibility = async (subject: string) => object((await body(await f.request(`${endpoint(subject)}/by-key/check`))).eligibility);
+  const beforeMedia = await eligibility(mediaThought.id), beforeSubject = await eligibility("subject");
+  expect(beforeMedia.eligible).toBe(true); expect(beforeSubject.eligible).toBe(true);
+  expect((await f.request(retirement(mediaThought.id,titleRun),acknowledge())).status).toBe(409);
+  expect((await f.request(retirement("subject","missing-intent"),acknowledge())).status).toBe(404);
+  expect(f.read(db => db.query("SELECT id,weave_retired_at FROM runs WHERE id IN (?,?) ORDER BY id").all(titleRun,"missing-intent")))
+    .toEqual([{id:"missing-intent",weave_retired_at:null},{id:titleRun,weave_retired_at:null}]);
+  expect(await eligibility(mediaThought.id)).toEqual(beforeMedia);
+  expect(await eligibility("subject")).toEqual(beforeSubject);
+}));
 
 for (const subject of ["root", "subject"] as const) test(`keyed reinterpretation admits the ${subject === "root" ? "user-authored root" : "AI subject"}, replays, and creates distinct work after completion`, async () => mediaApiFixture(async f => {
   seed(f);

@@ -64,6 +64,7 @@ function closureSnapshot(db: Database): unknown {
     db.query("SELECT rowid,id,hex(CAST(text AS BLOB)) AS text,author,kind,created_at,origin,parent_id FROM thoughts ORDER BY rowid").all(),
     ...["thought_titles", "responses", "response_thoughts", "response_seals", "runs", "run_operation_receipts", "run_issued_thoughts", "agent_bindings", "export_reports"].map(table => db.query(table === "agent_bindings"
       ? "SELECT rowid,run_id,session_id,service_url,directory,model_json,permissions_json,protocol_version FROM agent_bindings ORDER BY rowid"
+      : table === "runs" ? "SELECT rowid,id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id,cancellation_state FROM runs ORDER BY rowid"
       : `SELECT rowid,* FROM ${table} ORDER BY rowid`).all()),
     db.query("SELECT rowid,run_id,request,effort,hex(CAST(run_id AS BLOB)) AS run_id_bytes,hex(CAST(request AS BLOB)) AS request_bytes,hex(CAST(effort AS BLOB)) AS effort_bytes FROM export_intents ORDER BY rowid").all(),
     db.query("SELECT rowid,run_id,position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps ORDER BY rowid").all(),
@@ -71,6 +72,12 @@ function closureSnapshot(db: Database): unknown {
     db.query("SELECT hex(CAST(markdown AS BLOB)) AS markdown,hex(CAST(sources_json AS BLOB)) AS sources FROM export_reports ORDER BY rowid").all(),
     db.query("SELECT hex(CAST(input AS BLOB)) AS input,hex(CAST(envelope_json AS BLOB)) AS envelope,hex(CAST(result_json AS BLOB)) AS result FROM run_steps ORDER BY rowid").all(),
   ];
+}
+
+function expectLegacyRetirementDefaults(db: Database): void {
+  expect(db.query("SELECT id,weave_retired_at FROM runs ORDER BY rowid").all()).toEqual([
+    {id:"run",weave_retired_at:null}, {id:"export",weave_retired_at:null},
+  ]);
 }
 
 function expectRetainedExportDefaults(db: Database): void {
@@ -134,12 +141,14 @@ test("import closure rebuild preserves populated initial guidance and reinstates
     migrate(db);
     expect(guidanceRows(db)).toEqual(before);
     expect(closureSnapshot(db)).toEqual(journal);
+    expectLegacyRetirementDefaults(db);
     assertGuidanceImmutable(db);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
     const reopened = new Database(path);
     try {
       migrate(reopened);
       expect(guidanceRows(reopened)).toEqual(before);
+      expectLegacyRetirementDefaults(reopened);
       assertGuidanceImmutable(reopened);
     } finally { reopened.close(); }
   } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
@@ -165,6 +174,7 @@ test("populated predecessor closure and native journal bytes survive failure, re
     expectRetainedExportDefaults(db);
     expect(db.query("SELECT * FROM media_store").all()).toEqual([]);
     expect(closureSnapshot(db)).toEqual(before);
+    expectLegacyRetirementDefaults(db);
     expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
@@ -175,6 +185,7 @@ test("populated predecessor closure and native journal bytes survive failure, re
       migrate(reopened); migrate(reopened);
       requireMediaSchema(reopened);
       expect(closureSnapshot(reopened)).toEqual(before);
+      expectLegacyRetirementDefaults(reopened);
       expectRetainedExportDefaults(reopened);
       expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
@@ -222,6 +233,7 @@ test("failure after destructive closure rebuild and copied runs restores predece
     expect(() => db.run("UPDATE thoughts SET text='changed' WHERE id='subject'")).toThrow(/predecessor immutable/);
     migrate(db);
     expect(closureSnapshot(db)).toEqual(before);
+    expectLegacyRetirementDefaults(db);
     expectRetainedExportDefaults(db);
     expect(db.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
     expect(db.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);
@@ -230,6 +242,7 @@ test("failure after destructive closure rebuild and copied runs restores predece
     try {
       migrate(reopened); migrate(reopened);
       expect(closureSnapshot(reopened)).toEqual(before);
+      expectLegacyRetirementDefaults(reopened);
       expectRetainedExportDefaults(reopened);
       expect(reopened.query("SELECT execution_owner_id FROM agent_bindings ORDER BY rowid").all()).toEqual([{ execution_owner_id: null }]);
       expect(reopened.query("SELECT submit_owner FROM run_steps ORDER BY rowid").all()).toEqual([{ submit_owner: null }, { submit_owner: null }]);

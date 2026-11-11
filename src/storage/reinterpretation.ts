@@ -3,6 +3,7 @@ import { ReinterpretationConflictError, reinterpretationTrigger, type Reinterpre
   type ReinterpretationRepository, type ReinterpretationSnapshot, type WeaveRunControl } from "../domain/reinterpretation";
 import { RunConflictError, RunNotFoundError, type RunSources } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
+import { resolveWeavePurpose } from "../domain/weave-scheduling";
 import { createLogger, type Logger } from "../logging";
 import { SqliteAgentRuns } from "./agent";
 import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
@@ -10,6 +11,8 @@ import { immediate } from "./transaction";
 import { admitWeave } from "./weave-admission";
 
 interface SubjectControl {readonly kind:MaterialKind;readonly rejected:number}
+interface RetirementIdentity { readonly status:string; readonly generation:number; readonly triggerId:string; readonly retiredAt:string|null }
+export interface RetirementSnapshot { readonly runId:string; readonly retiredAt:string|null; readonly eligibility:ReinterpretationEligibility }
 
 /** A weave trigger is the durable receipt. No network calls, content reads or independent command journal. */
 export class SqliteReinterpretations implements ReinterpretationRepository {
@@ -43,6 +46,52 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
       WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? ORDER BY rowid LIMIT 1`).get(subjectId,reinterpretationTrigger(requestKey));
     const run = receipt ? this.run(receipt.id) : null;
     return {receipt:run ? {subjectId,requestKey,runId:run.id} : null,run,eligibility:this.eligibility(subjectId,subject)};
+  }
+  private retirementIdentity(subjectId: string, runId: string): RetirementIdentity {
+    const row = this.db.query<RetirementIdentity,[string,string]>(`SELECT status,generation,weave_trigger_id AS triggerId,weave_retired_at AS retiredAt
+      FROM runs WHERE id=? AND kind='weave' AND weave_subject_id=? AND weave_trigger_id IS NOT NULL`).get(runId,subjectId);
+    if (!row) throw new RunNotFoundError();
+    return row;
+  }
+  retirement(subjectId: string, runId: string): RetirementSnapshot {
+    this.logger.verbose("[reinterpretation] retirement lookup attempt",{runId});
+    try {
+      const result = this.db.transaction(() => {
+        const subject = this.subject(subjectId), identity = this.retirementIdentity(subjectId,runId);
+        return {runId,retiredAt:identity.retiredAt,eligibility:this.eligibility(subjectId,subject)};
+      })();
+      this.logger.verbose("[reinterpretation] retirement lookup succeeded",{runId});
+      return result;
+    } catch (error) { this.logger.verbose("[reinterpretation] retirement lookup failed",{runId}); throw error; }
+  }
+  /** The caller joins the exact run's local execution before invoking the returned synchronous commit. */
+  prepareRetirement(subjectId: string, runId: string): () => RetirementSnapshot & {remoteState:"unknown"} {
+    this.logger.info("[reinterpretation] retirement attempt",{runId});
+    let expected: RetirementIdentity;
+    try {
+      const subject = this.subject(subjectId);
+      expected = this.retirementIdentity(subjectId,runId);
+      if (!["failed","interrupted"].includes(expected.status) || resolveWeavePurpose(subject.kind,expected.triggerId) === "media-title-only") {
+        throw new RunConflictError("Weave cannot be retired");
+      }
+    }
+    catch (error) { this.logger.warning("[reinterpretation] retirement refused",{runId}); throw error; }
+    return () => {
+      try {
+        const snapshot = immediate(this.db,() => {
+          const subject = this.subject(subjectId), current = this.retirementIdentity(subjectId,runId);
+          if (current.status !== expected.status || current.generation !== expected.generation || current.triggerId !== expected.triggerId ||
+              !["failed","interrupted"].includes(current.status) || resolveWeavePurpose(subject.kind,current.triggerId) === "media-title-only") {
+            throw new RunConflictError("Weave cannot be retired");
+          }
+          const retiredAt = current.retiredAt ?? this.sources.now();
+          if (current.retiredAt === null) this.db.run("UPDATE runs SET weave_retired_at=? WHERE id=?",[retiredAt,runId]);
+          return {runId,retiredAt,remoteState:"unknown" as const,eligibility:this.eligibility(subjectId,subject)};
+        });
+        this.logger.info("[reinterpretation] retirement recorded",{runId});
+        return snapshot;
+      } catch (error) { this.logger.warning("[reinterpretation] retirement refused",{runId}); throw error; }
+    };
   }
   admit(subjectId: string, requestKey: string): ReinterpretationAdmission {
     this.logger.verbose("[reinterpretation] admission attempt",{subjectId});

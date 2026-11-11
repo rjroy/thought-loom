@@ -2,7 +2,7 @@ import "server-only";
 import { callDaemon } from "./client";
 import { readWebConfig } from "./config";
 import { isTrustedRequest } from "./request-guard";
-import { handleReinterpretation } from "./reinterpretation";
+import { handleReinterpretation, handleInterpretationRetirement } from "./reinterpretation";
 
 /** Shared wrapper for the two fixed Idea routes; browser headers never become daemon credentials. */
 export async function reinterpretationRoute(request: Request, params: Promise<{id:string;key?:string}>, method: "POST" | "GET"): Promise<Response> {
@@ -11,6 +11,17 @@ export async function reinterpretationRoute(request: Request, params: Promise<{i
     if (!isTrustedRequest(config,request)) throw new Error("Forbidden");
     const {id,key} = await params;
     return await handleReinterpretation(request,id,method === "POST" ? request.headers.get("idempotency-key") : key ?? null,{callDaemon});
+  } catch {
+    return Response.json({message:"Forbidden."},{status:403,headers:{"cache-control":"private, no-store"}});
+  }
+}
+
+export async function interpretationRetirementRoute(request:Request, params:Promise<{id:string;runId:string}>):Promise<Response> {
+  try {
+    const config = readWebConfig({ THOUGHTLOOM_WEB_ORIGIN:process.env.THOUGHTLOOM_WEB_ORIGIN, THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS:process.env.THOUGHTLOOM_WEB_ADDITIONAL_ORIGINS });
+    if (!isTrustedRequest(config,request)) throw new Error("Forbidden");
+    const {id,runId} = await params;
+    return await handleInterpretationRetirement(request,id,runId,{callDaemon});
   } catch {
     return Response.json({message:"Forbidden."},{status:403,headers:{"cache-control":"private, no-store"}});
   }

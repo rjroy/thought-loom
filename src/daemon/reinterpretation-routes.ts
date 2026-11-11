@@ -5,6 +5,7 @@ import { RunForbiddenError } from "../domain/run";
 import { ValidationError } from "../domain/validation";
 import { createLogger, type Logger } from "../logging";
 import { ImportHttpError, metadataLimit, readBytes, strictObject, utf8 } from "./import-body";
+import type { RetirementSnapshot } from "../storage/reinterpretation";
 
 type Env = {Variables:{actor:Actor}};
 const bad = (): never => { throw new ValidationError("Invalid reinterpretation request"); };
@@ -12,7 +13,10 @@ function noQuery(c: Context<Env>): void { if (new URL(c.req.url).searchParams.si
 
 /** Fixed user-only command and control-receipt paths; neither returns thought or native content. */
 export function createReinterpretationRoutes(service: Pick<ReinterpretationService,"admit"|"byKey">,
-  notify: () => void, logger: Logger = createLogger()): Hono<Env> {
+  notify: () => void, logger: Logger = createLogger(), retirement?: {
+    read(subjectId:string,runId:string): RetirementSnapshot;
+    retire(subjectId:string,runId:string): Promise<RetirementSnapshot & {remoteState:"unknown"}>;
+  }): Hono<Env> {
   const app = new Hono<Env>();
   const user: MiddlewareHandler<Env> = async (c,next) => {
     c.header("cache-control","private, no-store");
@@ -43,5 +47,20 @@ export function createReinterpretationRoutes(service: Pick<ReinterpretationServi
     noQuery(c);
     return c.json(service.byKey("user",c.req.param("id"),reinterpretationRequestKey(c.req.param("key"))));
   });
+  if (retirement) {
+    app.get("/thoughts/:id/reinterpret/retire/:runId",user,c => {
+      noQuery(c);
+      return c.json(retirement.read(c.req.param("id"),c.req.param("runId")));
+    });
+    app.post("/thoughts/:id/reinterpret/retire/:runId",user,async c => {
+      noQuery(c);
+      if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(c.req.header("content-type") ?? "")) throw new ImportHttpError(415,"unsupported-media-type");
+      const input = strictObject(utf8(await readBytes(c.req.raw,metadataLimit),bad),["acknowledgeRemoteUncertainty"],bad);
+      if (input.acknowledgeRemoteUncertainty !== true) bad();
+      const result = await retirement.retire(c.req.param("id"),c.req.param("runId"));
+      try { notify(); } catch { logger.warning("[reinterpretation] worker notification deferred",{runId:result.runId}); }
+      return c.json(result);
+    });
+  }
   return app;
 }

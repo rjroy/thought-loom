@@ -161,8 +161,10 @@ const guidanceDefinitions: readonly Definition[] = [
     ? {...table,columns:{...table.columns,guidance:optionalText}} : table),
   definition("agent_instructions", {singleton:integerKey,weaver:text,evolve:text,search:text,export:text,revision:integer}, ["singleton"]),
 ];
-const definitions: readonly Definition[] = guidanceDefinitions.map(table => table.name === "export_intents"
+const dispositionDefinitions: readonly Definition[] = guidanceDefinitions.map(table => table.name === "export_intents"
   ? {...table,columns:{...table.columns,local_disposition:text}} : table);
+const definitions: readonly Definition[] = dispositionDefinitions.map(table => table.name === "runs"
+  ? {...table,columns:{...table.columns,weave_retired_at:optionalText}} : table);
 
 const spellingRevision = definition("search_revision", { id: integerKey, revision: integer }, ["id"]);
 const virtualTables = new Set(["thought_search_fts", "response_search_fts"]);
@@ -290,12 +292,13 @@ function tableShapes(items: readonly Definition[]): readonly TableShape[] {
     columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 }
-export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3";
+export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4";
 export const backupTableShapes = tableShapes(definitions);
 const legacyTableShapes = tableShapes(legacyDefinitions);
 const guidanceTableShapes = tableShapes(guidanceDefinitions);
+const dispositionTableShapes = tableShapes(dispositionDefinitions);
 export function shapesForSchema(schema: BackupAppSchema): readonly TableShape[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : backupTableShapes;
+  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : backupTableShapes;
 }
 
 /** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
@@ -316,6 +319,7 @@ function tableDefinitions(items: readonly Definition[], shapes: readonly TableSh
 export const backupTableDefinitions = tableDefinitions(definitions,backupTableShapes);
 const legacyTableDefinitions = tableDefinitions(legacyDefinitions,legacyTableShapes);
 const guidanceTableDefinitions = tableDefinitions(guidanceDefinitions,guidanceTableShapes);
+const dispositionTableDefinitions = tableDefinitions(dispositionDefinitions,dispositionTableShapes);
 export function definitionsForSchema(schema: BackupAppSchema): readonly BackupTableDefinition[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : backupTableDefinitions;
+  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : backupTableDefinitions;
 }

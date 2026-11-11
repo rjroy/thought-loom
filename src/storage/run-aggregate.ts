@@ -72,6 +72,7 @@ export class SqliteRunAggregate {
   protected require(id: string): RunRecord { const run = this.loadRun(id); if (!run) throw new RunNotFoundError(); return run; }
   protected active(claim: Claim): RunRecord {
     assertRunNotRestoreFenced(this.db,claim.runId);
+    if (this.db.query("SELECT 1 FROM runs WHERE id=? AND weave_retired_at IS NOT NULL").get(claim.runId)) throw new RunFenceError();
     const run = this.require(claim.runId);
     if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,run.id);
     if (run.generation !== claim.generation || !["queued","submitting","running","uncertain"].includes(run.status)) throw new RunFenceError();

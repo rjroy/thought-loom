@@ -198,6 +198,16 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       migrateRestoreFences(db);
       migrateAgentInstructions(db);
       migrateExportLifecycle(db);
+      // Install after legacy table rebuilds so existing run identities and history are preserved.
+      if (!db.query<{name:string},[]>("PRAGMA table_info(runs)").all().some(column => column.name === "weave_retired_at")) {
+        db.exec("ALTER TABLE runs ADD COLUMN weave_retired_at TEXT");
+      }
+      db.exec(`CREATE TRIGGER IF NOT EXISTS runs_weave_retirement_once BEFORE UPDATE OF weave_retired_at ON runs
+        WHEN OLD.weave_retired_at IS NOT NULL OR NEW.weave_retired_at IS NULL
+        BEGIN SELECT RAISE(ABORT,'weave retirement immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS runs_weave_retirement_terminal BEFORE UPDATE OF status ON runs
+        WHEN OLD.weave_retired_at IS NOT NULL AND NEW.status IS NOT OLD.status
+        BEGIN SELECT RAISE(ABORT,'retired weave status immutable'); END;`);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;

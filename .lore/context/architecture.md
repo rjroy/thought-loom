@@ -41,6 +41,8 @@ The daemon reads the complete paginated parent-session history and compares actu
 
 Ordinary cancellation requires a terminal boundary for every potentially dispatched journal step and an empty inbox/inactive session; an empty snapshot or interrupt acknowledgement is not proof. A queued non-user native item remains pending work, not an owned prompt to cancel or a reason to interrupt. Stop and rejection still fence late publication. Restricted Search, Export and import retain their deny policy and reject actual forbidden-tool or standalone shell execution evidence, as well as conflicting inputs. Previously interrupted runs are not automatically revived.
 
+As an explicit exception to waiting for remote proof, a user may acknowledge remote uncertainty and retire one failed or interrupted interpretation-capable weave. This permanently fences its local execution and publication and removes only that run as an admission and dispatch blocker. The earlier native work may still run or have external effects, including overlapping a replacement. Retirement is not native settlement or cancellation; existing lawful cleanup remains best effort. Other active or unsettled runs still block, and queued automatic work may proceed under normal serialization. There is no automatic retirement.
+
 ## Client and daemon boundary
 
 The browser client must never access the daemon directly. Browser requests that need daemon functionality go through the Next.js server, which communicates with the daemon.

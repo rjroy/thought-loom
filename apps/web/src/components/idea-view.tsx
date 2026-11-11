@@ -23,13 +23,14 @@ import { MediaSourceStatus } from "./media-source-status";
 import type { MediaRun, MediaScope } from "../features/media/types";
 import { createReinterpretationController } from "../features/idea/reinterpretation-controller";
 import { createReinterpretationClient } from "../features/idea/reinterpretation-request";
-import { reinterpretationId } from "../features/idea/reinterpretation";
+import { reinterpretationId, retirementCandidate, type ReinterpretationRun } from "../features/idea/reinterpretation";
 import { ReinterpretationStatus, reinterpretationRunToShow } from "./reinterpretation-status";
 
 const noSource = () => null;
 const noSubscription = () => () => {};
 
-type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string };
+type Confirmation = { kind: "idea" } | { kind: "branch" } | { kind: "connection"; id: string }
+  | {kind:"retirement"; run:ReinterpretationRun};
 type PreviewState = { phase: "loading" | "error"; stale: boolean }
   | { phase: "ready"; stale: boolean; value: BranchPreview };
 type CanonicalRead = {
@@ -137,6 +138,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [replyId, setReplyId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [retirementAcknowledged, setRetirementAcknowledged] = useState(false);
+  const [retirementStale, setRetirementStale] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const alive = useRef(false);
   const readGeneration = useRef(0);
@@ -151,6 +154,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const more = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const dialogCancel = useRef<HTMLButtonElement>(null);
   const dialogReturn = useRef<HTMLElement | null>(null);
   const [downloadPending, setDownloadPending] = useState(false), [downloadError, setDownloadError] = useState(false);
   const downloading = useRef(false);
@@ -165,7 +169,9 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
   const mediaCommandPending = !!mediaState && (mediaState.retryRequest.kind === "pending" || mediaState.stopping);
   // Initial recovery retains its own pending retry and unconfirmed Stop controls.
   const initialRetryUnresolved = !!mediaState && (mediaState.retryRequest.kind !== "idle" || mediaState.stopping || mediaState.unconfirmedStop !== null);
-  const reinterpretationCommandPending = reinterpretationState?.request === "pending" || reinterpretationState?.stopping === true;
+  const retirementPending = reinterpretationState?.retirement?.status === "pending";
+  const retirementUnresolved = !!reinterpretationState?.retirement && reinterpretationState.retirement.status !== "confirmed";
+  const reinterpretationCommandPending = reinterpretationState?.request === "pending" || reinterpretationState?.stopping === true || retirementPending;
   const disabled = pending || unconfirmed || connecting || connectionLocked || mediaCommandPending || reinterpretationCommandPending;
   const reinterpretationRun = reinterpretationState ? reinterpretationRunToShow(reinterpretationState) : null;
   const reinterpretationOwnsStatus = !initialRetryUnresolved && !!reinterpretationState && (showInterpretation
@@ -300,9 +306,19 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
 
   useEffect(() => { if (editing) titleInput.current?.focus(); }, [editing]);
   useEffect(() => {
-    if (confirmation && !dialog.current?.open) dialog.current?.showModal();
+    if (confirmation && dialog.current && !dialog.current.open) {
+      dialog.current.showModal();
+      // Mount-time autoFocus runs while the dialog is still closed.
+      dialogCancel.current?.focus();
+    }
     if (!confirmation && dialog.current?.open) dialog.current.close();
   }, [confirmation]);
+  useEffect(() => {
+    if (confirmation?.kind !== "retirement" || !reinterpretationState?.fresh) return;
+    if (retirementCandidate(reinterpretationState.eligibility)?.id !== confirmation.run.id) {
+      setRetirementStale(true); setRetirementAcknowledged(false);
+    }
+  }, [confirmation, reinterpretationState]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -332,11 +348,13 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     // A command can become disabled while its outcome is unconfirmed.
     dialogReturn.current = returnTarget;
     setMenuOpen(false);
+    setRetirementAcknowledged(false); setRetirementStale(false);
     setConfirmation(value);
     if (value.kind === "branch") void loadPreview();
+    if (value.kind === "retirement") void reinterpretation?.prepare();
   }
   function closeConfirmation() {
-    if (writing.current) return;
+    if (writing.current || reinterpretation?.getSnapshot().retirement?.status === "pending") return;
     const wasOpen = dialog.current?.open === true;
     const returnTarget = dialogReturn.current;
     dialogReturn.current = null;
@@ -346,9 +364,15 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     setConfirmation(null);
     setPreview(null);
     if (wasOpen) {
-      const available = returnTarget?.isConnected && returnTarget !== document.body && !returnTarget.matches(":disabled")
-        && !returnTarget.closest("[hidden]");
-      (available ? returnTarget : menuButton.current)?.focus();
+      const restoreFocus = () => {
+        const available = returnTarget?.isConnected && returnTarget !== document.body && !returnTarget.matches(":disabled")
+          && !returnTarget.closest("[hidden]");
+        (available ? returnTarget : confirmation?.kind === "retirement" ? document.getElementById("idea-interpretation-check") : menuButton.current)?.focus();
+      };
+      if (confirmation?.kind === "retirement") {
+        // Wait until the retired-run trigger has actually disappeared from the DOM.
+        requestAnimationFrame(() => { if (alive.current && currentView.current?.thought.id === location?.id) restoreFocus(); });
+      } else restoreFocus();
     }
   }
 
@@ -356,7 +380,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     const sourceCommand = media?.getSnapshot();
     const reinterpretationCommand = reinterpretation?.getSnapshot();
     if (writing.current || disabled || !location || sourceCommand?.stopping || sourceCommand?.retryRequest.kind === "pending"
-      || reinterpretationCommand?.request === "pending" || reinterpretationCommand?.stopping) return;
+       || reinterpretationCommand?.request === "pending" || reinterpretationCommand?.stopping || reinterpretationCommand?.retirement?.status === "pending") return;
     writing.current = true;
     readGeneration.current++;
     media?.invalidate();
@@ -511,7 +535,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     if (!alive.current || !subjectIsActive() || writing.current) return;
     const state = reinterpretation.getSnapshot();
     if (!state.fresh || state.eligibility?.eligible !== true || state.request === "uncertain" || state.request === "pending"
-      || state.checking || state.stopping || state.unconfirmedStop) return;
+       || state.checking || state.stopping || state.unconfirmedStop || state.retirement && state.retirement.status !== "confirmed") return;
     readGeneration.current++;
     await reinterpretation.request();
   }
@@ -522,6 +546,11 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     const current = () => alive.current && generation === readGeneration.current
       && watchGeneration === reinterpretationWatchGeneration.current;
     const state = reinterpretation.getSnapshot();
+    if (state.retirement && state.retirement.status !== "confirmed") {
+      await reinterpretation.checkRetirement();
+      if (current()) await refreshRunContext(null,true);
+      return;
+    }
     if (state.request !== "uncertain" && reinterpretationRunToShow(state)) {
       await reinterpretation.checkRun();
       if (!current()) return;
@@ -541,12 +570,23 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     readGeneration.current++;
     await reinterpretation.stop();
   }
+  async function retireInterpretation() {
+    if (!reinterpretation || confirmation?.kind !== "retirement" || !retirementAcknowledged || retirementStale
+      || !subjectIsActive() || writing.current || disabled || initialRetryUnresolved) return;
+    const runId = confirmation.run.id, state = reinterpretation.getSnapshot();
+    if (!state.fresh || state.checking || retirementCandidate(state.eligibility)?.id !== runId) return;
+    readGeneration.current++;
+    await reinterpretation.retire(runId);
+    if (!alive.current || currentView.current?.thought.id !== location?.id) return;
+    const result = reinterpretation.getSnapshot();
+    if (result.retirement?.runId === runId || result.notice === "retirement-refused") closeConfirmation();
+  }
   const back = location?.returnTo ?? "/explore";
   const inspection = location?.scope !== "normal";
   const thought = view?.thought;
   const reply = view?.responses.find(value => value.id === replyId) ?? null;
   const context = view ? contextItems(view) : [];
-  const showExistingInterpretation = !!reinterpretationState && (reinterpretationState.request === "uncertain"
+  const showExistingInterpretation = !!reinterpretationState && (retirementUnresolved || reinterpretationState.request === "uncertain"
     || reinterpretationState.unconfirmedStop !== null || reinterpretationState.eligibility?.eligible === false
       && reinterpretationState.eligibility.reason !== "subject-rejected"
     || !!reinterpretationRun && !["completed", "failed", "interrupted"].includes(reinterpretationRun.status));
@@ -554,7 +594,8 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     state={reinterpretationState} rejected={removed || thought?.rejected === true || inspection && thought?.rejected !== false}
     disabled={pending || unconfirmed || connecting || connectionLocked || mediaCommandPending}
     outputPublished={!!view && !!reinterpretationRun && containsRunOutput(view, [reinterpretationRun])}
-    contextError={contextError} onCheck={checkInterpretation} onResend={resendInterpretation} onStop={stopInterpretation} /> : null;
+    contextError={contextError} onCheck={checkInterpretation} onResend={resendInterpretation} onStop={stopInterpretation}
+    onRetire={run => openConfirmation({kind:"retirement",run})} /> : null;
   const recordPreviousReturn = useCallback(() => {
     if (!previous || !location || !currentView.current) return;
     let href = thoughtHref(location.id, location);
@@ -746,6 +787,31 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
       <dialog ref={dialog} className={styles.dialog} aria-labelledby="idea-confirm-heading"
         aria-describedby="idea-confirm-description" onCancel={event => { event.preventDefault(); closeConfirmation(); }}>
         {confirmation && location && <>
+          {confirmation.kind === "retirement" ? <>
+            <h2 id="idea-confirm-heading">Retire this interpretation run?</h2>
+            <p className={styles.metadata}>Run {confirmation.run.id} · {confirmation.run.status}</p>
+            <p id="idea-confirm-description">This keeps run {confirmation.run.id} inactive in Thoughtloom and removes its block on interpretation. Your idea, saved interpretations and Full replies stay unchanged. This does not request a new interpretation.</p>
+            <div className={styles.warning} id="idea-retirement-warning">
+              <p>Thoughtloom cannot verify that the old agent stopped. Tools it already started could still run or change external files and services, and could overlap new work. Retiring this run does not stop or undo those effects. Previously queued work may become able to proceed.</p>
+            </div>
+            <label className={styles.retirementAcknowledgment}>
+              <input type="checkbox" checked={retirementAcknowledged} disabled={retirementPending || retirementStale}
+                aria-describedby="idea-retirement-warning" onChange={event => setRetirementAcknowledged(event.target.checked)} />
+              I understand that old agent work may continue and overlap new work.
+            </label>
+            {reinterpretationState?.checking && <p role="status">Checking this same run’s current eligibility…</p>}
+            {retirementPending && <p role="status">Retiring this run… This request has already been sent.</p>}
+            {retirementStale && <p className={styles.warning} role="status">The blocking work changed. Close this confirmation and review the current interpretation status before making another decision.</p>}
+            {reinterpretationState?.phase === "storage-error" && <p className={styles.warning} role="status">Recovery identity could not be safely stored. No retirement request was sent.</p>}
+            {!retirementStale && reinterpretationState?.notice === "read-error" && <><p role="status">Current eligibility could not be confirmed. No retirement request was sent.</p><button className={styles.textButton} type="button" onClick={() => void reinterpretation?.prepare()}>Check eligibility</button></>}
+            <div className={styles.buttons}>
+              <button ref={dialogCancel} className={styles.button} type="button" disabled={retirementPending} onClick={closeConfirmation}>Cancel</button>
+              <button className={styles.button} type="button" disabled={disabled || !retirementAcknowledged || retirementStale
+                || !reinterpretationState?.fresh || reinterpretationState.checking || reinterpretationState.phase !== "ready"
+                || retirementCandidate(reinterpretationState.eligibility)?.id !== confirmation.run.id}
+                onClick={() => void retireInterpretation()}>Retire this run</button>
+            </div>
+          </> : <>
           <h2 id="idea-confirm-heading">{confirmation.kind === "branch" ? "Reject idea branch" : confirmation.kind === "idea" ? "Reject this idea?" : "Reject this connection?"}</h2>
           <p id="idea-confirm-description">{confirmation.kind === "branch"
             ? "This idea and its evolution descendants only. Discovered connections and source references are not included."
@@ -765,7 +831,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
           </>}
           {pending && <p role="status">Waiting for confirmation. This change has already been sent.</p>}
           <div className={styles.buttons}>
-            <button className={styles.button} type="button" disabled={pending} onClick={closeConfirmation} autoFocus>Cancel</button>
+            <button ref={dialogCancel} className={styles.button} type="button" disabled={pending} onClick={closeConfirmation}>Cancel</button>
             <button className={`${styles.button} ${styles.danger}`} type="button"
               disabled={disabled || (confirmation.kind === "branch" && preview?.phase !== "ready")}
               onClick={() => {
@@ -776,6 +842,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
                 }
               }}>{confirmation.kind === "branch" ? "Confirm reject branch" : confirmation.kind === "idea" ? "Reject this idea" : "Reject connection"}</button>
           </div>
+          </>}
         </>}
       </dialog>
     </section>
