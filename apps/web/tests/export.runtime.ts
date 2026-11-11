@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { expect, type Download, type Page, type Request as BrowserRequest, type Response as BrowserResponse } from "@playwright/test";
+import { expect, type Download, type Page, type Request as BrowserRequest } from "@playwright/test";
 
 type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
 type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
@@ -12,12 +12,23 @@ const report = Buffer.from('# Report Café 雪\r\n\r\nOwned report content.\r\n\
 
 export function exportDaemon(token: string) {
   const attempts: Attempt[] = [];
-  let status: Status = "queued", artifact: "pending" | "error" | "ready" = "pending", admission: "normal" | "unknown" = "normal", next = 0;
+  type History = { id: string; status: Status; createdAt: string; request: string; effort: "quick" | "standard" | "thorough"; restored: boolean; deletionState: "stop-required" | "settling" | "ready" };
+  const seed = (): History[] => [
+    { id: "export-live", status: "running", createdAt: "2032-01-03T00:00:00Z", request: "Owned active question", effort: "quick", restored: false, deletionState: "stop-required" },
+    { id: "export-restored", status: "interrupted", createdAt: "2032-01-02T00:00:00Z", request: "Owned restored question", effort: "thorough", restored: true, deletionState: "stop-required" },
+    { id: "export-completed", status: "completed", createdAt: "2032-01-01T00:00:00Z", request: "Owned completed question", effort: "standard", restored: false, deletionState: "ready" },
+  ];
+  let history = seed(), readFailure = false, deleteConflict = false, paginate = false;
+  let status: Status = "queued", artifact: "pending" | "error" | "ready" = "pending", admission: "normal" | "unknown" | "unknown-saved" = "normal", next = 0;
   let hold: "simple" | "admission" | null = null, release: (() => void) | undefined;
-  const reset = () => { status = "queued"; artifact = "pending"; admission = "normal"; next = 0; hold = null; release = undefined; };
+  const reset = () => { status = "queued"; artifact = "pending"; admission = "normal"; next = 0; hold = null; release = undefined; history = seed(); readFailure = false; deleteConflict = false; paginate = false; };
   return {
     attempts, reset, expectedAuthorization: `Bearer ${token}`,
     setStatus(value: Status) { status = value; }, setArtifact(value: typeof artifact) { artifact = value; }, setAdmission(value: typeof admission) { admission = value; },
+    setReadFailure(value: boolean) { readFailure = value; }, setDeleteConflict(value: boolean) { deleteConflict = value; },
+    setPagination(value: boolean) { paginate = value; },
+    emptyHistory() { history = []; },
+    settle(id: string) { const item = history.find(value => value.id === id); if (!item) throw new Error("Missing owned export"); item.deletionState = "ready"; },
     hold(value: "simple" | "admission") { hold = value; },
     waiting() { return release !== undefined; },
     release() { release?.(); release = undefined; hold = null; },
@@ -36,17 +47,35 @@ export function exportDaemon(token: string) {
         if (hold === "admission") await new Promise<void>(resolve => { release = resolve; });
         if (admission === "unknown") { res.writeHead(500).end("owned admission failure"); return; }
         next++; status = "queued"; artifact = "pending";
+        const input = JSON.parse(body) as {request:string;effort:"quick"|"standard"|"thorough"};
+        history.unshift({id:`export-run-${next}`,status,createdAt:"2032-01-04T00:00:00Z",request:input.request,effort:input.effort,restored:false,deletionState:"stop-required"});
+        if (admission === "unknown-saved") { res.writeHead(500).end("owned lost admission response"); return; }
         send({ run: { id: `export-run-${next}`, kind: "export", status, confirmedThoughtIds: [], responseId: null } }, 201); return;
       }
+      if (url.pathname === "/exports/agentic" && method === "GET") {
+        if (readFailure) { res.writeHead(503).end(); return; }
+        if (paginate && !url.searchParams.has("cursor") && history.length > 2) { send({items:history.slice(0,2),nextCursor:"owned-next"}); return; }
+        send({items:paginate && url.searchParams.has("cursor") ? history.slice(2) : history,nextCursor:null}); return;
+      }
       if (url.pathname.startsWith("/exports/agentic/")) {
+        const parts = url.pathname.split("/"), item = history.find(value => value.id === parts[3]);
+        if (!item) { res.writeHead(404).end(); return; }
+        if (parts[4] === "metadata" && method === "GET") { if (readFailure) { res.writeHead(503).end(); return; } send(item); return; }
+        if (method === "DELETE") {
+          if (deleteConflict || item.deletionState !== "ready") { res.writeHead(409).end(); return; }
+          history = history.filter(value => value.id !== item.id); res.writeHead(204).end(); return;
+        }
+        if (item.id === "export-completed") { res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" }).end(report); return; }
         if (artifact === "pending") { res.writeHead(409).end("owned partial report"); return; }
         if (artifact === "error") { res.writeHead(500).end("owned report failure"); return; }
         res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" }).end(report); return;
       }
       if (url.pathname.startsWith("/runs/export-")) {
         const id = url.pathname.split("/")[2];
-        if (method === "POST" && !["completed", "failed", "interrupted"].includes(status)) status = "interrupted";
-        send({ id, kind: "export", status, confirmedThoughtIds: [], responseId: null }); return;
+        const item = history.find(value => value.id === id);
+        if (!item) { res.writeHead(404).end(); return; }
+        if (method === "POST") { item.status = "interrupted"; item.deletionState = item.restored ? "ready" : "settling"; }
+        send({ id, kind: "export", status:item.status, confirmedThoughtIds: [], responseId: null }); return;
       }
       if (url.searchParams.has("scope") && url.searchParams.get("scope") !== "normal") { res.writeHead(403).end(); return; }
       if (/^\/thoughts\/export-root\/(?:children|connections|responses)$/.test(url.pathname)) { send([]); return; }
@@ -89,211 +118,163 @@ async function downloadBytes(download: Download): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+/** BTR-EXP-002: the catalog mounts and completes before an abandoned form's admission settles. */
+export async function checkExportAdmissionRace(page: Page, daemon: Fixture, origin: string, outcome: "normal" | "unknown-saved"): Promise<void> {
+  daemon.reset(); daemon.emptyHistory(); daemon.setAdmission(outcome); daemon.hold("admission");
+  const before = daemon.attempts.length, question = `Owned pending ${outcome} question`;
+  try {
+    await page.goto(`${origin}/exports/new`, {waitUntil:"networkidle"});
+    await page.getByRole("textbox", {name:"Request",exact:true}).fill(question);
+    const admission = page.waitForResponse(response => new URL(response.url()).pathname === "/api/export/agentic" && response.request().method() === "POST");
+    await page.getByRole("button", {name:"Create report",exact:true}).click();
+    await expect.poll(() => daemon.waiting()).toBe(true);
+    await page.getByRole("link", {name:"Cancel",exact:true}).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports");
+    await expect(page.getByRole("heading", {name:"No exports yet",exact:true})).toBeVisible();
+    const readsBefore = daemon.attempts.slice(before).filter(call => call.method === "GET" && call.path === "/exports/agentic").length;
+    assert.ok(readsBefore >= 1, "the empty catalog must complete before admission is released");
+    daemon.release();
+    const response = await admission;
+    if (outcome === "normal") assert.equal(response.status(),201);
+    else assert.notEqual(response.status(),201);
+    // No manual check, reload, or second mount: the already-visible catalog must reconcile.
+    await expect(page.getByText(question,{exact:true})).toBeVisible({timeout:5000});
+    await expect(page.getByRole("heading", {name:"No exports yet",exact:true})).toHaveCount(0);
+    assert.ok(daemon.attempts.slice(before).filter(call => call.method === "GET" && call.path === "/exports/agentic").length > readsBefore);
+    assert.equal(daemon.attempts.slice(before).filter(call => call.method === "POST" && call.path === "/exports/agentic").length,1);
+    assert.ok(!daemon.attempts.slice(before).some(call => call.method === "POST" && call.path.startsWith("/runs/")));
+  } finally { daemon.release(); }
+}
+
 export async function checkExportBrowser(page: Page, daemon: Fixture, options: { origin: string; daemonOrigin: string; token: string; narrow: boolean }): Promise<void> {
   daemon.reset();
-  type Trace = { method: string; url: string; resource: string; category: string; phase: "pending" | "finished" | "failed"; body: string | null; status?: number; failure?: string };
-  const inFlight = new Map<BrowserRequest, Trace>();
-  const events: Trace[] = [];
-  const onRequest = (request: BrowserRequest) => {
-    const url = new URL(request.url());
-    const resource = request.resourceType();
-    const category = resource === "document" ? "document" : url.searchParams.has("_rsc") || request.headers().rsc === "1" ? "next-rsc" : url.pathname.startsWith("/api/export/thoughts/") ? "export-thought-api" : url.pathname.startsWith("/api/export/") ? "export-api" : "other";
-    const trace: Trace = { method: request.method(), url: `${url.origin}${url.pathname}${url.search}`, resource, category, phase: "pending", body: request.postData() };
-    inFlight.set(request, trace); events.push(trace);
+  daemon.setPagination(true);
+  const before = daemon.attempts.length, leaks: string[] = [];
+  const inspect = (request: BrowserRequest) => {
+    if (request.url().startsWith(options.daemonOrigin) || request.url().includes(options.token) || request.headers().authorization?.includes(options.token)) leaks.push(request.url());
   };
-  const onFinished = (request: BrowserRequest) => { const trace = inFlight.get(request); if (trace) { trace.phase = "finished"; inFlight.delete(request); } };
-  const onFailed = (request: BrowserRequest) => { const trace = inFlight.get(request); if (trace) { trace.phase = "failed"; trace.failure = request.failure()?.errorText; inFlight.delete(request); } };
-  const onResponse = (response: BrowserResponse) => { const trace = inFlight.get(response.request()); if (trace) trace.status = response.status(); };
-  page.on("request", onRequest); page.on("response", onResponse); page.on("requestfinished", onFinished); page.on("requestfailed", onFailed);
-  await page.goto(`${options.origin}/export?thoughtId=export-imported`, { waitUntil: "networkidle" });
-  await expect(page.getByText(imported.text, { exact: true })).toBeVisible();
-  await expect(page.getByText("Imported source · imported original", { exact: true })).toBeVisible();
-  await expect(page.locator("main").getByText(/^AI · imported original$/)).toHaveCount(0);
-  await page.goto(`${options.origin}/export`, { waitUntil: "networkidle" });
-  await expect(page.getByRole("banner").getByRole("link", { name: /^(?:back|return|previous)\b/i })).toHaveCount(0);
-  const before = daemon.attempts.length;
-  const navigation = await page.goto(`${options.origin}/export?thoughtId=export-root`, { waitUntil: "networkidle" });
-  assert.equal(navigation?.status(), 200, "fresh Export bookmark must resolve to the actual page");
-  await expect(page.getByText(root.text, { exact: true })).toBeVisible();
-  await expect(page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveAttribute("href", /^\/ideas\/export-root(?:\?|$)/);
-  await expect(page.locator("main").getByRole("link", { name: /(?:back|return).*idea/i })).toHaveCount(0);
-  const count = page.getByRole("spinbutton", { name: /count|number/i });
-  const request = page.getByRole("textbox", { name: /request|question/i });
-  const effort = page.getByRole("combobox", { name: /effort/i });
-  const createReport = page.getByRole("button", { name: /create report/i });
-  const simpleButton = page.getByRole("button", { name: /create (?:simple )?export|preview (?:simple )?export/i });
-  const simplePosts = () => daemon.attempts.slice(before).filter(call => call.method === "POST" && call.path === "/exports/simple");
-  const reportPosts = () => daemon.attempts.slice(before).filter(call => call.method === "POST" && call.path === "/exports/agentic");
-  await count.fill("0"); await request.fill("Owned independent report request");
-  if (await simpleButton.isEnabled()) await simpleButton.click();
-  await expect(page.getByText("Enter a whole number of 1 or more.")).toBeVisible();
-  assert.equal(simplePosts().length, 0);
-  await expect(createReport).toBeEnabled();
-  await count.fill("3");
-  daemon.hold("simple");
+  page.on("request", inspect);
+  const writes = () => daemon.attempts.slice(before).filter(call => call.method !== "GET");
   try {
-    await simpleButton.focus();
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Enter");
-    await expect.poll(() => daemon.waiting()).toBe(true);
-    assert.equal(simplePosts().length, 1);
-    assert.deepEqual(JSON.parse(simplePosts()[0]?.body ?? "null"), { rootId: "export-root", count: 3, traversal: "breadth" });
-  } finally { daemon.release(); }
-  await expect(page.getByText("Simple Café 雪")).toBeVisible();
-  const preview = page.getByRole("region", { name: /simple markdown preview/i });
-  const previewHeading = preview.getByRole("heading", { name: /simple markdown preview/i });
-  await expect.poll(() => preview.evaluate(element => {
-    const active = document.activeElement;
-    return active instanceof HTMLElement && (active === element || active === element.querySelector("h2")) && active.tabIndex === -1;
-  }), { message: "confirmed Simple preview heading or region should receive programmatic focus" }).toBe(true);
-  await expect.poll(() => previewHeading.evaluate(element => {
-    const rect = element.getBoundingClientRect();
-    return rect.top >= 0 && rect.bottom <= window.innerHeight;
-  }), { message: "confirmed Simple preview heading should be within the viewport" }).toBe(true);
-  const success = page.locator('[role="status"], [aria-live="polite"], [aria-live="assertive"]').filter({ hasText: /(?:ready|created|complete|prepared|available|success)/i }).filter({ hasText: /(?:export|markdown|preview)/i });
-  await expect(success.first()).toBeVisible();
-  const simpleDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: /download/i }).first().click();
-  const simpleFile = await simpleDownload;
-  assert.equal(simpleFile.suggestedFilename(), "thoughtloom-simple.md"); assert.deepEqual(await downloadBytes(simpleFile), simple);
-  assert.equal(simplePosts().length, 1, "download must reuse the received bytes");
+    await page.goto(`${options.origin}/explore`, { waitUntil: "networkidle" });
+    await page.getByRole("link", { name: "Exports", exact: true }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports");
+    await expect(page.getByRole("heading", { name: "Active exports" })).toBeVisible();
+    await expect(page.getByText("Owned active question").first()).toBeVisible();
+    await page.getByRole("button", { name: /more exports/i }).click();
+    await expect(page.getByRole("heading", { name: "History", exact: true })).toBeVisible();
+    await expect(page.getByText("Owned completed question").first()).toBeVisible();
+    assert.equal(writes().length, 0, "listing must not start or stop exports");
 
-  await effort.selectOption("quick");
-  daemon.hold("admission");
-  try {
-    await createReport.dblclick({ delay: 40 });
-    await expect.poll(() => daemon.waiting()).toBe(true);
-    assert.equal(reportPosts().length, 1);
-    assert.deepEqual(JSON.parse(reportPosts()[0]?.body ?? "null"), { request: "Owned independent report request", effort: "quick" });
-  } finally { daemon.release(); }
-  await expect(page.getByText("export-run-1", { exact: false }).first()).toBeVisible();
-  await expect(page.getByText(/queued/i).first()).toBeVisible();
-  await expect(request).toHaveValue("Owned independent report request");
-  await expect(request).not.toBeEditable();
-  await expect(effort).toBeDisabled();
-  daemon.setStatus("running");
-  await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText(/^request$/i).first()).toBeVisible();
-  daemon.setStatus("uncertain");
-  await expect(page.getByText(/uncertain/i).first()).toBeVisible({ timeout: 15000 });
-  const beforeCheck = daemon.attempts.length;
-  await page.getByRole("button", { name: /check (?:this )?run/i }).click();
-  await expect.poll(() => daemon.attempts.slice(beforeCheck).some(call => call.path === "/runs/export-run-1")).toBe(true);
-  await page.getByRole("button", { name: /^stop$/i }).click();
-  await expect(page.getByText(/interrupted/i).first()).toBeVisible();
-  const stops = daemon.attempts.slice(before).filter(call => call.path === "/runs/export-run-1/stop");
-  assert.equal(stops.length, 1); assert.equal(stops[0]?.body, "{}");
-  await expect(page.getByText(/no completed report is available/i)).toBeVisible();
-  await page.getByRole("button", { name: /back to setup/i }).click();
-  await expect(request).toHaveValue("Owned independent report request");
-  await expect(page.getByText("export-run-1", { exact: false }).first()).toBeVisible();
-  const beforeLeave = daemon.attempts.length;
-  await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i }).click();
-  await expect(page).toHaveURL(url => url.pathname === "/ideas/export-root");
-  await expect(page.getByRole("heading", { name: "Export root", level: 1 })).toBeVisible();
-  await page.goBack();
-  await expect(page.getByText("export-run-1", { exact: false }).first()).toBeVisible();
-  assert.ok(!daemon.attempts.slice(beforeLeave).some(call => call.method === "POST"), "leaving must not stop or resubmit");
+    await page.getByRole("link", { name: "Owned completed question" }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports/export-completed");
+    await expect(page.getByText("Owned report content.")).toBeVisible();
+    const beforeReload = writes().length;
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByText("Owned completed question").first()).toBeVisible();
+    await expect(page.getByText("Owned report content.")).toBeVisible();
+    assert.equal(writes().length, beforeReload, "reopening a bookmark must not start a run");
+    await expect(page.getByText("Body forgery")).toBeVisible();
+    await expect(page.locator('a[href="/ideas/export-forgery"], a[href="/ideas/export-hidden"], img[src^="https://evil.invalid"]')).toHaveCount(0);
+    await expect(page.locator('a[href="/ideas/export-visible"]').first()).toBeVisible();
+    await expect(page.locator('a[href="/ideas/export-imported"]').first()).toBeVisible();
+    assert.equal(await page.evaluate(() => (window as typeof window & { ownedExportScriptRan?: boolean }).ownedExportScriptRan), undefined);
+    const downloadsBefore = daemon.attempts.filter(call => call.path === "/exports/agentic/export-completed" && call.method === "GET").length;
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: /download markdown/i }).click();
+    assert.deepEqual(await downloadBytes(await download), report);
+    assert.equal(daemon.attempts.filter(call => call.path === "/exports/agentic/export-completed" && call.method === "GET").length, downloadsBefore);
 
-  // A reload starts setup without replay. Observe fetch initiation in the new document.
-  await page.addInitScript(() => {
-    const requests: string[] = [];
-    (window as typeof window & { __ownedExportRequests?: string[] }).__ownedExportRequests = requests;
-    const fetch = window.fetch.bind(window);
-    window.fetch = (input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-      if (url.origin === window.location.origin && url.pathname.startsWith("/api/export/")) requests.push(`${(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()} ${url.pathname}`);
-      return fetch(input, init);
-    };
-  });
-  const beforeReload = daemon.attempts.length;
-  await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByText("export-run-1", { exact: false })).toHaveCount(0);
-  const fresh = await page.evaluate(() => (window as typeof window & { __ownedExportRequests?: string[] }).__ownedExportRequests ?? []);
-  assert.ok(!fresh.some(call => /^(?:POST |GET \/api\/export\/runs\/)/.test(call)), `reload must not replay or resume: ${JSON.stringify(fresh)}`);
-  assert.ok(!daemon.attempts.slice(beforeReload).some(call => call.method === "POST"), "reload must not write");
+    await page.goto(`${options.origin}/exports/export-live`, { waitUntil: "networkidle" });
+    await expect(page.getByText("Owned active question").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /delete/i })).toHaveCount(0);
+    await page.getByRole("button", { name: /^stop$/i }).click();
+    await expect(page.getByText(/stop requested/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /delete/i })).toHaveCount(0);
+    assert.equal(daemon.attempts.slice(before).filter(call => call.path === "/runs/export-live/stop" && call.method === "POST").length, 1);
+    daemon.setReadFailure(true);
+    await page.getByRole("button", { name: /check status/i }).click();
+    await expect(page.getByText("Owned active question").first()).toBeVisible();
+    await expect(page.getByText(/unconfirmed|could not|unavailable/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /delete/i })).toHaveCount(0);
+    daemon.setReadFailure(false); daemon.settle("export-live");
+    await page.getByRole("button", { name: /check status/i }).click();
+    await page.getByRole("button", { name: /^delete$/i }).click();
+    const dialog = page.getByRole("dialog", { name: /delete this export/i });
+    await expect(dialog.getByText("Owned active question")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /cancel/i })).toBeFocused();
+    await page.keyboard.press("Escape"); await expect(dialog).not.toBeVisible();
+    await page.getByRole("button", { name: /^delete$/i }).click();
+    daemon.setDeleteConflict(true);
+    await dialog.getByRole("button", { name: /delete export/i }).click();
+    await expect(page.getByText("Owned active question").first()).toBeVisible();
+    await expect(page.getByText(/could not|changed|unavailable|check/i).first()).toBeVisible();
+    assert.equal(daemon.attempts.slice(before).filter(call => call.path === "/runs/export-live/stop" && call.method === "POST").length, 1);
+    daemon.setDeleteConflict(false);
 
-  await request.fill("Owned completed report"); await effort.selectOption("standard"); await createReport.click();
-  await expect(page.getByText("export-run-2", { exact: false }).first()).toBeVisible();
-  daemon.setStatus("completed");
-  await expect(page.getByRole("heading", { name: "Completed", exact: true })).toBeVisible({ timeout: 15000 });
-  const reportCalls = () => daemon.attempts.slice(before).filter(call => call.path === "/exports/agentic/export-run-2").length;
-  await expect.poll(reportCalls, { timeout: 15000 }).toBeGreaterThan(0);
-  await expect(page.getByText(/report ready/i)).toHaveCount(0);
-  await expect(page.getByText("owned partial report")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /download/i })).toHaveCount(0);
-  daemon.setArtifact("error");
-  const beforeError = reportCalls();
-  await page.getByRole("button", { name: /check (?:this )?run/i }).click();
-  await expect.poll(reportCalls).toBeGreaterThan(beforeError);
-  await expect(page.getByText(/could not read the report/i)).toBeVisible();
-  await expect(page.getByText(/report ready/i)).toHaveCount(0);
-  daemon.setArtifact("ready");
-  let external = 0;
-  await page.route("https://evil.invalid/**", route => { external++; return route.abort(); });
-  await page.getByRole("button", { name: /check (?:this )?run/i }).click();
-  await expect(page.getByText(/report ready/i).first()).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText("Owned report content.")).toBeVisible();
-  await expect(page.getByText("Body forgery")).toBeVisible();
-  await expect(page.locator('a[href="/ideas/export-forgery"]')).toHaveCount(0);
-  await expect(page.locator('a[href="/ideas/export-hidden"]')).toHaveCount(0);
-  await expect(page.locator('a[href="/ideas/export-visible"]').first()).toBeVisible();
-  await expect(page.locator('a[href="/ideas/export-imported"]').first()).toBeVisible();
-  await expect(page.locator('a[href^="https://evil.invalid"], img[src^="https://evil.invalid"]')).toHaveCount(0);
-  assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-visible?scope=normal"));
-  assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-imported?scope=normal"));
-  assert.ok(daemon.attempts.slice(before).some(call => call.path === "/thoughts/export-hidden?scope=normal"));
-  assert.equal(external, 0); assert.equal(await page.evaluate(() => (window as typeof window & { ownedExportScriptRan?: boolean }).ownedExportScriptRan), undefined);
-  const reportReads = reportCalls();
-  const reportDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: /download/i }).last().click();
-  const reportFile = await reportDownload;
-  assert.equal(reportFile.suggestedFilename(), "thoughtloom-report.md"); assert.deepEqual(await downloadBytes(reportFile), report);
-  assert.equal(reportCalls(), reportReads);
+    await page.goto(`${options.origin}/exports/export-restored`, { waitUntil: "networkidle" });
+    await expect(page.getByText(/restored snapshot/i).first()).toBeVisible();
+    await page.getByRole("button", { name: /^stop$/i }).click();
+    const acknowledge = page.getByRole("checkbox", { name: /understand this does not stop old remote work/i });
+    await expect(acknowledge).not.toBeChecked();
+    await expect(page.getByRole("button", { name: /confirm local discard/i })).toBeDisabled();
+    await acknowledge.check(); await page.getByRole("button", { name: /confirm local discard/i }).click();
+    await expect(page.getByText(/local discard confirmed/i)).toBeVisible();
+    await page.getByRole("button", { name: /^delete$/i }).click();
+    const restoredDialog = page.getByRole("dialog", { name: /delete this export/i });
+    await expect(restoredDialog.getByText(/old remote work may still be running/i)).toBeVisible();
+    await restoredDialog.getByRole("button", { name: /delete export/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports");
+    await expect(page.getByText("Owned restored question")).toHaveCount(0);
 
-  await page.getByRole("button", { name: /back to setup/i }).click();
-  await page.reload({ waitUntil: "networkidle" });
-  await request.fill("Owned failure report"); await createReport.click();
-  await expect(page.getByText("export-run-3", { exact: false }).first()).toBeVisible();
-  daemon.setStatus("failed");
-  await expect(page.getByText(/no completed report is available/i)).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole("button", { name: /^stop$/i })).toHaveCount(0);
+    await page.getByRole("link", { name: /new export/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports/new");
+    const question = page.getByRole("textbox", { name: /request/i });
+    await expect(page.getByRole("combobox", { name: /effort/i })).toHaveValue("standard");
+    await question.fill(" "); await expect(page.getByRole("button", { name: /create report/i })).toBeDisabled();
+    daemon.setAdmission("unknown"); await question.fill("Owned unknown request");
+    const preAdmission = writes().length;
+    await page.getByRole("button", { name: /create report/i }).click();
+    await expect(page.getByText(/unconfirmed|may have started|could not confirm/i).first()).toBeVisible();
+    await expect(question).toHaveValue("Owned unknown request");
+    assert.equal(writes().length, preAdmission + 1);
+    assert.ok(!daemon.attempts.slice(before).some(call => call.path === "/runs/undefined"));
+    await page.goto(`${options.origin}/exports/new`, { waitUntil: "networkidle" });
+    daemon.setAdmission("normal");
+    await page.getByRole("textbox", { name: /request/i }).fill("Owned new question");
+    await page.getByRole("combobox", { name: /effort/i }).selectOption("quick");
+    const admittedBefore = writes().length;
+    await page.getByRole("button", { name: /create report/i }).click();
+    await expect(page).toHaveURL(url => url.pathname === "/exports/export-run-1");
+    await expect(page.getByText("Owned new question").first()).toBeVisible();
+    const admitted = writes().slice(admittedBefore);
+    assert.equal(admitted.length, 1);
+    assert.equal(admitted[0]?.path, "/exports/agentic");
+    assert.deepEqual(JSON.parse(admitted[0]?.body ?? "null"), {request:"Owned new question",effort:"quick"});
+    await page.reload({waitUntil:"networkidle"});
+    await expect(page.getByText("Owned new question").first()).toBeVisible();
+    assert.equal(writes().length, admittedBefore + 1);
 
-  daemon.setAdmission("unknown");
-  await page.reload({ waitUntil: "networkidle" });
-  const beforeUnknown = reportPosts().length, unknownCalls = daemon.attempts.length;
-  await request.fill("Owned unknown report"); await createReport.click();
-  await expect(page.getByText(/admission unconfirmed|may have started|could not confirm/i).first()).toBeVisible();
-  await page.waitForTimeout(300);
-  assert.equal(reportPosts().length, beforeUnknown + 1);
-  assert.ok(!daemon.attempts.slice(unknownCalls).some(call => call.path.startsWith("/runs/")), "unknown admission must not invent a run lookup");
-
-  const eventStart = events.length, daemonStart = daemon.attempts.length;
-  const pendingBefore = [...inFlight.values()].map(trace => ({ ...trace }));
-  let hiddenNavigation: BrowserResponse | null = null;
-  try {
-    hiddenNavigation = await page.goto(`${options.origin}/export?thoughtId=export-hidden`, { waitUntil: "networkidle", timeout: 30000 });
-  } catch (error) {
-    const diagnostic = {
-      pendingBefore,
-      navigationRequests: events.slice(eventStart),
-      outstanding: [...inFlight.values()],
-      daemonCalls: daemon.attempts.slice(daemonStart).map(({ method, path, body }) => ({ method, path, body })),
-    };
-    throw new Error(`Owned hidden-root navigation failed: ${JSON.stringify(diagnostic)}`, { cause: error });
-  } finally {
-    page.off("request", onRequest); page.off("response", onResponse); page.off("requestfinished", onFinished); page.off("requestfailed", onFailed);
-  }
-  assert.equal(hiddenNavigation?.status(), 200);
-  await expect.poll(() => daemon.attempts.slice(daemonStart).some(call => call.method === "GET" && call.path === "/thoughts/export-hidden?scope=normal")).toBe(true);
-  await expect(page.getByText(/root.*unavailable|idea.*unavailable|thought.*unavailable/i).first()).toBeVisible();
-  await count.fill("3");
-  await expect(simpleButton).toBeDisabled();
-  await request.fill("Owned independent missing-root request");
-  await expect(createReport).toBeEnabled();
-  assert.ok(daemon.attempts.slice(before).every(call => call.authorization === daemon.expectedAuthorization));
-  assert.ok(!daemon.attempts.slice(before).some(call => call.path.includes("scope=history") || call.path.includes("scope=show-rejected")));
-  assert.ok(!daemon.attempts.slice(before).some(call => call.method !== "GET" && !["/exports/simple", "/exports/agentic", "/runs/export-run-1/stop"].includes(call.path)), "export must not write knowledge");
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "Export horizontal overflow");
-  void options.daemonOrigin; void options.token; void options.narrow;
+    await page.goto(`${options.origin}/export?thoughtId=export-root`, { waitUntil: "networkidle" });
+    await expect(page.getByText(root.text, { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /request|question/i })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: /effort/i })).toHaveCount(0);
+    const count = page.getByRole("spinbutton", { name: /count|number/i });
+    const create = page.getByRole("button", { name: /create (?:simple )?export/i });
+    const simpleBefore = daemon.attempts.filter(call => call.path === "/exports/simple").length;
+    await count.fill("0"); if (await create.isEnabled()) await create.click();
+    await expect(page.getByText("Enter a whole number of 1 or more.")).toBeVisible();
+    assert.equal(daemon.attempts.filter(call => call.path === "/exports/simple").length, simpleBefore);
+    await count.fill("3"); await create.click();
+    await expect(page.getByText("Simple Café 雪")).toBeVisible();
+    const simpleDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: /download/i }).click();
+    assert.deepEqual(await downloadBytes(await simpleDownload), simple);
+    assert.equal(daemon.attempts.filter(call => call.path === "/exports/simple").length, simpleBefore + 1);
+    assert.ok(daemon.attempts.slice(before).every(call => call.authorization === daemon.expectedAuthorization));
+    assert.ok(!daemon.attempts.slice(before).some(call => /scope=(history|show-rejected)/.test(call.path)));
+    assert.deepEqual(leaks, []);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    void options.narrow;
+  } finally { daemon.release(); page.off("request", inspect); }
 }

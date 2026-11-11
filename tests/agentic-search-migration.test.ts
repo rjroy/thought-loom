@@ -208,12 +208,14 @@ test("first search upgrade preserves populated import-era closure, and rolls bac
       expect(schema).toEqual(expect.arrayContaining([expect.objectContaining({ type: "trigger", name })]));
       const trigger = after.find(row => row.type === "trigger" && row.name === name);
       expect(trigger).toBeDefined();
-      const sql = trigger?.sql.replace(/\s+/g, " ") ?? "";
-      expect(sql).toContain("JOIN search_turns purge_turn ON purge_turn.run_id=purge_run.id JOIN search_sessions purge_session ON purge_session.id=purge_turn.session_id");
-      expect(sql).toContain(`purge_run.id=OLD.${name === "runs_immutable_delete" ? "id" : "run_id"} AND purge_run.kind='search' AND purge_session.deleted_at IS NOT NULL`);
-      expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM runs purge_run/);
-      expect(sql).toMatch(/RAISE\(ABORT,/);
     }
+    // Every migrated populated non-search execution remains protected. The owned
+    // tombstoned-search purge test below exercises the corresponding allowed path.
+    for (const [table,column] of [["runs","id"],["run_steps","run_id"],["run_context","run_id"],
+      ["agent_bindings","run_id"],["run_operation_receipts","run_id"],["run_issued_thoughts","run_id"]]) {
+      expect(() => db.run(`DELETE FROM ${table} WHERE ${column}='weave'`)).toThrow(/immutable/i);
+    }
+    expect(snapshot()).toEqual(before);
     const reopened = new Database(path);
     try {
       migrate(reopened); migrate(reopened);

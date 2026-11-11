@@ -16,6 +16,9 @@ import { SqliteRunRepository } from "../src/storage/run";
 import { SqliteRunWorkerState } from "../src/storage/run-worker";
 import { isRunRestoreFenced } from "../src/storage/restore-fences";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
+import { SqliteAgenticExports } from "../src/storage/agentic-export";
+import { SqliteAgentRuns } from "../src/storage/agent";
+import { AgentService } from "../src/domain/agent";
 
 const now = () => "2030-01-02T03:04:05.000Z";
 const logger = createLogger("verbose", () => {});
@@ -124,6 +127,27 @@ test("configured direct tick does not resolve a service for a fenced queued run,
     const before = f.snapshot(); await worker.tick(historical.id);
     expect(resolutions).toBe(0); expect(clients).toBe(0); expect(f.snapshot()).toEqual(before);
     await worker.tick(fresh.id); expect(resolutions).toBe(1); expect(clients).toBe(0);
+  } finally { worker.pause(); await worker.drain(); }
+}));
+
+test("restored export local Stop and deletion never resolve or call the old provider", async () => fixture(async f => {
+  const exports = new SqliteAgenticExports(f.db, f.sources);
+  const run = exports.admit("user", { request: "Historical export to discard" });
+  f.runs.stop(run.id);
+  f.fence(run.id);
+  let resolutions = 0, clients = 0;
+  const worker = new ConfiguredRunWorker({ db: f.db, ...f.sources, config: agent,
+    async resolve() { resolutions++; throw new Error("unexpected historical resolver"); },
+    client() { clients++; throw new Error("unexpected historical client"); } });
+  try {
+    expect(typeof exports.delete).toBe("function");
+    await worker.tick(run.id);
+    new AgentService(new SqliteAgentRuns(f.db, f.sources), false).stop("user", run.id);
+    expect(f.steps.cancellation(run.id)).toBe("pending");
+    await worker.tick(run.id);
+    exports.delete("user", run.id);
+    await worker.tick(run.id);
+    expect(resolutions).toBe(0); expect(clients).toBe(0);
   } finally { worker.pause(); await worker.drain(); }
 }));
 

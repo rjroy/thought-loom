@@ -27,6 +27,7 @@ import { migrateRestoreFences } from "./restore-fences-schema";
 import { initializeMediaStore, mediaStoreId, saveMediaSource, storedThought, type MediaSourceWrite } from "./media-source";
 import { rebuildResponseSearch } from "./search-projections";
 import { migrateAgentInstructions } from "./agent-instructions";
+import { migrateExportLifecycle } from "./agentic-export-schema";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -196,6 +197,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
       migrateMediaFoundation(db, logger);
       migrateRestoreFences(db);
       migrateAgentInstructions(db);
+      migrateExportLifecycle(db);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;

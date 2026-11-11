@@ -114,7 +114,7 @@ export function createSearchSchema(db: Database): void {
 const activeStatuses = "'queued','submitting','running','uncertain'";
 
 /** All execution purge exceptions use the retained owner mapping, never only a caller's session ID. */
-function purgeRun(runId: string): string {
+export function purgeRun(runId: string): string {
   return `EXISTS (SELECT 1 FROM runs purge_run JOIN search_turns purge_turn ON purge_turn.run_id=purge_run.id
     JOIN search_sessions purge_session ON purge_session.id=purge_turn.session_id
     WHERE purge_run.id=${runId} AND purge_run.kind='search' AND purge_session.deleted_at IS NOT NULL)`;
@@ -276,7 +276,7 @@ function noSearchExecutionReplace(table: string, conflict: string): string {
 }
 
 function executionGuards(): string {
-  // These are the only existing immutable-delete definitions changed by search persistence.
+  // Bootstrap search exceptions. Core migration installs the combined export/search guards last.
   const deletes = [
     ["run_steps_immutable_delete", "run_steps", "step immutable"],
     ["run_context_immutable_delete", "run_context", "exposed context immutable"],

@@ -1,7 +1,7 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { isAbsolute } from "node:path";
-import { RunConflictError, RunFenceError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
+import { RunConflictError, RunFenceError, RunNotFoundError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, ProtocolValidationError, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
 import type { Thought } from "../domain/thought";
 import { SqliteAgentBindings } from "../storage/agent-binding";
@@ -172,7 +172,7 @@ export class RunWorker {
     try {
       this.localFence(runId);
       const run = this.runs.get(runId);
-      if (!run) { this.searchClock.forget(runId); throw new RunConflictError("Worker run does not exist"); }
+      if (!run) { this.forget(runId); return; } // A locally deleted export/search owner cannot be reconstructed from a stale tick.
       if (run.kind !== "weave" && run.kind !== "evolve" && run.kind !== "export" && run.kind !== "search") return; // Import dispatch belongs to its separately authorized worker.
       if (terminal(run)) { this.forget(runId); return; }
       if (run.kind === "weave" && run.status === "queued" && !this.state.canDispatch(runId)) {
@@ -248,6 +248,7 @@ export class RunWorker {
       }
     } catch (error) {
       if (this.paused) return;
+      if (error instanceof RunNotFoundError && this.runs.get(runId) === null) { this.forget(runId); return; }
       if (error instanceof RunFenceError) {
         this.searchClock.forget(runId);
         const run = this.runs.get(runId);

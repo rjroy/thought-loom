@@ -38,7 +38,7 @@ export function compareRestoreRecords(snapshot: SqlSnapshot, manifest: BackupMan
 }
 /** Internal current-schema witness, generated only after validating the loaded source projection. */
 export function restoredManifest(snapshot: SqlSnapshot, source: BackupManifest): BackupManifest {
-  return {...source,appSchema:"thoughtloom-logical-2",tables:snapshot.tables.map(captured => {
+  return {...source,appSchema:"thoughtloom-logical-3",tables:snapshot.tables.map(captured => {
     const encoded = encodeTable(captured.shape,captured.rows);
     return {name:captured.shape.name,path:`tables/${captured.shape.name}.json`,rowCount:String(captured.rows.length),byteLength:String(encoded.length),sha256:digest(encoded)};
   })};
@@ -81,11 +81,17 @@ export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly
     db.exec("ANALYZE");
     check(restoreSchemaFingerprint(db) === JSON.stringify(schema),"inconsistent-source"); assertRestoreFenceSchema(db);
     const loaded = readSqlSnapshot(db,guard); validateBytes(loaded);
-    if ((manifest.appSchema ?? "thoughtloom-logical-1") === "thoughtloom-logical-1") {
-      // The original bytes are compared with the frozen inventory; only these two absent fields may default.
-      check(table(loaded,"agent_instructions").rows.length === 0,"inconsistent-source");
-      check(table(loaded,"run_steps").rows.every(row => row.values.guidance?.storage === "null"),"inconsistent-source");
-      const legacy = readSqlSnapshot(db,guard,shapesForSchema("thoughtloom-logical-1"));
+    const sourceSchema = manifest.appSchema ?? "thoughtloom-logical-1";
+    if (sourceSchema !== "thoughtloom-logical-3") {
+      // Validate explicit additive defaults and compare every original byte against its frozen projection.
+      if (sourceSchema === "thoughtloom-logical-1") {
+        check(table(loaded,"agent_instructions").rows.length === 0,"inconsistent-source");
+        check(table(loaded,"run_steps").rows.every(row => row.values.guidance?.storage === "null"),"inconsistent-source");
+      }
+      const retained = new TextEncoder().encode("retained");
+      check(table(loaded,"export_intents").rows.every(row => row.values.local_disposition?.storage === "text" &&
+        Buffer.from(row.values.local_disposition.bytes).equals(retained)),"inconsistent-source");
+      const legacy = readSqlSnapshot(db,guard,shapesForSchema(sourceSchema));
       validateBytes(legacy); compareRestoreRecords(legacy,manifest);
     } else compareRestoreRecords(loaded,manifest);
     const verified = restoredManifest(loaded,manifest);

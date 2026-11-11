@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { RejectionService } from "../src/domain/rejection";
-import { RunFenceError, RunForbiddenError, RunNotFoundError, RunService, type NativeDispatcher } from "../src/domain/run";
+import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, RunService, type NativeDispatcher } from "../src/domain/run";
 import { parseEnvelope, ProtocolValidationError, type ReportEnvelope } from "../src/domain/run-protocol";
 import { SqliteAgenticExports } from "../src/storage/agentic-export";
 import { SqliteCapabilityDispatcher } from "../src/storage/capability";
@@ -15,6 +15,10 @@ import { SqliteTitleRepository } from "../src/storage/title";
 import { TitleService } from "../src/domain/title";
 import { ValidationError } from "../src/domain/validation";
 import { exportSources, renderExportReport } from "../src/domain/agentic-export";
+import { SqliteRunWorkerState } from "../src/storage/run-worker";
+import { SqliteAgentBindings } from "../src/storage/agent-binding";
+import { AgentService } from "../src/domain/agent";
+import { SqliteAgentRuns } from "../src/storage/agent";
 
 const now = () => "2032-01-01T00:00:00Z";
 const native: NativeDispatcher = { submit: async () => {}, observe: async () => "running" };
@@ -74,6 +78,206 @@ function begin(f: ReturnType<typeof setup>) {
 function knowledge(db: Database) {
   return ["thoughts", "thought_titles", "thought_sources", "thought_source_seals", "connections", "connection_sources", "rejected_thoughts", "rejected_connections", "responses", "response_thoughts", "response_seals"].map(table => [table, db.query(`SELECT * FROM ${table} ORDER BY rowid`).all()]);
 }
+
+test("export history is user-only, bounded, deterministic and survives reopening", () => fixture((f, path) => {
+  const a = f.exports.admit("user", { request: "First question", effort: "quick" });
+  const b = f.exports.admit("user", { request: "Second question", effort: "thorough" });
+  const c = f.exports.admit("user", { request: "Third question" });
+  const weave = f.service.admit("user", "weave").run;
+  // Generic legacy export admission has no recoverable user intent.
+  const legacy = f.service.admit("user", "export").run;
+  const h = f.exports;
+  expect(typeof h.list).toBe("function");
+  expect(() => h.list("ai")).toThrow(RunForbiddenError);
+  expect(() => h.get("ai", a.id)).toThrow(RunForbiddenError);
+  for (const limit of [0, 201, 1.5]) expect(() => h.list("user", { limit })).toThrow(ValidationError);
+  const first = h.list("user", { limit: 2 });
+  expect(first.items).toHaveLength(2);
+  expect(first.nextCursor).not.toBeNull();
+  const second = h.list("user", { limit: 2, cursor: first.nextCursor });
+  expect(second.nextCursor).toBeNull();
+  const items = [...first.items, ...second.items];
+  expect(items.map(item => item.id).sort()).toEqual([a.id, b.id, c.id].sort());
+  expect(items.some(item => item.id === legacy.id)).toBe(false);
+  expect(h.get("user", legacy.id)).toBeNull();
+  expect(h.get("user", weave.id)).toBeNull();
+  expect(() => h.delete("user", weave.id)).toThrow(RunNotFoundError);
+  expect(() => h.delete("user", "missing-run")).toThrow(RunNotFoundError);
+  expect(h.get("user", b.id)).toEqual({ id: b.id, status: "queued", createdAt: now(), request: "Second question", effort: "thorough", deletionState: "stop-required", restored: false });
+  for (const item of items) expect(Object.keys(item).sort()).toEqual(["createdAt", "deletionState", "effort", "id", "request", "restored", "status"]);
+  const reopened = new Database(path);
+  try {
+    migrate(reopened);
+    const restored = new SqliteAgenticExports(reopened, f.sources);
+    expect(restored.get("user", b.id)).toEqual(h.get("user", b.id));
+    expect(restored.list("user", { limit: 2 })).toEqual(first);
+  } finally { reopened.close(); }
+}));
+
+const ownedTables = ["runs", "export_intents", "export_reports", "run_steps", "run_context", "agent_bindings", "run_replies", "run_operation_receipts", "run_issued_thoughts"] as const;
+function ownedRows(db: Database, id: string) {
+  return ownedTables.map(table => [table, db.query(`SELECT * FROM ${table} WHERE ${table === "runs" ? "id" : "run_id"}=? ORDER BY rowid`).all(id)]);
+}
+
+test("deleting a completed export removes its local execution and report without changing knowledge or unrelated runs", () => fixture((f, path) => {
+  const run = begin(f);
+  new SqliteAgentBindings(f.db).bind(run.run.id, { sessionId: run.run.sessionId, serviceUrl: "http://127.0.0.1:44999", location: { directory: "/owned/workspace" }, model: { providerID: "fixture-provider", id: "fixture-model" }, permissions: [{ action: "*", resource: "*", effect: "deny" }], protocolVersion: 1 }, run.claim);
+  run.invoke("readThought", { id: "human" });
+  const promptId = run.complete(envelope("Retained report body.", ["human"]));
+  const report = f.exports.finalize(run.claim, promptId);
+  f.rejection.rejectThought("user", "human");
+  const before = knowledge(f.db);
+  const other = f.exports.admit("user", { request: "Unrelated export" });
+  const weave = f.service.admit("user", "weave").run;
+  const otherBefore = ownedRows(f.db, other.id), weaveBefore = ownedRows(f.db, weave.id);
+  expect(f.db.query("SELECT 1 FROM agent_bindings WHERE run_id=?").get(run.run.id)).not.toBeNull();
+  expect(f.db.query("SELECT 1 FROM run_context WHERE run_id=?").get(run.run.id)).not.toBeNull();
+  expect(f.db.query("SELECT 1 FROM run_steps WHERE run_id=? AND envelope_json LIKE '%Retained report body.%'").get(run.run.id)).not.toBeNull();
+  const h = f.exports;
+  expect(typeof h.get).toBe("function");
+  expect(h.get("user", run.run.id)).toMatchObject({ id: run.run.id, request: "What connects these thoughts?", status: "completed", deletionState: "ready" });
+  expect(f.exports.report("user", run.run.id)).toEqual(report);
+  expect(() => h.delete("ai", run.run.id)).toThrow(RunForbiddenError);
+  h.delete("user", run.run.id);
+  expect(h.get("user", run.run.id)).toBeNull();
+  expect(h.list("user").items.some(item => item.id === run.run.id)).toBe(false);
+  expect(f.exports.report("user", run.run.id)).toBeNull();
+  for (const [, rows] of ownedRows(f.db, run.run.id)) expect(rows).toEqual([]);
+  expect(ownedRows(f.db, other.id)).toEqual(otherBefore);
+  expect(ownedRows(f.db, weave.id)).toEqual(weaveBefore);
+  expect(() => f.db.run("DELETE FROM runs WHERE id=?", [weave.id])).toThrow(/immutable/i);
+  expect(() => f.db.run("DELETE FROM run_steps WHERE run_id=?", [other.id])).toThrow(/immutable/i);
+  expect(f.db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  expect(knowledge(f.db)).toEqual(before);
+  expect(() => f.exports.finalize(run.claim, promptId)).toThrow();
+  expect(() => h.delete("user", run.run.id)).toThrow(RunNotFoundError);
+  const reopened = new Database(path);
+  try { migrate(reopened); for (const [, rows] of ownedRows(reopened, run.run.id)) expect(rows).toEqual([]); }
+  finally { reopened.close(); }
+}));
+
+test("active and cancellation-pending exports cannot be deleted; settled Stop fences publication", () => fixture(f => {
+  const run = begin(f);
+  const promptId = run.complete(envelope("Late report must not publish.", []));
+  const h = f.exports;
+  expect(typeof h.delete).toBe("function");
+  expect(() => h.delete("user", run.run.id)).toThrow(RunConflictError);
+  expect(h.get("user", run.run.id)).toMatchObject({ status: "uncertain", deletionState: "stop-required" });
+  f.service.stop("user", run.run.id);
+  expect(f.steps.cancellation(run.run.id)).toBe("pending");
+  expect(h.get("user", run.run.id)).toMatchObject({ status: "interrupted", deletionState: "settling" });
+  expect(() => h.delete("user", run.run.id)).toThrow(RunConflictError);
+  // A completed native envelope is not proof of unsubmitted work; settle through the existing journal boundary.
+  f.steps.settleCancellation(run.run.id);
+  expect(h.get("user", run.run.id)?.deletionState).toBe("ready");
+  h.delete("user", run.run.id);
+  expect(h.get("user", run.run.id)).toBeNull();
+  for (const [, rows] of ownedRows(f.db, run.run.id)) expect(rows).toEqual([]);
+  expect(() => f.exports.finalize(run.claim, promptId)).toThrow();
+  expect(f.exports.report("user", run.run.id)).toBeNull();
+}));
+
+test("unsubmitted Stop becomes deletable only after worker settlement", () => fixture(f => {
+  const run = f.exports.admit("user", { request: "Never dispatched" });
+  const h = f.exports;
+  expect(typeof h.delete).toBe("function");
+  f.service.stop("user", run.id);
+  expect(() => h.delete("user", run.id)).toThrow(RunConflictError);
+  expect(new SqliteRunWorkerState(f.db, f.sources).settleUnsubmitted(run.id)).toBe(true);
+  h.delete("user", run.id);
+  expect(h.get("user", run.id)).toBeNull();
+}));
+
+test("restored export Stop acknowledges local discard without changing historical execution or cancellation", () => fixture((f, path) => {
+  const run = begin(f);
+  const promptId = run.complete(envelope("Historical unpublished report.", []));
+  f.service.stop("user", run.run.id);
+  expect(f.steps.cancellation(run.run.id)).toBe("pending");
+  f.db.run("INSERT INTO restore_fences VALUES ('run',?,?,?,?)", [run.run.id, "a".repeat(64), now(), '{}']);
+  const fence = f.db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(run.run.id);
+  const execution = ownedRows(f.db, run.run.id).filter(([table]) => table !== "export_intents");
+  const knowledgeBefore = knowledge(f.db);
+  const h = f.exports;
+  expect(typeof h.get).toBe("function");
+  expect(h.get("user", run.run.id)).toMatchObject({ status: "interrupted", restored: true, deletionState: "stop-required" });
+  expect(() => h.delete("user", run.run.id)).toThrow(RunConflictError);
+  const agent = new AgentService(new SqliteAgentRuns(f.db, f.sources), false);
+  agent.stop("user", run.run.id);
+  expect(h.get("user", run.run.id)).toMatchObject({ status: "interrupted", restored: true, deletionState: "ready" });
+  expect(f.steps.cancellation(run.run.id)).toBe("pending");
+  expect(ownedRows(f.db, run.run.id).filter(([table]) => table !== "export_intents")).toEqual(execution);
+  expect(f.db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(run.run.id)).toEqual(fence);
+  const reopened = new Database(path);
+  try { migrate(reopened); expect(new SqliteAgenticExports(reopened, f.sources).get("user", run.run.id)?.deletionState).toBe("ready"); }
+  finally { reopened.close(); }
+  h.delete("user", run.run.id);
+  for (const [, rows] of ownedRows(f.db, run.run.id)) expect(rows).toEqual([]);
+  expect(f.db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(run.run.id)).toBeNull();
+  expect(knowledge(f.db)).toEqual(knowledgeBefore);
+  expect(() => f.exports.finalize(run.claim, promptId)).toThrow();
+  expect(f.db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+}));
+
+test("a live pending export cannot forge local discard or purge authority", () => fixture(f => {
+  const run = begin(f);
+  f.service.stop("user", run.run.id);
+  const h = f.exports;
+  expect(typeof h.get).toBe("function");
+  expect(h.get("user", run.run.id)).toMatchObject({ restored: false, deletionState: "settling" });
+  for (const disposition of ["local-stopped", "deleting"]) {
+    expect(() => f.db.run("UPDATE export_intents SET local_disposition=? WHERE run_id=?", [disposition, run.run.id])).toThrow();
+  }
+  expect(() => f.db.run("DELETE FROM run_steps WHERE run_id=?", [run.run.id])).toThrow(/immutable/i);
+  expect(() => h.delete("user", run.run.id)).toThrow(RunConflictError);
+  expect(f.steps.cancellation(run.run.id)).toBe("pending");
+}));
+
+test("restored formerly active export with no cancellation journal needs local Stop, not invented settlement", () => fixture(f => {
+  const run = f.exports.admit("user", { request: "Restored queued export" });
+  // Restore recovery interrupts active local work without recording a native cancellation.
+  f.db.run("UPDATE runs SET status='interrupted',generation=generation+1 WHERE id=?", [run.id]);
+  f.db.run("INSERT INTO restore_fences VALUES ('run',?,?,?,?)", [run.id, "c".repeat(64), now(), '{"runs.status":"queued"}']);
+  const h = f.exports;
+  expect(typeof h.get).toBe("function");
+  expect(h.get("user", run.id)).toMatchObject({ restored: true, deletionState: "stop-required" });
+  expect(() => h.delete("user", run.id)).toThrow(RunConflictError);
+  new AgentService(new SqliteAgentRuns(f.db, f.sources), false).stop("user", run.id);
+  expect(f.steps.cancellation(run.id)).toBe("none");
+  expect(h.get("user", run.id)?.deletionState).toBe("ready");
+  h.delete("user", run.id);
+  for (const [, rows] of ownedRows(f.db, run.id)) expect(rows).toEqual([]);
+}));
+
+test("restored export deletion failure preserves local acknowledgement, execution and restore fence", () => fixture(f => {
+  const run = f.exports.admit("user", { request: "Restored rollback" });
+  f.service.stop("user", run.id);
+  f.db.run("INSERT INTO restore_fences VALUES ('run',?,?,?,?)", [run.id, "b".repeat(64), now(), '{}']);
+  const h = f.exports;
+  expect(typeof h.delete).toBe("function");
+  new AgentService(new SqliteAgentRuns(f.db, f.sources), false).stop("user", run.id);
+  const before = ownedRows(f.db, run.id);
+  const fence = f.db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(run.id);
+  f.db.exec("CREATE TRIGGER test_restored_delete_failure BEFORE DELETE ON runs BEGIN SELECT RAISE(ABORT,'test restored delete failure'); END");
+  expect(() => h.delete("user", run.id)).toThrow(/test restored delete failure/);
+  expect(ownedRows(f.db, run.id)).toEqual(before);
+  expect(f.db.query("SELECT * FROM restore_fences WHERE entity_kind='run' AND entity_id=?").get(run.id)).toEqual(fence);
+  expect(h.get("user", run.id)).toMatchObject({ restored: true, deletionState: "ready" });
+  expect(f.steps.cancellation(run.id)).toBe("pending");
+}));
+
+test("failed execution deletion rolls back all export-owned rows together", () => fixture(f => {
+  const run = begin(f);
+  const promptId = run.complete(envelope("Rollback report.", []));
+  const report = f.exports.finalize(run.claim, promptId);
+  const before = ownedRows(f.db, run.run.id);
+  const h = f.exports;
+  expect(typeof h.delete).toBe("function");
+  f.db.exec("CREATE TRIGGER test_export_delete_failure BEFORE DELETE ON runs BEGIN SELECT RAISE(ABORT,'test export delete failure'); END");
+  expect(() => h.delete("user", run.run.id)).toThrow(/test export delete failure/);
+  expect(h.get("user", run.run.id)?.id).toBe(run.run.id);
+  expect(f.exports.report("user", run.run.id)).toEqual(report);
+  expect(ownedRows(f.db, run.run.id)).toEqual(before);
+}));
 
 test("strict report envelopes accept only one complete typed report, never malformed or model authority", () => {
   const valid = envelope("# Findings\n\nExisting thinking.", ["human", "hypothesis"]);

@@ -3,6 +3,8 @@ import type { Claim, RunRecord } from "./run";
 import type { Thought } from "./thought";
 import { nonEmpty, oneOf, record, ValidationError } from "./validation";
 import { protocolJson } from "./run-protocol";
+import type { ExportHistoryItem, ExportHistoryPage } from "./export-history";
+export type { ExportHistoryItem, ExportHistoryPage, ExportHistoryCursor, ExportDeletionState } from "./export-history";
 
 export type ExportEffort = "quick" | "standard" | "thorough";
 export interface ExportIntent { readonly request: string; readonly effort: ExportEffort }
@@ -59,4 +61,8 @@ export interface AgenticExports {
   intent(runId: string): ExportIntent | null;
   finalize(claim: Claim, promptId: string): ExportReport;
   report(actor: Actor, runId: string): ExportReport | null;
+  list(actor: Actor, request?: unknown): ExportHistoryPage;
+  get(actor: Actor, runId: string): ExportHistoryItem | null;
+  stop(actor: Actor, runId: string): void;
+  delete(actor: Actor, runId: string): void;
 }
