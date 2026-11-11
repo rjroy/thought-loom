@@ -3,7 +3,7 @@ import { SearchStorageError, searchRevision } from "../domain/agentic-search";
 import type { RejectionService } from "../domain/rejection";
 import { RunConflictError } from "../domain/run";
 import type { Logger } from "../logging";
-import { interruptOrdinaryRun, ordinaryRunContextValid, scopedRunVisibility } from "./run-fences";
+import { interruptOrdinaryRun, ordinaryRunContextValid, scopedRunVisibility, type InterruptionDiagnostic } from "./run-fences";
 import { readRun } from "./run-record";
 import { assertRestoreFenceSchema } from "./restore-fences-schema";
 
@@ -65,7 +65,7 @@ export function recordSearchEligibilityChange(db: Database, kind: "thought" | "c
 }
 
 /** Source rejection only. Reuse the affected-reference closure and ordinary eligibility/fence, in the marker transaction. */
-export function recordMediaSourceRejection(db: Database, id: string, service: RejectionService, logger: Logger): number {
+export function recordMediaSourceRejection(db: Database, id: string, service: RejectionService, logger: Logger, diagnostics: InterruptionDiagnostic[]): number {
   if (!db.inTransaction) throw new RunConflictError("Media rejection requires its marker transaction");
   assertRestoreFenceSchema(db);
   const target = new TextEncoder().encode(id);
@@ -85,6 +85,7 @@ export function recordMediaSourceRejection(db: Database, id: string, service: Re
     if (run === null) throw new RunConflictError("Media-dependent run journal unavailable");
     if (ordinaryRunContextValid(db,run,visible)) continue;
     interruptOrdinaryRun(db,run,"context-invalidated",logger);
+    diagnostics.push({ run, reason: "context-invalidated" });
     logger.info("[run storage] media context fenced in rejection transaction", { runId: run.id, generation: run.generation, fencedGeneration: run.generation + 1 });
     interrupted++;
   }

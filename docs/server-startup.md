@@ -343,6 +343,10 @@ Successful idle polling does not produce Info messages. Invalid configured level
 
 The normal worker's local-processing failure is an Error diagnostic visible at the default level. It includes the run ID, claim generation, a fixed operation stage and a safe category (`protocol-validation`, `binding`, `run-conflict` or `unexpected`). These identify where processing failed and the recognized error type, not the underlying cause; exception messages, stacks, payloads and model output are not logged. Native service unavailability and cancellation retain their separate diagnostics and behavior. The cause of the previously reported first-question Evolve failure remains unknown; its non-recurrence does not establish a fix.
 
+The run storage diagnostic `interruption committed` is an Info event for a committed interruption at the run repository boundary, an agent-service Stop, or an eager media-source rejection. It includes the run ID, categorical reason, previous and new status and generation, and the resulting cancellation state. `stopped` identifies a Stop request; `context-invalidated` means required AI-visible context was no longer eligible; `quarantined` means native ownership or history could not be safely correlated; `interrupted-reply` identifies an interrupted reply passed to the ordinary repository finish operation, not a claim that the normal native worker produces such replies. Pending cancellation is a request for later settlement, not proof that native work has stopped. Local failure cleanup that ends in `failed` is not logged as a committed interruption.
+
+These reasons are diagnostics, not persisted run reasons, and cannot explain interruptions that occurred before this logging was enabled. Events are emitted only when the instrumented boundary owns and successfully commits the transaction. An operation nested in an independently owned transaction is not logged by that inner boundary because its eventual commit or rollback is unknown. Restore, migrations, and separate search-specific invalidation paths are not covered by this event.
+
 ```sh
 THOUGHTLOOM_LOG_LEVEL=verbose bun run daemon
 # Or, with a generated test launcher:

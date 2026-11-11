@@ -16,7 +16,7 @@ import { requireSearchExecutionOwner, searchExecutionContextValid } from "./sear
 import { searchRevision } from "../domain/search-session-guards";
 import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose } from "../domain/weave-scheduling";
 import { isReadCapability } from "../domain/capability";
-import { interruptOrdinaryRun, issuedRunThoughts, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type RunVisibility } from "./run-fences";
+import { interruptOrdinaryRun, issuedRunThoughts, logCommittedInterruption, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type InterruptionDiagnostic, type InterruptionReason, type RunVisibility } from "./run-fences";
 import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 
@@ -45,11 +45,26 @@ function decodeStep(row: StepRow): RunStep {
 
 /** Internal shared run boundary. Knowledge and protocol methods use the same ownership, context, and Stop fences. */
 export class SqliteRunAggregate {
+  private readonly interruptionFrames: InterruptionDiagnostic[][] = [];
   constructor(protected readonly db: Database, protected readonly logger: Logger = createLogger()) {}
   protected transaction<T>(operation: string, runId: string, action: () => T): T {
     this.logger.verbose(`[run storage] ${operation} attempt`, { runId });
-    try { const result = immediate(this.db,action); this.logger.verbose(`[run storage] ${operation} succeeded`, { runId }); return result; }
+    const outerTransaction = this.db.inTransaction;
+    const frame: InterruptionDiagnostic[] = [];
+    this.interruptionFrames.push(frame);
+    try {
+      const result = immediate(this.db,action);
+      const parent = this.interruptionFrames.at(-2);
+      if (parent) parent.push(...frame);
+      else if (!outerTransaction) for (const diagnostic of frame) logCommittedInterruption(this.db,this.logger,diagnostic);
+      this.logger.verbose(`[run storage] ${operation} succeeded`, { runId });
+      return result;
+    }
     catch (error) { this.logger.verbose(`[run storage] ${operation} failed`, { runId }); throw error; }
+    finally { this.interruptionFrames.pop(); }
+  }
+  protected noteInterruption(run: RunRecord, reason: InterruptionReason): void {
+    this.interruptionFrames.at(-1)?.push({ run, reason });
   }
   protected loadRun(id: string): RunRecord | null {
     return readRun(this.db,id);
@@ -205,8 +220,9 @@ export class SqliteRunAggregate {
         response.thoughtIds.some((id,index) => id !== expected.thoughtIds[index])) throw new RunConflictError("Reply must link this run's results in issued order");
     if (response.thoughtIds.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
   }
-  protected finalInterrupt(run: RunRecord, reason: "stopped" | "context-invalidated" | "failed" = "stopped"): void {
+  protected finalInterrupt(run: RunRecord, reason: "stopped" | "context-invalidated" | "failed" = "stopped", diagnosticReason: InterruptionReason | undefined = reason === "failed" ? undefined : reason): void {
     assertRunNotRestoreFenced(this.db,run.id);
+    if (diagnosticReason) this.noteInterruption(run,diagnosticReason);
     if (run.kind === "search") {
       searchRevision(run.generation + 1);
       this.db.run("UPDATE search_turns SET outcome_reason=? WHERE run_id=? AND outcome_reason IS NULL",[reason,run.id]);

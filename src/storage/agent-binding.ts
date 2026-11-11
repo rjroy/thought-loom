@@ -186,7 +186,7 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
         if (step.promptId !== prompt.promptId || step.input !== prompt.input) throw new RunFenceError("Native call does not match the current persisted prompt");
       }
       if (phase === "quarantined") {
-        this.finalInterrupt(run,run.kind === "search" ? "failed" : "stopped");
+        this.finalInterrupt(run,run.kind === "search" ? "failed" : "stopped", "quarantined");
         if (run.kind === "search") this.db.run("UPDATE runs SET status='failed' WHERE id=?",[run.id]);
         return;
       }

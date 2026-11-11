@@ -75,7 +75,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     if (run.status === "interrupted" && run.generation !== claim.generation) return null;
     this.active(claim);
     const visible = this.visibility();
-    if (!this.contextValid(run,visible)) { this.finalInterrupt(run); return null; }
+    if (!this.contextValid(run,visible)) { this.finalInterrupt(run,"context-invalidated"); return null; }
     this.requireWeaveCapability(run,ref.kind === "thought" ? "readThought" : ref.kind === "connection" ? "readConnection" : "readResponse");
     nonEmpty(ref.id, "id");
     const value = visible(ref);
@@ -145,6 +145,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
       const intent = evolveWeaveIntent(run,value,this.issued(run.id));
       if (this.sources.scheduleWeave && intent) admitWeave(this.db,this.sources,intent);
       this.db.run("UPDATE runs SET status=?,generation=generation+1 WHERE id=?", [value.state === "complete" ? "completed" : "interrupted",claim.runId]);
+      if (value.state === "interrupted") this.noteInterruption(run,"interrupted-reply");
     });
   }
 }

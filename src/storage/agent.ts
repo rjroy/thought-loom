@@ -4,13 +4,17 @@ import { RunAdmissionService, RunConflictError, RunNotFoundError, type RunSource
 import { SqliteRunRepository } from "./run";
 import type { ExportIntent, ExportReport } from "../domain/agentic-export";
 import { SqliteAgenticExports } from "./agentic-export";
+import { createLogger, type Logger } from "../logging";
+import { logCommittedInterruption } from "./run-fences";
 
 /** User-only domain service owns access; each returned projection is a consistent SQLite snapshot. */
 export class SqliteAgentRuns implements AgentRunRepository {
   private readonly runs: SqliteRunRepository;
   private readonly admissions: RunAdmissionService;
   private readonly exports: SqliteAgenticExports;
+  private readonly logger: Logger;
   constructor(private readonly db: Database, sources: RunSources) {
+    this.logger = sources.logger ?? createLogger();
     this.runs = new SqliteRunRepository(db,{...sources,scheduleWeave:true});
     this.admissions = new RunAdmissionService({...sources,repository:this.runs});
     this.exports = new SqliteAgenticExports(db,sources);
@@ -48,14 +52,20 @@ export class SqliteAgentRuns implements AgentRunRepository {
   report(id: string): ExportReport | null { return this.exports.report("user",id); }
   status(id: string): AgentRunView | null { return this.db.transaction(() => this.read(id))(); }
   stop(id: string): AgentRunView {
-    return this.db.transaction(() => {
+    const outerTransaction = this.db.inTransaction;
+    const outcome = this.db.transaction(() => {
       const existing = this.read(id);
       if (!existing) throw new RunNotFoundError();
+      const before = this.runs.get(id);
       if (existing.kind === "export" && this.exports.get("user",id)) this.exports.stop("user",id);
       else this.runs.stop(id);
       const run = this.read(id);
       if (!run) throw new RunNotFoundError();
-      return run;
+      return { run, before };
     }).immediate();
+    if (!outerTransaction && outcome.before && !["completed","interrupted","failed"].includes(outcome.before.status)) {
+      logCommittedInterruption(this.db,this.logger,{ run: outcome.before, reason: "stopped" });
+    }
+    return outcome.run;
   }
 }
