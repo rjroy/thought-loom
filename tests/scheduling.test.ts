@@ -101,33 +101,37 @@ test("Evolve finish atomically saves canonical reply and targeted follow-up on l
   const first = f.service.execute(claim, { id: "op-first", type: "development", parentId: admission.contribution.id, text: "first result", sourceIds: [] });
   const last = f.service.execute(claim, { id: "op-last", type: "development", parentId: admission.contribution.id, text: "last result", sourceIds: [] });
   const reply = { id: "reply", role: "addendum", state: "complete", text: "canonical reply", thoughtIds: [first.thought.id, last.thought.id] } as const;
+  const discovery = jobs(f.db);
+  expect(discovery).toEqual([admission.contribution.id,first.thought.id,last.thought.id].map(subjectId => ({
+    id:expect.any(String),status:"queued",subjectId,triggerId:`connection-discovery:${admission.run.id}`,
+  })));
   f.db.exec(`CREATE TRIGGER test_reply_after_followup AFTER INSERT ON responses
-    WHEN NEW.id='reply' AND EXISTS(SELECT 1 FROM runs WHERE kind='weave' AND weave_subject_id='${last.thought.id}')
+    WHEN NEW.id='reply' AND EXISTS(SELECT 1 FROM runs WHERE kind='weave' AND weave_subject_id='${last.thought.id}' AND weave_trigger_id='evolve:${admission.run.id}')
     BEGIN SELECT RAISE(ABORT,'test finish after both'); END;
     CREATE TRIGGER test_followup_after_reply AFTER INSERT ON runs
-    WHEN NEW.kind='weave' AND NEW.weave_subject_id='${last.thought.id}' AND EXISTS(SELECT 1 FROM responses WHERE id='reply')
+    WHEN NEW.kind='weave' AND NEW.weave_subject_id='${last.thought.id}' AND NEW.weave_trigger_id='evolve:${admission.run.id}' AND EXISTS(SELECT 1 FROM responses WHERE id='reply')
     BEGIN SELECT RAISE(ABORT,'test finish after both'); END;`);
   expect(() => f.service.finish(claim, reply)).toThrow(/test finish after both/);
   expect(f.store.getResponse("reply")).toBeNull();
   expect(f.runs.reply(admission.run.id)).toBeNull();
   expect(f.runs.get(admission.run.id)?.status).not.toBe("completed");
-  expect(jobs(f.db)).toEqual([]);
+  expect(jobs(f.db)).toEqual(discovery);
   expect(f.store.getThought(last.thought.id)).toEqual(last.thought);
   f.db.exec("DROP TRIGGER test_reply_after_followup; DROP TRIGGER test_followup_after_reply");
   f.service.finish(claim, reply);
   expect(f.runs.reply(admission.run.id)).toEqual(reply);
   expect(f.runs.get(admission.run.id)?.status).toBe("completed");
-  expect(jobs(f.db)).toEqual([{ id: expect.any(String), status: "queued", subjectId: last.thought.id, triggerId: expect.any(String) }]);
+  expect(jobs(f.db)).toEqual([...discovery,{ id: expect.any(String), status: "queued", subjectId: last.thought.id, triggerId: `evolve:${admission.run.id}` }]);
 }));
 
-test("Evolve fallback schedules no contribution weave; weaver knowledge writes do not recursively schedule", () => fixture(f => {
+test("Evolve fallback adds no ordinary contribution weave; metadata and connection writes do not recursively schedule", () => fixture(f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "fallback input" });
   if (!admission.contribution) throw new Error("Expected contribution");
   const claim = f.service.claim(admission.run.id);
   f.service.finish(claim, { id: "fallback", role: "fallback", state: "complete", text: "question back", thoughtIds: [admission.contribution.id] });
   const before = jobs(f.db);
   expect(f.runs.reply(admission.run.id)).toMatchObject({ text: "question back", role: "fallback", thoughtIds: [admission.contribution.id] });
-  expect(before).toEqual([]);
+  expect(before).toEqual([{id:expect.any(String),status:"queued",subjectId:admission.contribution.id,triggerId:`connection-discovery:${admission.run.id}`}]);
   const interpretation = f.creation.interpret("ai", "root", { text: "weaver interpretation" });
   f.titles.fillAi("ai", interpretation.id, "AI title");
   f.creation.connect("ai", { fromId: "root", toId: interpretation.id, category: "related", explanation: "relationship" });
@@ -140,12 +144,16 @@ test("Evolve completion retains its reply and queues a follow-up while the targe
   const claim = f.service.claim(admission.run.id);
   const result = f.service.execute(claim, { id: "busy-development", type: "development", parentId: admission.contribution.id, text: "target for follow-up", sourceIds: [] });
   const existing = f.operations.admitWeave("user", { subjectId: result.thought.id, triggerId: "already-active" });
+  const before = jobs(f.db);
+  expect(before).toEqual([
+    ...[admission.contribution.id,result.thought.id].map(subjectId => ({id:expect.any(String),status:"queued",subjectId,triggerId:`connection-discovery:${admission.run.id}`})),
+    {id:existing.id,status:"queued",subjectId:result.thought.id,triggerId:"already-active"},
+  ]);
   const reply = { id: "busy-reply", role: "addendum", state: "complete", text: "retained reply", thoughtIds: [result.thought.id] } as const;
   f.service.finish(claim, reply);
   expect(f.runs.reply(admission.run.id)).toEqual(reply);
   expect(f.runs.get(admission.run.id)?.status).toBe("completed");
-  expect(jobs(f.db)).toEqual([
-    expect.objectContaining({ id: existing.id, subjectId: result.thought.id, status: "queued" }),
-    expect.objectContaining({ subjectId: result.thought.id, status: "queued", triggerId: `evolve:${admission.run.id}` }),
+  expect(jobs(f.db)).toEqual([...before,
+    {id:expect.any(String),subjectId:result.thought.id,status:"queued",triggerId:`evolve:${admission.run.id}`},
   ]);
 }));

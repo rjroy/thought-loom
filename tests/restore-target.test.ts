@@ -102,7 +102,7 @@ const legacyNames = [
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 /** Freeze the changed historical table shapes; other controlled fixture tables use the shared inventory. */
-async function legacySnapshot(root: string, version: 1 | 2 | 3 = 1): Promise<string> {
+async function legacySnapshot(root: string, version: 1 | 2 | 3 | 4 = 1): Promise<string> {
   const dbPath = join(root,"legacy-source.sqlite"), output = join(root,"legacy-snapshot");
   const writer = new Database(dbPath);
   try {
@@ -110,7 +110,7 @@ async function legacySnapshot(root: string, version: 1 | 2 | 3 = 1): Promise<str
     const store = new SqliteStore(writer);
     store.saveThought({id:"legacy-root",text:"legacy controlled thought",title:null,author:"user",kind:"captured-original",createdAt:"2030",origin:"fixture",parentId:null,sourceIds:[]});
     const sources = {id:(() => { let n=0; return () => `legacy-${++n}`; })(),now:() => "2030",logger};
-    new SqliteRunOperations(writer,sources)
+    const legacyWeave = new SqliteRunOperations(writer,sources)
       .admitWeave("user",{subjectId:"legacy-root",triggerId:"legacy-trigger"});
     writer.run("UPDATE run_steps SET input='legacy exact input' WHERE position=0");
     const exports = new SqliteAgenticExports(writer,sources), run = exports.admit("user",{request:"Legacy report question",effort:"quick"});
@@ -119,6 +119,10 @@ async function legacySnapshot(root: string, version: 1 | 2 | 3 = 1): Promise<str
     steps.completeStep(claim,run.promptId,{version:1,kind:"report",markdown:"Legacy report body.",sourceThoughtIds:[]});
     exports.finalize(claim,run.promptId);
     if (version >= 2) new SqliteAgentInstructions(writer,logger).save({...settings,revision:0});
+    if (version === 4) {
+      new SqliteRunOperations(writer,sources).fail(new SqliteRunRepository(writer,sources).claim(legacyWeave.id));
+      writer.run("UPDATE runs SET weave_retired_at=? WHERE id=?",[restoredAt,legacyWeave.id]);
+    }
   } finally { writer.close(); }
   const reader = new Database(dbPath,{readonly:true,create:false,safeIntegers:true});
   try {
@@ -126,7 +130,7 @@ async function legacySnapshot(root: string, version: 1 | 2 | 3 = 1): Promise<str
     const oldSteps = ["envelope_json",...(version >= 2 ? ["guidance"] : []),"input","native_state","position","prompt_id","result_json","run_id","state","submit_owner"];
     const shapes = backupTableShapes.filter(shape => names.includes(shape.name)).map(shape => ({...shape,columns:
       shape.name === "export_intents" && version < 3 ? ["effort","request","run_id"] : shape.name === "run_steps" ? oldSteps :
-      shape.name === "runs" ? shape.columns.filter(column => column !== "weave_retired_at") : shape.columns}));
+      shape.name === "runs" && version < 4 ? shape.columns.filter(column => column !== "weave_retired_at") : shape.columns}));
     expect(shapes.map(shape => shape.name).sort()).toEqual(names);
     if (version < 3) expect(shapes.find(shape => shape.name === "export_intents")?.columns).toEqual(["effort","request","run_id"]);
     expect(shapes.find(shape => shape.name === "run_steps")?.columns.includes("guidance")).toBe(version >= 2);
@@ -220,6 +224,29 @@ test("logical-3 backup restores historical weaves without inventing retirement",
   } finally { await rm(dir,{recursive:true,force:true}); }
 },45000);
 
+test("frozen logical-4 restores exact retirement and execution with explicitly empty screening progress", async () => {
+  const dir = await mkdtemp("/tmp/opencode/restore-legacy-screening-");
+  try {
+    const snapshot = await legacySnapshot(dir,4), parent = join(dir,"stage"), target = join(dir,"target");
+    await mkdir(parent,{mode:0o700});
+    function verify(path: string): void {
+      const db = new Database(path,{readonly:true,create:false});
+      try {
+        expect(db.query("SELECT * FROM run_screening_passes").all()).toEqual([]);
+        expect(db.query("SELECT * FROM run_screening_pairs").all()).toEqual([]);
+        expect(db.query("SELECT status,weave_retired_at FROM runs WHERE kind='weave'").get()).toEqual({status:"failed",weave_retired_at:restoredAt});
+        expect(db.query("SELECT input FROM run_steps WHERE input='legacy exact input'").get()).toEqual({input:"legacy exact input"});
+        expect(db.query("SELECT text FROM thoughts WHERE id='legacy-root'").get()).toEqual({text:"legacy controlled thought"});
+        expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+      } finally { db.close(); }
+    }
+    const stage = await stageRestoreSnapshot({snapshotDirectory:snapshot,stagingParentDirectory:parent,logger});
+    try { verify(stage.databasePath); await recoverRestoreStage(stage,{restoredAt,logger}); verify(stage.databasePath); }
+    finally { await stage.dispose(); }
+    verify((await restoreBackup({snapshotDirectory:snapshot,targetDirectory:target,restoredAt,logger})).databasePath);
+  } finally { await rm(dir,{recursive:true,force:true}); }
+},45000);
+
 test("logical-3 preserves restored export local Stop across capture and restore, then deletes without provider calls", async () => fixture(async f => {
   let sequence = 0;
   const sources = {id:() => `roundtrip-export-${++sequence}`,now:() => "2030",logger};
@@ -228,7 +255,7 @@ test("logical-3 preserves restored export local Stop across capture and restore,
   finally { source.close(); }
   const output = join(f.dir,"export-capture"); await mkdir(output,{mode:0o700});
   const first = await captureBackup({databasePath:f.source,mediaDirectory:`${f.source}.media`,outputDirectory:output,logger});
-  expect((JSON.parse(await readFile(join(first.snapshotDirectory,"manifest.json"),"utf8")) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-4");
+  expect((JSON.parse(await readFile(join(first.snapshotDirectory,"manifest.json"),"utf8")) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-5");
   const restored = await restoreBackup({snapshotDirectory:first.snapshotDirectory,targetDirectory:join(f.dir,"export-first"),restoredAt,logger});
   const firstDb = new Database(restored.databasePath);
   let originalFence: unknown;
@@ -297,7 +324,7 @@ test("final restore installs the exact recovered snapshot on one exclusively own
   }
   finally { await reference.dispose(); }
   const sourceBefore = tables(f.source), manifest = await readFile(join(f.snapshot.snapshotDirectory, "manifest.json"));
-  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-4");
+  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-5");
   const boundaries: { message: string; inode: bigint; marker: boolean; competing?: number | null; schemaObjects?: number }[] = [];
   const boundaryLogger = createLogger("verbose", record => {
     if (["[restore] target ownership acquired", "[restore] target marker durable", "[restore] target database committed", "[restore] target validated"].includes(record.message)) {

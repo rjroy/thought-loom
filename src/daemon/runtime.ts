@@ -17,6 +17,7 @@ import type { AgentConfig } from "./agent-config";
 import type { PublicClient, ResolvedAgentService } from "../agent/opencode-adapter";
 import { createPublicClient, resolveAgentService } from "../agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../agent/configured-worker";
+import { systemOneScreening } from "../agent/system-one-screening";
 import { RunWorker } from "../agent/worker";
 import { RunSupervisor } from "../agent/supervisor";
 import { LocalMarkdownImportDriver } from "../agent/import-driver";
@@ -156,7 +157,8 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     const store = new SqliteStore(db, scheduling);
     // Receipt lookup is invoked only at a later execution boundary, after this root has wired the session service.
     const searchClock: SearchClockDependencies = { latestObservation: owner => searchClockReceipts?.latest(owner) ?? null };
-    const configuredWorker = valid.agent ? new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,searchClock,mediaPath,
+    const connectionScreening = valid.screening ? systemOneScreening(valid.screening,diagnostics) : undefined;
+    const configuredWorker = valid.agent ? new ConfiguredRunWorker({db,...scheduling,config:valid.agent,executionOwner,searchClock,mediaPath,connectionScreening,
       resolve:dependencies.resolveAgentService ?? resolveAgentService,client:dependencies.createPublicClient ?? createPublicClient}) : undefined;
     // The same lane owner explicitly has no native producer when unconfigured; do not invent a model or transport.
     worker = configuredWorker ?? new RunWorker({db,...scheduling,executionOwner,mediaPath});

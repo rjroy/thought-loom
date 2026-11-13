@@ -7,7 +7,8 @@ import { immediate } from "./transaction";
 import { readRejectionState } from "./rejection-state";
 import { recordMediaSourceRejection, recordSearchEligibilityChange } from "./search-invalidation";
 import { storedThoughts } from "./media-source";
-import { logCommittedInterruption, type InterruptionDiagnostic } from "./run-fences";
+import { interruptOrdinaryRun, logCommittedInterruption, type InterruptionDiagnostic } from "./run-fences";
+import { readRun } from "./run-record";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[rejection storage] ${operation} attempt`);
@@ -204,7 +205,21 @@ export class SqliteRejectionRepository implements RejectionRepository {
     const invalidated = recordSearchEligibilityChange(this.db, kind, id, rejected);
     const interruptedMediaRuns = rejected && kind === "thought"
       ? recordMediaSourceRejection(this.db,id,new RejectionService(this),this.logger,diagnostics) : 0;
-    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns });
+    let interruptedScreeningRuns = 0;
+    if (rejected && kind === "thought") {
+      // A local pair call already exposed this thought. Reject→restore must not revive its old reasoning.
+      const affected = this.db.query<{id:string},[Uint8Array]>(`SELECT r.id FROM runs r JOIN run_screening_passes p ON p.run_id=r.id
+        JOIN run_context c ON c.run_id=r.id AND c.kind='thought' AND c.ref_id=CAST(? AS TEXT)
+        WHERE r.status IN ('queued','submitting','running','uncertain') AND r.weave_retired_at IS NULL
+          AND NOT EXISTS(SELECT 1 FROM restore_fences f WHERE f.entity_kind='run' AND f.entity_id=r.id)`).all(key);
+      for (const {id:runId} of affected) {
+        const run = readRun(this.db,runId);
+        if (!run) throw new Error("Screening owner unavailable");
+        interruptOrdinaryRun(this.db,run,"context-invalidated",this.logger);
+        diagnostics.push({run,reason:"context-invalidated"}); interruptedScreeningRuns++;
+      }
+    }
+    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns, interruptedScreeningRuns });
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {

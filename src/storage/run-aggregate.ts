@@ -1,13 +1,13 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import type { MaterialKind, Thought } from "../domain/thought";
-import type { Connection } from "../domain/connection";
+import { createConnection, type Connection } from "../domain/connection";
 import { RejectionService } from "../domain/rejection";
 import { CreationService } from "../domain/creation";
 import type { SharedResponse } from "../domain/shared-response";
 import { parseEnvelope, protocolJson, type RunStep } from "../domain/run-protocol";
 import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type ContextRef, type NativeState, type RunRecord, type RunStatus } from "../domain/run";
-import { isStepOperationCapability, type WeaveIntent } from "../domain/run-operations";
+import { assertConnectionOperationRecord, isStepOperationCapability, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope, stepOperationScope, type WeaveIntent } from "../domain/run-operations";
 import { SqliteRejectionRepository } from "./rejection";
 import { SqliteKnowledgeWriter } from "./knowledge-write";
 import { insertRun, readRun } from "./run-record";
@@ -154,7 +154,12 @@ export class SqliteRunAggregate {
     assertWeaveCapability(this.weavePurpose(run),capability);
   }
   private requireWeaveHistory(run: RunRecord, purpose: WeavePurpose): void {
-    if (purpose !== "media-title-only") return;
+    if (purpose !== "media-title-only" && purpose !== "connection-only") return;
+    const intent = this.readWeaveIntent(run.id);
+    if (purpose === "connection-only" && (this.issued(run.id).length || this.db.query(`SELECT 1 FROM run_replies
+      WHERE run_id=? AND (draft_json IS NOT NULL OR response_id IS NOT NULL)`).get(run.id))) {
+      throw new RunForbiddenError("Connection discovery cannot publish thoughts or public replies");
+    }
     // Check retained protocol, not prompt wording. A prepared successor may already contain a forbidden cached read.
     // Do not load or rewrite input/result bytes merely to establish execution eligibility.
     const history = this.db.query<{ promptId: string; state: RunStep["state"]; envelope: string | null; hasResult: number }, [string]>(
@@ -163,19 +168,36 @@ export class SqliteRunAggregate {
     for (const step of history) {
       const predecessor = step.promptId !== run.promptId;
       if (predecessor && (step.state !== "processed" || step.hasResult === 0)) {
-        throw new RunForbiddenError("Media title-only history has an unconfirmed predecessor");
+        throw new RunForbiddenError("Restricted weave history has an unconfirmed predecessor");
       }
       // A current, unprocessed request may be recorded for audit, then denied by dispatch and retired by failure.
       // Once it has a result, was processed, or has a successor, it must have been an authorized title-only request.
       if (!predecessor && step.state !== "processed" && step.hasResult === 0) continue;
       const envelope = step.envelope === null ? null : parseEnvelope(step.envelope);
-      if (envelope?.kind !== "request") throw new RunForbiddenError("Media title-only history has no authorized predecessor request");
+      if (envelope?.kind !== "request") throw new RunForbiddenError("Restricted weave history has no authorized predecessor request");
       assertWeaveCapability(purpose,envelope.request.capability);
+      if (envelope.request.capability === "connection") {
+        stepOperationScope(run,intent,parseStepOperation({type:"connection",...envelope.request.arguments}),purpose);
+      }
+    }
+    for (const receipt of this.db.query<{format:string;operation:string},[string]>(
+      "SELECT format,operation_json AS operation FROM run_operation_receipts WHERE run_id=?").all(run.id)) {
+      if (receipt.format !== "step") throw new RunForbiddenError("Restricted weave cannot replay legacy operations");
+      const operation = parseStepOperation(JSON.parse(receipt.operation));
+      assertWeaveCapability(purpose,operation.type);
+      stepOperationScope(run,intent,operation,purpose);
     }
   }
   protected readReceipt(runId: string, operationId: string): ReceiptRow | null {
     return this.db.query(`SELECT operation_json AS operation,result_json AS result,thought_id AS thoughtId,format
       FROM run_operation_receipts WHERE run_id=? AND operation_id=?`).get(runId,operationId) as ReceiptRow | null;
+  }
+  /** Internal retained metadata, never a consumer read or permission to expose rejected content. */
+  protected storedConnection(id: string): Connection | null {
+    const row = this.db.query("SELECT id,from_id AS fromId,to_id AS toId,category,proposed_by AS proposedBy,explanation FROM connections WHERE id=?").get(id);
+    if (!row) return null;
+    const sources = this.db.query<{id:string},[string]>("SELECT source_id AS id FROM connection_sources WHERE connection_id=? ORDER BY position").all(id);
+    return createConnection({...row,sourceIds:sources.map(source => source.id)});
   }
   protected appendIssued(runId: string, operationId: string, thoughtId: string): void {
     this.db.run(`INSERT INTO run_issued_thoughts (run_id,operation_id,thought_id,position)
@@ -205,6 +227,13 @@ export class SqliteRunAggregate {
       const receipt = this.readReceipt(step.runId,step.promptId);
       if (!receipt || receipt.format !== "step" || protocolJson(JSON.parse(receipt.result)) !== resultJson) {
         throw new RunConflictError("Write result must match its committed step receipt");
+      }
+      if (step.envelope.request.capability === "connection") {
+        const operation = parseStepOperation(JSON.parse(receipt.operation));
+        if (operation.type !== "connection" || receipt.thoughtId !== null ||
+            protocolJson(stepOperationEnvelope(operation)) !== protocolJson(step.envelope)) throw new RunConflictError("Connection receipt differs from its request");
+        const connectionResult = parseConnectionOperationResult(operation,result);
+        assertConnectionOperationRecord(connectionResult,connectionResult.status === "not-created" ? null : this.storedConnection(connectionResult.connection.id));
       }
     }
     return resultJson;

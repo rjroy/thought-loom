@@ -236,6 +236,48 @@ Stop fences local execution before remote cancellation settles. Pending settleme
 
 For a failed or interrupted weave whose historical cancellation flag is already `settled` but whose journal does not prove safety, the existing bounded supervisor scan schedules the same joined ordinary cleanup path. It excludes already-proven and restore-fenced history. The adapter must establish terminal boundaries for every potentially dispatched step and current empty inbox/inactive state; missing, foreign or active evidence cannot authorize settlement. The commit rechecks the complete journal, generation, binding and restore fence, then records terminal step bookkeeping without changing the run's terminal status or generation, saved input, protocol output, receipts or knowledge. This neither resubmits nor revives the old run. No schema change or separate recovery job is involved.
 
+### `run_screening_passes` and `run_screening_pairs`
+
+Optional local connection screening uses one durable pass per creation-owned text-subject weave (ordinary capture/Markdown or connection-only work), before its initial prompt is prepared. These are private execution history, not connection evidence or a second native submission journal. Media originals/title-only and explicit reinterpretation runs do not enter this step; their newly generated text can have separate creation owners.
+
+| Pass column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `run_id` | `TEXT` | Primary key and FK to `runs.id`; stable across new claim generations. |
+| `subject_id` | `TEXT` | Immutable FK to `thoughts.id`, matching the owning weave subject. |
+| `policy_json` | `TEXT` | Immutable canonical JSON `{"version":"connection-screening-1","threshold":0.6,"judgeIdentity":"…"}`. Production judge identity is a SHA-256 over endpoint/model/timeout and the exact question policy, not credentials or a claim ID. |
+| `candidate_count` | `INTEGER` | Immutable nonnegative size of the initial eligible other-text-thought membership. |
+| `status` | `TEXT` | `collecting`, `complete` or sticky `fallback`. Completion is committed with the initial prompt. |
+| `failure_code` | `TEXT`, nullable | Non-null exactly for fallback: `screening-unavailable`, `eligibility-changed` or `configuration-changed`. No raw exception or thought text. |
+
+| Pair column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `run_id` | `TEXT` | FK to the pass; composite primary key with `candidate_id`. |
+| `candidate_id` | `TEXT` | Immutable FK to another text thought, never a media-original descriptor. |
+| `position` | `INTEGER` | Immutable contiguous membership order; unique with `run_id`. |
+| `judgment_json` | `TEXT`, nullable | Null until committed; then write-once canonical `{"score":0.75}` with one finite probability in `[0,1]`. JSON TEXT avoids adding REAL cells to the portable format. |
+
+Membership is admitted atomically. Triggers protect identities, membership, completed judgments and terminal fallback, and require all judgments before completion. Application/backup validators additionally enforce canonical policy/score JSON and cross-row ownership/count/exposure/full-read invariants. Existing progress is not keyed to `runs.generation`: a restart resumes only null judgments under a fresh claim. An interrupted unfinished **read-only** pair judgment can be recomputed; this never permits replay of native submissions or writes with uncertain acknowledgement.
+
+The worker checks claim, context, subject and candidate eligibility before each external call, commits ID exposure, performs network work outside SQLite, then fences ownership and eligibility again before saving the score. Screening exposure is not a Weaver full read. Rejecting a thought already exposed by a screening-owned run interrupts that active run in the rejection transaction, so restoring it cannot authorize a late judgment. Stop, stale claims, retirement and restore fences also deny late work.
+
+A known failure persists fallback immediately, even while other calls drain; no judgment is retried within that run after fallback. A changed/missing judge configuration or policy before completion uses fallback instead of mixing judgments. Candidate membership drift also uses fallback, not a partial exhaustive claim. Initial prompt preparation atomically rechecks membership, selects nominees from saved scores, grants their scoped full-read witnesses, captures guidance and stores exact prompt bytes. Once prepared, no restart or configuration change regenerates/re-screens that prompt.
+
+[`run-screening-schema.ts`](../src/storage/run-screening-schema.ts) installs these additive tables/guards after predecessor migrations in the core transaction. Legacy databases receive empty progress, not inferred scores. Portable captures use logical-5; logical-1 through logical-4 restore with explicitly verified empty progress. Recovery preserves these rows verbatim while fencing their owning runs.
+
+### Creation-owned connection discovery
+
+No additional queue, table or column is used. An internal `weave` run with immutable `weave_trigger_id='connection-discovery:<creator-run-id>'` has purpose `connection-only`. Its existing subject/trigger identity is the durable replay key. The creator is retained in `runs`: its `input_thought_id` identifies an Evolve contribution, or its `run_issued_thoughts` membership identifies a generated development/interpretation. Admission and backup/restore validation check this origin relationship, exclude media-original descriptors, and refuse issued thoughts or public reply rows belonging to connection-only work.
+
+Direct contribution/development commands have no creator run. Their scheduled knowledge writer atomically admits `connection-discovery-direct:<thought-id>` alongside the new thought. The suffix must match the fixed subject, which must be a non-root user-authored `user-contribution` with origin `contribution` and no sources, or an AI-authored `developing-idea` with origin `development`. It must not be any run's admitted input or issued thought. Fresh admission requires the writer's creation transaction; general admission can replay an existing owner but cannot backfill historical direct thoughts. These explicit direct identities remain distinct from run origins, including Evolve Stop's origin matching. No fake run, new table or backup version is introduced.
+
+Evolve admission saves the contribution, original run and discovery owner together. Every typed or legacy generated development/interpretation saves its owner with the thought, receipt and issued membership; capability dispatch also commits the exact result in that transaction. This includes siblings, non-latest developments, media interpretations and new reinterpretation outputs. Replay reuses the recorded owner, never schedules another. Fresh discovery admission requires active, unfenced creation authority; stopped/restored historical creators cannot acquire new owners. Existing historical creations are not backfilled by migration or replay.
+
+Ordinary captured/Markdown weaving retains its creation screening. A generated thought's dedicated owner owns its screening even if completed, stopped or using fallback: the ordinary latest-development Evolve follow-up keeps title/interpretation duties but does not repeat creation screening or nominations. Connection-only dispatch is independent of interpretation serialization; it is excluded from interpretation admission blockers and cannot be retired through interpretation retirement.
+
+Connection-only authority permits scoped search/reads and warranted connections involving its fixed subject, not interpretation/development/title writes. The application checks purpose and endpoint scope before effects, cached receipt/result replay and completion. Its canonical final envelope stays in `run_steps`; no `responses`/`run_replies` publication or recursive interpretation job is created. Operator-managed native tools retain the existing Weaver policy; application scope is not a native-tool sandbox.
+
+User Stop on Evolve also interrupts active discovery owners whose durable trigger names that Evolve run, in the same transaction. Generations and existing cancellation journals fence held calls and late results; completed effects are not undone. Origin identities survive reopening, receipt replay and backup. Restore preserves the trigger/origin facts and fences all historical runs without creating or resuming discovery. This semantic use of existing TEXT fields does not change the logical-5 inventory or frozen older inventories.
+
 ### `agent_bindings`
 
 | Column | Type | Constraint / meaning |
@@ -300,6 +342,10 @@ Composite primary key: `(run_id, operation_id)`. A unique constraint covers `(ru
 
 Typed step operations record developments, interpretations, categorized connections or conditional missing-title fills. Their effects and receipts commit atomically; only thought-producing operations also create issued membership. Evolve developments use the admitted contribution as parent; weave interpretations use the persisted weave subject. Authorship, IDs and timestamps are daemon-owned.
 
+Weaver/Evolve connection capabilities deduplicate the same directed `(fromId,toId,category)` inside the guarded immediate transaction, after purpose, prompt, visibility and endpoint/supporting-source full-read checks. A visible existing match returns `{type:"connection",status:"already-present",connection}` with its original identity, explanation and attribution and AI-scoped provenance. Any explicitly rejected match suppresses equivalent creation, even alongside a visible match, returning only `{type:"connection",status:"not-created"}`. No rejected identity, content or provenance enters the result or context. With no match, `{type:"connection",status:"created",connection}` records a new AI relation. There is no global unique constraint: direct commands retain deliberate multiplicity, and reversed endpoints or different categories remain distinct.
+
+Each outcome, its exposures and the dispatched step result commit with its immutable receipt. Replay returns that original outcome without looking for newer matches or enriching redacted provenance after restoration; exposed relation/source rejection still fences replay. Readers, successor confirmation and backup validation reject unknown/malformed outcomes, mismatched requests or fictitious backing records. Historical status-less `{type:"connection",connection}` created receipts remain readable without adding a status or rewriting bytes. The pre-existing TEXT JSON cells are extensible; no table, column or backup inventory changes are needed.
+
 Reusing the operation identity with the same request reuses the result; a different request conflicts. Title-fill outcomes include a durable no-op when a title already exists. Replaying that no-op after a later user clear does not apply the old proposal. A stopped, failed, stale or rejected-context claim cannot use replay to bypass its fence. Export runs cannot dispatch any knowledge write. Legacy development receipts remain readable without inventing membership for non-thought results.
 
 ### `run_issued_thoughts`
@@ -335,7 +381,7 @@ For media roots, title-clear purpose is derived from the persisted subject and t
 
 When the scheduling port is enabled, capture, an explicit user title-clear on an eligible active note, and successful Evolve finalization admit a follow-up weave inside the triggering transaction. Capture uses `capture:<thought-id>`; each eligible title-clear has a daemon-generated invitation ID; Evolve uses `evolve:<run-id>` and selects its last issued development or contribution fallback. Clearing an already absent title on an eligible note is still a new regeneration invitation; clearing a rejected note's title is not. Worker finalization uses the same scheduling path as direct run finalization.
 
-Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, weaver interpretations, connection writes and interrupted replies do not recursively schedule more weaving.
+Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, connection writes and interrupted replies do not schedule weaving. Run-created interpretations/developments admit only their dedicated connection-discovery owner; they do not recursively schedule interpretation-capable work.
 
 Explicit user reinterpretation uses `reinterpret:<request-key>` with the same immutable subject/trigger identity and uniqueness guard. No receipt table is added. A key identifies one admitted request, not a semantic content duplicate or an alias for unrelated active work. User-only receipt recovery reads the existing run; historical `settled` flags alone do not prove replacement eligibility. A valid recorded never-submitted or completed journal can establish safety. Otherwise an explicit per-run retirement can remove that run alone as a blocker while retaining remote uncertainty. See the [command and recovery contract](daemon-api.md#reinterpret-post-thoughtsidreinterpret).
 

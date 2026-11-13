@@ -116,7 +116,7 @@ describe("run-scoped capabilities and durable witnesses", () => {
     const promptId = run.current();
     const result = run.dispatch(connect);
     expect(result.type).toBe("connection");
-    if (result.type !== "connection") throw new Error("Expected connection result");
+    if (result.type !== "connection" || result.status !== "created") throw new Error("Expected created connection result");
     expect(result.connection).toMatchObject({ fromId: "subject", toId: "candidate", category: "supports", proposedBy: "ai", sourceIds: ["subject"] });
     expect(value.ops.stepReceipt(run.run.id, promptId)).toEqual({ operation: { type: "connection", ...connect.arguments }, result });
     expect(value.dispatcher.dispatch(run.claim, promptId, connect)).toEqual(result);

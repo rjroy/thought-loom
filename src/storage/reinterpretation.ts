@@ -3,7 +3,7 @@ import { ReinterpretationConflictError, reinterpretationTrigger, type Reinterpre
   type ReinterpretationRepository, type ReinterpretationSnapshot, type WeaveRunControl } from "../domain/reinterpretation";
 import { RunConflictError, RunNotFoundError, type RunSources } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
-import { resolveWeavePurpose } from "../domain/weave-scheduling";
+import { interpretationPurpose, resolveWeavePurpose } from "../domain/weave-scheduling";
 import { createLogger, type Logger } from "../logging";
 import { SqliteAgentRuns } from "./agent";
 import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
@@ -71,7 +71,7 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
     try {
       const subject = this.subject(subjectId);
       expected = this.retirementIdentity(subjectId,runId);
-      if (!["failed","interrupted"].includes(expected.status) || resolveWeavePurpose(subject.kind,expected.triggerId) === "media-title-only") {
+      if (!["failed","interrupted"].includes(expected.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,expected.triggerId))) {
         throw new RunConflictError("Weave cannot be retired");
       }
     }
@@ -81,7 +81,7 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
         const snapshot = immediate(this.db,() => {
           const subject = this.subject(subjectId), current = this.retirementIdentity(subjectId,runId);
           if (current.status !== expected.status || current.generation !== expected.generation || current.triggerId !== expected.triggerId ||
-              !["failed","interrupted"].includes(current.status) || resolveWeavePurpose(subject.kind,current.triggerId) === "media-title-only") {
+              !["failed","interrupted"].includes(current.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,current.triggerId))) {
             throw new RunConflictError("Weave cannot be retired");
           }
           const retiredAt = current.retiredAt ?? this.sources.now();

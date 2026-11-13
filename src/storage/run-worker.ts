@@ -6,7 +6,7 @@ import type { CancellationState, OrdinaryCancellationJournal, RunStep } from "..
 import { createSharedResponse, type SharedResponse } from "../domain/shared-response";
 import type { Thought } from "../domain/thought";
 import { nonEmpty } from "../domain/validation";
-import { SqliteRunAggregate } from "./run-aggregate";
+import { SqliteRunScreeningState } from "./run-screening";
 import { SqliteRunOperations } from "./run-operations";
 import { SqliteRunRepository } from "./run";
 import { SqliteAgenticExports } from "./agentic-export";
@@ -21,13 +21,14 @@ import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { SqliteAgentInstructions } from "./agent-instructions";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
-export class SqliteRunWorkerState extends SqliteRunAggregate {
+export class SqliteRunWorkerState extends SqliteRunScreeningState {
   constructor(db: Database, private readonly sources: RunSources,
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
   canDispatch(runId: string): boolean {
     return this.transaction("check weave dispatch",runId,() => !isRunRestoreFenced(this.db,runId) && weaveDispatchAllowed(this.db,runId));
   }
-  prepareInitial(claim: Claim, render: (context: InitialRunContext) => string): RunStep {
+  prepareInitial(claim: Claim, render: (context: InitialRunContext) => string,
+    screeningRender?: (context: InitialRunContext, nominations: readonly Thought[]) => string): RunStep {
     const prepared = this.guardedExecution("prepare worker context",claim,run => {
       const step = this.currentStep(run.id);
       if (step.input !== null) return { step, clock: null };
@@ -43,12 +44,15 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         run.kind === "search" ? settings.search : run.kind === "export" ? settings.export : null;
       if (guidance === null) throw new RunForbiddenError("Ordinary agent guidance required");
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
-      const input = nonEmpty(render(context),"initial input");
+      let nominations: readonly Thought[] | undefined;
+      if (screeningRender && context.job.kind === "weave") nominations = this.screeningNominations(claim,context.job.subjectId);
+      const input = nonEmpty(nominations !== undefined && screeningRender ? screeningRender(context,nominations) : render(context),"initial input");
       if (search) for (const ref of search.dependencies) this.track(run.id,ref);
       for (const thought of context.thoughts) this.trackThought(run.id,thought);
       for (const connection of context.connections) this.trackConnection(run.id,connection);
       for (const response of context.responses) this.trackResponse(run.id,response);
-      this.db.run("UPDATE run_steps SET input=?,guidance=CAST(? AS TEXT) WHERE run_id=? AND prompt_id=?",[input,new TextEncoder().encode(guidance),run.id,step.promptId]);
+      this.db.run("UPDATE run_steps SET input=CAST(? AS TEXT),guidance=CAST(? AS TEXT) WHERE run_id=? AND prompt_id=?",
+        [new TextEncoder().encode(input),new TextEncoder().encode(guidance),run.id,step.promptId]);
       return { step: { ...step, input }, clock };
     });
     prepared.clock?.committed();
@@ -100,7 +104,7 @@ export class SqliteRunWorkerState extends SqliteRunAggregate {
         if (response) responses.set(response.id,response);
       }
     }
-    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id,...(purpose === "reinterpretation" ? {purpose} : {})} :
+    return {job:run.kind === "weave" ? {kind:"weave",subjectId:subject.id,...(purpose !== "ordinary" ? {purpose} : {})} :
       {kind:"evolve",contributionId:subject.id,continuationId:subject.parentId},thoughts,connections,responses:[...responses.values()]};
   }
   /** Failed transport is not submission evidence. Only a previously committed intent makes this observation-only. */

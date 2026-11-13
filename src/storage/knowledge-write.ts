@@ -2,9 +2,9 @@ import type { Database } from "bun:sqlite";
 import { createThought, type Thought } from "../domain/thought";
 import { createConnection, type Connection } from "../domain/connection";
 import { ValidationError } from "../domain/validation";
-import { captureWeaveIntent } from "../domain/weave-scheduling";
+import { captureWeaveIntent, directConnectionDiscoveryIntent } from "../domain/weave-scheduling";
 import type { Logger } from "../logging";
-import { admitWeave, type WeaveSources } from "./weave-admission";
+import { admitDirectConnectionDiscovery, admitWeave, type WeaveSources } from "./weave-admission";
 
 /** Narrow knowledge writer shared by the store and run aggregate, without depending on the store facade. */
 export class SqliteKnowledgeWriter {
@@ -29,6 +29,7 @@ export class SqliteKnowledgeWriter {
         this.db.run("INSERT INTO thought_source_seals (thought_id) VALUES (?)", [thought.id]);
         const intent = captureWeaveIntent(thought);
         if (this.scheduling && intent) admitWeave(this.db,this.scheduling,intent);
+        else if (this.scheduling && directConnectionDiscoveryIntent(thought)) admitDirectConnectionDiscovery(this.db,this.scheduling,thought);
       }).immediate();
     });
   }
@@ -36,8 +37,8 @@ export class SqliteKnowledgeWriter {
     this.boundary("save connection", () => {
       const connection = createConnection(input);
       this.db.transaction(() => {
-        this.db.run("INSERT INTO connections (id, from_id, to_id, category, proposed_by, explanation) VALUES (?, ?, ?, ?, ?, ?)",
-          [connection.id, connection.fromId, connection.toId, connection.category, connection.proposedBy, connection.explanation]);
+        this.db.run("INSERT INTO connections (id, from_id, to_id, category, proposed_by, explanation) VALUES (?, ?, ?, ?, ?, CAST(? AS TEXT))",
+          [connection.id, connection.fromId, connection.toId, connection.category, connection.proposedBy, new TextEncoder().encode(connection.explanation)]);
         const insert = this.db.query("INSERT INTO connection_sources (connection_id, position, source_id) VALUES (?, ?, ?)");
         connection.sourceIds.forEach((id, index) => insert.run(connection.id, index, id));
       })();

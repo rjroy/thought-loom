@@ -7,6 +7,7 @@ import { createSharedResponse, type SharedResponse } from "../domain/shared-resp
 import { record } from "../domain/validation";
 import type { Logger } from "../logging";
 import { SqliteSharedResponses } from "./shared-response";
+import { resolveWeavePurpose } from "../domain/weave-scheduling";
 
 export type RunVisibility = (ref: ContextRef) => ContextValue | null;
 export type InterruptionReason = "stopped" | "context-invalidated" | "quarantined" | "interrupted-reply";
@@ -73,18 +74,18 @@ export function interruptOrdinaryRun(db: Database, run: RunRecord, _reason: "sto
   const row = db.query<{ draft: string | null; responseId: string | null }, [string]>(
     "SELECT draft_json AS draft,response_id AS responseId FROM run_replies WHERE run_id=?").get(run.id);
   const associations = runAssociations(db,run);
-  let mediaWeave = false;
+  let internalOutcome = false;
   if (run.kind === "weave") {
-    const subject = db.query<{ subjectId: string | null; triggerId: string | null; kind: string | null }, [string]>(
+    const subject = db.query<{ subjectId: string | null; triggerId: string | null; kind: Thought["kind"] | null }, [string]>(
       `SELECT run.weave_subject_id AS subjectId,run.weave_trigger_id AS triggerId,thought.kind
        FROM runs run LEFT JOIN thoughts thought ON thought.id=run.weave_subject_id WHERE run.id=?`).get(run.id);
     if (subject && subject.subjectId !== null && subject.triggerId !== null) {
       if (subject.kind === null) throw new RunNotFoundError();
-      mediaWeave = subject.kind === "media-original";
+      internalOutcome = subject.kind === "media-original" || resolveWeavePurpose(subject.kind,subject.triggerId) === "connection-only";
     }
   }
   // Source-root replies are finalized by the Weaver; interruption never publishes a draft summary.
-  if (!mediaWeave && row?.draft && !row.responseId && associations) {
+  if (!internalOutcome && row?.draft && !row.responseId && associations) {
     const response = createSharedResponse({ ...record(JSON.parse(row.draft)), ...associations, state: "interrupted" });
     new SqliteSharedResponses(db,logger).save(response);
     db.run("UPDATE run_replies SET draft_json=NULL,response_id=? WHERE run_id=?",[response.id,run.id]);

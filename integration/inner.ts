@@ -10,6 +10,7 @@ import { startDaemon, type RunningDaemon } from "../src/daemon/runtime";
 import type { InboxItem, NativeMessage, NativeSession, PublicClient } from "../src/agent/opencode-adapter";
 import { AgentSessionMissingError } from "../src/agent/errors";
 import { independentPng } from "../tests/fixtures/media-rasters";
+import { resolveWeavePurpose } from "../src/domain/weave-scheduling";
 const ownedRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
 const { chromium, expect } = ownedRequire("@playwright/test") as typeof import("@playwright/test");
 
@@ -97,7 +98,7 @@ class FixtureClient implements PublicClient {
     }
     if (job.kind === "evolve" && this.holdEvolve) await new Promise<void>(done => { this.releaseHeld = done; });
     const step = history.length;
-    const output = job.kind === "export" ? (step === 1
+    const output = job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: "No further findings" } : job.kind === "export" ? (step === 1
       ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.sourceId } } }
       : { version: 1, kind: "report", markdown: "# Owned integrated report\n\nEvidence from the captured thought.", sourceThoughtIds: [this.sourceId] })
       : job.kind === "evolve" && step === 1
@@ -500,14 +501,29 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     assert.ok(Array.isArray(completedEvolve.confirmedThoughtIds));
     assert.equal(completedEvolve.confirmedThoughtIds.length, 1);
     const developmentId = string(completedEvolve.confirmedThoughtIds[0]);
-    const followups = dbRows(dbPath, "SELECT id, kind, status, weave_subject_id FROM runs WHERE kind = 'weave'")
+    const followups = dbRows(dbPath, "SELECT id, kind, status, weave_subject_id, weave_trigger_id FROM runs WHERE kind = 'weave'")
       .map(record).filter(row => row.weave_subject_id === developmentId);
-    assert.equal(followups.length, 1, "the confirmed development must have its own weave run");
-    const followupId = string(followups[0]?.id);
+    const ordinary = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id)) === "ordinary");
+    const discovery = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id)) === "connection-only");
+    assert.equal(ordinary.length, 1, "the confirmed development must retain its ordinary title/interpretation follow-up");
+    assert.equal(discovery.length, 1, "the confirmed development must have exactly one connection-only creation owner");
+    assert.equal(followups.length, 2, "no extra or unclassified follow-up work may be admitted");
+    assert.equal(ordinary[0]?.weave_trigger_id, `evolve:${runId}`);
+    assert.equal(discovery[0]?.weave_trigger_id, `connection-discovery:${runId}`);
+    const followupId = string(ordinary[0]?.id);
     const followup = record((await daemonCall(running, `/runs/${encodeURIComponent(followupId)}`)).value);
     assert.equal(followup.id, followupId);
     assert.equal(followup.kind, "weave");
     assert.equal(followup.status, "completed", `weave for confirmed development ${developmentId} must complete`);
+    const publicReply = record((await daemonCall(running, `/responses/${encodeURIComponent(string(followup.responseId))}`)).value);
+    assert.ok(Array.isArray(publicReply.thoughtIds) && publicReply.thoughtIds.includes(developmentId), "ordinary follow-up must publish its associated Full reply");
+    const discoveryId = string(discovery[0]?.id), discoveryStatus = record((await daemonCall(running, `/runs/${encodeURIComponent(discoveryId)}`)).value);
+    assert.equal(discoveryStatus.kind, "weave"); assert.equal(discoveryStatus.status, "completed");
+    assert.deepEqual(discoveryStatus.confirmedThoughtIds, [], "connection-only work cannot issue recursive interpretations");
+    assert.equal(discoveryStatus.responseId, null, "connection-only work cannot publish a Full reply");
+    const discoveryStep = dbRows(dbPath,"SELECT run_id,envelope_json FROM run_steps ORDER BY position DESC").map(record).find(row => row.run_id === discoveryId);
+    assert.ok(discoveryStep);
+    assert.equal(record(JSON.parse(string(discoveryStep.envelope_json))).kind,"complete", "connection-only work must retain its canonical internal outcome");
     const beforeExport = knowledge(dbPath);
     await page.getByRole("banner").getByRole("link", { name: /(?:back|return).*idea/i }).click();
     await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(id)}`);

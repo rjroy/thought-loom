@@ -104,7 +104,7 @@ All accept the read scopes above and return `200` JSON:
 
 Each per-thought relationship route requires the requested thought to be visible under the same read scope; a missing or hidden thought returns `404`. A visible thought with no visible related records returns an empty array. These reads use existing response, connection, and evolution relationships; they do not traverse discovered connections as evolution ancestry. Child and connection inspection records include the `rejected` field described above. Shared response associations follow the same visibility policy as `/responses/:id`, including the stricter AI rule.
 
-Completed weaving retains its final outcome through these response routes, associated with the original capture and any issued interpretations. This includes no-findings outcomes and source-access limitations; a failed URL does not create a fake interpretation. Shared-response AI visibility still requires all associated thoughts to be eligible. URL summaries are ordinary searchable interpretation thoughts with inline source links, not a new response or source-record type. Capture requests remain unchanged.
+Completed interpretation-capable weaving retains its final outcome through these response routes, associated with the original capture and any issued interpretations. This includes no-findings outcomes and source-access limitations; a failed URL does not create a fake interpretation. Automatic connection-only work retains an internal protocol outcome, not a public/searchable Full reply. Shared-response AI visibility still requires all associated thoughts to be eligible. URL summaries are ordinary searchable interpretation thoughts with inline source links, not a new response or source-record type. Capture requests remain unchanged.
 
 ### Chronological browse: `GET /browse/thoughts`
 
@@ -300,7 +300,7 @@ Fresh admission returns `202`; an exact subject/key replay returns `200` with th
 }
 ```
 
-Eligibility reasons are `null`, `subject-rejected`, `work-active`, `work-unsettled`, or `work-unverified`. Eligibility is advisory; admission transactionally checks all interpretation-capable weave work for the subject. A text title-clear job participates; a genuinely media-title-only job does not fulfill or block interpretation. Unverified historical cancellation settlement cannot itself authorize replacement work. With agent configuration, the existing cleanup worker can re-observe the saved native identity and journal; positive terminal proof clears that blocker without resubmitting or reviving the old run. Missing or conflicting evidence remains blocked unless the user explicitly retires that specific run as described below. A fresh interpretation still requires an explicit new key; replaying the old key returns its old receipt. Configuration absence permits durable queue admission without native execution.
+Eligibility reasons are `null`, `subject-rejected`, `work-active`, `work-unsettled`, or `work-unverified`. Eligibility is advisory; admission transactionally checks all interpretation-capable weave work for the subject. A text title-clear job participates; genuinely media-title-only and automatic connection-only jobs do not fulfill or block interpretation. Unverified historical cancellation settlement cannot itself authorize replacement work. With agent configuration, the existing cleanup worker can re-observe the saved native identity and journal; positive terminal proof clears that blocker without resubmitting or reviving the old run. Missing or conflicting evidence remains blocked unless the user explicitly retires that specific run as described below. A fresh interpretation still requires an explicit new key; replaying the old key returns its old receipt. Configuration absence permits durable queue admission without native execution.
 
 New interpretations are immutable children of the selected thought, not replacements for earlier output. Each run retains its own Full reply through the existing response readers. A media reinterpretation can create one new interpretation for that run; a historical child cannot satisfy completion. If it produces no new interpretation, the run fails while retaining its complete limitation reply. Ordinary text/URL weaving may finish honestly with a fallback reply and no new thoughts.
 
@@ -318,7 +318,7 @@ After an uncertain POST, retain the original subject/key. Lookup absence cannot 
 
 These user-only, private/no-store control routes select one existing weave by its exact subject and run ID. GET returns `200 {runId, retiredAt, eligibility}` where `retiredAt` is a recorded timestamp or `null`, and `eligibility` is the current overall reinterpretation eligibility. GET does not change state or contact the native service.
 
-POST requires exactly `{"acknowledgeRemoteUncertainty":true}` and returns `200 {runId, retiredAt, remoteState:"unknown", eligibility}`. Repeating it returns the same recorded timestamp. Only failed or interrupted, intent-backed interpretation-capable weaves can be retired. Active, uncertain, completed, wrong-subject, missing-intent and media-title-only runs cannot be retired. Missing or mismatched identities return `404`; an ineligible run returns `409`. Invalid bodies and query parameters return `400`; anonymous and AI callers receive `401` and `403` respectively. Retirement is available without agent configuration while the daemon holds its execution lease.
+POST requires exactly `{"acknowledgeRemoteUncertainty":true}` and returns `200 {runId, retiredAt, remoteState:"unknown", eligibility}`. Repeating it returns the same recorded timestamp. Only failed or interrupted, intent-backed interpretation-capable weaves can be retired. Active, uncertain, completed, wrong-subject, missing-intent, media-title-only and connection-only runs cannot be retired. Missing or mismatched identities return `404`; an ineligible run returns `409`. Invalid bodies and query parameters return `400`; anonymous and AI callers receive `401` and `403` respectively. Retirement is available without agent configuration while the daemon holds its execution lease.
 
 Retirement joins the run's local execution flight, permanently fences local execution and publication, and removes only that run as a blocker. It does not create a new run or change cancellation and native journal facts. Existing lawful cancellation cleanup remains best effort. The remote operation may still be running or cause external effects, including overlapping later work. Other blockers still apply, and already queued automatic work can resume under ordinary serialization.
 
@@ -326,9 +326,9 @@ Retirement joins the run's local execution flight, permanently fences local exec
 
 Body: exactly `{"text":"A contribution to this discussion"}`. The path selects a normally visible parent. Missing or rejected parents return `404`; unknown body fields return `400`.
 
-Success returns `201 {contribution, run}`. The daemon creates the user contribution and queued Evolve run atomically. IDs, timestamps, authorship, classification and ancestry defaults are daemon-owned. The returned `run` uses the status shape below; it does not claim generation has finished.
+Success returns `201 {contribution, run}`. The daemon creates the user contribution, queued Evolve run and the contribution's internal connection-only discovery owner atomically. IDs, timestamps, authorship, classification and ancestry defaults are daemon-owned. The returned `run` is the Evolve run and uses the status shape below; it does not claim generation or background discovery has finished. No discovery ID or screening result is added to this response.
 
-During the run, Evolve may fill an absent title only on the admitted contribution and may record warranted connections after scoped full reads. A current title wins over a late AI fill. Confirmed changes remain saved on Stop or failure. A completed run schedules ordinary follow-up weaving on its latest issued development when one exists; a reply without a development remains associated with the contribution without scheduling a contribution weave.
+During the run, Evolve may fill an absent title only on the admitted contribution and may record warranted connections after scoped full reads. A current title wins over a late AI fill. Every saved development also acquires its own connection-only discovery owner in the creation/receipt transaction, including non-latest developments. Confirmed changes remain saved on Stop or failure. A completed run still schedules ordinary title/interpretation-capable follow-up weaving on its latest issued development when one exists, without repeating that thought's creation screening/nominations. A reply without a development remains associated with the contribution; its already-admitted connection-only work does not create interpretations or another Full reply.
 
 Without [agent configuration](server-startup.md#agent-configuration), this returns actionable `503` before saving the contribution. With configuration present, service unavailability leaves admitted work durable rather than discarding the contribution. The daemon owns execution; disconnecting the HTTP client does not cancel it.
 
@@ -426,6 +426,8 @@ Native completion is not local completion: a response may still need validation 
 
 Body: `{}`. Returns the same run-status shape after local authority is fenced, without waiting for native cancellation to settle. Confirmed saved thoughts remain saved; Stop does not reject or undo them. Pending native cancellation is reconciled separately. A safely identified unfinished reply can remain interrupted; raw machine JSON is not published as partial prose. Weaver/Evolve native tools run in a trusted operator environment; Stop cannot undo their external side effects. See the [tool-access policy](server-startup.md#agent-configuration).
 
+Stopping an Evolve run also transactionally interrupts its still-pending connection-only owners for saved contributions/developments, using their durable creation origins. This fences held screening and late results across restart; completed connections remain. It is not a promise of immediate remote cancellation. The response continues to describe the selected Evolve run only.
+
 For a run with a [restore fence](backup-restore.md#small-durable-guard-not-a-second-execution-engine), or an import run whose file/batch is fenced, Stop preserves the stored execution status, generation and cancellation facts and authorizes no old native call. For a locally terminal, intent-backed restored export only, the application adapter additionally records an export-owned local-discard acknowledgement. This acknowledges local Stop, **not** remote cancellation: old remote work remains unknown/unaffected. Other fenced runs retain the idempotent history-read behavior. The Stop response shape is unchanged; use `GET /exports/agentic/:runId/metadata` to read export deletion eligibility before calling `DELETE /exports/agentic/:runId`. See [offline restore](backup-restore.md#standalone-offline-installation) for recovery.
 
 ```sh
@@ -452,7 +454,7 @@ Do not send `id`, `createdAt`, `author`, `kind`, `origin`, `parentId`, or `sourc
 
 **Role:** user. **Body:** `text` and optional `title`.
 
-The path selects an existing, normally visible parent. The daemon derives `kind: "user-contribution"`, `origin: "contribution"`, the parent link, an empty source list, and the generated identity/time. It returns the new thought with `201`.
+The path selects an existing, normally visible parent. The daemon derives `kind: "user-contribution"`, `origin: "contribution"`, the parent link, an empty source list, and the generated identity/time. It atomically saves the thought and one internal connection-only discovery owner, then returns the new thought with `201`. This direct command does not create an Evolve run.
 
 ### Development: `POST /thoughts/:id/developments`
 
@@ -461,6 +463,8 @@ The path selects an existing, normally visible parent. The daemon derives `kind:
 The daemon derives `kind: "developing-idea"`, `origin: "development"`, and the path-selected parent. The parent and every supplied source must be visible to the caller in normal scope. A rejected or missing reference gives `404`. It returns the new thought with `201`.
 
 This command accepts a supplied development; it does not ask a model to create one. Extra source references do not become evolution parents.
+
+Both direct creation commands atomically queue one connection-only Weaver owner for the new text, even without agent configuration; execution waits for configured agents. The development's discovery admission also commits with its thought. These owners use their direct thought identity, not a fictitious creator run, and cannot create recursive interpretations or public Full replies. Discovery failure does not undo a successfully admitted thought; an admission transaction failure rolls back both. Responses and request fields are unchanged. These POSTs have no idempotency key: another POST creates another thought, so a timeout or uncertain acknowledgement does not authorize automatic replay. Internal owner replay reuses the recorded journal and never restarts a stopped/restored owner. Stopping an unrelated Evolve does not stop independently admitted direct work.
 
 ### Connection: `POST /connections`
 
@@ -471,6 +475,8 @@ This command accepts a supplied development; it does not ask a model to create o
 ```
 
 `sourceIds` is optional. Categories are `supports`, `contradicts`, `extends`, and `related`. Endpoints and supporting sources must be normally visible to the caller. The daemon generates the connection ID and derives `proposedBy` from the credential, then returns the connection with `201`. Do not supply `id` or `proposedBy`.
+
+This direct command does not deduplicate: deliberate repeated submissions create distinct connections, for either credential. The internal Weaver/Evolve `connection` capability instead deduplicates the same directed endpoints and category after its run/purpose and full-read checks. Its typed results are `created` with the new connection, `already-present` with the eligible existing connection and unchanged attribution, or opaque `not-created` without a connection identity or details. A rejected matching relation suppresses an automated clone without exposing it. Capability receipts replay the original outcome; these internal statuses do not change this HTTP route's request/response shape or authorize automatic POST replay.
 
 ## Title commands
 

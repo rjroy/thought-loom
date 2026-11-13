@@ -163,8 +163,15 @@ const guidanceDefinitions: readonly Definition[] = [
 ];
 const dispositionDefinitions: readonly Definition[] = guidanceDefinitions.map(table => table.name === "export_intents"
   ? {...table,columns:{...table.columns,local_disposition:text}} : table);
-const definitions: readonly Definition[] = dispositionDefinitions.map(table => table.name === "runs"
+const retirementDefinitions: readonly Definition[] = dispositionDefinitions.map(table => table.name === "runs"
   ? {...table,columns:{...table.columns,weave_retired_at:optionalText}} : table);
+const definitions: readonly Definition[] = [
+  ...retirementDefinitions,
+  definition("run_screening_passes", {run_id:text,subject_id:text,policy_json:text,candidate_count:integer,status:text,failure_code:optionalText}, ["run_id"], {
+    references:[reference(["run_id"],"runs",["id"]),reference(["subject_id"],"thoughts",["id"])] }),
+  definition("run_screening_pairs", {run_id:text,candidate_id:text,position:integer,judgment_json:optionalText}, ["run_id","candidate_id"], {
+    unique:[unique(["run_id","position"])],references:[reference(["run_id"],"run_screening_passes",["run_id"]),reference(["candidate_id"],"thoughts",["id"])] }),
+];
 
 const spellingRevision = definition("search_revision", { id: integerKey, revision: integer }, ["id"]);
 const virtualTables = new Set(["thought_search_fts", "response_search_fts"]);
@@ -292,13 +299,14 @@ function tableShapes(items: readonly Definition[]): readonly TableShape[] {
     columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 }
-export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4";
+export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4" | "thoughtloom-logical-5";
 export const backupTableShapes = tableShapes(definitions);
 const legacyTableShapes = tableShapes(legacyDefinitions);
 const guidanceTableShapes = tableShapes(guidanceDefinitions);
 const dispositionTableShapes = tableShapes(dispositionDefinitions);
+const retirementTableShapes = tableShapes(retirementDefinitions);
 export function shapesForSchema(schema: BackupAppSchema): readonly TableShape[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : backupTableShapes;
+  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : schema === "thoughtloom-logical-4" ? retirementTableShapes : backupTableShapes;
 }
 
 /** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
@@ -320,6 +328,7 @@ export const backupTableDefinitions = tableDefinitions(definitions,backupTableSh
 const legacyTableDefinitions = tableDefinitions(legacyDefinitions,legacyTableShapes);
 const guidanceTableDefinitions = tableDefinitions(guidanceDefinitions,guidanceTableShapes);
 const dispositionTableDefinitions = tableDefinitions(dispositionDefinitions,dispositionTableShapes);
+const retirementTableDefinitions = tableDefinitions(retirementDefinitions,retirementTableShapes);
 export function definitionsForSchema(schema: BackupAppSchema): readonly BackupTableDefinition[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : backupTableDefinitions;
+  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : schema === "thoughtloom-logical-4" ? retirementTableDefinitions : backupTableDefinitions;
 }
