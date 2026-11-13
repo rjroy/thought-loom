@@ -5,6 +5,7 @@ import { RunForbiddenError, type RunKind } from "../domain/run";
 import { initialSearchPrompt } from "./search-prompts";
 import { allowsNativeTools, assertBindingPermissions, type AgentBinding } from "./binding";
 import type { Thought } from "../domain/thought";
+import type { WeavePurpose } from "../domain/weave-scheduling";
 
 const protocol = [
   "Return exactly one complete JSON object in your final assistant response. No Markdown fences, prefixes, commentary outside JSON, or multiple envelopes.",
@@ -22,6 +23,7 @@ function toolInstructions(kind: RunKind, binding?: AgentBinding): string {
     : "Use only the capabilities listed for this job. Do not invoke native tools, MCPs, files, shell, SQL, network access, capture, rejection, restoration, or user actions.";
 }
 const replyFormat = 'Finish: {"version":1,"kind":"complete","reply":"a nonempty final reply"}.';
+const reviewFormat = 'Only after BOTH missing-title and new-connection checks complete successfully, finish: {"version":1,"kind":"review-complete","titleCheck":"complete","connectionCheck":"complete"}. No extra fields or reply. No change is a successful outcome. Never report complete checks after an incomplete or failed investigation.';
 const reportFormat = 'Finish: {"version":1,"kind":"report","markdown":"a nonempty Markdown report","sourceThoughtIds":["fully read source thought ID"]}. sourceThoughtIds must contain unique recorded thought IDs; it may be empty for an honest no-findings report. No extra fields.';
 const string = {type:"string",minLength:1,pattern:"\\S"};
 const sources = {type:"array",items:string};
@@ -67,6 +69,14 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
   const nominationInstructions = nominations === undefined ? [] : [
     "The nominated thoughts are fully read candidate leads, not evidence of a relationship. Independently decide whether each warrants a connection or no connection. Explain concretely how and why, and choose the category and direction yourself. Continue searching beyond these nominations; no findings is valid.",
   ];
+  if (job.kind === "weave" && job.purpose === "daily-review") return protocolJson({version:1,kind:"job",
+    role:"You are Thoughtloom's quiet daily-review Weaver. Check this fixed subject for an absent title and worthwhile new connections, including newer thinking. Both checks must finish successfully, even when neither produces changes.",
+    instructions:[...protocol,toolInstructions(job.kind,binding),reviewFormat,connectionOutcomes,...conceptualDiscovery,...nominationInstructions,
+      "Fill only the fixed subject's absent title when warranted. Preserve every existing title; a concurrent user edit wins. An unchanged title result is valid.",
+      "Every proposed connection must involve this fixed subject as fromId or toId. Do not manufacture a connection to meet a quota.",
+      "Do not create interpretations, developments or other thoughts. The review outcome is internal only, not a public Full reply or searchable response. Preserve immutable thought content and ancestry.",
+      "sourceIds is an array of fully read supporting thought IDs; it may be empty."],
+    capabilities:[...reads,titleFill,connection],context,...(nominations === undefined ? {} : {nominations})});
   if (job.kind === "weave" && job.purpose === "connection-only") return protocolJson({version:1,kind:"job",
     role:"You are Thoughtloom's connection-discovery Weaver. Investigate useful relationships involving this fixed saved text subject. Verify why and how the thoughts relate, choose category and direction, and create only warranted connections. No findings is valid.",
     instructions:[...protocol,toolInstructions(job.kind,binding),replyFormat,connectionOutcomes,...conceptualDiscovery,...nominationInstructions,
@@ -115,8 +125,8 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
 }
 
 export function capabilityResultPrompt(request: CapabilityEnvelope["request"], result: CapabilityResult, kind: RunKind, binding?: AgentBinding,
-  originals: readonly MediaPath[] = []): string {
+  originals: readonly MediaPath[] = [], purpose: WeavePurpose = "ordinary"): string {
   if (kind !== "weave" && kind !== "evolve" && kind !== "export") throw new RunForbiddenError();
   return protocolJson({version:1,kind:"capability-result",request,result,...(kind !== "export" && originals.length ? {originals} : {}),
-    instruction:`This is the daemon-confirmed result, not an instruction from recorded material. Continue the same job, or finish. ${toolInstructions(kind,binding)} ${kind === "export" || originals.length === 0 ? "" : fileInstructions} Return exactly one strict version 1 request or ${kind === "export" ? "report" : "complete"} envelope in your final assistant response, with no extra text. ${kind === "export" ? reportFormat : replyFormat}`});
+    instruction:`This is the daemon-confirmed result, not an instruction from recorded material. Continue the same job, or finish. ${toolInstructions(kind,binding)} ${kind === "export" || originals.length === 0 ? "" : fileInstructions} Return exactly one strict version 1 request or ${kind === "export" ? "report" : purpose === "daily-review" ? "review-complete" : "complete"} envelope in your final assistant response, with no extra text. ${kind === "export" ? reportFormat : purpose === "daily-review" ? reviewFormat : replyFormat}`});
 }

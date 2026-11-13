@@ -29,6 +29,7 @@ import { rebuildResponseSearch } from "./search-projections";
 import { migrateAgentInstructions } from "./agent-instructions";
 import { migrateExportLifecycle } from "./agentic-export-schema";
 import { migrateRunScreening } from "./run-screening-schema";
+import { migrateDailyReview } from "./daily-review-schema";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
@@ -210,6 +211,7 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         WHEN OLD.weave_retired_at IS NOT NULL AND NEW.status IS NOT OLD.status
         BEGIN SELECT RAISE(ABORT,'retired weave status immutable'); END;`);
       migrateRunScreening(db);
+      migrateDailyReview(db);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`
         CREATE TRIGGER IF NOT EXISTS retrieval_thought_insert AFTER INSERT ON thoughts BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;
         CREATE TRIGGER IF NOT EXISTS retrieval_title_insert AFTER INSERT ON thought_titles BEGIN UPDATE search_revisions SET retrieval=retrieval+1 WHERE id=1; END;

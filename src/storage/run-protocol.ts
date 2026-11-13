@@ -54,6 +54,10 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     const kind = this.guardedExecution("complete prompt",claim,run => {
       const step = this.current(run,promptId);
       const value = parseEnvelope(protocolJson(envelope));
+      const review = run.kind === "weave" && this.weavePurpose(run) === "daily-review";
+      if ((value.kind === "review-complete" && !review) || (review && value.kind !== "request" && value.kind !== "review-complete")) {
+        throw new RunForbiddenError("Final envelope does not match the weave purpose");
+      }
       if (run.kind === "search") {
         if (value.kind === "request") parseSearchCapabilityRequest(value.request);
         else if (value.kind !== "search-reply") throw new RunForbiddenError("Search envelope authority required");

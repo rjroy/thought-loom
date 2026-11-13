@@ -10,6 +10,7 @@ import { ScriptedClient, config, drive, fixture, now, setup, status } from "./ag
 import type { NativeSession, PublicClient } from "../src/agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../src/agent/configured-worker";
 import { foreignKeyGroups, orderForeignKeyGroups, type ForeignKeyPart } from "./fixtures/sqlite-foreign-keys";
+import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
 
 const logger = createLogger("error", () => {});
 const credentials = { user: "user-0123456789-0123456789-abcdef", ai: "agent-0123456789-0123456789-abcdef" };
@@ -68,6 +69,7 @@ test("real runtime binds search setup to its registered owner before the native 
     migrate(db, logger);
     let sequence = 0; const id = () => `fixture${String(++sequence).padStart(24, "0")}`;
     const store = new SqliteStore(db), { runId } = setup(db, store, id);
+    sealDailyReview(db);
     const captured: ({ execution_owner_id: string | null } | null)[] = [];
     class OwnedClient extends ScriptedClient {
       override async sessionCreate(input: Parameters<PublicClient["sessionCreate"]>[0]): Promise<NativeSession> {
@@ -79,7 +81,7 @@ test("real runtime binds search setup to its registered owner before the native 
     daemon = await startDaemon({ dbPath: path, port: 0, credentials, agent: { service: { url: "http://127.0.0.1:44991" }, directory: "/tmp/opencode/owned-fixture",
       model: { providerID: "fixture", id: "fixture-model" }, effort: { quick: null, standard: null, thorough: null } } }, () => {}, {
       logSink: () => {}, startTimer(callback) { poll = callback; return () => { poll = undefined; }; },
-      resolveAgentService: async () => ({ url: "http://127.0.0.1:44991" }), createPublicClient: () => client,
+      resolveAgentService: async () => ({ url: "http://127.0.0.1:44991" }), createPublicClient: () => client, now: () => sealedReviewNow,
     });
     requireOwners(db);
     const owner = db.query("SELECT id FROM execution_owners").get() as { id: string } | null;

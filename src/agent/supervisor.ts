@@ -1,7 +1,7 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { assertRestoreFenceSchema } from "../storage/restore-fences-schema";
-import { recordedWeaveCancellationSafeSql } from "../storage/run-cancellation";
+import { recordedSubjectCancellationSafeSql } from "../storage/run-cancellation";
 
 const concurrency=8;
 
@@ -58,7 +58,7 @@ export class RunSupervisor {
     cursor.through ??= (this.dependencies.db.query(`SELECT COALESCE(MAX(rowid),0) AS n FROM ${table}`).get() as {n:number}).n;
     const sql = source === "runs" ? `SELECT r.id,r.rowid AS position FROM runs r WHERE r.kind IN ('weave','evolve','export','search') AND
       (r.status IN ('queued','submitting','running','uncertain') OR (r.status IN ('completed','interrupted','failed') AND r.cancellation_state='pending')
-        OR (r.kind='weave' AND r.status IN ('interrupted','failed') AND r.cancellation_state='settled' AND NOT ${recordedWeaveCancellationSafeSql}))
+         OR (r.kind IN ('weave','evolve') AND r.status IN ('interrupted','failed') AND r.cancellation_state='settled' AND NOT ${recordedSubjectCancellationSafeSql}))
       AND NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE rf.entity_kind='run' AND rf.entity_id=r.id)
       AND r.rowid>? AND r.rowid<=? ORDER BY r.rowid LIMIT ?` :
       `SELECT c.run_id AS id,c.rowid AS position FROM search_native_cleanup c JOIN search_sessions s ON s.id=c.session_id

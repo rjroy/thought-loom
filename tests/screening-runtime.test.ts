@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { ConfigError, parseConfig, validateConfig } from "../src/daemon/config";
 import { startDaemon } from "../src/daemon/runtime";
 import { SqliteRunOperations } from "../src/storage/run-operations";
+import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteRunWorkerState } from "../src/storage/run-worker";
+import { SqliteDailyReviews } from "../src/storage/daily-review";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { createLogger, type LogRecord } from "../src/logging";
 import { systemOneScreening } from "../src/agent/system-one-screening";
@@ -71,6 +74,7 @@ async function runtimeCase(response: "success" | "invalid" | "missing" | "out-of
   let server: ReturnType<typeof Bun.serve> | undefined;
   let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
   let reader: Database | undefined;
+  let ownedRunId = "";
   try {
     server = Bun.serve({hostname:"127.0.0.1",port:0,async fetch(request) {
       const body = await request.json() as RequestBody;
@@ -92,12 +96,19 @@ async function runtimeCase(response: "success" | "invalid" | "missing" | "out-of
       }
       let sequence = 0;
       const id = () => `fixture${String(++sequence).padStart(24,"0")}`;
-      new SqliteRunOperations(db,{id,now,sessionId:() => `ses_${id()}`,promptId:() => `msg_${id()}`}).admitWeave("user",{subjectId:"subject",triggerId:"owned-screen"});
+      const sources = {id,now,sessionId:() => `ses_${id()}`,promptId:() => `msg_${id()}`};
+      ownedRunId = new SqliteRunOperations(db,sources).admitWeave("user",{subjectId:"subject",triggerId:"owned-screen"}).id;
+      // Preserve this transport test's single owned weave by sealing the date through actual review admission and Stop.
+      const batch = new SqliteDailyReviews(db,sources).admitDueBatch("2031-01-01T12:00:00.000Z",true);
+      if (batch.kind !== "admitted") throw new Error("Expected owned sealed review date");
+      const runs = new SqliteRunRepository(db,sources), state = new SqliteRunWorkerState(db,sources);
+      for (const runId of batch.runIds) { runs.stop(runId); if (!state.settleUnsubmitted(runId)) throw new Error("Expected settled owned review"); }
     } finally { db.close(); }
     const records: LogRecord[] = [];
     let pulse: (() => void) | undefined;
     daemon = await startDaemon({port:0,dbPath:path,credentials:{user,ai},agent,
       screening:{url:`http://127.0.0.1:${server.port}/v1/systemone`,model:"d3",timeoutMs:100}},() => {},{
+      now:() => "2031-01-01T12:00:00.000Z",
       logSink:record => records.push(record),resolveAgentService:async () => ({url:"http://127.0.0.1:44991"}),
       createPublicClient:() => client,startTimer:poll => { pulse = poll; return () => {}; },
     });
@@ -106,7 +117,7 @@ async function runtimeCase(response: "success" | "invalid" | "missing" | "out-of
     for (let i=0;i<300;i++) {
       pulse?.();
       await Bun.sleep(5);
-      status = reader.query<{status:string},[]>("SELECT status FROM runs WHERE kind='weave'").get()?.status ?? "";
+      status = reader.query<{status:string},[string]>("SELECT status FROM runs WHERE id=?").get(ownedRunId)?.status ?? "";
       if (["completed","failed","interrupted"].includes(status)) break;
     }
     const connectionCount = reader.query<{count:number},[]>("SELECT COUNT(*) AS count FROM connections").get()?.count ?? -1;

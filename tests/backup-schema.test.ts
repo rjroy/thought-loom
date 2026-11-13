@@ -12,7 +12,7 @@ const included = [
   "export_intents", "export_reports", "import_namespaces", "import_documents", "import_locations", "import_document_parts", "import_document_seals",
   "markdown_imports", "markdown_import_files", "markdown_import_payloads", "media_store", "media_sources",
   "search_sessions", "search_turns", "search_messages", "search_discoveries", "search_content_dependencies", "search_composer_contexts",
-  "search_composer_dependencies", "search_revisions", "search_native_cleanup", "restore_fences", "agent_instructions", "run_screening_passes", "run_screening_pairs",
+  "search_composer_dependencies", "search_revisions", "search_native_cleanup", "restore_fences", "agent_instructions", "run_screening_passes", "run_screening_pairs", "daily_review_batches", "daily_review_items",
 ].sort();
 const rowidTables = ["runs", "run_operation_receipts", "response_thoughts", "run_context", "markdown_import_files", "import_namespaces", "search_native_cleanup"].sort();
 

@@ -39,6 +39,8 @@ An installation can optionally screen newly saved text locally for possible conn
 
 An ordinary daemon restart retains completed screening progress and resumes only unfinished pair checks. Known screening failure stays on search fallback for that run. Restoring a backup does not restart historical AI work.
 
+With agents configured, quiet daily review revisits a bounded selection of eligible text thoughts for missing titles and useful connections. No review screen or daily action is required. A current title is never replaced by a late AI fill, and no change is a valid review outcome. The initial cap can make a full rotation take longer than 30 days; see [daily review operation](server-startup.md#agent-configuration).
+
 **Keep a copy of important unsaved text.** Capture has no guaranteed autosave, offline queue or draft recovery after a full refresh. If you see **Not sure it saved**, keep that page open and follow the [recovery guidance](#recover-when-something-goes-wrong) rather than saving again immediately.
 
 ## Understand your library

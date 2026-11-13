@@ -1,6 +1,6 @@
 import { createLogger } from "../logging";
 import type { Database } from "bun:sqlite";
-import { RunConflictError, RunFenceError, RunNotFoundError, type RunRecord, type RunSources } from "../domain/run";
+import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type RunRecord, type RunSources } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
 import type { MaterialKind, Thought } from "../domain/thought";
 import type { MediaRetryEligibility } from "../domain/media-import";
@@ -61,6 +61,7 @@ function admit(db: Database, sources: WeaveSources, input: WeaveIntent, directCr
         (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)`).get(intent.subjectId);
       if (!subject) throw new RunNotFoundError();
       const purpose = resolveWeavePurpose(subject.kind,intent.triggerId);
+      if (purpose === "daily-review") throw new RunForbiddenError("Daily review requires owned batch admission");
       const originRunId = connectionDiscoveryOrigin(intent.triggerId);
       const directSubjectId = directConnectionDiscoverySubject(intent.triggerId);
       if (purpose === "connection-only" && directSubjectId === null) {

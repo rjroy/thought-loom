@@ -1,7 +1,7 @@
 import { createLogger, type Logger } from "../logging";
 import type { Database } from "bun:sqlite";
 import { isAbsolute } from "node:path";
-import { recordedWeaveCancellationSafe } from "../storage/run-cancellation";
+import { recordedSubjectCancellationSafe } from "../storage/run-cancellation";
 import { RunConflictError, RunFenceError, RunNotFoundError, type Claim, type RunKind, type RunRecord, type RunSources } from "../domain/run";
 import { parseEnvelope, ProtocolValidationError, type OrdinaryCancellationJournal, type RunStep } from "../domain/run-protocol";
 import type { Thought } from "../domain/thought";
@@ -339,7 +339,7 @@ export class RunWorker {
       this.steps.advanceSearch(claim,step.promptId,() => this.dependencies.promptId?.() ?? `msg_${this.dependencies.id()}`);
       return;
     }
-    if (step.envelope?.kind === "complete" || step.envelope?.kind === "report") {
+    if (step.envelope?.kind === "complete" || step.envelope?.kind === "report" || step.envelope?.kind === "review-complete") {
       this.state.finish(claim,step.promptId);
       if (this.runs.get(claim.runId)?.status === "failed") this.logger.error("[worker] source interpretation missing",{runId:claim.runId,kind});
       else this.logger.info("[worker] run completed", { runId: claim.runId, kind });
@@ -351,7 +351,7 @@ export class RunWorker {
     const paths = result.type === "thought" && result.thought !== null
       ? await this.mediaPaths(claim,kind,binding,[result.thought]) : [];
     this.active(claim);
-    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind,binding,paths)});
+    this.steps.advance(claim,step.promptId,result,{promptId:this.dependencies.promptId?.() ?? this.dependencies.id(),input:capabilityResultPrompt(step.envelope.request,result,kind,binding,paths,this.state.purpose(claim.runId))});
   }
   private async mediaPaths(claim: Claim, kind: RunKind, binding: AgentBinding, thoughts: readonly Thought[]): Promise<readonly MediaPath[]> {
     if (kind !== "weave" && kind !== "evolve") return [];
@@ -407,7 +407,7 @@ export class RunWorker {
     if (this.paused || !["interrupted","failed"].includes(run.status)) return;
     if (isRunRestoreFenced(this.dependencies.db,run.id)) return;
     const cancellation = this.steps.cancellation(run.id);
-    if (cancellation !== "pending" && !(run.kind === "weave" && cancellation === "settled" && !recordedWeaveCancellationSafe(this.dependencies.db,run.id))) return;
+    if (cancellation !== "pending" && !(["weave","evolve"].includes(run.kind) && cancellation === "settled" && !recordedSubjectCancellationSafe(this.dependencies.db,run.id))) return;
     if (this.state.settleUnsubmitted(run.id)) return;
     const binding = this.bindings.get(run.id);
     if (!binding) return;

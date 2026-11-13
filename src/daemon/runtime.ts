@@ -17,6 +17,7 @@ import type { AgentConfig } from "./agent-config";
 import type { PublicClient, ResolvedAgentService } from "../agent/opencode-adapter";
 import { createPublicClient, resolveAgentService } from "../agent/opencode-adapter";
 import { ConfiguredRunWorker } from "../agent/configured-worker";
+import { DailyReviewDriver } from "../agent/daily-review-driver";
 import { systemOneScreening } from "../agent/system-one-screening";
 import { RunWorker } from "../agent/worker";
 import { RunSupervisor } from "../agent/supervisor";
@@ -41,6 +42,7 @@ import { runBackupAttempt } from "../backup/run";
 import { SqliteAgentInstructions } from "../storage/agent-instructions";
 import { ExportHistoryService } from "../domain/export-history";
 import { SqliteAgenticExports } from "../storage/agentic-export";
+import { SqliteDailyReviews } from "../storage/daily-review";
 
 /** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
@@ -48,6 +50,8 @@ export interface RuntimeDependencies {
   readonly resolveAgentService?: (config: AgentConfig) => Promise<ResolvedAgentService>;
   readonly createPublicClient?: (service: ResolvedAgentService) => PublicClient;
   readonly startTimer?: (poll: () => void) => () => void;
+  /** Owned domain clock for runtime admissions and worker completion timestamps. */
+  readonly now?: () => string;
   readonly backupScheduler?: { readonly timer: BackupTimer; readonly attempt: (signal: AbortSignal) => Promise<void> };
 }
 
@@ -77,6 +81,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let mediaFiles: MediaFiles | undefined;
   let mediaValidator: MediaValidator | undefined;
   let backupScheduler: BackupScheduler | undefined;
+  let dailyReview: DailyReviewDriver | undefined;
   let acceptingRequests = true;
   const requestFlights = new Set<Promise<Response>>();
   async function close(force: boolean): Promise<boolean> {
@@ -85,6 +90,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     acceptingRequests = false;
     // Seal/abort synchronously, and join capture/Git before originals, database and execution ownership are released.
     try { if (backupScheduler) pending.push(backupScheduler.stop()); } catch { failed = true; }
+    try { if (dailyReview) pending.push(dailyReview.stop()); } catch { failed = true; }
     // Pause the worker synchronously before awaiting either drain; a late native callback cannot advance local work.
     try { worker?.pause(); } catch { failed = true; }
     try { if (supervisor) pending.push(supervisor.stop()); } catch { failed = true; }
@@ -151,7 +157,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       limits:{maxBytes:mediaMaxBytes,orphanGraceMs:24*60*60*1000,cleanupBatchSize:64}});
     const files = mediaFiles, mediaPath = (sourceId: string) => files.originalPath(sourceId);
     await files.cleanup();
-    const scheduling = { id: randomUUID, now: () => new Date().toISOString(), logger: diagnostics,
+    const scheduling = { id: randomUUID, now: dependencies.now ?? (() => new Date().toISOString()), logger: diagnostics,
       // Public SDK schemas require these prefixes. Existing persisted identities are never rewritten.
       sessionId: () => `ses_${randomUUID()}`, promptId: () => `msg_${randomUUID()}` };
     const store = new SqliteStore(db, scheduling);
@@ -220,6 +226,12 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       maxRequestBodySize:Math.max(128*1024*1024,Math.min(Number.MAX_SAFE_INTEGER,Math.max(valid.importMaxBytes ?? 1048576,mediaMaxBytes)+4096+65536)) });
     supervisor?.start();
     imports?.start();
+    if (supervisor) {
+      const reviews = new SqliteDailyReviews(db,scheduling), activeSupervisor = supervisor;
+      dailyReview = new DailyReviewDriver({now:scheduling.now,admit:at => { owner.assertHeld(); return reviews.admitDueBatch(at,true); },
+        startTimer,notifyWork:() => activeSupervisor.notifyWork(),logger:diagnostics});
+      dailyReview.start();
+    }
     const url = server.url.toString();
     let stopping: Promise<void> | undefined;
     logger({ phase: "outcome", operation: "start", success: true, url });

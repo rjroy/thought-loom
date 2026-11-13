@@ -7,6 +7,7 @@ import type { SearchComposerView, SearchTurnControlView } from "../src/domain/ag
 import { ScriptedClient } from "./agentic-search-capability-fixture";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { createLogger } from "../src/logging";
+import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
 
 const credentials = { user: "owned-user-012345678901234567890123456789", ai: "owned-agent-01234567890123456789012345678" };
 const libraryTables = ["thoughts", "thought_titles", "thought_sources", "thought_source_seals", "connections", "connection_sources", "responses", "response_thoughts", "response_seals", "rejected_thoughts", "rejected_connections", "thought_search_fts", "response_search_fts"];
@@ -39,7 +40,7 @@ async function start(path: string, dir: string, client: ScriptedClient, setPoll:
   return startDaemon({ dbPath: path, port: 0, credentials, agent: { service: { url: "http://127.0.0.1:44991" }, directory: dir,
     model: { providerID: "owned-provider", id: "owned-model" }, effort: { quick: null, standard: null, thorough: null } } }, () => {}, {
     startTimer: callback => { setPoll(callback); return () => {}; }, resolveAgentService: async () => ({ url: "http://127.0.0.1:44991" }),
-    createPublicClient: () => client, logSink: () => {},
+    createPublicClient: () => client, logSink: () => {}, now: () => sealedReviewNow,
   });
 }
 
@@ -57,11 +58,14 @@ test("configured HTTP Delete returns before held native admission and retains on
       migrate(seed, createLogger("error", () => {}));
       new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-OWNED-LIBRARY", title: null, titleAuthor: null,
         author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "fixture", parentId: null, sourceIds: [] });
+      sealDailyReview(seed);
     } finally { seed.close(); }
     daemon = await start(path, dir, client, callback => { poll = callback; });
     const { session, control } = await admit(daemon);
     await drive(poll, () => entered, "native submission"); await bounded(reached, "submission entry");
     expect(client.prompts).toHaveLength(0);
+    const binding = read(path, db => db.query<{ session_id: string }, [string]>("SELECT session_id FROM agent_bindings WHERE run_id=?").get(control.run.id));
+    if (!binding) throw new Error("missing admitted search binding");
     const before = read(path, library);
     const result = await bounded(http(daemon, `/search-sessions/${session.id}`, { method: "DELETE" }), "local Delete");
     expect(result.status).toBe(204); expect(released).toBe(false);
@@ -77,6 +81,7 @@ test("configured HTTP Delete returns before held native admission and retains on
     client.historyMode = "empty"; release();
     await drive(poll, () => client.prompts.length === 1, "late native admission");
     const prompt = client.prompts[0]; if (!prompt) throw new Error("missing late admitted prompt");
+    expect(prompt.sessionID).toBe(binding.session_id);
     expect(client.sessions.get(prompt.sessionID)?.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
     await drive(poll, () => read(path, db => (db.query("SELECT drain_state FROM search_native_cleanup WHERE run_id=?").get(control.run.id) as { drain_state: string } | null)?.drain_state === "drained"), "joined local flight");
     const pending = read(path, db => db.query("SELECT state,admission_state,prompt_manifest_json,evidence_json FROM search_native_cleanup WHERE run_id=?").get(control.run.id)) as { state: string; admission_state: string; prompt_manifest_json: string; evidence_json: string | null };

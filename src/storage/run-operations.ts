@@ -13,6 +13,7 @@ import { SqliteTitleRepository } from "./title";
 import { admitWeave } from "./weave-admission";
 import { SqliteSharedResponses } from "./shared-response";
 import type { RunVisibility } from "./run-fences";
+import { dailyReviewInstant } from "../domain/daily-review";
 
 /** Typed writes share the original run aggregate, transaction, receipt table, and issued ordering. */
 export class SqliteRunOperations extends SqliteRunAggregate implements RunOperations {
@@ -134,11 +135,21 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       if (!intent) throw new RunConflictError("Legacy weave subject is unknown");
       if (run.promptId !== promptId) throw new RunFenceError("Prompt is no longer current");
       const step = this.currentStep(run.id);
+      const purpose = this.weavePurpose(run);
+      if (purpose === "daily-review") {
+        if (step.input === null || step.state !== "completed" || step.envelope?.kind !== "review-complete") {
+          throw new RunConflictError("Daily review requires both completed checks");
+        }
+        const completedAt = dailyReviewInstant(this.sources.now());
+        this.db.run("UPDATE runs SET status='completed',generation=generation+1,cancellation_state='none' WHERE id=?",[run.id]);
+        const changed = this.db.run("UPDATE daily_review_items SET completed_at=? WHERE run_id=? AND completed_at IS NULL",[completedAt,run.id]);
+        if (changed.changes !== 1) throw new RunConflictError("Daily review completion membership unavailable");
+        return;
+      }
       if (step.state !== "completed" || step.envelope?.kind !== "complete") throw new RunConflictError("Weave requires an explicit completed final envelope");
       // Associate the subject and every issued thought: a rejected summary must not
       // expose an outcome that may describe it to AI through another association.
       const issued = this.issued(run.id);
-      const purpose = this.weavePurpose(run);
       if (purpose === "connection-only") {
         if (issued.length) throw new RunForbiddenError("Discovery cannot publish issued knowledge");
         // The canonical complete envelope is internal history, never a searchable/public Full reply.

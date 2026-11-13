@@ -81,7 +81,7 @@ export function interruptOrdinaryRun(db: Database, run: RunRecord, _reason: "sto
        FROM runs run LEFT JOIN thoughts thought ON thought.id=run.weave_subject_id WHERE run.id=?`).get(run.id);
     if (subject && subject.subjectId !== null && subject.triggerId !== null) {
       if (subject.kind === null) throw new RunNotFoundError();
-      internalOutcome = subject.kind === "media-original" || resolveWeavePurpose(subject.kind,subject.triggerId) === "connection-only";
+      internalOutcome = subject.kind === "media-original" || ["connection-only","daily-review"].includes(resolveWeavePurpose(subject.kind,subject.triggerId));
     }
   }
   // Source-root replies are finalized by the Weaver; interruption never publishes a draft summary.

@@ -165,12 +165,19 @@ const dispositionDefinitions: readonly Definition[] = guidanceDefinitions.map(ta
   ? {...table,columns:{...table.columns,local_disposition:text}} : table);
 const retirementDefinitions: readonly Definition[] = dispositionDefinitions.map(table => table.name === "runs"
   ? {...table,columns:{...table.columns,weave_retired_at:optionalText}} : table);
-const definitions: readonly Definition[] = [
+const screeningDefinitions: readonly Definition[] = [
   ...retirementDefinitions,
   definition("run_screening_passes", {run_id:text,subject_id:text,policy_json:text,candidate_count:integer,status:text,failure_code:optionalText}, ["run_id"], {
     references:[reference(["run_id"],"runs",["id"]),reference(["subject_id"],"thoughts",["id"])] }),
   definition("run_screening_pairs", {run_id:text,candidate_id:text,position:integer,judgment_json:optionalText}, ["run_id","candidate_id"], {
     unique:[unique(["run_id","position"])],references:[reference(["run_id"],"run_screening_passes",["run_id"]),reference(["candidate_id"],"thoughts",["id"])] }),
+];
+const definitions: readonly Definition[] = [
+  ...screeningDefinitions,
+  definition("daily_review_batches", {review_date:text,admitted_at:text,eligible_count:integer,ceiling:integer,admitted_count:integer,policy_json:text}, ["review_date"]),
+  definition("daily_review_items", {run_id:text,review_date:text,thought_id:text,position:integer,completed_at:optionalText}, ["run_id"], {
+    unique:[unique(["review_date","thought_id"]),unique(["review_date","position"])],
+    references:[reference(["run_id"],"runs",["id"]),reference(["review_date"],"daily_review_batches",["review_date"]),reference(["thought_id"],"thoughts",["id"])] }),
 ];
 
 const spellingRevision = definition("search_revision", { id: integerKey, revision: integer }, ["id"]);
@@ -299,14 +306,15 @@ function tableShapes(items: readonly Definition[]): readonly TableShape[] {
     columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 }
-export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4" | "thoughtloom-logical-5";
+export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4" | "thoughtloom-logical-5" | "thoughtloom-logical-6";
 export const backupTableShapes = tableShapes(definitions);
 const legacyTableShapes = tableShapes(legacyDefinitions);
 const guidanceTableShapes = tableShapes(guidanceDefinitions);
 const dispositionTableShapes = tableShapes(dispositionDefinitions);
 const retirementTableShapes = tableShapes(retirementDefinitions);
+const screeningTableShapes = tableShapes(screeningDefinitions);
 export function shapesForSchema(schema: BackupAppSchema): readonly TableShape[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : schema === "thoughtloom-logical-4" ? retirementTableShapes : backupTableShapes;
+  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : schema === "thoughtloom-logical-4" ? retirementTableShapes : schema === "thoughtloom-logical-5" ? screeningTableShapes : backupTableShapes;
 }
 
 /** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
@@ -329,6 +337,7 @@ const legacyTableDefinitions = tableDefinitions(legacyDefinitions,legacyTableSha
 const guidanceTableDefinitions = tableDefinitions(guidanceDefinitions,guidanceTableShapes);
 const dispositionTableDefinitions = tableDefinitions(dispositionDefinitions,dispositionTableShapes);
 const retirementTableDefinitions = tableDefinitions(retirementDefinitions,retirementTableShapes);
+const screeningTableDefinitions = tableDefinitions(screeningDefinitions,screeningTableShapes);
 export function definitionsForSchema(schema: BackupAppSchema): readonly BackupTableDefinition[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : schema === "thoughtloom-logical-4" ? retirementTableDefinitions : backupTableDefinitions;
+  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : schema === "thoughtloom-logical-4" ? retirementTableDefinitions : schema === "thoughtloom-logical-5" ? screeningTableDefinitions : backupTableDefinitions;
 }

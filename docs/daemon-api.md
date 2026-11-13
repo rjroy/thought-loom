@@ -106,6 +106,8 @@ Each per-thought relationship route requires the requested thought to be visible
 
 Completed interpretation-capable weaving retains its final outcome through these response routes, associated with the original capture and any issued interpretations. This includes no-findings outcomes and source-access limitations; a failed URL does not create a fake interpretation. Automatic connection-only work retains an internal protocol outcome, not a public/searchable Full reply. Shared-response AI visibility still requires all associated thoughts to be eligible. URL summaries are ordinary searchable interpretation thoughts with inline source links, not a new response or source-record type. Capture requests remain unchanged.
 
+Daily review publishes no Full reply or new thoughts; only conditional titles and warranted subject connections may change. Its successful review timestamp is private scheduling metadata, not an added Thought DTO field. Configured daemon startup schedules review internally; there is no HTTP daily-review admission endpoint. If internally admitted work is inspected by known run ID, the existing status shape is unchanged and `responseId` remains null. Daily review is not an interpretation retirement candidate; a later interpretation request can remain queued behind active/unsettled daily work without treating that review as the requested interpretation.
+
 ### Chronological browse: `GET /browse/thoughts`
 
 Both authenticated roles can browse thoughts without a search query. The response is `{items, nextCursor}` with scoped Thought records and a string continuation or null. This does not include conversational responses; `/thoughts` remains an array.

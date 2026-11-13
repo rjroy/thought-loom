@@ -85,6 +85,32 @@ function fileFixture(action: (db: Database, path: string) => void): void {
 }
 
 describe("media source migration and immutable metadata", () => {
+  test("daily metadata DDL failure rolls back the populated frozen predecessor and additive retry preserves it", () => fileFixture((db,path) => {
+    seedFrozen(db);
+    const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name").all();
+    const beforeSchema = schema(), beforeRows = preserved(db);
+    let injected = false;
+    const failing = new Proxy(db,{get(target,key) {
+      if (key === "exec") return (sql: string) => {
+        const result = target.exec(sql);
+        if (sql.startsWith("CREATE TABLE IF NOT EXISTS daily_review_batches")) { injected = true; throw new Error("owned daily DDL fault"); }
+        return result;
+      };
+      const member = Reflect.get(target,key,target);
+      return typeof member === "function" ? member.bind(target) : member;
+    }});
+    expect(() => migrate(failing)).toThrow("owned daily DDL fault");
+    expect(injected).toBe(true); expect(db.inTransaction).toBe(false);
+    expect(schema()).toEqual(beforeSchema); expect(preserved(db)).toEqual(beforeRows);
+    migrate(db); expect(preserved(db)).toEqual(beforeRows);
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); expect(preserved(reopened)).toEqual(beforeRows);
+      expect(reopened.query("SELECT * FROM daily_review_batches").all()).toEqual([]);
+      expect(reopened.query("SELECT * FROM daily_review_items").all()).toEqual([]);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  }));
   test("screening migration failure rolls back the populated frozen predecessor before additive retry", () => fileFixture((db,path) => {
     seedFrozen(db);
     const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name").all();
