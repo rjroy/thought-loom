@@ -35,6 +35,10 @@ Open the web address supplied by whoever runs your Thoughtloom installation. If 
 
 Saving records your thought immediately when confirmed. It does not wait for AI. With agents configured, background processing called *weaving* can add interpretations and connections later. Without agents, that work stays queued; your thought is still saved.
 
+An installation can optionally screen newly saved text locally for possible connections, including captures, Markdown, Evolve contributions/developments and AI interpretations. Original image/PDF descriptors are not screened; their saved text interpretations are. The Weaver still decides whether a connection is warranted and can search for others. Connection-only work does not create interpretations or another Full reply. If screening is unavailable, discovery falls back to search; the screening results are not shown as evidence. See [connection screening configuration](server-startup.md#optional-connection-screening).
+
+An ordinary daemon restart retains completed screening progress and resumes only unfinished pair checks. Known screening failure stays on search fallback for that run. Restoring a backup does not restart historical AI work.
+
 **Keep a copy of important unsaved text.** Capture has no guaranteed autosave, offline queue or draft recovery after a full refresh. If you see **Not sure it saved**, keep that page open and follow the [recovery guidance](#recover-when-something-goes-wrong) rather than saving again immediately.
 
 ## Understand your library
@@ -114,6 +118,8 @@ Choose **Edit title**, enter the label, then **Save title**. Use **Clear title**
 
 Your connection is attributed to **You**. It does not move either thought into a different evolution branch. Keep the editor open until creation is confirmed: leaving the Idea or refreshing clears its draft, and an uncertain save is not automatically resent.
 
+Automatic Weaver/Evolve work does not add another connection with the same direction and category when one already exists, and does not recreate an equivalent rejected connection. An existing connection keeps its original explanation and attribution. This does not prevent you from deliberately adding another manual connection.
+
 ## Develop an idea with Evolve
 
 ![Evolve showing a completed sample contribution, a separate Full reply, and a recorded development selected for continuation.](images/user-guide/evolve.png)
@@ -129,7 +135,7 @@ Use Evolve when you want to add a question, challenge or new contribution, rathe
 
 **Open idea** only opens a reading view; it does not select a continuation. To start a different branch deliberately, you can also open an earlier Idea and choose **Evolve this idea** there.
 
-Use **Check this run** to refresh known work. **Stop** requests cancellation while retaining saved developments. It cannot guarantee that remote tools have stopped or undo their effects. Leaving the page does not stop the run.
+Use **Check this run** to refresh known work. **Stop** requests cancellation while retaining saved developments. It also stops pending automatic connection discovery for that Evolve's saved contributions/developments, without undoing connections already created. It cannot guarantee that remote tools have stopped or undo their effects. Leaving the page does not stop the run.
 
 In-app navigation retains the workspace in browser memory. A full reload opens a fresh workspace and loses its draft and local run references without cancelling recorded work. Copy important draft text and displayed run IDs before reloading. If admission is unconfirmed, do not send the same contribution again: this view has no confirmed run to check or stop.
 

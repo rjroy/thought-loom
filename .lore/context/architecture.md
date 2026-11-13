@@ -43,6 +43,14 @@ Ordinary cancellation requires a terminal boundary for every potentially dispatc
 
 As an explicit exception to waiting for remote proof, a user may acknowledge remote uncertainty and retire one failed or interrupted interpretation-capable weave. This permanently fences its local execution and publication and removes only that run as an admission and dispatch blocker. The earlier native work may still run or have external effects, including overlapping a replacement. Retirement is not native settlement or cancellation; existing lawful cleanup remains best effort. Other active or unsettled runs still block, and queued automatic work may proceed under normal serialization. There is no automatic retirement.
 
+## Creation-owned connection discovery
+
+Creation-owned connection discovery uses ordinary durable weave journals and the existing supervisor, not another queue. A connection-only purpose is encoded with its immutable subject/creation-origin trigger and has application-scoped reads plus warranted connections involving that subject, but no thought/title writes or public reply publication. Creation, receipts/issued membership and discovery admission commit together. Ordinary interpretation work remains a distinct dispatch/admission/retirement class. Evolve Stop fences pending discovery for its saved contributions/developments using persisted origins; it does not undo saved connections or establish remote cancellation. Weaver's operator-managed native tool policy remains unchanged and is not a sandbox.
+
+Direct contribution/development API creation has no originating run. Its thought and direct-thought discovery identity commit together in the knowledge writer; direct and run-origin triggers have separate validity contracts and retain their exact bytes in backups. Direct owners cannot impersonate a run-created source or be swept into an unrelated Evolve Stop cascade. This uses the existing immutable run journal, not another queue or schema version.
+
+Automated connection writes deduplicate only inside the Weaver/Evolve capability aggregate, by directed endpoints and category. Authorization and full reads precede lookup. An eligible match yields an explicit already-present result with original attribution; any explicitly rejected match yields only an opaque not-created result and prevents an equivalent clone, including when another match is visible. Lookup/effect/no-op, exposures and immutable receipt/result commit together. Replay never reinterprets a no-op after restoration. Direct/manual connections remain multiplicative, with no global unique constraint or category/direction collapse. Existing JSON TEXT journals carry these typed outcomes without changing frozen logical backup inventories.
+
 ## Client and daemon boundary
 
 The browser client must never access the daemon directly. Browser requests that need daemon functionality go through the Next.js server, which communicates with the daemon.

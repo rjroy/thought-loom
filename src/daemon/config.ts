@@ -3,8 +3,16 @@ import { ConfigError } from "./config-error";
 import type { LogLevel } from "../logging";
 import { isAbsolute } from "node:path";
 import { parseBackupConfig, validateBackupConfig, type BackupConfig } from "../backup/config";
+import { validateServiceUrl } from "../agent/binding";
+import { nonEmpty, record } from "../domain/validation";
 export { ConfigError } from "./config-error";
 
+/** Optional local System One service; no service is started or managed by the daemon. */
+export interface ScreeningConfig {
+  readonly url: string;
+  readonly model: string;
+  readonly timeoutMs: number;
+}
 export interface DaemonConfig {
   readonly port: number;
   readonly dbPath: string;
@@ -15,9 +23,23 @@ export interface DaemonConfig {
   readonly mediaDir?: string;
   readonly mediaMaxBytes?: number;
   readonly backup?: BackupConfig;
+  readonly screening?: ScreeningConfig;
 }
 
 const portDiagnostic = "THOUGHTLOOM_PORT must be an integer from 0 to 65535";
+const screeningDiagnostic = "THOUGHTLOOM_SCREENING_CONFIG must contain a valid screening configuration";
+
+function validateScreeningConfig(input: unknown): ScreeningConfig {
+  try {
+    const data = record(input);
+    const keys = Object.keys(data);
+    if (keys.length !== 3 || !["url","model","timeoutMs"].every(key => Object.hasOwn(data,key))) throw new Error();
+    const url = validateServiceUrl(data.url), model = nonEmpty(data.model,"model");
+    if (/[\u0000-\u001f\u007f]/.test(model) || typeof data.timeoutMs !== "number" ||
+        !Number.isSafeInteger(data.timeoutMs) || data.timeoutMs < 1 || data.timeoutMs > 120000) throw new Error();
+    return {url,model,timeoutMs:data.timeoutMs};
+  } catch { throw new ConfigError(screeningDiagnostic); }
+}
 
 /** Parse explicit server-side environment values, without opening resources. */
 export function parseConfig(env: Readonly<Record<string, string | undefined>>): DaemonConfig {
@@ -28,6 +50,11 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
   const rawMediaMax = env.THOUGHTLOOM_MEDIA_MAX_BYTES;
   if (rawMediaMax !== undefined && !/^\d+$/.test(rawMediaMax)) throw new ConfigError("THOUGHTLOOM_MEDIA_MAX_BYTES must be a positive safe integer");
   const agent = parseAgentConfig(env);
+  let screening: ScreeningConfig | undefined;
+  if (env.THOUGHTLOOM_SCREENING_CONFIG !== undefined) {
+    try { screening = validateScreeningConfig(JSON.parse(env.THOUGHTLOOM_SCREENING_CONFIG)); }
+    catch { throw new ConfigError(screeningDiagnostic); }
+  }
   const config = {
     port: rawPort === undefined ? 3001 : Number(rawPort),
     dbPath: env.THOUGHTLOOM_DB_PATH,
@@ -37,6 +64,7 @@ export function parseConfig(env: Readonly<Record<string, string | undefined>>): 
     ...(rawMediaMax === undefined ? {} : {mediaMaxBytes:Number(rawMediaMax)}),
     ...(env.THOUGHTLOOM_MEDIA_DIR === undefined ? {} : {mediaDir:env.THOUGHTLOOM_MEDIA_DIR}),
     ...(agent === null ? {} : {agent}),
+    ...(screening === undefined ? {} : {screening}),
     ...(env.THOUGHTLOOM_BACKUP_CONFIG === undefined ? {} : {backup:parseBackupConfig(env.THOUGHTLOOM_BACKUP_CONFIG)}),
   };
   return validateConfig(config);
@@ -74,6 +102,7 @@ export function validateConfig(input: unknown): DaemonConfig {
   const mediaDir = "mediaDir" in input ? input.mediaDir : undefined;
   if (mediaDir !== undefined && (typeof mediaDir !== "string" || !isAbsolute(mediaDir) || mediaDir.includes("\0"))) throw new ConfigError("THOUGHTLOOM_MEDIA_DIR must be an absolute directory path");
   const backup = "backup" in input ? validateBackupConfig(input.backup, input.dbPath, mediaDir) : undefined;
+  const screening = "screening" in input && input.screening !== undefined ? validateScreeningConfig(input.screening) : undefined;
   return { port: input.port, dbPath: input.dbPath, credentials: { user, ai }, logLevel: level, ...(importMaxBytes === undefined ? {} : {importMaxBytes}),
-    ...(mediaMaxBytes === undefined ? {} : {mediaMaxBytes}), ...(mediaDir === undefined ? {} : {mediaDir}), ...(agent === null ? {} : {agent}), ...(backup === undefined ? {} : {backup}) };
+    ...(mediaMaxBytes === undefined ? {} : {mediaMaxBytes}), ...(mediaDir === undefined ? {} : {mediaDir}), ...(agent === null ? {} : {agent}), ...(backup === undefined ? {} : {backup}), ...(screening === undefined ? {} : {screening}) };
 }

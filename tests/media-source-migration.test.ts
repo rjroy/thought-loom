@@ -85,10 +85,38 @@ function fileFixture(action: (db: Database, path: string) => void): void {
 }
 
 describe("media source migration and immutable metadata", () => {
+  test("screening migration failure rolls back the populated frozen predecessor before additive retry", () => fileFixture((db,path) => {
+    seedFrozen(db);
+    const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name").all();
+    const beforeSchema = schema(), beforeRows = preserved(db);
+    let injected = false;
+    const failing = new Proxy(db,{get(target,key) {
+      if (key === "exec") return (sql: string) => {
+        const result = target.exec(sql);
+        if (sql.startsWith("CREATE TABLE IF NOT EXISTS run_screening_passes")) { injected = true; throw new Error("owned screening DDL fault"); }
+        return result;
+      };
+      const member = Reflect.get(target,key,target);
+      return typeof member === "function" ? member.bind(target) : member;
+    }});
+    expect(() => migrate(failing)).toThrow("owned screening DDL fault");
+    expect(injected).toBe(true); expect(db.inTransaction).toBe(false);
+    expect(schema()).toEqual(beforeSchema); expect(preserved(db)).toEqual(beforeRows);
+    migrate(db); expect(preserved(db)).toEqual(beforeRows);
+    const reopened = new Database(path);
+    try {
+      migrate(reopened); expect(preserved(reopened)).toEqual(beforeRows);
+      expect(reopened.query("SELECT * FROM run_screening_passes").all()).toEqual([]);
+      expect(reopened.query("SELECT * FROM run_screening_pairs").all()).toEqual([]);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  }));
   test("legacy runs acquire a null retirement marker without changing historical facts", () => fileFixture((db, path) => {
     seedFrozen(db);
     const before = db.query("SELECT id,status,generation FROM runs ORDER BY id").all();
     migrate(db);
+    expect(db.query("SELECT * FROM run_screening_passes").all()).toEqual([]);
+    expect(db.query("SELECT * FROM run_screening_pairs").all()).toEqual([]);
     expect(db.query("SELECT id,status,generation FROM runs ORDER BY id").all()).toEqual(before);
     expect(db.query("SELECT id,weave_retired_at FROM runs ORDER BY id").all()).toEqual([
       { id: "legacy-search", weave_retired_at: null }, { id: "legacy-weave", weave_retired_at: null },

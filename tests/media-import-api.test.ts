@@ -8,6 +8,7 @@ import { corruptPngPixels, independentPng } from "./fixtures/media-rasters";
 import { pathComplete, pathRequest, promptStrings } from "./fixtures/media-path-worker";
 import { admitWeave } from "../src/storage/weave-admission";
 import { SqliteStore } from "../src/storage/sqlite";
+import { connectionDiscoveryOrigin, resolveWeavePurpose } from "../src/domain/weave-scheduling";
 
 test("owned media upload retains its original and queues normal weaving without agent configuration", async () => mediaApiFixture(async f => {
   expect((await f.request("/thoughts")).status).toBe(200);
@@ -241,15 +242,50 @@ test("media HTTP retry reuses a failed original after normal cancellation withou
     await f.until(async () => (await body(await f.request(`/runs/${runId}`))).status === "completed","retried source interpretation");
     expect((await f.request(retryPath,retry("duplicate-summary"))).status).toBe(409);
     expect(f.read(db => db.query("SELECT count(*) AS n FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(first.thought.id))).toEqual({n:1});
-    const initialPrompts = f.client.prompts.filter(prompt => object(JSON.parse(prompt.text)).kind === "job");
+    const mediaRuns = f.read(db => db.query<{id:string;status:string;trigger:string},[string]>(
+      "SELECT id,status,weave_trigger_id AS trigger FROM runs WHERE kind='weave' AND weave_subject_id=? ORDER BY rowid").all(first.thought.id));
+    expect(mediaRuns.map(run => [run.id,run.status,resolveWeavePurpose("media-original",run.trigger)])).toEqual([
+      [first.runId,"failed","ordinary"],[runId,"completed","ordinary"],
+    ]);
+    const initialPrompts = f.client.prompts.filter(prompt => object(JSON.parse(prompt.text)).kind === "job" &&
+      mediaRuns.some(run => f.client.sessions.get(prompt.sessionID)?.metadata.runId === run.id));
     expect(initialPrompts).toHaveLength(2);
+    expect(initialPrompts.map(prompt => f.client.sessions.get(prompt.sessionID)?.metadata.runId)).toEqual([first.runId,runId]);
     const paths = initialPrompts.map(prompt => originalPath(prompt.text,first.thought.id));
     expect(paths).toEqual([join(f.mediaDirectory,"objects",source),join(f.mediaDirectory,"objects",source)]);
+    for (const prompt of initialPrompts) {
+      const capabilities = object(JSON.parse(prompt.text)).capabilities;
+      if (!Array.isArray(capabilities)) throw new Error("Expected media Weaver capabilities");
+      expect(capabilities.map(item => object(item).capability)).toEqual(expect.arrayContaining(["interpretation","title-fill","connection"]));
+    }
+    const child = f.read(db => db.query<{id:string},[string]>("SELECT id FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(first.thought.id));
+    if (!child) throw new Error("Expected the retried media interpretation");
+    const discoveryRuns = f.read(db => db.query<{id:string;trigger:string},[string]>(
+      "SELECT id,weave_trigger_id AS trigger FROM runs WHERE kind='weave' AND weave_subject_id=? ORDER BY rowid").all(child.id));
+    expect(discoveryRuns).toHaveLength(1);
+    const discovery = discoveryRuns[0];
+    if (!discovery) throw new Error("Expected the interpretation's discovery owner");
+    expect(resolveWeavePurpose("ai-interpretation",discovery.trigger)).toBe("connection-only");
+    expect(connectionDiscoveryOrigin(discovery.trigger)).toBe(runId);
+    const discoveryPrompt = () => f.client.prompts.find(prompt => object(JSON.parse(prompt.text)).kind === "job" &&
+      f.client.sessions.get(prompt.sessionID)?.metadata.runId === discovery.id);
+    await f.until(() => discoveryPrompt() !== undefined,"interpretation discovery prompt");
+    const discoveryInput = discoveryPrompt();
+    if (!discoveryInput) throw new Error("Expected the discovery prompt");
+    const discoveryCapabilities = object(JSON.parse(discoveryInput.text)).capabilities;
+    if (!Array.isArray(discoveryCapabilities)) throw new Error("Expected discovery capabilities");
+    expect(discoveryCapabilities.map(item => object(item).capability).sort()).toEqual(["connection","readConnection","readResponse","readThought","search"].sort());
+    expect(f.read(db => db.query("SELECT count(*) AS n FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(first.thought.id))).toEqual({n:1});
     expect(Array.from(await readFile(join(f.mediaDirectory,"objects",source)))).toEqual(Array.from(bytes));
     expect(f.read(db => db.query("SELECT count(*) AS n FROM media_sources").get())).toEqual({n:1});
     expect(f.client.scriptErrors).toEqual([]);
-  },{configured:true,script:(_index,input) => !interpret ? pathComplete("The owned source could not be understood.") :
-    object(JSON.parse(input)).kind === "job" ? pathRequest("interpretation",{text:"Retried owned interpretation.",sourceIds:[]}) : pathComplete("Saved the retried interpretation.")});
+  },{configured:true,script:(_index,input) => {
+    if (!interpret) return pathComplete("The owned source could not be understood.");
+    const prompt = object(JSON.parse(input));
+    if (prompt.kind !== "job") return pathComplete("Saved the retried interpretation.");
+    if (object(object(prompt.context).job).purpose === "connection-only") return pathComplete("No connection warranted.");
+    return pathRequest("interpretation",{text:"Retried owned interpretation.",sourceIds:[]});
+  }});
 },30000);
 
 test("initial media retry and reinterpretation race to one interpretation admission", async () => mediaApiFixture(async f => {

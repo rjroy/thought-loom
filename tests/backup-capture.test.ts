@@ -90,7 +90,7 @@ test("online capture publishes deterministic complete canonical history and exac
   const manifest = parse<Manifest>(manifestBytes);
   if (!manifestBytes) throw new Error("Missing manifest");
   expect(first.manifestSha256).toBe(sha256(manifestBytes));
-  expect(manifest).toMatchObject({ format: "thoughtloom-backup", version: 1, appSchema: "thoughtloom-logical-4", mediaStoreId: storeId });
+  expect(manifest).toMatchObject({ format: "thoughtloom-backup", version: 1, appSchema: "thoughtloom-logical-5", mediaStoreId: storeId });
   const source = new Database(f.dbPath, { readonly: true, create: false, safeIntegers: true });
   try { expect(manifest.tables.map(entry => entry.name)).toEqual(validateSourceSchema(source).map(shape => shape.name)); }
   finally { source.close(); }

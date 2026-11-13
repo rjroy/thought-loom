@@ -6,7 +6,7 @@ import { normalizeBinding, validateServiceUrl } from "./binding";
 import { AgentUnavailableError } from "./errors";
 import { OpenCodeAdapter, type AgentBinding, type PublicClient, type ResolvedAgentService } from "./opencode-adapter";
 import type { SupervisedWorker } from "./supervisor";
-import { RunWorker, type WorkerNative } from "./worker";
+import { RunWorker, type ConnectionScreeningPort, type WorkerNative } from "./worker";
 import { SqliteAgentBindings } from "../storage/agent-binding";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteAgenticExports } from "../storage/agentic-export";
@@ -28,6 +28,7 @@ export interface ConfiguredWorkerDependencies extends RunSources {
   readonly executionOwner?: ExecutionOwnerLease;
   /** Resolve originals from the daemon-owned store shared with OpenCode. */
   readonly mediaPath?: (sourceId: string) => Promise<string>;
+  readonly connectionScreening?: ConnectionScreeningPort;
 }
 
 /** One worker and one lazy attachment snapshot; no SDK/service work at construction or daemon readiness. */

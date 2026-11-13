@@ -106,10 +106,12 @@ describe("typed operations on durable run aggregate", () => {
     expect(store.getThought(interpreted.thought.id)).toEqual(interpreted.thought);
     const third = steps.advance(claim, second.promptId, interpreted, { promptId: "prompt-connection", input: "interpretation outcome" });
     const connection: StepOperation = { type: "connection", fromId: "subject", toId: "target", category: "supports", explanation: "supporting evidence", sourceIds: ["subject"] };
+    // This aggregate fixture supplies a trusted initial read; unlike dispatcher fixtures it does not render/read model context.
+    for (const id of ["subject","target"]) db.run("INSERT INTO run_context(run_id,kind,ref_id,full_read) VALUES (?,'thought',?,1) ON CONFLICT(run_id,kind,ref_id) DO UPDATE SET full_read=1",[run.id,id]);
     steps.completeStep(claim, third.promptId, proposal(connection));
     const linked = ops.executeStep(claim, third.promptId, connection);
     expect(linked.type).toBe("connection");
-    if (linked.type !== "connection") throw new Error("Expected connection result");
+    if (linked.type !== "connection" || linked.status !== "created") throw new Error("Expected created connection result");
     expect(linked.connection.id).toMatch(/^issued-\d+$/);
     expect(linked.connection).toEqual({ id: linked.connection.id, fromId: "subject", toId: "target", category: "supports", explanation: "supporting evidence", sourceIds: ["subject"], proposedBy: "ai" });
     expect(store.getConnection(linked.connection.id)).toEqual(linked.connection);

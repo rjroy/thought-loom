@@ -69,7 +69,7 @@ class Client implements PublicClient {
     const output = job.kind === "export" ? (turn === 1 ? { version: 1, kind: "request", request: this.exportWrite ?? { capability: "search", arguments: { query: "cobalt" } } } :
       turn === 2 ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.exportSourceId } } } :
         { version: 1, kind: "report", markdown: "# Fixture report\n\nExisting thinking, not new knowledge.", sourceThoughtIds: [this.exportSourceId] }) :
-      turn > 1 || this.completeFirst ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
+      turn > 1 || this.completeFirst || job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
       job.kind === "evolve" ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "fixture development", sourceIds: [] } } } :
         { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Fixture generated title" } } };
     if (job.kind === "export" && turn === 1 && this.exportWrite) this.exportProposals.push(this.exportWrite.capability);

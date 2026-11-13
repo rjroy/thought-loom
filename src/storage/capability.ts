@@ -31,7 +31,7 @@ export class SqliteCapabilityDispatcher extends SqliteRunAggregate implements Ca
       const operation = capabilityOperation(request);
       let result: CapabilityResult;
       if (operation !== null) {
-        const { refs } = stepOperationScope(run,this.readWeaveIntent(run.id),operation);
+        const { refs } = stepOperationScope(run,this.readWeaveIntent(run.id),operation,this.weavePurpose(run));
         for (const id of refs) {
           if (!this.db.query("SELECT 1 FROM run_context WHERE run_id=? AND kind='thought' AND ref_id=? AND full_read=1").get(run.id,id)) {
             throw new RunForbiddenError("A full read is required before using a thought as evidence");
@@ -40,7 +40,7 @@ export class SqliteCapabilityDispatcher extends SqliteRunAggregate implements Ca
         // Same connection and outer transaction: effect, typed receipt, issued order, exposures and result commit together.
         result = this.operations.executeStep(claim,promptId,operation);
         if (result.type === "development" || result.type === "interpretation") this.trackThought(run.id,result.thought);
-        else if (result.type === "connection") this.trackConnection(run.id,result.connection);
+        else if (result.type === "connection" && result.status !== "not-created") this.trackConnection(run.id,result.connection);
       } else {
         // The discriminated write cases have already been handled; check the remaining read shape.
         const read = this.readRequest(request);

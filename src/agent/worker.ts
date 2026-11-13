@@ -11,6 +11,7 @@ import { SqliteRunOperations } from "../storage/run-operations";
 import { SqliteRunProtocolRepository } from "../storage/run-protocol";
 import { SqliteRunRepository } from "../storage/run";
 import { SqliteRunWorkerState } from "../storage/run-worker";
+import { screeningPolicy } from "../domain/connection-screening";
 import { SqliteAgenticExports } from "../storage/agentic-export";
 import { AgentBindingError, allowsNativeTools, assertBindingPermissions, normalizeBinding } from "./binding";
 import type { AgentBinding, NativePhase, Observation, PersistedPrompt } from "./opencode-adapter";
@@ -34,12 +35,30 @@ export interface WorkerNative {
   /** Cancellation-only sealed metadata; isolated ordinary fixtures need not implement this port. */
   cancelSearch?(identity: SearchCleanupIdentity, authorize: () => void): Promise<SearchCleanupObservation>;
 }
+/** Content supplied to a caller-neutral local pair judgment, not an agent read witness. */
+export interface ScreeningThought {
+  readonly id: string;
+  readonly text: string;
+}
+export interface ScreeningPair {
+  readonly thoughtA: ScreeningThought;
+  readonly thoughtB: ScreeningThought;
+}
+/** The returned probability nominates a candidate; it is not evidence of a connection. */
+export interface ConnectionScreeningPort {
+  /** Stable identity of the judge configuration and question policy, not a process or claim identity. */
+  readonly identity: string;
+  judge(pair: ScreeningPair): Promise<number>;
+}
+const SCREENING_CONCURRENCY = 4;
 interface WorkerOwnershipDependencies extends RunSources {
   readonly db: Database;
   readonly searchClock?: SearchClockDependencies;
   readonly executionOwner?: ExecutionOwnerLease;
   /** Daemon-owned resolver; the worker scopes source IDs before requesting an absolute shared-filesystem path. */
   readonly mediaPath?: (sourceId: string) => Promise<string>;
+  /** Optional local pair judge. External calls must occur outside guarded storage transactions. */
+  readonly connectionScreening?: ConnectionScreeningPort;
 }
 export type WorkerDependencies = WorkerOwnershipDependencies & ({
   /** Bind the supplied bindings.assertActive to its receiver; it fences SQL claims/context and local pause around native calls. */
@@ -203,7 +222,13 @@ export class RunWorker {
         const paths = context === null || (context.job.kind === "weave" && context.job.purpose === "media-title-only")
           ? [] : await this.mediaPaths(owner,run.kind,binding,context.thoughts);
         this.active(owner);
-        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths));
+        const job = context?.job;
+        const subject = context && job?.kind === "weave" && job.purpose !== "media-title-only" && job.purpose !== "reinterpretation"
+          ? context.thoughts.find(thought => thought.id === job.subjectId && thought.kind !== "media-original") : undefined;
+        if (subject && this.state.ownsScreening(runId)) await this.screenConnections(owner,subject.id,this.dependencies.connectionScreening);
+        this.active(owner);
+        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths),
+          (context,nominations) => initialWorkerPrompt(context,binding,paths,nominations));
         stage = "bind-session";
         this.bindings.bind(runId,binding,owner);
         return;
@@ -265,6 +290,40 @@ export class RunWorker {
       try { this.active(claim); this.operations.fail(claim); this.forget(runId); }
       catch (failure) { if (!(failure instanceof RunFenceError)) throw failure; }
     }
+  }
+  private async screenConnections(claim: Claim, subjectId: string, port: ConnectionScreeningPort | undefined): Promise<void> {
+    const candidateIds = this.state.beginScreening(claim,subjectId,port ? screeningPolicy(port.identity) : null);
+    if (!port || candidateIds.length === 0) return;
+    let next = 0, failed = false, failure: unknown;
+    this.logger.verbose("[worker] screening attempt",{runId:claim.runId,generation:claim.generation});
+    const consume = async () => {
+      while (!failed && next < candidateIds.length) {
+        const id = candidateIds[next++];
+        if (id === undefined) return;
+        try {
+          this.localFence(claim.runId);
+          const pair = this.state.screeningPair(claim,subjectId,id);
+          if (!pair) { failed = true; return; }
+          if (pair.subject.text === null || pair.candidate.text === null) throw new Error("Screening eligibility changed");
+          const score = await port.judge({thoughtA:{id:pair.subject.id,text:pair.subject.text},thoughtB:{id:pair.candidate.id,text:pair.candidate.text}});
+          this.localFence(claim.runId);
+          this.state.recordScreeningJudgment(claim,subjectId,id,score);
+        } catch (error) {
+          failed = true; failure = error;
+          if (!(error instanceof RunFenceError)) {
+            try { this.localFence(claim.runId); this.state.screeningFailed(claim); }
+            catch (fence) { failure = fence; }
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(SCREENING_CONCURRENCY,candidateIds.length)},consume));
+    this.active(claim);
+    if (failed) {
+      if (failure instanceof RunFenceError) throw failure;
+      return;
+    }
+    this.logger.verbose("[worker] screening complete",{runId:claim.runId,generation:claim.generation});
   }
   private async process(claim: Claim, step: RunStep, kind: RunKind, binding: AgentBinding): Promise<void> {
     this.active(claim);

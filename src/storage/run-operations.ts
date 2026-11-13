@@ -1,18 +1,18 @@
 import type { Database } from "bun:sqlite";
 import { RunConflictError, RunFenceError, RunForbiddenError, RunNotFoundError, type Claim, type RunRecord, type RunSources } from "../domain/run";
-import { parseStepOperation, stepOperationEnvelope, stepOperationScope, type RunOperations, type StepOperation, type StepOperationResult, type StepReceipt, type WeaveIntent } from "../domain/run-operations";
+import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope, stepOperationScope, type ConnectionOperationResult, type RunOperations, type StepOperation, type StepOperationResult, type StepReceipt, type WeaveIntent } from "../domain/run-operations";
 import { protocolJson } from "../domain/run-protocol";
 import { CreationNotFoundError } from "../domain/creation";
 import { createThought } from "../domain/thought";
-import { createConnection } from "../domain/connection";
 import { createSharedResponse } from "../domain/shared-response";
 import { TitleConflictError, TitleNotFoundError, TitleService } from "../domain/title";
 import { record } from "../domain/validation";
-import { assertWeaveCapability } from "../domain/weave-scheduling";
+import { assertWeaveCapability, connectionDiscoveryIntent } from "../domain/weave-scheduling";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { SqliteTitleRepository } from "./title";
 import { admitWeave } from "./weave-admission";
 import { SqliteSharedResponses } from "./shared-response";
+import type { RunVisibility } from "./run-fences";
 
 /** Typed writes share the original run aggregate, transaction, receipt table, and issued ordering. */
 export class SqliteRunOperations extends SqliteRunAggregate implements RunOperations {
@@ -36,7 +36,10 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       result = { type: data.type, thought };
     } else {
       if (row.thoughtId !== null) throw new RunConflictError("Non-thought receipt has thought membership");
-      if (data.type === "connection") result = { type: "connection", connection: createConnection(data.connection) };
+      if (data.type === "connection" && operation.type === "connection") {
+        result = parseConnectionOperationResult(operation,data);
+        assertConnectionOperationRecord(result,result.status === "not-created" ? null : this.storedConnection(result.connection.id));
+      }
       else if (data.type === "title-fill" && (data.status === "filled" || data.status === "unchanged")) result = { type: "title-fill", status: data.status };
       else throw new RunConflictError("Invalid receipt result");
     }
@@ -50,8 +53,13 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       const step = this.readStep(run.id,promptId);
       if (!step || !["completed","processed"].includes(step.state) ||
           protocolJson(step.envelope) !== protocolJson(stepOperationEnvelope(operation))) throw new RunConflictError("Operation differs from the completed prompt request");
-      const { subjectId, refs } = stepOperationScope(run,this.readWeaveIntent(run.id),operation);
+      const { subjectId, refs } = stepOperationScope(run,this.readWeaveIntent(run.id),operation,this.weavePurpose(run));
       if (refs.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
+      if (operation.type === "connection") for (const id of refs) {
+        if (!this.db.query("SELECT 1 FROM run_context WHERE run_id=? AND kind='thought' AND ref_id=? AND full_read=1").get(run.id,id)) {
+          throw new RunForbiddenError("A full read is required before using a thought as evidence");
+        }
+      }
       const existing = this.stepReceipt(run.id,step.promptId);
       if (existing) {
         if (protocolJson(existing.operation) !== protocolJson(operation)) throw new RunConflictError("Receipt proposal differs");
@@ -66,14 +74,17 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
           throw new RunConflictError("Source already has an initial interpretation; use Evolve");
         }
       }
-      const effect = this.apply(operation,subjectId);
+      const effect = operation.type === "connection" ? this.connect(operation,visible) : this.apply(operation,subjectId);
       const thoughtId = effect.type === "development" || effect.type === "interpretation" ? effect.thought.id : null;
       this.db.run(`INSERT INTO run_operation_receipts (run_id,operation_id,operation_json,thought_id,result_json,format) VALUES (?,?,?,?,?,'step')`,
         [run.id,step.promptId,protocolJson(operation),thoughtId,protocolJson(effect)]);
-      if (thoughtId !== null) this.appendIssued(run.id,step.promptId,thoughtId);
+      if (thoughtId !== null) {
+        this.appendIssued(run.id,step.promptId,thoughtId);
+        admitWeave(this.db,this.sources,connectionDiscoveryIntent(thoughtId,run.id));
+      }
       for (const id of refs) this.track(run.id,{kind:"thought",id});
       if (thoughtId !== null) this.track(run.id,{kind:"thought",id:thoughtId});
-      if (effect.type === "connection") this.track(run.id,{kind:"connection",id:effect.connection.id});
+      if (effect.type === "connection" && effect.status !== "not-created") this.trackConnection(run.id,effect.connection);
       return effect;
     });
     this.logger.verbose("[run storage] step operation confirmed", { runId: claim.runId, promptId, type: result.type, generation: claim.generation });
@@ -83,10 +94,25 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
     return this.db.query(`SELECT 1 FROM run_issued_thoughts issued JOIN thoughts t ON t.id=issued.thought_id
       WHERE issued.run_id=? AND t.parent_id=? AND t.kind='ai-interpretation'`).get(runId,subjectId) !== null;
   }
-  private apply(operation: StepOperation, subjectId: string | null): StepOperationResult {
+  /** Caller has already fenced claim/prompt/purpose, visibility and all full-read witnesses in this immediate transaction. */
+  private connect(operation: Extract<StepOperation,{type:"connection"}>, visible: RunVisibility): ConnectionOperationResult {
+    const key = [operation.fromId,operation.toId,operation.category];
+    // Only identity metadata crosses this suppression boundary. Never return or witness a rejected relation.
+    if (this.db.query(`SELECT 1 FROM connections c JOIN rejected_connections r ON r.connection_id=c.id
+      WHERE c.from_id=? AND c.to_id=? AND c.category=? LIMIT 1`).get(...key)) return {type:"connection",status:"not-created"};
+    const matches = this.db.query<{id:string},[string,string,string]>(`SELECT id FROM connections
+      WHERE from_id=? AND to_id=? AND category=? ORDER BY rowid`).all(operation.fromId,operation.toId,operation.category);
+    for (const match of matches) {
+      const connection = visible({kind:"connection",id:match.id});
+      if (connection && "fromId" in connection) return {type:"connection",status:"already-present",connection};
+    }
+    if (matches.length) return {type:"connection",status:"not-created"};
+    try { return {type:"connection",status:"created",connection:this.creation(this.sources).connect("ai",operation)}; }
+    catch (error) { if (error instanceof CreationNotFoundError) throw new RunNotFoundError(); throw error; }
+  }
+  private apply(operation: Exclude<StepOperation,{type:"connection"}>, subjectId: string | null): StepOperationResult {
     try {
       if (operation.type === "development") return { type: "development", thought: this.creation(this.sources).develop("ai",operation.parentId,operation) };
-      if (operation.type === "connection") return { type: "connection", connection: this.creation(this.sources).connect("ai",operation) };
       if (subjectId === null) throw new RunConflictError("Weave subject is unknown");
       if (operation.type === "interpretation") return { type: "interpretation", thought: this.creation(this.sources).interpret("ai",subjectId,operation) };
       try {
@@ -113,6 +139,12 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       // expose an outcome that may describe it to AI through another association.
       const issued = this.issued(run.id);
       const purpose = this.weavePurpose(run);
+      if (purpose === "connection-only") {
+        if (issued.length) throw new RunForbiddenError("Discovery cannot publish issued knowledge");
+        // The canonical complete envelope is internal history, never a searchable/public Full reply.
+        this.db.run("UPDATE runs SET status='completed',generation=generation+1,cancellation_state='none' WHERE id=?",[run.id]);
+        return;
+      }
       if (purpose === "media-title-only") {
         if (issued.length) throw new RunForbiddenError("Media title-only work cannot publish issued knowledge");
         // A later complete envelope cannot launder a retained forbidden request or a legacy receipt.

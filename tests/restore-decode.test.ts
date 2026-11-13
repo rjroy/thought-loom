@@ -79,7 +79,7 @@ test("table decoding rejects noncanonical cells, order, key/rowid violations and
 });
 
 test("manifest decoding requires the complete canonical inventory and exact typed sequences", () => {
-  expect(backupTableShapes.map(table => table.name)).toEqual(currentNames);
+  expect(backupTableShapes.map(table => table.name)).toEqual([...currentNames,"run_screening_pairs","run_screening_passes"].sort());
   const manifest: BackupManifest = { appSchema:"thoughtloom-logical-2", mediaStoreId: null, mediaMarker: null, originals: [],
     tables: tableEntries(currentNames),
     sequences: [{ name: "import_documents", value: 9223372036854775807n }],

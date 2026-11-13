@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AgentUncertainError, createPublicClient, OpenCodeAdapter, type AgentBinding, type NativeSession, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
-import { RunWorker, type WorkerNative } from "../src/agent/worker";
+import { RunWorker, type ConnectionScreeningPort, type ScreeningPair, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
 import { SearchService } from "../src/domain/search";
@@ -83,6 +83,267 @@ async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: st
   // Test harness bound only; the worker must not impose an effort quota.
   for (let i = 0; i < 40 && !["completed", "interrupted", "failed"].includes(f.runs.get(runId)?.status ?? ""); i++) await instance.tick(runId);
 }
+
+test("ordinary weave screens every eligible other thought before nominating threshold matches to Weaver", async () => fixture(async f => {
+  const candidates = Array.from({length:32}, (_, index) => ({id:`candidate-${index}`, text:`distinct owned candidate text ${index}`}));
+  for (const candidate of [...candidates, {id:"rejected-candidate",text:"rejected owned content"}]) {
+    f.store.saveThought({...candidate, title:null, author:"user", kind:"captured-original", createdAt:now(), origin:"fixture", parentId:null, sourceIds:[]});
+  }
+  f.rejection.rejectThought("user","rejected-candidate");
+  const run = f.ops.admitWeave("user", {subjectId:"root",triggerId:"screen-all"});
+  const native = new OwnedNative(new SqliteAgentBindings(f.db), () => complete("no connection warranted"));
+  const pairs: ScreeningPair[] = [];
+  const connectionScreening: ConnectionScreeningPort = {identity:"owned-judge-v1",async judge(pair) {
+    expect(native.submitted).toHaveLength(0);
+    expect(f.db.inTransaction).toBe(false);
+    pairs.push(pair);
+    return pair.thoughtB.id === "candidate-0" ? 0.60 : pair.thoughtB.id === "candidate-1" ? 0.599 : 0.1;
+  }};
+  const instance = new RunWorker({db:f.db,id:f.id,now,bindingFor:binding,native:() => native,connectionScreening});
+  try {
+    for (let i=0;i<12 && native.submitted.length === 0;i++) await instance.tick(run.id);
+    expect(pairs.map(pair => pair.thoughtB.id).sort()).toEqual(candidates.map(candidate => candidate.id).sort());
+    expect(pairs.every(pair => pair.thoughtA.id === "root" && pair.thoughtA.text === "owned subject")).toBe(true);
+    expect(pairs.map(pair => pair.thoughtB.text).sort()).toEqual(candidates.map(candidate => candidate.text).sort());
+    expect(native.submitted).toHaveLength(1);
+    const input = native.submitted[0]?.input ?? "";
+    const prompt = JSON.parse(input) as {nominations: {id:string;text:string}[]};
+    expect(prompt.nominations.map(thought => thought.id)).toEqual(["candidate-0"]);
+    expect(prompt.nominations[0]?.text).toBe("distinct owned candidate text 0");
+    expect(JSON.stringify(prompt.nominations)).not.toMatch(/probability|score|noul/i);
+    expect(input).not.toContain('0.599');
+    expect(input).toMatch(/search/i);
+    expect(input).toMatch(/no (?:useful )?(?:connection|findings)/i);
+    await drive(instance,f,run.id);
+    expect(f.runs.get(run.id)?.status).toBe("completed");
+    expect(f.runs.reply(run.id)?.text).toBe("no connection warranted");
+    expect(f.db.query("SELECT COUNT(*) AS count FROM connections").get()).toEqual({count:0});
+  } finally { instance.pause(); await instance.drain(); }
+}));
+
+test("rejection during a held screening call fences prompt preparation and native submission", async () => fixture(async f => {
+  f.store.saveThought({id:"candidate",text:"owned candidate",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = f.ops.admitWeave("user",{subjectId:"root",triggerId:"screen-rejection"});
+  const native = new OwnedNative(new SqliteAgentBindings(f.db),() => complete("unused"));
+  let enter: () => void = () => {};
+  let release: () => void = () => {};
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const connectionScreening: ConnectionScreeningPort = {identity:"owned-judge-v1",async judge() { enter(); await held; return 1; }};
+  const instance = new RunWorker({db:f.db,id:f.id,now,bindingFor:binding,native:() => native,connectionScreening});
+  const tick = instance.tick(run.id);
+  try {
+    await entered;
+    f.rejection.rejectThought("user","candidate");
+    release(); await tick;
+    expect(f.runs.get(run.id)?.status).toBe("interrupted");
+    expect(f.steps.steps(run.id)[0]?.input).toBeNull();
+    expect(native.submitted).toEqual([]);
+  } finally { release(); await tick; instance.pause(); await instance.drain(); }
+}));
+
+test("a new eligible thought during screening causes search fallback rather than a partial nomination set", async () => fixture(async f => {
+  const save = (id:string) => f.store.saveThought({id,text:`owned ${id}`,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  save("first");
+  const run = f.ops.admitWeave("user",{subjectId:"root",triggerId:"screen-growth"});
+  const native = new OwnedNative(new SqliteAgentBindings(f.db),() => complete("unused"));
+  let enter: () => void = () => {}, release: () => void = () => {};
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const records: LogRecord[] = [];
+  const connectionScreening: ConnectionScreeningPort = {identity:"owned-judge-v1",async judge() { enter(); await held; return 1; }};
+  const instance = new RunWorker({db:f.db,id:f.id,now,logger:createLogger(undefined,record => records.push(record)),bindingFor:binding,native:() => native,connectionScreening});
+  const tick = instance.tick(run.id);
+  try {
+    await entered;
+    save("late");
+    release(); await tick;
+    for (let i=0;i<12 && native.submitted.length === 0;i++) await instance.tick(run.id);
+    const prompt = JSON.parse(native.submitted[0]?.input ?? "null") as {nominations?: unknown; instructions: string[]};
+    expect(prompt.nominations).toBeUndefined();
+    expect(prompt.instructions.join(" ")).toContain("Actively search existing thinking for promising candidates");
+    expect(records.some(record => record.level === "error")).toBe(true);
+  } finally { release(); await tick; instance.pause(); await instance.drain(); }
+}));
+
+test("screening failure logs a sanitized error and retains the legacy search-driven Weaver prompt", async () => fixture(async f => {
+  f.store.saveThought({id:"candidate",text:"private candidate content",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const records: LogRecord[] = [], logger = createLogger(undefined,record => records.push(record));
+  const run = f.ops.admitWeave("user",{subjectId:"root",triggerId:"screen-fallback"});
+  const native = new OwnedNative(new SqliteAgentBindings(f.db),() => complete("no findings"));
+  let calls = 0;
+  const connectionScreening: ConnectionScreeningPort = {identity:"owned-judge-v1",async judge() { calls++; throw new Error("private transport secret"); }};
+  const instance = new RunWorker({db:f.db,id:f.id,now,logger,bindingFor:binding,native:() => native,connectionScreening});
+  try {
+    for (let i=0;i<12 && native.submitted.length === 0;i++) await instance.tick(run.id);
+    expect(calls).toBeGreaterThan(0);
+    expect(native.submitted).toHaveLength(1);
+    const input = native.submitted[0]?.input ?? "";
+    expect(input).toContain("Actively search existing thinking for promising candidates");
+    expect(input).not.toMatch(/exhaustive(?:ly)? screen/i);
+    expect(records.some(record => record.level === "error")).toBe(true);
+    const logs = JSON.stringify(records);
+    for (const secret of ["private transport secret","private candidate content","owned subject"]) expect(logs).not.toContain(secret);
+  } finally { instance.pause(); await instance.drain(); }
+}));
+
+async function screeningRestartFixture(action: (f: {
+  readonly db: Database; readonly id: () => string; readonly store: SqliteStore;
+  reopen(): void;
+}) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join("/tmp/opencode","screening-restart-"));
+  const path = join(dir,"owned.sqlite");
+  let db = new Database(path), sequence = 0;
+  const id = () => `restart-${++sequence}`;
+  try {
+    migrate(db);
+    new SqliteStore(db).saveThought({id:"root",text:"owned subject",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+    await action({get db() { return db; },id,get store() { return new SqliteStore(db); },reopen() { db.close(); db = new Database(path); }});
+  } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
+}
+
+function screeningRestartWorker(db: Database, id: () => string, connectionScreening: Omit<ConnectionScreeningPort,"identity"> & {readonly identity?:string}, log?: (record: LogRecord) => void) {
+  const native = new OwnedNative(new SqliteAgentBindings(db),() => complete("no findings"));
+  return {native,instance:new RunWorker({db,id,now,logger:createLogger("verbose",log ?? (() => {})),bindingFor:binding,native:() => native,
+    connectionScreening:{identity:"owned-judge-v1",...connectionScreening}})};
+}
+
+async function enteredWithin(promise: Promise<void>): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([promise,new Promise<never>((_,reject) => { timeout = setTimeout(() => reject(new Error("Owned screening boundary not reached")),2000); })]); }
+  finally { if (timeout !== undefined) clearTimeout(timeout); }
+}
+
+test("durable screening progress resumes only unfinished judgments after worker and database restart", async () => screeningRestartFixture(async f => {
+  for (let i=0;i<5;i++) f.store.saveThought({id:`candidate-${i}`,text:`owned candidate ${i}`,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = new SqliteRunOperations(f.db,{id:f.id,now}).admitWeave("user",{subjectId:"root",triggerId:"durable-screen"});
+  let enter: () => void = () => {}, release: () => void = () => {};
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const seen: string[] = [];
+  let checkpoint: () => void = () => {};
+  const checkpointed = new Promise<void>(resolve => { checkpoint = resolve; });
+  let nominatedId = "";
+  const first = screeningRestartWorker(f.db,f.id,{async judge(pair) {
+    seen.push(pair.thoughtB.id);
+    if (seen.length === 1) nominatedId = pair.thoughtB.id;
+    if (seen.length === 5) { enter(); await held; }
+    return pair.thoughtB.id === nominatedId ? 0.75 : 0.1;
+  }},record => {
+    if (record.message === "[run storage] record screening judgment succeeded" &&
+        (f.db.query<{n:number},[string]>("SELECT count(*) AS n FROM run_screening_pairs WHERE run_id=? AND judgment_json IS NOT NULL").get(run.id)?.n ?? 0) === 4) checkpoint();
+  });
+  const tick = first.instance.tick(run.id);
+  try {
+    await enteredWithin(entered);
+    await enteredWithin(checkpointed);
+    expect(seen).toHaveLength(5);
+    expect(f.db.query("SELECT judgment_json FROM run_screening_pairs WHERE run_id=? AND candidate_id=?").get(run.id,nominatedId)).toEqual({judgment_json:'{"score":0.75}'});
+    expect(new SqliteRunProtocolRepository(f.db).steps(run.id)[0]?.input).toBeNull();
+    first.instance.pause(); release(); await tick; await first.instance.drain();
+    f.reopen();
+    const resumedCalls: string[] = [];
+    const resumed = screeningRestartWorker(f.db,f.id,{async judge(pair) { resumedCalls.push(pair.thoughtB.id); return 0.1; }});
+    try {
+      for (let i=0;i<12 && resumed.native.submitted.length === 0;i++) await resumed.instance.tick(run.id);
+      expect(resumedCalls).toEqual([seen[4]]);
+      expect(resumed.native.submitted).toHaveLength(1);
+      const prompt = JSON.parse(resumed.native.submitted[0]?.input ?? "null") as {nominations:{id:string}[]};
+      expect(prompt.nominations.map(item => item.id)).toEqual([nominatedId]);
+    } finally { resumed.instance.pause(); await resumed.instance.drain(); }
+  } finally { release(); await tick; first.instance.pause(); await first.instance.drain(); }
+}));
+
+test("durable screening failure remains fallback after restart without repeating failed judgments", async () => screeningRestartFixture(async f => {
+  for (let i=0;i<2;i++) f.store.saveThought({id:`candidate-${i}`,text:`owned candidate ${i}`,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = new SqliteRunOperations(f.db,{id:f.id,now}).admitWeave("user",{subjectId:"root",triggerId:"durable-fallback"});
+  let enter: () => void = () => {}, release: () => void = () => {}, fail: () => void = () => {}, failed: () => void = () => {};
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const failureGate = new Promise<void>(resolve => { fail = resolve; });
+  const failureReturned = new Promise<void>(resolve => { failed = resolve; });
+  let checkpoint: () => void = () => {};
+  const checkpointed = new Promise<void>(resolve => { checkpoint = resolve; });
+  const first = screeningRestartWorker(f.db,f.id,{async judge(pair) {
+    if (pair.thoughtB.id === "candidate-0") { await failureGate; failed(); throw new Error("owned outage"); }
+    enter(); await held; return 0.9;
+  }},record => {
+    if (record.message === "[run storage] record screening failure succeeded" &&
+        f.db.query<{status:string},[string]>("SELECT status FROM run_screening_passes WHERE run_id=?").get(run.id)?.status === "fallback") checkpoint();
+  });
+  const tick = first.instance.tick(run.id);
+  try {
+    await enteredWithin(entered);
+    fail(); await enteredWithin(failureReturned);
+    await enteredWithin(checkpointed);
+    expect(f.db.query("SELECT status,failure_code FROM run_screening_passes WHERE run_id=?").get(run.id)).toEqual({status:"fallback",failure_code:"screening-unavailable"});
+    expect(new SqliteRunProtocolRepository(f.db).steps(run.id)[0]?.input).toBeNull();
+    first.instance.pause(); release(); await tick; await first.instance.drain();
+    f.reopen();
+    const resumedCalls: string[] = [];
+    const resumed = screeningRestartWorker(f.db,f.id,{async judge(pair) { resumedCalls.push(pair.thoughtB.id); return 1; }});
+    try {
+      for (let i=0;i<12 && resumed.native.submitted.length === 0;i++) await resumed.instance.tick(run.id);
+      expect(resumedCalls).toEqual([]);
+      expect(resumed.native.submitted).toHaveLength(1);
+      const prompt = JSON.parse(resumed.native.submitted[0]?.input ?? "null") as {nominations?:unknown;instructions:string[]};
+      expect(prompt.nominations).toBeUndefined();
+      expect(prompt.instructions.join(" ")).toContain("Actively search existing thinking for promising candidates");
+    } finally { resumed.instance.pause(); await resumed.instance.drain(); }
+  } finally { fail(); release(); await tick; first.instance.pause(); await first.instance.drain(); }
+}));
+
+test("prepared screening prompt and identity survive restart with changed screening configuration", async () => screeningRestartFixture(async f => {
+  f.store.saveThought({id:"candidate",text:"owned candidate",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = new SqliteRunOperations(f.db,{id:f.id,now}).admitWeave("user",{subjectId:"root",triggerId:"durable-prompt"});
+  let initialCalls = 0;
+  const first = screeningRestartWorker(f.db,f.id,{async judge() { initialCalls++; return 0.9; }});
+  try {
+    await first.instance.tick(run.id);
+    expect(initialCalls).toBe(1);
+    const step = new SqliteRunProtocolRepository(f.db).steps(run.id)[0];
+    if (!step || step.input === null) throw new Error("Expected owned prepared screening prompt");
+    const saved = {promptId:step.promptId,input:step.input};
+    expect(first.native.submitted).toEqual([]);
+    first.instance.pause(); await first.instance.drain();
+    f.reopen();
+    let changedCalls = 0;
+    const resumed = screeningRestartWorker(f.db,f.id,{identity:"changed-judge-v2",async judge() { changedCalls++; throw new Error("changed owned configuration must not be used"); }});
+    try {
+      for (let i=0;i<12 && resumed.native.submitted.length === 0;i++) await resumed.instance.tick(run.id);
+      expect(changedCalls).toBe(0);
+      expect(resumed.native.submitted).toEqual([saved]);
+      const stepAfter = new SqliteRunProtocolRepository(f.db).steps(run.id)[0];
+      expect({promptId:stepAfter?.promptId,input:stepAfter?.input}).toEqual(saved);
+    } finally { resumed.instance.pause(); await resumed.instance.drain(); }
+  } finally { first.instance.pause(); await first.instance.drain(); }
+}));
+
+test("late screening judgment from a stale owner cannot overwrite its successor's prompt", async () => screeningRestartFixture(async f => {
+  f.store.saveThought({id:"candidate",text:"owned candidate",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = new SqliteRunOperations(f.db,{id:f.id,now}).admitWeave("user",{subjectId:"root",triggerId:"stale-screen-owner"});
+  let enter: () => void = () => {}, release: () => void = () => {};
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const first = screeningRestartWorker(f.db,f.id,{async judge() { enter(); await held; return 1; }});
+  const tick = first.instance.tick(run.id);
+  let successor: ReturnType<typeof screeningRestartWorker> | undefined;
+  try {
+    await enteredWithin(entered);
+    successor = screeningRestartWorker(f.db,f.id,{async judge() { return 0; }});
+    await successor.instance.tick(run.id);
+    const prepared = new SqliteRunProtocolRepository(f.db).steps(run.id)[0];
+    if (!prepared || prepared.input === null) throw new Error("Expected successor prepared prompt");
+    expect((JSON.parse(prepared.input) as {nominations:unknown[]}).nominations).toEqual([]);
+    release(); await tick;
+    const after = new SqliteRunProtocolRepository(f.db).steps(run.id)[0];
+    expect({promptId:after?.promptId,input:after?.input}).toEqual({promptId:prepared.promptId,input:prepared.input});
+    expect(first.native.submitted).toEqual([]);
+  } finally {
+    release(); await tick; first.instance.pause(); await first.instance.drain();
+    successor?.instance.pause(); await successor?.instance.drain();
+  }
+}));
 
 test("default-level worker diagnostics classify initial preparation failures without exposing private data", async () => fixture(async f => {
   const records: LogRecord[] = [];
@@ -164,6 +425,7 @@ test("weave and Evolve render discovery guidance alongside the shared evidence f
   for (const phrase of ["claims, themes, and implications", "Actively search", "beyond lexical similarity", "snippets as discovery leads, not evidence", "Fully read promising candidate thoughts", "already fully read and needs no redundant reread", "does not read its endpoint thoughts", "supports, contradicts, extends, or related", "intended direction", "explain concretely", "only fully read supporting thoughts", "finding no useful connection is valid", "do not reconstruct it from indirect provenance"]) expect(text).toContain(phrase);
   expect(weave.role).toContain("fill an absent title");
   const evolve = render({ kind: "evolve", contributionId: "input", continuationId: null });
+  const discovery = render({ kind:"weave",subjectId:"subject",purpose:"connection-only" });
   const exported = render({ kind: "export", request: "fixture question", effort: "standard" });
   expect(evolve.instructions.join(" ")).toMatch(/search.*candidate/i);
   expect(evolve.instructions.join(" ")).toMatch(/fully read/i);
@@ -171,6 +433,10 @@ test("weave and Evolve render discovery guidance alongside the shared evidence f
   expect(evolve.instructions.join(" ")).not.toMatch(/sibling interpretations|source-informed interpretation|bare list of links/i);
   expect(evolve.capabilities.map(item => item.capability)).toEqual(expect.arrayContaining(["title-fill", "search", "readThought", "connection", "development"]));
   expect(evolve.capabilities.map(item => item.capability)).not.toContain("interpretation");
+  for (const prompt of [weave,evolve,discovery]) {
+    const guidance = prompt.instructions.join(" ");
+    for (const phrase of ["created records a new AI relation", "already-present returns an existing eligible relation", "original identity, explanation and attribution", "not-created is an opaque no-op", "retry an equivalent proposal", "same directed endpoints and category", "full reads before any outcome"]) expect(guidance).toContain(phrase);
+  }
   expect(Object.keys(evolve.capabilities.find(item => item.capability === "title-fill")?.argumentsSchema.properties ?? {})).toEqual(["title"]);
   expect(exported.instructions.join(" ")).not.toContain("Actively search existing thinking for promising candidates");
 });
@@ -334,7 +600,9 @@ for (const withDevelopment of [false, true]) test(`Evolve enriches its contribut
   for (const [index, item] of issued.entries()) expect(f.store.getThought(item.id)).toMatchObject({ text: index === 0 ? "first development" : "latest development", parentId: contributionId, author: "ai", kind: "developing-idea" });
   expect(f.db.query("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(contributionId)).toEqual({ n: 0 });
   expect(f.runs.reply(admission.run.id)).toEqual({ id: expect.any(String), text: "full conversational reply", role: withDevelopment ? "addendum" : "fallback", state: "complete", thoughtIds: withDevelopment ? issued.map(item => item.id) : [contributionId] });
-  expect(f.db.query("SELECT weave_subject_id AS subjectId,weave_trigger_id AS triggerId FROM runs WHERE kind='weave'").all()).toEqual(withDevelopment ? [{ subjectId: issued.at(-1)?.id, triggerId: `evolve:${admission.run.id}` }] : []);
+  expect(f.db.query("SELECT weave_subject_id AS subjectId,weave_trigger_id AS triggerId FROM runs WHERE kind='weave' AND weave_trigger_id NOT LIKE 'connection-discovery:%'").all()).toEqual(withDevelopment ? [{ subjectId: issued.at(-1)?.id, triggerId: `evolve:${admission.run.id}` }] : []);
+  expect(f.db.query("SELECT weave_subject_id AS subjectId,weave_trigger_id AS triggerId FROM runs WHERE kind='weave' AND weave_trigger_id LIKE 'connection-discovery:%' ORDER BY rowid").all())
+    .toEqual([contributionId,...issued.map(item => item.id)].map(subjectId => ({subjectId,triggerId:`connection-discovery:${admission.run.id}`})));
 }));
 
 test("worker persists scoped initial context and ordered development result before the next prompt", async () => fixture(async f => {

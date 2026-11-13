@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { RunStatus } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
-import { resolveWeavePurpose } from "../domain/weave-scheduling";
+import { interpretationPurpose, resolveWeavePurpose } from "../domain/weave-scheduling";
 import { recordedWeaveCancellationSafe } from "./run-cancellation";
 import { isRunRestoreFenced } from "./restore-fences";
 
@@ -16,7 +16,7 @@ export interface SubjectWeaveWork {
 export type WeaveBlockReason = "work-active" | "work-unsettled" | "work-unverified";
 const active = (status: RunStatus): boolean => ["queued","submitting","running","uncertain"].includes(status);
 
-/** Existing insertion order and durable journal facts, not an in-memory subject owner or another queue. */
+/** Interpretation-capable work only, ordered by existing journal facts, not another queue. */
 export function subjectWeaveWork(db: Database, subjectId: string, kind: MaterialKind): readonly SubjectWeaveWork[] {
   const rows = db.query<SubjectWeaveWork & {triggerId:string},[string]>(`SELECT r.id,r.status,
     r.weave_trigger_id AS triggerId,r.cancellation_state AS cancellation,r.weave_retired_at AS retiredAt,
@@ -27,7 +27,7 @@ export function subjectWeaveWork(db: Database, subjectId: string, kind: Material
       (r.status IN ('submitting','running','uncertain') AND NOT EXISTS(SELECT 1 FROM run_steps s WHERE s.run_id=r.id
         AND s.position=(SELECT MAX(position) FROM run_steps WHERE run_id=r.id) AND s.native_state='completed'))) AS nativePending
     FROM runs r WHERE r.kind='weave' AND r.weave_subject_id=? ORDER BY r.rowid`).all(subjectId);
-  return rows.filter(row => resolveWeavePurpose(kind,row.triggerId) !== "media-title-only");
+  return rows.filter(row => interpretationPurpose(resolveWeavePurpose(kind,row.triggerId)));
 }
 
 export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): WeaveBlockReason | null {
@@ -48,7 +48,7 @@ export function weaveDispatchAllowed(db: Database, runId: string): boolean {
   if (!run) return false;
   if (run.kind !== "weave" || run.subjectId === null || run.triggerId === null) return true; // Never infer an unknown legacy subject.
   if (run.materialKind === null) return false;
-  if (resolveWeavePurpose(run.materialKind,run.triggerId) === "media-title-only") return true;
+  if (!interpretationPurpose(resolveWeavePurpose(run.materialKind,run.triggerId))) return true;
   const work = subjectWeaveWork(db,run.subjectId,run.materialKind).filter(item => item.retiredAt === null && !isRunRestoreFenced(db,item.id));
   if (work.some(item => item.cancellation === "pending" || (!active(item.status) && weaveWorkBlockReason(db,item) !== null))) return false;
   const candidates = work.filter(item => active(item.status));

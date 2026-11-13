@@ -7,7 +7,7 @@ import { requireExecutionRun, requireOrdinaryRun, RunConflictError, RunFenceErro
 import { SqliteSharedResponses } from "./shared-response";
 import { migrate } from "./sqlite";
 import { SqliteRunAggregate } from "./run-aggregate";
-import { evolveWeaveIntent } from "../domain/weave-scheduling";
+import { connectionDiscoveryIntent, connectionDiscoveryTrigger, evolveWeaveIntent } from "../domain/weave-scheduling";
 import { admitWeave } from "./weave-admission";
 import { searchRevision } from "../domain/search-session-guards";
 import { weaveDispatchAllowed } from "./weave-work";
@@ -34,6 +34,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
         catch (error) { if (error instanceof CreationNotFoundError) throw new RunNotFoundError(); throw error; }
       }
       this.insertRun(run);
+      if (contribution) admitWeave(this.db,this.sources,connectionDiscoveryIntent(contribution.id,run.id));
     });
   }
   claim(id: string): Claim {
@@ -65,8 +66,17 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     if (isRunRestoreFenced(this.db,id)) return; // Historical control read, never ordinary interruption/cancellation intent.
     const run = this.require(id);
     if (run.kind === "import" && isImportRunRestoreFenced(this.db,run.id)) return;
-    if (["completed","interrupted","failed"].includes(run.status)) return;
-    this.finalInterrupt(run);
+    if (!["completed","interrupted","failed"].includes(run.status)) this.finalInterrupt(run);
+    if (run.kind === "evolve") {
+      const trigger = connectionDiscoveryTrigger(run.id);
+      const dependents = this.db.query<{id:string},[string]>(`SELECT r.id FROM runs r WHERE r.kind='weave' AND r.weave_trigger_id=?
+        AND r.status IN ('queued','submitting','running','uncertain') AND r.weave_retired_at IS NULL
+        AND NOT EXISTS(SELECT 1 FROM restore_fences f WHERE f.entity_kind='run' AND f.entity_id=r.id)`).all(trigger);
+      for (const child of dependents) {
+        this.finalInterrupt(this.require(child.id));
+        this.logger.info("[run storage] related discovery interruption applied in transaction",{runId:child.id,originRunId:run.id,reason:"origin-stopped"});
+      }
+    }
   }); }
   expose(claim: Claim, ref: ContextRef): ContextValue | null { return this.transaction("expose", claim.runId, () => {
     assertRunNotRestoreFenced(this.db,claim.runId);
@@ -115,6 +125,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
         const thought = this.creation(this.sources).develop("ai", operation.parentId, { text: operation.text, sourceIds: operation.sourceIds });
         this.db.run("INSERT INTO run_operation_receipts (run_id,operation_id,operation_json,thought_id,result_json) VALUES (?,?,?,?,?)", [claim.runId,operation.id,JSON.stringify(operation),thought.id,JSON.stringify(thought)]);
         this.appendIssued(claim.runId,operation.id,thought.id);
+        admitWeave(this.db,this.sources,connectionDiscoveryIntent(thought.id,run.id));
         // The returned result exposes these references too; later publication cannot reuse rejected provenance.
         for (const id of [operation.parentId,...operation.sourceIds,thought.id]) this.track(claim.runId,{kind:"thought",id});
         return { thought };

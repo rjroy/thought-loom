@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import type { RawCell, RawRow, TableShape } from "./format";
 import { validateSourceSchema } from "./schema";
 import { check, type Guard } from "./capture-files";
+import { parseScreeningJudgment, parseScreeningPolicy } from "../domain/connection-screening";
+import { connectionDiscoveryPrefix, directConnectionDiscoveryPrefix } from "../domain/weave-scheduling";
+import { createConnection } from "../domain/connection";
+import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
+import { parseEnvelope, protocolJson } from "../domain/run-protocol";
 
 export interface CapturedTable { readonly shape: TableShape; readonly rows: readonly RawRow[] }
 export interface SqlSnapshot {
@@ -30,10 +35,37 @@ function polymorphic(db: Database, table: string, kind: string, id: string): voi
 export function validateRecords(db: Database): void {
   check(db.query<{ integrity_check: string }, []>("PRAGMA main.integrity_check(1)").get()?.integrity_check === "ok", "inconsistent-source");
   noRows(db, "PRAGMA main.foreign_key_check");
+  noRows(db,`SELECT 1 FROM main.runs d LEFT JOIN main.thoughts t ON t.id=d.weave_subject_id
+    WHERE d.kind='weave' AND substr(d.weave_trigger_id,1,${connectionDiscoveryPrefix.length})='${connectionDiscoveryPrefix}' AND (
+      t.kind='media-original' OR NOT EXISTS(SELECT 1 FROM main.runs origin
+        WHERE origin.id=substr(d.weave_trigger_id,${connectionDiscoveryPrefix.length + 1}) AND origin.kind IN ('weave','evolve')
+          AND ((origin.kind='evolve' AND origin.input_thought_id=d.weave_subject_id) OR EXISTS(
+            SELECT 1 FROM main.run_issued_thoughts i WHERE i.run_id=origin.id AND i.thought_id=d.weave_subject_id)))
+      OR EXISTS(SELECT 1 FROM main.run_issued_thoughts i WHERE i.run_id=d.id)
+      OR EXISTS(SELECT 1 FROM main.run_replies r WHERE r.run_id=d.id AND (r.draft_json IS NOT NULL OR r.response_id IS NOT NULL))) LIMIT 1`);
+  noRows(db,`SELECT 1 FROM main.runs d LEFT JOIN main.thoughts t ON t.id=d.weave_subject_id
+    WHERE d.kind='weave' AND substr(d.weave_trigger_id,1,${directConnectionDiscoveryPrefix.length})='${directConnectionDiscoveryPrefix}' AND (
+      d.weave_subject_id IS NOT substr(d.weave_trigger_id,${directConnectionDiscoveryPrefix.length + 1}) OR t.parent_id IS NULL
+      OR NOT ((t.kind='user-contribution' AND t.author='user' AND t.origin='contribution' AND NOT EXISTS(SELECT 1 FROM main.thought_sources s WHERE s.thought_id=t.id))
+        OR (t.kind='developing-idea' AND t.author='ai' AND t.origin='development'))
+      OR EXISTS(SELECT 1 FROM main.runs r WHERE r.input_thought_id=t.id)
+      OR EXISTS(SELECT 1 FROM main.run_issued_thoughts i WHERE i.thought_id=t.id OR i.run_id=d.id)
+      OR EXISTS(SELECT 1 FROM main.run_replies r WHERE r.run_id=d.id AND (r.draft_json IS NOT NULL OR r.response_id IS NOT NULL))) LIMIT 1`);
   for (const [table, owner] of [["thought_sources", "thought_id"], ["connection_sources", "connection_id"], ["response_thoughts", "response_id"],
     ["run_steps", "run_id"], ["run_issued_thoughts", "run_id"], ["import_document_parts", "document_id"], ["markdown_import_files", "import_id"],
     ["search_turns", "session_id"], ["search_messages", "session_id"], ["search_discoveries", "session_id"]]) ordered(db, table, owner);
   ordered(db, "import_document_parts", "document_id", "thought_ordinal", "WHERE kind='thought'");
+  ordered(db,"run_screening_pairs","run_id");
+  noRows(db,`SELECT 1 FROM main.run_screening_passes p JOIN main.runs r ON r.id=p.run_id
+    JOIN main.thoughts t ON t.id=p.subject_id JOIN main.run_steps s ON s.run_id=r.id AND s.position=0
+    WHERE r.kind!='weave' OR r.weave_subject_id IS NOT p.subject_id OR t.kind='media-original'
+      OR p.candidate_count!=(SELECT count(*) FROM main.run_screening_pairs j WHERE j.run_id=p.run_id)
+      OR (p.status='collecting' AND s.input IS NOT NULL)
+      OR (p.status='complete' AND (s.input IS NULL OR EXISTS(SELECT 1 FROM main.run_screening_pairs j WHERE j.run_id=p.run_id AND j.judgment_json IS NULL))) LIMIT 1`);
+  noRows(db,`SELECT 1 FROM main.run_screening_pairs j JOIN main.run_screening_passes p ON p.run_id=j.run_id
+    JOIN main.thoughts t ON t.id=j.candidate_id WHERE t.kind='media-original' OR j.candidate_id=p.subject_id
+      OR (j.judgment_json IS NOT NULL AND (NOT EXISTS(SELECT 1 FROM main.run_context c WHERE c.run_id=j.run_id AND c.kind='thought' AND c.ref_id=j.candidate_id)
+        OR NOT EXISTS(SELECT 1 FROM main.run_context c WHERE c.run_id=j.run_id AND c.kind='thought' AND c.ref_id=p.subject_id))) LIMIT 1`);
   for (const [table, kind, id] of [["run_context", "kind", "ref_id"], ["search_content_dependencies", "ref_kind", "ref_id"],
     ["search_composer_dependencies", "ref_kind", "ref_id"]]) polymorphic(db, table, kind, id);
   noRows(db, `SELECT 1 FROM main.thoughts t WHERE
@@ -157,9 +189,88 @@ function validateApplicationIntegers(snapshot: SqlSnapshot): void {
   }
   for (const row of table(snapshot, "runs").rows) if (text(row, "kind") === "search") safe(integer(row, "generation"));
 }
+/** TEXT payloads are extensible; old receipt encodings and all frozen inventories remain byte-exact. */
+function validateConnectionReceipts(snapshot: SqlSnapshot): void {
+  const key = (runId: string, id: string): string => JSON.stringify([runId,id]);
+  const steps = new Map(table(snapshot,"run_steps").rows.map(row => [key(text(row,"run_id"),text(row,"prompt_id")),row]));
+  const connections = new Map(table(snapshot,"connections").rows.map(row => [text(row,"id"),row]));
+  const sources = new Map<string,RawRow[]>();
+  for (const row of table(snapshot,"connection_sources").rows) {
+    const id = text(row,"connection_id"), list = sources.get(id) ?? [];
+    list.push(row); sources.set(id,list);
+  }
+  const context = new Map(table(snapshot,"run_context").rows.map(row => [
+    JSON.stringify([text(row,"run_id"),text(row,"kind"),text(row,"ref_id")]),integer(row,"full_read") === 1n,
+  ]));
+  const object = (input: unknown): Record<string,unknown> | null =>
+    typeof input === "object" && input !== null && !Array.isArray(input) ? Object.fromEntries(Object.entries(input)) : null;
+  const json = (row: RawRow, column: string): unknown => {
+    if (row.values[column]?.storage !== "text") return null;
+    try { return JSON.parse(text(row,column)); } catch { return null; }
+  };
+  for (const receipt of table(snapshot,"run_operation_receipts").rows) {
+    if (text(receipt,"format") !== "step") continue;
+    const runId = text(receipt,"run_id"), step = steps.get(key(runId,text(receipt,"operation_id")));
+    const operationValue = json(receipt,"operation_json"), resultValue = json(receipt,"result_json");
+    const request = step ? object(object(json(step,"envelope_json"))?.request) : null;
+    // Do not reinterpret unrelated historical receipt payloads (including pre-media interpretations).
+    if (object(operationValue)?.type !== "connection" && object(resultValue)?.type !== "connection" && request?.capability !== "connection") continue;
+    try {
+      const operation = parseStepOperation(operationValue);
+      check(operation.type === "connection" && receipt.values.thought_id.storage === "null" && step !== undefined,"inconsistent-source");
+      const result = parseConnectionOperationResult(operation,resultValue);
+      check(protocolJson(parseEnvelope(text(step,"envelope_json"))) === protocolJson(stepOperationEnvelope(operation)),"inconsistent-source");
+      if (step.values.result_json.storage !== "null") check(protocolJson(json(step,"result_json")) === protocolJson(resultValue),"inconsistent-source");
+      if (result.status !== "not-created") {
+        const row = connections.get(result.connection.id);
+        check(row !== undefined,"inconsistent-source");
+        const sourceIds = (sources.get(result.connection.id) ?? []).toSorted((a,b) => Number(integer(a,"position") - integer(b,"position"))).map(row => text(row,"source_id"));
+        assertConnectionOperationRecord(result,createConnection({id:text(row,"id"),fromId:text(row,"from_id"),toId:text(row,"to_id"),
+          category:text(row,"category"),proposedBy:text(row,"proposed_by"),explanation:text(row,"explanation"),sourceIds}));
+      }
+      // Older trusted aggregate callers predate full-read enforcement. Do not invent or rewrite their witnesses.
+      if (result.status !== undefined) {
+        const witness = (kind: string,id: string,full = false): void => {
+          const read = context.get(JSON.stringify([runId,kind,id]));
+          check(read !== undefined && (!full || read),"inconsistent-source");
+        };
+        for (const id of [operation.fromId,operation.toId,...operation.sourceIds]) witness("thought",id,true);
+        if (result.status !== "not-created") {
+          witness("connection",result.connection.id,true);
+          for (const id of result.connection.sourceIds) witness("thought",id);
+        }
+      }
+    } catch { check(false,"inconsistent-source"); }
+  }
+}
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
 export function validateBytes(snapshot: SqlSnapshot): void {
   validateApplicationIntegers(snapshot);
+  validateConnectionReceipts(snapshot);
+  const screening = snapshot.tables.find(value => value.shape.name === "run_screening_passes");
+  if (screening) {
+    const pairs = table(snapshot,"run_screening_pairs").rows, context = table(snapshot,"run_context").rows;
+    const fullReads = new Set(context.filter(row => text(row,"kind") === "thought" && integer(row,"full_read") === 1n)
+      .map(row => JSON.stringify([text(row,"run_id"),text(row,"ref_id")])));
+    const policies = new Map<string,ReturnType<typeof parseScreeningPolicy>>();
+    for (const pass of screening.rows) {
+      try { policies.set(text(pass,"run_id"),parseScreeningPolicy(text(pass,"policy_json"))); }
+      catch { check(false,"inconsistent-source"); }
+    }
+    const complete = new Set(screening.rows.filter(row => text(row,"status") === "complete").map(row => text(row,"run_id")));
+    for (const pair of pairs) {
+      if (pair.values.judgment_json.storage === "null") continue;
+      let score: number;
+      try { score = parseScreeningJudgment(text(pair,"judgment_json")); }
+      catch { check(false,"inconsistent-source"); }
+      const runId = text(pair,"run_id"), policy = policies.get(runId);
+      check(policy !== undefined,"inconsistent-source");
+      if (complete.has(runId) && score >= policy.threshold) {
+        const witness = JSON.stringify([runId,text(pair,"candidate_id")]);
+        check(fullReads.has(witness),"inconsistent-source");
+      }
+    }
+  }
   const settings = snapshot.tables.find(value => value.shape.name === "agent_instructions");
   if (settings) {
     check(settings.rows.length <= 1,"inconsistent-source");

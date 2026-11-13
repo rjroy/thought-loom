@@ -164,7 +164,7 @@ function file(entry: { readonly path: string; readonly byteLength: string; reado
 export function encodeManifest(manifest: BackupManifest): Uint8Array {
   closed(manifest, [...(manifest.appSchema === undefined ? [] : ["appSchema"]), "mediaStoreId", "tables", "sequences", "mediaMarker", "originals"]);
   const appSchema = manifest.appSchema ?? "thoughtloom-logical-1";
-  if (appSchema !== "thoughtloom-logical-1" && appSchema !== "thoughtloom-logical-2" && appSchema !== "thoughtloom-logical-3" && appSchema !== "thoughtloom-logical-4") invalid();
+  if (appSchema !== "thoughtloom-logical-1" && appSchema !== "thoughtloom-logical-2" && appSchema !== "thoughtloom-logical-3" && appSchema !== "thoughtloom-logical-4" && appSchema !== "thoughtloom-logical-5") invalid();
   dense(manifest.tables); dense(manifest.sequences); dense(manifest.originals);
   const tables = manifest.tables.map(entry => {
     closed(entry, ["name", "path", "rowCount", "byteLength", "sha256"]);
