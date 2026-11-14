@@ -39,7 +39,7 @@
 }
 
 html {
-  min-inline-size: 20rem;
+  min-inline-size: 320px;
   min-block-size: 100%;
   background: var(--color-ground);
   scrollbar-color: var(--color-control-line) var(--color-ground);
