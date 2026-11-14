@@ -103,6 +103,48 @@ async function checkCanopyLayout(page: Page): Promise<void> {
     } finally { await context.close(); }
   }
 }
+export async function checkCaptureHeadingLayout(page: Page): Promise<void> {
+  const browser = page.context().browser();
+  assert.ok(browser, "Capture heading layout requires an owned browser");
+  for (const [width, scale] of [[1440, 100], [375, 100], [375, 200]] as const) {
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    try {
+      const probe = await context.newPage();
+      await probe.goto(new URL("/capture", page.url()).href, { waitUntil: "networkidle" });
+      await probe.evaluate(value => { document.documentElement.style.fontSize = `${value}%`; }, scale);
+      await probe.evaluate(() => document.fonts.ready);
+      const heading = probe.getByRole("heading", { name: "Capture", exact: true });
+      const action = probe.getByRole("button", { name: "Import", exact: true });
+      const container = await probe.locator(".capture-heading").boundingBox();
+      const title = await heading.boundingBox(), button = await action.boundingBox();
+      assert.ok(container && title && button);
+      for (const bounds of [title, button]) {
+        assert.ok(bounds.x >= container.x && bounds.x + bounds.width <= container.x + container.width,
+          `Capture heading and Import must fit the heading container at ${width}px/${scale}%`);
+      }
+      if (scale === 200) assert.ok(button.y >= title.y + title.height, "Import must wrap below Capture when the row cannot fit");
+      else assert.ok(button.y < title.y + title.height && button.y + button.height > title.y,
+        "ordinary Capture heading and Import must retain their shared row");
+      assert.ok(await probe.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `Capture must not widen the page at ${width}px/${scale}%`);
+      await action.focus();
+      await probe.keyboard.press("Enter");
+      await expect(action).toHaveAttribute("aria-expanded", "true");
+      const choices = probe.locator("#capture-import-choices");
+      await expect(choices).toBeVisible();
+      const choicesBox = await choices.boundingBox();
+      assert.ok(choicesBox && choicesBox.x >= 0 && choicesBox.x + choicesBox.width <= width,
+        "the anchored Import choices must stay inside the viewport");
+      await probe.keyboard.press("Tab");
+      await expect(choices.getByRole("button", { name: /^Image or PDF/ })).toBeFocused();
+      await probe.keyboard.press("Escape");
+      await expect(action).toBeFocused();
+      await expect(action).toHaveAttribute("aria-expanded", "false");
+      await expect(choices).not.toBeVisible();
+    } finally { await context.close(); }
+  }
+}
+
 async function waitAttempts(daemon: Fixture, count: number): Promise<void> {
   await expect.poll(() => daemon.attempts.length, { timeout: 5000 }).toBe(count);
 }
@@ -162,6 +204,7 @@ export async function checkCaptureBrowser(page: Page, daemon: Fixture): Promise<
     placement = await paintedCanopy(page);
     assert.ok(Math.abs(placement.width - 196) < 1 && Math.abs(placement.height - 294) < 1, "approved display size");
     await checkCanopyLayout(page);
+    await checkCaptureHeadingLayout(page);
   } else await expect(canopy).not.toBeVisible();
   const unchangedCanopy = async () => {
     if (!placement) { await expect(canopy).not.toBeVisible(); return; }
