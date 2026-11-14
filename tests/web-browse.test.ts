@@ -7,7 +7,7 @@ import { handleBrowse } from "../apps/web/src/server/browse";
 import type { DaemonRequest } from "../apps/web/src/server/daemon";
 import { ownedMedia } from "./fixtures/web-media";
 
-const defaults: BrowseQuery = { sort: "newest", author: ["user", "ai"], scope: "normal" };
+const defaults: BrowseQuery = { sort: "newest", author: ["user", "ai", "source"], scope: "normal" };
 const old: BrowseQuery = { sort: "oldest", author: ["ai"], scope: "show-rejected" };
 const thought = { id: "one", text: "Owned actual thinking", title: "Owned title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "capture", parentId: null, sourceIds: [] } as const;
 const next = { ...thought, id: "two", text: "Second owned thought", title: null, titleAuthor: null, author: "ai", kind: "developing-idea" } as const;
@@ -34,8 +34,24 @@ describe("Browse bookmarks and read validation", () => {
     expect(decodeBrowseQuery(url.searchParams)).toEqual(old);
   });
 
+  test("explicit source and legacy author bookmarks preserve their exact selections", () => {
+    for (const [input, authors] of [
+      ["author=source", ["source"]],
+      ["author=source&author=user&author=source", ["user", "source"]],
+      ["author=user&author=ai", ["user", "ai"]],
+      ["author=ai", ["ai"]],
+    ] as const) {
+      const query = decodeBrowseQuery(new URLSearchParams(input));
+      expect(query?.author).toEqual(authors);
+      if (!query) throw new Error(`Invalid bookmark: ${input}`);
+      expect(encodeBrowseQuery(query).getAll("author")).toEqual([...authors]);
+      expect(decodeBrowseQuery(encodeBrowseQuery(query))).toEqual(query);
+      expect(new URL(browseMapHref("one", browseListHref(query)), "http://web.invalid").searchParams.get("returnTo")).toBe(browseListHref(query));
+    }
+  });
+
   test("rejects unknown parameters, conflicting selections and invalid read controls", () => {
-    for (const value of ["author=none&author=ai", "author=source", "author=", "sort=bad", "sort=newest&sort=oldest", "scope=history", "scope=normal&scope=normal", "unknown=x", "limit=1", "cursor=x"]) {
+    for (const value of ["author=none&author=ai", "author=none&author=source", "author=", "sort=bad", "sort=newest&sort=oldest", "scope=history", "scope=normal&scope=normal", "unknown=x", "limit=1", "cursor=x"]) {
       expect(decodeBrowseQuery(new URLSearchParams(value))).toBeUndefined();
     }
     for (const value of ["limit=0", "limit=201", "limit=1.5", "limit=", "limit=1&limit=2", "cursor=", "cursor=x&cursor=y", "author=none&author=user", "unknown=x"]) {
@@ -93,7 +109,15 @@ describe("Browse data boundaries", () => {
     expect(calls).toHaveLength(1);
     const initial = await handleBrowse(request(), { callDaemon: async command => { calls.push(command); return json(page); } });
     expect(initial.status).toBe(200);
-    expect(new URL(calls[1]?.path ?? "", "http://daemon.invalid").searchParams.getAll("author").sort()).toEqual(["ai", "user"]);
+    expect(new URL(calls[1]?.path ?? "", "http://daemon.invalid").searchParams.getAll("author").sort()).toEqual(["ai", "source", "user"]);
+    const imported = { ...thought, author: "source", kind: "imported-original", origin: "markdown-import" };
+    for (const [query, expected] of [["author=source", ["source"]], ["author=user&author=source", ["user", "source"]], ["author=user&author=ai", ["user", "ai"]]] as const) {
+      const returned = { items: query.includes("source") ? [imported] : [], nextCursor: null };
+      const result = await handleBrowse(request(`?${query}`), { callDaemon: async command => { calls.push(command); return json(returned); } });
+      expect(result.status).toBe(200);
+      expect(new URL(calls.at(-1)?.path ?? "", "http://daemon.invalid").searchParams.getAll("author")).toEqual([...expected]);
+      expect(await result.json()).toEqual(returned);
+    }
   });
 
   test("server sanitizes invalid input, malformed data, exceptions and rejected cursors", async () => {

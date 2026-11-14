@@ -1,6 +1,6 @@
 export interface BrowseQuery {
   readonly sort: "newest" | "oldest";
-  readonly author: readonly ("user" | "ai")[];
+  readonly author: readonly ("user" | "ai" | "source")[];
   readonly scope: "normal" | "show-rejected";
 }
 
@@ -16,8 +16,8 @@ export function decodeBrowseQuery(params: URLSearchParams): BrowseQuery | undefi
   if ((sort !== "newest" && sort !== "oldest") || (scope !== "normal" && scope !== "show-rejected")) return undefined;
   const selected = params.getAll("author");
   if (selected.includes("none")) return selected.length === 1 ? { sort, author: [], scope } : undefined;
-  if (selected.some(value => value !== "user" && value !== "ai")) return undefined;
-  const author = (["user", "ai"] as const).filter(value => !selected.length || selected.includes(value));
+  if (selected.some(value => value !== "user" && value !== "ai" && value !== "source")) return undefined;
+  const author = (["user", "ai", "source"] as const).filter(value => !selected.length || selected.includes(value));
   return { sort, author, scope };
 }
 

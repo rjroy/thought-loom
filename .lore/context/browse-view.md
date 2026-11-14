@@ -15,10 +15,10 @@ Direct entry opens a recent-ideas list. **Browse from here** on Idea opens a map
 
 ## Chronological list
 
-- Include user-authored and AI-recorded thoughts, not full conversational replies.
+- Include user-authored, AI-recorded and imported-source thoughts, not full conversational replies. Imported source covers imported Markdown and retained images/PDFs with unverified original authorship.
 - Show titles, actual-text excerpts, authorship, material kind and creation date.
 - Default to newest first; offer oldest first. No shuffle.
-- Authorship filters apply to the starting list, not map neighbors.
+- Authorship filters are You, AI and Imported source, all selected by default. Clear filters restores all three and normal visibility while retaining sort. Explicit bookmarked selections, including older You/AI-only links, retain their subset; selecting none shows guidance without reading the daemon. Authorship filters apply to the starting list, not map neighbors.
 - Selecting an idea opens its map and actual-text inspector. Returning restores list filters and position.
 
 ## Focused Map

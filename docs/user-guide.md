@@ -83,9 +83,9 @@ Bookmark or copy the search URL to repeat its query and filters. Search words ap
 
 ### Browse without a search query
 
-Choose **Browse** to scan ideas chronologically. Use **Newest first** or **Oldest first**, the **You** and **AI** authorship filters, and **Load more**. **Refresh list** starts a fresh reading of the list. If no authorship is selected, select one to see ideas.
+Choose **Browse** to scan ideas chronologically. Use **Newest first** or **Oldest first**, the **You**, **AI** and **Imported source** authorship filters, and **Load more**. All three authorships are selected by default. Imported source includes imported Markdown, images and PDFs whose original authorship is unverified, not automatically your writing. **Refresh list** starts a fresh reading of the list. If no authorship is selected, select at least one to see ideas. **Clear filters** selects all three authorships and hides rejected material while keeping your sort choice. Bookmarked authorship selections, including older You/AI-only links, keep their selected subset.
 
-Selecting an idea title opens its local connected map. You can also enter the map from an Idea's **Browse from here** action.
+Selecting an idea title opens its local connected map. You can also enter the map from an Idea's **Browse from here** action. Authorship filters apply to the starting list, not the map's linked ideas.
 
 ![Browse map linking the starting garden thought to an interpretation, with its text and recorded relationships on the right.](images/user-guide/browse-map.png)
 
