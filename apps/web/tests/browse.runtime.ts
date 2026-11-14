@@ -393,6 +393,19 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await expect(page.getByRole("heading", { name: "Browse", exact: true })).toBeVisible();
   await expect(link).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Owned browse title 50", { exact: true })).toBeVisible();
+  const root = page.locator("html");
+  const originalFontSize = await root.evaluate(element => element.style.fontSize);
+  const minimumWidth = await root.evaluate(element => getComputedStyle(element).minInlineSize);
+  const rootWidth = await root.evaluate(element => element.getBoundingClientRect().width);
+  try {
+    for (const scale of [100, 150, 200]) {
+      await root.evaluate((element, value) => { element.style.fontSize = `${value}%`; }, scale);
+      assert.equal(await root.evaluate(element => getComputedStyle(element).minInlineSize), minimumWidth,
+        `the document minimum width must not scale with ${scale}% root text`);
+      assert.equal(await root.evaluate(element => element.getBoundingClientRect().width), rootWidth,
+        `enlarging root text to ${scale}% must not widen the document root`);
+    }
+  } finally { await root.evaluate((element, value) => { element.style.fontSize = value; }, originalFontSize); }
   const authors = page.getByRole("group", { name: "Authorship" });
   const source = authors.getByRole("checkbox", { name: /^Imported source$/i });
   await expect(source).toBeChecked();

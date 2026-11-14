@@ -105,6 +105,8 @@ The local-map client checks use `bun --no-env-file test tests/web-browse-map.tes
 
 Both browser source-copy allowlists include Browse's list/map pages and fixed API routes, query/DTO/request/controller/server modules, incremental map layout, mounted-memory provider, views and CSS modules. No design comp or private data is a runtime fixture. List bookmarks contain filters, not cursors: reload starts a fresh live walk. Loaded pages and reading position are document-local memory for in-app return; they are not persisted across reloads. A map bookmark contains its starting thought/scope and safe list return, not an expanded graph or inspected selection; reload reads one starting neighborhood. Tests use neither an operator service nor a provider for these reads.
 
+The Browse browser check also verifies that 100%, 150% and 200% root text leave the computed document minimum inline size and root box width unchanged at both desktop and 375px viewports. This guards the font-independent page floor, not every descendant's enlarged-text reflow. Separate content overflow can remain without widening the root box; this check is not whole-page reflow certification.
+
 ### Continuous integration
 
 The [GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests and pushes to `master`. On GitHub-hosted Ubuntu 24.04 it uses Bun 1.4.3 and frozen dependencies, builds spellfix, runs the root tests and typecheck, builds and typechecks the web app, and runs both full browser foundation and shared-record integration suites. Commands use `--no-env-file`; the fixtures use owned data and deterministic fake agents, not repository secrets, an operator service, or a model provider. Native acceptance remains separate.

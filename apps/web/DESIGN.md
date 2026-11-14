@@ -111,6 +111,8 @@ Raw HTML is skipped, non-HTTP(S) links are inert, and images display alternative
 
 ## Layout
 
+The document has a fixed `320px` minimum inline size, independent of the root text size. Enlarging text must not turn this viewport floor into a wider page; typography and spacing retain their existing relative units. This is a minimum-width rule, not a guarantee that every screen or content state reflows without overflow.
+
 The shell uses `--page-inset: clamp(1.25rem, 3.125vw, 3rem)`. Main content has 2rem top and 4rem bottom padding; narrow top padding is 1.75rem. Shared grouping gaps repeatedly use 0.5rem, 0.75rem, 1rem, 1.5rem and 2rem; these are existing literals, not a declared global spacing scale.
 
 The desktop header has a minimum height of 4.625rem. Its identity and navigation can wrap when their combined content needs more width; navigation itself also wraps instead of overflowing enlarged text. At `max-width: 48rem`, the wordmark/tagline stack above the visible navigation row. Explore alone keeps the shared header sticky and adds scroll margins for its controls. There is no added hamburger destination or permanently fixed composer.
