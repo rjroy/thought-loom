@@ -17,8 +17,17 @@ export function migrateRunScreening(db: Database): void {
     position INTEGER NOT NULL CHECK(position>=0),
     judgment_json TEXT CHECK(judgment_json IS NULL OR (json_valid(judgment_json) AND json_type(judgment_json)='object'
       AND json_type(judgment_json,'$.score') IN ('integer','real') AND json_extract(judgment_json,'$.score') BETWEEN 0 AND 1)),
+    excluded_connection_id TEXT REFERENCES connections(id),
     PRIMARY KEY(run_id,candidate_id), UNIQUE(run_id,position)
-  );
+  );`);
+  if (!db.query<{name:string},[]>("PRAGMA table_info(run_screening_pairs)").all().some(column => column.name === "excluded_connection_id")) {
+    db.exec("ALTER TABLE run_screening_pairs ADD COLUMN excluded_connection_id TEXT REFERENCES connections(id)");
+  }
+  // Reinstall changed guards on existing databases too; the surrounding core transaction owns rollback.
+  db.exec(`CREATE INDEX IF NOT EXISTS connections_endpoints ON connections(from_id,to_id);
+  DROP TRIGGER IF EXISTS screening_pass_update;
+  DROP TRIGGER IF EXISTS screening_pair_insert;
+  DROP TRIGGER IF EXISTS screening_pair_update;
   CREATE TRIGGER IF NOT EXISTS screening_pass_insert BEFORE INSERT ON run_screening_passes
   WHEN EXISTS(SELECT 1 FROM run_screening_passes WHERE run_id=NEW.run_id) OR NEW.status!='collecting'
     OR NOT EXISTS(SELECT 1 FROM runs r JOIN thoughts t ON t.id=NEW.subject_id JOIN run_steps s ON s.run_id=r.id AND s.position=0
@@ -29,20 +38,27 @@ export function migrateRunScreening(db: Database): void {
   WHEN NEW.run_id IS NOT OLD.run_id OR NEW.subject_id IS NOT OLD.subject_id OR NEW.policy_json IS NOT OLD.policy_json
     OR NEW.candidate_count IS NOT OLD.candidate_count OR OLD.status!='collecting' OR NEW.status='collecting'
     OR (NEW.status='complete' AND ((SELECT count(*) FROM run_screening_pairs WHERE run_id=OLD.run_id)!=OLD.candidate_count
-      OR EXISTS(SELECT 1 FROM run_screening_pairs WHERE run_id=OLD.run_id AND judgment_json IS NULL)))
+      OR EXISTS(SELECT 1 FROM run_screening_pairs WHERE run_id=OLD.run_id AND judgment_json IS NULL AND excluded_connection_id IS NULL)))
   BEGIN SELECT RAISE(ABORT,'screening identity or completion immutable'); END;
   CREATE TRIGGER IF NOT EXISTS screening_pass_delete BEFORE DELETE ON run_screening_passes
   BEGIN SELECT RAISE(ABORT,'screening history immutable'); END;
   CREATE TRIGGER IF NOT EXISTS screening_pair_insert BEFORE INSERT ON run_screening_pairs
   WHEN EXISTS(SELECT 1 FROM run_screening_pairs WHERE run_id=NEW.run_id AND candidate_id=NEW.candidate_id)
-    OR NEW.judgment_json IS NOT NULL OR NOT EXISTS(SELECT 1 FROM run_screening_passes p JOIN thoughts t ON t.id=NEW.candidate_id
+    OR NEW.judgment_json IS NOT NULL OR NEW.excluded_connection_id IS NOT NULL
+    OR NOT EXISTS(SELECT 1 FROM run_screening_passes p JOIN thoughts t ON t.id=NEW.candidate_id
       WHERE p.run_id=NEW.run_id AND p.status='collecting' AND t.kind!='media-original' AND p.subject_id!=NEW.candidate_id
         AND NEW.position=COALESCE((SELECT max(position)+1 FROM run_screening_pairs WHERE run_id=p.run_id),0) AND NEW.position<p.candidate_count)
   BEGIN SELECT RAISE(ABORT,'invalid screening membership'); END;
   CREATE TRIGGER IF NOT EXISTS screening_pair_update BEFORE UPDATE ON run_screening_pairs
   WHEN NEW.run_id IS NOT OLD.run_id OR NEW.candidate_id IS NOT OLD.candidate_id OR NEW.position IS NOT OLD.position
-    OR OLD.judgment_json IS NOT NULL OR NEW.judgment_json IS NULL
-    OR NOT EXISTS(SELECT 1 FROM run_screening_passes WHERE run_id=OLD.run_id AND status='collecting')
+    OR NOT EXISTS(SELECT 1 FROM run_screening_passes p JOIN run_steps s ON s.run_id=p.run_id AND s.position=0
+      WHERE p.run_id=OLD.run_id AND p.status='collecting' AND s.input IS NULL)
+    OR NOT ((OLD.judgment_json IS NULL AND NEW.judgment_json IS NOT NULL AND OLD.excluded_connection_id IS NULL AND NEW.excluded_connection_id IS NULL)
+      OR (OLD.excluded_connection_id IS NULL AND NEW.excluded_connection_id IS NOT NULL AND NEW.judgment_json IS OLD.judgment_json
+        AND EXISTS(SELECT 1 FROM run_screening_passes p JOIN connections c ON c.id=NEW.excluded_connection_id
+          WHERE p.run_id=OLD.run_id AND ((c.from_id=p.subject_id AND c.to_id=OLD.candidate_id) OR (c.to_id=p.subject_id AND c.from_id=OLD.candidate_id))
+            AND NOT EXISTS(SELECT 1 FROM rejected_connections r WHERE r.connection_id=c.id)
+            AND NOT EXISTS(SELECT 1 FROM rejected_thoughts r WHERE r.thought_id IN (c.from_id,c.to_id)))))
   BEGIN SELECT RAISE(ABORT,'screening judgment immutable'); END;
   CREATE TRIGGER IF NOT EXISTS screening_pair_delete BEFORE DELETE ON run_screening_pairs
   BEGIN SELECT RAISE(ABORT,'screening membership immutable'); END;`);

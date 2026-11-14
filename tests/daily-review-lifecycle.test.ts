@@ -166,6 +166,40 @@ test("daily screening exhausts eligible pairs and hands only nominations to auth
     expect(f.reviews.lastReviewedAt("a")).toBe(f.clock.now);
   } finally { w.pause(); await w.drain(); }
 }));
+test("active edges with rejected provenance skip screening, but a later day's rejected edge is not a negative cache", async () => dailyReviewFixture(async f => {
+  f.seed("a"); f.seed("z"); f.seed("PRIVATE-SOURCE-ID");
+  f.store.saveConnection({id:"owned-visible-edge",fromId:"z",toId:"a",category:"supports",proposedBy:"user",explanation:"Owned active relation",sourceIds:["PRIVATE-SOURCE-ID"]});
+  f.rejection.rejectThought("user","PRIVATE-SOURCE-ID");
+  const firstBatch = f.admit(); if (firstBatch.kind !== "admitted") throw new Error("Expected owned first batch");
+  const firstId = firstBatch.runIds.find(id => f.ops.weaveIntent(id)?.subjectId === "a");
+  if (!firstId) throw new Error("Expected owned a review");
+  const firstCalls:string[] = [], firstClient = new ScriptedClient(() => reviewComplete);
+  const first = worker(f,firstClient,{identity:"owned-provenance-exclusion",async judge(pair) { firstCalls.push(pair.thoughtB.id); return 0.9; }});
+  try {
+    await until(first,firstId,() => f.run(firstId).status === "completed");
+    expect(firstCalls).toEqual([]);
+    const input = firstClient.prompts[0]?.text ?? "";
+    expect(input).toContain("owned-visible-edge"); expect(input).not.toContain("PRIVATE-SOURCE-ID");
+    expect((JSON.parse(input) as {nominations:unknown[]}).nominations).toEqual([]);
+    expect(f.db.query("SELECT excluded_connection_id FROM run_screening_pairs WHERE run_id=?").get(firstId)).toEqual({excluded_connection_id:"owned-visible-edge"});
+  } finally { first.pause(); await first.drain(); }
+  for (const id of firstBatch.runIds.filter(id => id !== firstId)) { f.runs.stop(id); f.state.settleUnsubmitted(id); }
+  f.rejection.rejectConnection("user","owned-visible-edge");
+  const nextBatch = f.admit("2031-01-02T12:00:00.000Z"); if (nextBatch.kind !== "admitted") throw new Error("Expected owned next batch");
+  const nextId = nextBatch.runIds.find(id => f.ops.weaveIntent(id)?.subjectId === "a");
+  if (!nextId) throw new Error("Expected a fresh a review");
+  const nextCalls:string[] = [], nextClient = new ScriptedClient(() => reviewComplete);
+  const next = worker(f,nextClient,{identity:"owned-provenance-exclusion",async judge(pair) { nextCalls.push(pair.thoughtB.id); return 0.9; }});
+  try {
+    await until(next,nextId,() => f.run(nextId).status === "completed");
+    expect(nextCalls).toEqual(["z"]);
+    const input = nextClient.prompts[0]?.text ?? "";
+    expect((JSON.parse(input) as {nominations:{id:string}[]}).nominations.map(thought => thought.id)).toEqual(["z"]);
+    expect(input).not.toContain("owned-visible-edge"); expect(input).not.toContain("PRIVATE-SOURCE-ID");
+    expect(f.db.query("SELECT excluded_connection_id FROM run_screening_pairs WHERE run_id=?").get(firstId)).toEqual({excluded_connection_id:"owned-visible-edge"});
+    expect(f.db.query("SELECT excluded_connection_id FROM run_screening_pairs WHERE run_id=?").get(nextId)).toEqual({excluded_connection_id:null});
+  } finally { next.pause(); await next.drain(); }
+},{rotationDays:1,maxPerDay:10}));
 test("failed local daily screening logs sanitized Error and can complete through search-driven fallback", async () => dailyReviewFixture(async f => {
   f.seed("a"); f.seed("z"); const id = admit(f), client = new ScriptedClient(() => reviewComplete), records: LogRecord[] = [];
   const w = new RunWorker({db:f.db,...f.sources,logger:createLogger("verbose",record => records.push(record)),bindingFor:run => pathBinding(run,f.dir),

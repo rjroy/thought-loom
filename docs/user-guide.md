@@ -37,7 +37,9 @@ Saving records your thought immediately when confirmed. It does not wait for AI.
 
 An installation can optionally screen newly saved text locally for possible connections, including captures, Markdown, Evolve contributions/developments and AI interpretations. Original image/PDF descriptors are not screened; their saved text interpretations are. The Weaver still decides whether a connection is warranted and can search for others. Connection-only work does not create interpretations or another Full reply. If screening is unavailable, discovery falls back to search; the screening results are not shown as evidence. See [connection screening configuration](server-startup.md#optional-connection-screening).
 
-An ordinary daemon restart retains completed screening progress and resumes only unfinished pair checks. Known screening failure stays on search fallback for that run. Restoring a backup does not restart historical AI work.
+Local screening skips two thoughts already joined by an active connection, in either direction and of any category or authorship. They are not nominated again by that screening pass. Rejected connections do not count; later reviews reconsider pairs that are no longer connected. Weaver can still search independently.
+
+An ordinary daemon restart retains completed screening progress and resumes only unfinished, still-unconnected pair checks. Known screening failure stays on search fallback for that run. A connection added during a local call cannot undo the call, but prevents nomination if present when the initial prompt is saved. Already-saved prompts are not rewritten. Restoring a backup does not restart historical AI work.
 
 With agents configured, quiet daily review revisits a bounded selection of eligible text thoughts for missing titles and useful connections. No review screen or daily action is required. A current title is never replaced by a late AI fill, and no change is a valid review outcome. The initial cap can make a full rotation take longer than 30 days; see [daily review operation](server-startup.md#agent-configuration).
 

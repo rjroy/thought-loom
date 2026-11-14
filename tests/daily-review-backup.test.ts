@@ -46,9 +46,9 @@ async function owned(action: (fixture: BackupFixture) => Promise<void>, reviews 
   });
 }
 
-test("logical-6 capture/recovery/installation preserve successful review metadata and seal without reviving incomplete work", async () => owned(async f => {
+test("current capture/recovery/installation preserve successful review metadata and seal without reviving incomplete work", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-6");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-7");
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger:f.sources.logger});
   try {
@@ -75,13 +75,13 @@ test("logical-6 capture/recovery/installation preserve successful review metadat
   } finally { db.close(); }
 }),45000);
 
-const legacySchemas: readonly BackupAppSchema[] = ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4","thoughtloom-logical-5"];
-test.each(legacySchemas)("%s restoration explicitly defaults daily metadata empty and preserves every original projection byte", async schema => owned(async f => {
+const legacySchemas: readonly BackupAppSchema[] = ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4","thoughtloom-logical-5","thoughtloom-logical-6"];
+test.each(legacySchemas)("%s restoration verifies additive defaults and preserves every original projection byte", async schema => owned(async f => {
   const original = decodeManifest(await readFile(join(f.snapshot,"manifest.json"))), destination = join(f.dir,`legacy-${schema}`);
   await mkdir(join(destination,"tables"),{recursive:true,mode:0o700});
   const tables = [];
   for (const shape of shapesForSchema(schema)) {
-    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)),"thoughtloom-logical-6");
+    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)),"thoughtloom-logical-7");
     const rows: RawRow[] = current.map(row => ({rowid:row.rowid,values:Object.fromEntries(shape.columns.map(name => [name,row.values[name]]))}));
     const bytes = encodeTable(shape,rows), path = `tables/${shape.name}.json`;
     await writeFile(join(destination,path),bytes,{mode:0o600});
@@ -94,16 +94,23 @@ test.each(legacySchemas)("%s restoration explicitly defaults daily metadata empt
   try {
     const db = new Database(stage.databasePath,{safeIntegers:true});
     try {
-      expect(db.query("SELECT * FROM daily_review_batches").all()).toEqual([]);
-      expect(db.query("SELECT * FROM daily_review_items").all()).toEqual([]);
+      if (schema === "thoughtloom-logical-6") {
+        const numeric = new Database(stage.databasePath);
+        try { expect(reviewRows(numeric)).toEqual(f.reviewsBefore); } finally { numeric.close(); }
+        expect(f.reviewsBefore[0]?.rows.length).toBeGreaterThan(0);
+      } else {
+        expect(db.query("SELECT * FROM daily_review_batches").all()).toEqual([]);
+        expect(db.query("SELECT * FROM daily_review_items").all()).toEqual([]);
+      }
+      expect(db.query("SELECT 1 FROM run_screening_pairs WHERE excluded_connection_id IS NOT NULL").get()).toBeNull();
       compareRestoreRecords(readSqlSnapshot(db,() => {},shapesForSchema(schema)),manifest);
-      if (schema === "thoughtloom-logical-5") expect(db.query("SELECT judgment_json FROM run_screening_pairs WHERE judgment_json IS NOT NULL").all()).toEqual([{judgment_json:'{"score":0.75}'}]);
-      if (schema === "thoughtloom-logical-4" || schema === "thoughtloom-logical-5") {
+      if (schema === "thoughtloom-logical-5" || schema === "thoughtloom-logical-6") expect(db.query("SELECT judgment_json FROM run_screening_pairs WHERE judgment_json IS NOT NULL").all()).toEqual([{judgment_json:'{"score":0.75}'}]);
+      if (schema === "thoughtloom-logical-4" || schema === "thoughtloom-logical-5" || schema === "thoughtloom-logical-6") {
         expect(db.query("SELECT weave_retired_at FROM runs WHERE id=?").get(f.retiredId)).toEqual({weave_retired_at:f.clock.now});
       }
     } finally { db.close(); }
   } finally { await stage.dispose(); }
-},false),45000);
+},schema === "thoughtloom-logical-6"),45000);
 
 test.each(["wrong-trigger","wrong-policy","wrong-ceiling","missing-success","false-success","incomplete-envelope"] as const)(
   "restore refuses hash-consistent daily review %s corruption", async fault => owned(async f => {

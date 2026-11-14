@@ -48,8 +48,9 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
         run.kind === "search" ? settings.search : run.kind === "export" ? settings.export : null;
       if (guidance === null) throw new RunForbiddenError("Ordinary agent guidance required");
       // This renderer is synchronous, trusted application code, not a model callback or an external operation.
-      let nominations: readonly Thought[] | undefined;
-      if (screeningRender && context.job.kind === "weave") nominations = this.screeningNominations(claim,context.job.subjectId);
+      const screening = screeningRender && context.job.kind === "weave" ? this.screeningNominations(claim,context.job.subjectId) : undefined;
+      if (screening?.kind === "pending") return {step,clock:null};
+      const nominations = screening?.thoughts;
       const input = nonEmpty(nominations !== undefined && screeningRender ? screeningRender(context,nominations) : render(context),"initial input");
       if (search) for (const ref of search.dependencies) this.track(run.id,ref);
       for (const thought of context.thoughts) this.trackThought(run.id,thought);
