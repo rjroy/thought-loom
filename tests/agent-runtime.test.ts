@@ -13,6 +13,8 @@ import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunProtocolRepository } from "../src/storage/run-protocol";
 import { SqliteRunRepository } from "../src/storage/run";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
+import { SqliteDailyReviews } from "../src/storage/daily-review";
+import { SqliteRunWorkerState } from "../src/storage/run-worker";
 
 const user = "test-user-01234567890123456789012345";
 const ai = "test-agent-0123456789012345678901234";
@@ -66,7 +68,7 @@ class Client implements PublicClient {
     const context = object(initial.context);
     const job = object(context.job);
     const turn = this.prompts.filter(p => p.sessionID === input.sessionID).length;
-    const output = job.kind === "export" ? (turn === 1 ? { version: 1, kind: "request", request: this.exportWrite ?? { capability: "search", arguments: { query: "cobalt" } } } :
+    const output = job.purpose === "daily-review" ? {version:1,kind:"review-complete",titleCheck:"complete",connectionCheck:"complete"} : job.kind === "export" ? (turn === 1 ? { version: 1, kind: "request", request: this.exportWrite ?? { capability: "search", arguments: { query: "cobalt" } } } :
       turn === 2 ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.exportSourceId } } } :
         { version: 1, kind: "report", markdown: "# Fixture report\n\nExisting thinking, not new knowledge.", sourceThoughtIds: [this.exportSourceId] }) :
       turn > 1 || this.completeFirst || job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
@@ -90,6 +92,7 @@ function controlled(client: Client) {
   let cancels = 0;
   const services: ResolvedAgentService[] = [];
   const deps: RuntimeDependencies = {
+    now:() => "2031-01-01T12:00:00.000Z",
     async resolveAgentService(config) { return "url" in config.service ? { url: config.service.url, token: config.service.token } : { url: "http://127.0.0.1:44991", headers: { authorization: `Basic ${secret}` } }; },
     createPublicClient(service) { services.push(service); return client; },
     startTimer(poll) { callback = poll; return () => { cancels++; }; },
@@ -112,6 +115,13 @@ function seedExport(path: string) {
     const store = new SqliteStore(db);
     store.saveThought({ id: "export-source", text: "cobalt existing human thinking", title: "Owned source", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030", origin: "fixture", parentId: null, sourceIds: [] });
     store.saveThought({ id: "export-ai", text: "an AI hypothesis", title: null, titleAuthor: null, author: "ai", kind: "ai-interpretation", createdAt: "2031", origin: "fixture", parentId: "export-source", sourceIds: ["export-source"] });
+    // Seal the owned test date using the real admission and Stop boundaries, so export-specific assertions remain isolated.
+    let sequence = 0;
+    const sources = {id:() => `sealed-export-${++sequence}`,now:() => "2031-01-01T12:00:00.000Z"};
+    const batch = new SqliteDailyReviews(db,sources).admitDueBatch(sources.now(),true);
+    if (batch.kind !== "admitted") throw new Error("Expected owned sealed review date");
+    const runs = new SqliteRunRepository(db,sources), state = new SqliteRunWorkerState(db,sources);
+    for (const runId of batch.runIds) { runs.stop(runId); if (!state.settleUnsubmitted(runId)) throw new Error("Expected locally settled owned review"); }
   } finally { db.close(); }
 }
 function snapshot(path: string) {

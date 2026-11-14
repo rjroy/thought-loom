@@ -24,6 +24,7 @@ Capture rough thoughts, find meaningful connections, and develop ideas through d
 - **Capture** a thought with an optional title. Change its title later without rewriting the original.
 - **Find and browse** your thinking with keyword search, chronological lists and connected maps.
 - **Connect ideas** yourself, or let background AI weaving suggest interpretations and relationships. **Reinterpret** requests a fresh interpretation without replacing earlier work.
+- **Revisit thinking quietly** through configured daily review for missing titles and possible connections, without a separate review screen.
 - **Develop ideas** through Evolve, keeping your contributions, AI developments and Full replies distinct.
 - **Import Markdown, images and PDFs.** Markdown wording is preserved; image/PDF originals are retained separately from AI interpretations.
 - **Ask your library** questions in saved search conversations that rediscover existing ideas without adding new thoughts.

@@ -24,6 +24,24 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Daily review
+
+```sh
+bun --no-env-file test tests/daily-review-core.test.ts tests/daily-review-admission.test.ts tests/daily-review-lifecycle.test.ts tests/daily-review-backup.test.ts
+bun --no-env-file test tests/daily-review-regressions.test.ts
+bun --no-env-file test tests/daily-review-checkpoint.test.ts
+bun --no-env-file test tests/daily-review-driver.test.ts tests/daily-review-runtime.test.ts
+bun --no-env-file test tests/media-source-migration.test.ts tests/restore-coordination.test.ts tests/connection-discovery.test.ts tests/connection-deduplication.test.ts
+```
+
+These suites use test-owned UTC clocks, IDs, policy values, SQLite files and the deterministic native client. Policy unit tests inject their own rotation/cap rather than freezing production tuning. They cover arithmetic, successful-age/attempt ordering, busy-before-limit selection, atomic/sealed admissions across connections/reopen, no-change completion, conditional-title races, partial failure, restricted history/successors, screening/fallback, rejection/Stop/restore fences and observation-only uncertain restart. Driver controls cover boot, coalescing, empty/busy/error retry cadence, UTC rollover/backward time and stopped callbacks. The owned daemon fixture checks configured and configless startup, unavailable-agent identities, completion with a shared clock, concurrent title and held-prompt shutdown. Frozen-predecessor migration faults verify rollback/preservation. Logical-6 capture/recovery/installation retain successful metadata and seals; logical-1 through logical-5 projections verify explicit empty daily defaults and original bytes, including logical-5 screening/retirement. Hash-consistent malformed daily records are refused. These are controlled checks, not evidence of actual provider quality or a passing rerun on any particular revision.
+
+The shared-record source-copy allowlist includes `agent/daily-review-driver.ts`, `domain/daily-review.ts`, `storage/daily-review.ts`, `storage/daily-review-schema.ts` and `storage/daily-review-authority.ts`. Its fake agent returns the dedicated review-complete envelope only for daily work.
+
+The regression suite captures, stages and restores a real failed review's denied, uneffected final request while refusing fabricated results and forbidden processed predecessors. Its direct-worker/supervisor fixtures re-observe historically settled but unverified Evolve creators, require positive whole-journal native proof before daily admission, and keep missing/conflicting history blocked without resubmission, run revival or foreign interruption. These are isolated service-boundary checks, not operator-service evidence.
+
+The checkpoint suite pauses/drains a real worker after canonical request retention but before capability dispatch. Capture/staging preserve the exact prompt/session/input identities; recovery fences execution without a success timestamp. Fabricated results and mismatched effect receipts remain refused at that active checkpoint. The regression and backup suites retain the separate processed-predecessor and fabricated-success controls.
+
 ### Additional agent instructions
 
 ```sh
@@ -263,6 +281,10 @@ bun --no-env-file test tests/backup-schema.test.ts tests/backup-format.test.ts t
 ```
 
 The runtime fixture uses an owned loopback System One HTTP server, owned daemon/SQLite and a scripted native client. It checks explicit configuration and startup revalidation, the Noul request and threshold nomination, and search fallback with sanitized diagnostics on wrong or missing answers, invalid values, non-JSON, HTTP failure and timeout. The worker fixture checks the full candidate set, threshold, no SQL transaction during pair calls, rejected content, completed no-connection output and held-call eligibility changes. These are controlled application boundaries, not evidence of model understanding, `d3` compatibility, production performance or every creation and lifecycle path. No operator service or model is a fixture.
+
+Screening HTTP and export-specific runtime fixtures seal a test-owned UTC date through real daily admission and locally settled Stop before startup; their original transport and role assertions do not depend on background review timing. Separate daily runtime tests exercise fresh automatic admission.
+
+The Search retention, execution-provenance, reinterpretation retirement and backup-recovery walkthrough fixtures use the same real admission and unsubmitted Stop settlement boundary to isolate their native-session and historical-replay assertions. Their admission and daemon startup share a test-owned fixed UTC clock and day. The walkthrough captures the seal with its owned history; the reinterpretation fixture seals that day immediately before its configured restart.
 
 Restart fixtures wait on observable committed SQL judgment/fallback checkpoints through the instance logger, then pause/drain and reopen the owned database. They assert that only unfinished calls resume, saved nominations survive, known failure is sticky, prepared exact prompt/identity survives changed judge configuration, and stale results cannot overwrite a successor. Storage cases check changed-policy/candidate-set fallback, canonical finite JSON, atomic prompt/full-read rollback, and Stop/reject→restore/restore fences. A populated frozen predecessor fixture checks failure after real screening DDL rolls back schema/data and preserves history through successful migration/reopen. Backup cases exercise real logical-5 capture, stage/recovery/offline installation with collecting/complete/fallback records, exact progress/prompt preservation and historical execution fences, plus hash-consistent missing-full-read refusal. The frozen logical-4 restore fixture preserves retirement and execution while checking explicitly empty progress; logical-1 through logical-3 fixtures remain separate compatibility controls. These are coverage boundaries, not claims that every suite was rerun or that live model quality was established.
 

@@ -17,7 +17,7 @@ Its task is not to organize every note into a predetermined taxonomy. It should 
 
 The baseline loop is capture followed by asynchronous weaving, and targeted follow-up weaving after meaningful discussion changes. The application schedules and deduplicates work and tracks its state; the agent does the interpretive work.
 
-Exact scheduling, affected scope, and recovery from operational failures remain implementation decisions to design explicitly. Model effort or variants must not become application-imposed turn, token, cost, search-count or note-count quotas. A permanently running model, periodic full-corpus sweep, or scheduled aging process is not assumed.
+Exact scheduling, affected scope, and recovery from operational failures remain implementation decisions to design explicitly. Model effort or variants must not become application-imposed turn, token, cost, search-count or note-count quotas. A permanently running model or periodic full-corpus sweep is not assumed. The separately approved bounded daily-review policy below caps admitted subjects, not the work inside a model run.
 
 ## What a pass does
 
@@ -54,8 +54,12 @@ Show simple processing state where useful: pending, working, finished, or failed
 
 Preserve attribution, sources, and evolution history. All thoughts, including AI interpretations, are immutable; further thinking creates new material rather than overwriting old material. Rejection and restoration belong only to the user. For the weaver, rejected notes and connections are effectively nonexistent: do not retrieve them, include them as context, or reason from them. An active descendant does not make a rejected ancestor available again. These rules also apply to the evolution agent and the read-only Agentic export agent.
 
+## Daily review
+
+Bounded daily title/connection review is scheduled by the configured daemon through its existing worker. Each selected active text thought gets one restricted run that checks missing title and new connections, never creates another interpretation or public reply, and records successful review time only when both checks finish, including no change. Never-reviewed thoughts precede oldest successful reviews. Initial daily ceiling is `min(20, ceil(N/30))`, empty zero; the cap can make large-library rotation slower. Failed attempts are not successful reviews. Existing active/unsettled subject work defers admission, and uncertain native work is not automatically replaced. Local screening remains a nomination step with authoritative Weaver verification/search beyond; a historical creation owner does not suppress a daily pass. See [scheduling and metadata](../../docs/database-schema.md#daily-review-metadata-and-scheduling).
+
 ## Future possibilities, not requirements yet
 
 Acronym expansion and alternate-terminology/alias recording for retrieval are future enhancements, not V1 weaver responsibilities. An alias is not a conceptual connection.
 
-Periodic revisiting could reveal neglected questions, emerging themes, or several old notes describing the same problem. Aging, autonomous gardening, resurfacing schedules, and synthesized cross-note ideas need further discussion. Inactivity or age alone must not weaken an idea, imply low value, or justify deletion.
+Beyond that approved title/connection review, periodic revisiting could reveal neglected questions, emerging themes, or several old notes describing the same problem. Aging, autonomous gardening, resurfacing schedules, and synthesized cross-note ideas still need further discussion. Inactivity or age alone must not weaken an idea, imply low value, or justify deletion.

@@ -8,6 +8,7 @@ import { SqliteStore } from "../src/storage/sqlite";
 import { admitWeave } from "../src/storage/weave-admission";
 import { body, bounded, mediaApiFixture, object, text, type MediaApiFixture } from "./fixtures/media-import-api";
 import { insertMediaSource, mediaThought } from "./fixtures/media-source";
+import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
 
 const stamp = "2030-01-01T00:00:00.000Z";
 const endpoint = (subject = "subject") => `/thoughts/${subject}/reinterpret`;
@@ -86,12 +87,15 @@ for (const status of ["failed", "interrupted"] as const) test(`explicitly retire
   const next = control(await body(replacement));
   expect(next.runId).not.toBe(old.runId);
   await f.stop();
+  write(f, db => sealDailyReview(db));
   await f.start({ THOUGHTLOOM_AGENT_CONFIG: JSON.stringify(f.agent) });
   await f.until(() => f.client.prompts.length === 1, "replacement native dispatch");
   expect(f.client.prompts).toHaveLength(1);
+  expect(f.read(db => db.query("SELECT session_id FROM agent_bindings WHERE run_id=?").get(next.runId)))
+    .toEqual({ session_id: f.client.prompts[0]?.sessionID });
   expect(facts()).toEqual(before);
   expect(f.client.scriptErrors).toEqual([]);
-}, { script: () => ({ version: 1, kind: "complete", reply: "Owned replacement" }) }), 20000);
+}, { now: () => sealedReviewNow, script: () => ({ version: 1, kind: "complete", reply: "Owned replacement" }) }), 20000);
 
 test("retirement requires user authority, exact acknowledgement, terminal eligible work and the matching subject", async () => mediaApiFixture(async f => {
   seed(f);

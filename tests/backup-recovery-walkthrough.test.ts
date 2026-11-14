@@ -13,6 +13,8 @@ import { createLogger, type LogRecord } from "../src/logging";
 import { ScriptedClient } from "./agentic-search-capability-fixture";
 import { mediaApiCredentials as credentials, object, receipt, text, upload } from "./fixtures/media-import-api";
 import { independentPng } from "./fixtures/media-rasters";
+import { migrate, SqliteStore } from "../src/storage/sqlite";
+import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
 
 const remote = "https://backup.invalid/owned/walkthrough.git";
 const clock = { at: "2030-01-01T12:00:00Z", timeZone: "UTC" };
@@ -130,6 +132,7 @@ test("owned online Git revision restores through the standalone command without 
         if (restored && !configured) throw new Error("Unexpected configless native client");
         return selectedClient;
       },
+      now: () => sealedReviewNow,
       logSink: record => records.push(record),
     }), "daemon startup");
   }
@@ -137,6 +140,14 @@ test("owned online Git revision restores through the standalone command without 
   try {
     await git("init", "--bare", bare);
     await writeFile(join(dir, "owned-native-service-payload"), "native-service-only-sentinel", { mode: 0o600 });
+
+    const seed = new Database(source);
+    try {
+      migrate(seed);
+      new SqliteStore(seed).saveThought({ id: "review-seal-subject", text: "owned review seal subject", title: null,
+        author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "fixture", parentId: null, sourceIds: [] });
+      sealDailyReview(seed);
+    } finally { seed.close(); }
 
     // Produce real rowless cleanup using the normal search worker and the owned decoded native client.
     await start(true); client.dropNextAck = true;

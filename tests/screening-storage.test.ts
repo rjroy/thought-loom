@@ -37,10 +37,11 @@ test("screening storage is additive and logical-5 does not change the frozen log
   const db = new Database(":memory:");
   try {
     migrate(db);
-    const current = validateSourceSchema(db), legacy = shapesForSchema("thoughtloom-logical-4");
+    const current = shapesForSchema("thoughtloom-logical-5"), legacy = shapesForSchema("thoughtloom-logical-4");
     expect(current.filter(shape => !legacy.some(old => old.name === shape.name)).map(shape => shape.name))
       .toEqual(["run_screening_pairs","run_screening_passes"]);
     for (const old of legacy) expect(current.find(shape => shape.name === old.name)).toEqual(old);
+    for (const old of current) expect(validateSourceSchema(db).find(shape => shape.name === old.name)).toEqual(old);
     migrate(db);
     expect(db.query("SELECT * FROM run_screening_passes").all()).toEqual([]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);

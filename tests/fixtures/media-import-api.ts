@@ -69,6 +69,7 @@ interface Options {
   readonly configured?: boolean;
   readonly derivedDirectory?: boolean;
   readonly script?: (index: number, input: string) => object;
+  readonly now?: () => string;
 }
 async function setup(options: Options) {
   const directory = await mkdtemp(join("/tmp/opencode","media-http-")), dbPath = join(directory,"owned.sqlite");
@@ -85,6 +86,7 @@ async function setup(options: Options) {
   let daemon: RunningDaemon | undefined, poll: (() => void) | undefined, resolutions = 0, clients = 0;
   let activeDbPath = dbPath, mediaDirectory = environment.THOUGHTLOOM_MEDIA_DIR ?? `${dbPath}.media`;
   const dependencies: RuntimeDependencies = {
+    ...(options.now ? {now:options.now} : {}),
     logSink:record => logs.push(record),
     resolveAgentService:async () => { resolutions++; return {url:"http://127.0.0.1:44991"}; },
     createPublicClient:() => { clients++; return client; },

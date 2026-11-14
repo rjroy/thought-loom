@@ -31,7 +31,7 @@ export function stepOperationScope(run: RunRecord, intent: WeaveIntent | null, o
   if (operation.type === "development" && (run.kind !== "evolve" || operation.parentId !== run.inputThoughtId)) throw new RunConflictError("Development parent must be the admitted contribution");
   if (operation.type === "interpretation" && (run.kind !== "weave" || subjectId === null)) throw new RunForbiddenError();
   if (operation.type === "title-fill" && subjectId === null) throw new RunForbiddenError();
-  if (purpose === "connection-only" && operation.type === "connection" && operation.fromId !== subjectId && operation.toId !== subjectId) {
+  if ((purpose === "connection-only" || purpose === "daily-review") && operation.type === "connection" && operation.fromId !== subjectId && operation.toId !== subjectId) {
     throw new RunForbiddenError("Discovery connections must involve the fixed subject");
   }
   const refs = operation.type === "development" ? [operation.parentId,...operation.sourceIds] :

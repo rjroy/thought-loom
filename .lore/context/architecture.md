@@ -51,6 +51,10 @@ Direct contribution/development API creation has no originating run. Its thought
 
 Automated connection writes deduplicate only inside the Weaver/Evolve capability aggregate, by directed endpoints and category. Authorization and full reads precede lookup. An eligible match yields an explicit already-present result with original attribution; any explicitly rejected match yields only an opaque not-created result and prevents an equivalent clone, including when another match is visible. Lookup/effect/no-op, exposures and immutable receipt/result commit together. Replay never reinterprets a no-op after restoration. Direct/manual connections remain multiplicative, with no global unique constraint or category/direction collapse. Existing JSON TEXT journals carry these typed outcomes without changing frozen logical backup inventories.
 
+## Daily-review core
+
+The approved bounded daily review reuses one restricted Weaver run per selected text subject, combining absent-title and connection checks without creating interpretations or public replies. Immutable UTC-date batches and run-linked members seal admission; only successful completion of both checks records a member completion time, including no-change reviews. Execution, screening progress and native uncertainty remain in the existing journals/supervisor. Historical creation ownership does not suppress daily screening. Cross-purpose subject coordination preserves positive settlement/restore fences without widening interpretation ownership or retirement authority. [Admission and scheduling](../../docs/database-schema.md#daily-review-metadata-and-scheduling) are implemented; configured daemon startup wakes the daily driver at boot and on its shared technical timer. The initial 30-day/20-subject policy is tuning, not a schema constant or a model-effort quota.
+
 ## Client and daemon boundary
 
 The browser client must never access the daemon directly. Browser requests that need daemon functionality go through the Next.js server, which communicates with the daemon.

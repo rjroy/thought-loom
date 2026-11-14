@@ -4,7 +4,9 @@ import type { RawCell, RawRow, TableShape } from "./format";
 import { validateSourceSchema } from "./schema";
 import { check, type Guard } from "./capture-files";
 import { parseScreeningJudgment, parseScreeningPolicy } from "../domain/connection-screening";
-import { connectionDiscoveryPrefix, directConnectionDiscoveryPrefix } from "../domain/weave-scheduling";
+import { assertWeaveCapability, connectionDiscoveryPrefix, directConnectionDiscoveryPrefix } from "../domain/weave-scheduling";
+import { dailyReviewCeiling, dailyReviewDate, dailyReviewInstant, dailyReviewPrefix, dailyReviewTrigger, parseDailyReviewPolicy } from "../domain/daily-review";
+import { parseCapabilityRequest } from "../domain/capability";
 import { createConnection } from "../domain/connection";
 import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
 import { parseEnvelope, protocolJson } from "../domain/run-protocol";
@@ -56,6 +58,15 @@ export function validateRecords(db: Database): void {
     ["search_turns", "session_id"], ["search_messages", "session_id"], ["search_discoveries", "session_id"]]) ordered(db, table, owner);
   ordered(db, "import_document_parts", "document_id", "thought_ordinal", "WHERE kind='thought'");
   ordered(db,"run_screening_pairs","run_id");
+  ordered(db,"daily_review_items","review_date");
+  noRows(db,`SELECT 1 FROM main.daily_review_batches b WHERE b.admitted_count!=(SELECT count(*) FROM main.daily_review_items i WHERE i.review_date=b.review_date) LIMIT 1`);
+  noRows(db,`SELECT 1 FROM main.daily_review_items i JOIN main.runs r ON r.id=i.run_id JOIN main.thoughts t ON t.id=i.thought_id
+    WHERE r.kind!='weave' OR r.weave_subject_id IS NOT i.thought_id OR r.weave_trigger_id IS NOT 'daily-review:'||i.review_date
+      OR t.kind='media-original' OR (i.completed_at IS NOT NULL)!=(r.status='completed')
+      OR EXISTS(SELECT 1 FROM main.run_issued_thoughts x WHERE x.run_id=r.id)
+      OR EXISTS(SELECT 1 FROM main.run_replies x WHERE x.run_id=r.id AND (x.draft_json IS NOT NULL OR x.response_id IS NOT NULL)) LIMIT 1`);
+  noRows(db,`SELECT 1 FROM main.runs r WHERE r.kind='weave' AND (substr(r.weave_trigger_id,1,13)='daily-review:' OR r.weave_trigger_id='daily-review')
+    AND NOT EXISTS(SELECT 1 FROM main.daily_review_items i WHERE i.run_id=r.id) LIMIT 1`);
   noRows(db,`SELECT 1 FROM main.run_screening_passes p JOIN main.runs r ON r.id=p.run_id
     JOIN main.thoughts t ON t.id=p.subject_id JOIN main.run_steps s ON s.run_id=r.id AND s.position=0
     WHERE r.kind!='weave' OR r.weave_subject_id IS NOT p.subject_id OR t.kind='media-original'
@@ -243,10 +254,86 @@ function validateConnectionReceipts(snapshot: SqlSnapshot): void {
     } catch { check(false,"inconsistent-source"); }
   }
 }
+/** New review history has no legacy encodings. Never infer success from effects, status alone or restored work. */
+function validateDailyReviews(snapshot: SqlSnapshot): void {
+  const batches = snapshot.tables.find(value => value.shape.name === "daily_review_batches");
+  if (!batches) return; // Explicit frozen pre-review projection, already checked by the loader.
+  const items = table(snapshot,"daily_review_items").rows;
+  const byRun = new Map(items.map(item => [text(item,"run_id"),item]));
+  const byDate = new Map<string,RawRow[]>();
+  for (const item of items) {
+    const date = text(item,"review_date"), members = byDate.get(date) ?? []; members.push(item); byDate.set(date,members);
+  }
+  const runs = new Map(table(snapshot,"runs").rows.map(row => [text(row,"id"),row]));
+  const steps = new Map<string,RawRow[]>(), receipts = new Map<string,RawRow[]>();
+  for (const row of table(snapshot,"run_steps").rows) {
+    const id = text(row,"run_id"), list = steps.get(id) ?? []; list.push(row); steps.set(id,list);
+  }
+  for (const row of table(snapshot,"run_operation_receipts").rows) {
+    const id = text(row,"run_id"), list = receipts.get(id) ?? []; list.push(row); receipts.set(id,list);
+  }
+  try {
+    for (const batch of batches.rows) {
+      const date = text(batch,"review_date"), at = text(batch,"admitted_at"), count = integer(batch,"eligible_count");
+      check(dailyReviewDate(dailyReviewTrigger(date)) === date && dailyReviewInstant(at) === at && at.slice(0,10) === date,"inconsistent-source");
+      check(count > 0n && count <= BigInt(Number.MAX_SAFE_INTEGER),"inconsistent-source");
+      const policy = parseDailyReviewPolicy(text(batch,"policy_json")), ceiling = dailyReviewCeiling(Number(count),policy);
+      const members = byDate.get(date) ?? [];
+      check(integer(batch,"ceiling") === BigInt(ceiling) && integer(batch,"admitted_count") === BigInt(members.length) && members.length > 0 && members.length <= ceiling,"inconsistent-source");
+    }
+    for (const item of items) {
+      const id = text(item,"run_id"), subjectId = text(item,"thought_id"), date = text(item,"review_date"), run = runs.get(id);
+      check(run !== undefined && text(run,"kind") === "weave" && text(run,"weave_subject_id") === subjectId &&
+        text(run,"weave_trigger_id") === dailyReviewTrigger(date),"inconsistent-source");
+      const history = (steps.get(id) ?? []).toSorted((a,b) => Number(integer(a,"position") - integer(b,"position")));
+      const retainedReceipts = receipts.get(id) ?? [];
+      check(history.length > 0,"inconsistent-source");
+      for (const [position,step] of history.entries()) {
+        if (step.values.envelope_json.storage === "null") { check(position === history.length-1,"inconsistent-source"); continue; }
+        const envelope = parseEnvelope(text(step,"envelope_json"));
+        if (envelope.kind === "request") {
+          // Canonical output is retained before dispatch can accept or deny it, including across shutdown.
+          // Preserve an uneffected final request as data, not authority, before or after rejection.
+          const uneffectedFinalRequest = position === history.length-1 && text(step,"state") === "completed" &&
+            step.values.result_json.storage === "null" && item.values.completed_at.storage === "null" &&
+            text(run,"status") !== "completed" &&
+            !retainedReceipts.some(receipt => text(receipt,"operation_id") === text(step,"prompt_id"));
+          if (uneffectedFinalRequest) continue;
+          const request = parseCapabilityRequest(envelope.request); assertWeaveCapability("daily-review",request.capability);
+          if (request.capability === "connection") check(request.arguments.fromId === subjectId || request.arguments.toId === subjectId,"inconsistent-source");
+        } else check(envelope.kind === "review-complete" && position === history.length-1,"inconsistent-source");
+        if (position < history.length-1) check(text(step,"state") === "processed" && step.values.result_json.storage !== "null","inconsistent-source");
+      }
+      for (const receipt of retainedReceipts) {
+        check(text(receipt,"format") === "step","inconsistent-source");
+        const operation = parseStepOperation(JSON.parse(text(receipt,"operation_json"))); assertWeaveCapability("daily-review",operation.type);
+        if (operation.type === "connection") check(operation.fromId === subjectId || operation.toId === subjectId,"inconsistent-source");
+      }
+      if (item.values.completed_at.storage !== "null") {
+        const at = text(item,"completed_at"), last = history.at(-1);
+        check(dailyReviewInstant(at) === at && text(run,"status") === "completed" && last !== undefined && text(last,"state") === "completed" &&
+          parseEnvelope(text(last,"envelope_json")).kind === "review-complete","inconsistent-source");
+      } else check(text(run,"status") !== "completed","inconsistent-source");
+    }
+    // A review-only envelope cannot be laundered into an ordinary or unowned historical run.
+    for (const [id,history] of steps) for (const step of history) if (step.values.envelope_json.storage === "text") {
+      let envelope: unknown;
+      try { envelope = JSON.parse(text(step,"envelope_json")); } catch { continue; } // Unrelated legacy protocol is not reinterpreted here.
+      if (envelope && typeof envelope === "object" && "kind" in envelope && envelope.kind === "review-complete") {
+        check(byRun.has(id),"inconsistent-source");
+      }
+    }
+    for (const run of runs.values()) if (run.values.weave_trigger_id.storage === "text" &&
+      (text(run,"weave_trigger_id").startsWith(dailyReviewPrefix) || text(run,"weave_trigger_id") === "daily-review")) {
+      check(dailyReviewDate(text(run,"weave_trigger_id")) !== null && byRun.has(text(run,"id")),"inconsistent-source");
+    }
+  } catch { check(false,"inconsistent-source"); }
+}
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
 export function validateBytes(snapshot: SqlSnapshot): void {
   validateApplicationIntegers(snapshot);
   validateConnectionReceipts(snapshot);
+  validateDailyReviews(snapshot);
   const screening = snapshot.tables.find(value => value.shape.name === "run_screening_passes");
   if (screening) {
     const pairs = table(snapshot,"run_screening_pairs").rows, context = table(snapshot,"run_context").rows;

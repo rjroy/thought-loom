@@ -19,6 +19,7 @@ import { isReadCapability } from "../domain/capability";
 import { interruptOrdinaryRun, issuedRunThoughts, logCommittedInterruption, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type InterruptionDiagnostic, type InterruptionReason, type RunVisibility } from "./run-fences";
 import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
+import { requireDailyReviewMembership } from "./daily-review-authority";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = RunVisibility;
@@ -154,11 +155,15 @@ export class SqliteRunAggregate {
     assertWeaveCapability(this.weavePurpose(run),capability);
   }
   private requireWeaveHistory(run: RunRecord, purpose: WeavePurpose): void {
-    if (purpose !== "media-title-only" && purpose !== "connection-only") return;
+    if (purpose !== "media-title-only" && purpose !== "connection-only" && purpose !== "daily-review") return;
     const intent = this.readWeaveIntent(run.id);
-    if (purpose === "connection-only" && (this.issued(run.id).length || this.db.query(`SELECT 1 FROM run_replies
+    if (purpose === "daily-review") {
+      if (!intent) throw new RunForbiddenError("Daily review subject unavailable");
+      requireDailyReviewMembership(this.db,run.id,intent.subjectId,intent.triggerId);
+    }
+    if ((purpose === "connection-only" || purpose === "daily-review") && (this.issued(run.id).length || this.db.query(`SELECT 1 FROM run_replies
       WHERE run_id=? AND (draft_json IS NOT NULL OR response_id IS NOT NULL)`).get(run.id))) {
-      throw new RunForbiddenError("Connection discovery cannot publish thoughts or public replies");
+      throw new RunForbiddenError("Restricted weave cannot publish thoughts or public replies");
     }
     // Check retained protocol, not prompt wording. A prepared successor may already contain a forbidden cached read.
     // Do not load or rewrite input/result bytes merely to establish execution eligibility.

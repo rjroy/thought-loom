@@ -19,6 +19,7 @@ import { readAgentBinding } from "./run-record";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { SqliteAgentInstructions } from "./agent-instructions";
+import type { WeavePurpose } from "../domain/weave-scheduling";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunScreeningState {
@@ -26,6 +27,9 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
     private readonly searchClock = new SqliteSearchPromptClock(db,sources.now)) { super(db,sources.logger); }
   canDispatch(runId: string): boolean {
     return this.transaction("check weave dispatch",runId,() => !isRunRestoreFenced(this.db,runId) && weaveDispatchAllowed(this.db,runId));
+  }
+  purpose(runId: string): WeavePurpose {
+    return this.transaction("read weave purpose",runId,() => this.weavePurpose(this.require(runId)));
   }
   prepareInitial(claim: Claim, render: (context: InitialRunContext) => string,
     screeningRender?: (context: InitialRunContext, nominations: readonly Thought[]) => string): RunStep {
@@ -133,6 +137,9 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
       if (run.promptId !== promptId) throw new RunFenceError();
       if (run.kind === "export") { new SqliteAgenticExports(this.db,this.sources).finalize(claim,promptId); return; }
       const step = this.currentStep(run.id);
+      if (run.kind === "weave" && this.weavePurpose(run) === "daily-review") {
+        new SqliteRunOperations(this.db,this.sources).completeWeave(claim,promptId); return;
+      }
       if (step.input === null || step.state !== "completed" || step.envelope?.kind !== "complete") throw new RunConflictError("No canonical final reply is available");
       if (run.kind === "weave") { new SqliteRunOperations(this.db,this.sources).completeWeave(claim,promptId); return; }
       if (run.kind !== "evolve") throw new RunForbiddenError();
@@ -174,7 +181,7 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
       const binding = readAgentBinding(this.db,journal.runId);
       if (!binding || !sameBinding(binding,expectedBinding)) throw new RunFenceError("Cancellation binding changed during reconciliation");
       let verifiedSteps = 0;
-      if (this.require(journal.runId).kind === "weave") {
+      if (["weave","evolve"].includes(this.require(journal.runId).kind)) {
         for (const step of journal.steps) {
           if (step.state !== "submitting" && step.state !== "uncertain") continue;
           // The turn ended, including interruption/failure. The paired state is required by the SQL CHECK;

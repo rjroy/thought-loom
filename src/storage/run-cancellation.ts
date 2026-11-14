@@ -46,8 +46,8 @@ export function assertOrdinaryCancellationJournal(db: Database, journal: Ordinar
   }
 }
 
-/** SQL predicate over a runs row named r. Shared by admission and the bounded supervisor scan. */
-export const recordedWeaveCancellationSafeSql = `(
+/** SQL predicate over a runs row named r. Shared by Weaver/Evolve subject ownership and the bounded supervisor scan. */
+export const recordedSubjectCancellationSafeSql = `(
   EXISTS(SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND s.position=0 AND s.prompt_id=r.prompt_id)
   AND (
     (SELECT COUNT(*) FROM run_steps s WHERE s.run_id=r.id)=1 AND EXISTS(
@@ -70,9 +70,9 @@ export const recordedWeaveCancellationSafeSql = `(
   )
 )`;
 
-/** Read-only admission proof. Historical settlement alone says nothing about a possibly dispatched prompt. */
-export function recordedWeaveCancellationSafe(db: Database, runId: string): boolean {
-  const row = db.query<{safe:number},[string]>(`SELECT EXISTS(SELECT 1 FROM runs r WHERE r.id=? AND r.kind='weave'
-    AND r.status IN ('interrupted','failed') AND r.cancellation_state='settled' AND ${recordedWeaveCancellationSafeSql}) AS safe`).get(runId);
+/** Shared Weaver/Evolve proof. Historical settlement alone says nothing about a possibly dispatched prompt. */
+export function recordedSubjectCancellationSafe(db: Database, runId: string): boolean {
+  const row = db.query<{safe:number},[string]>(`SELECT EXISTS(SELECT 1 FROM runs r WHERE r.id=? AND r.kind IN ('weave','evolve')
+    AND r.status IN ('interrupted','failed') AND r.cancellation_state='settled' AND ${recordedSubjectCancellationSafeSql}) AS safe`).get(runId);
   return row?.safe === 1;
 }

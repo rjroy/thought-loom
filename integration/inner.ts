@@ -98,7 +98,8 @@ class FixtureClient implements PublicClient {
     }
     if (job.kind === "evolve" && this.holdEvolve) await new Promise<void>(done => { this.releaseHeld = done; });
     const step = history.length;
-    const output = job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: "No further findings" } : job.kind === "export" ? (step === 1
+    const output = job.purpose === "daily-review" ? {version:1,kind:"review-complete",titleCheck:"complete",connectionCheck:"complete"} :
+      job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: "No further findings" } : job.kind === "export" ? (step === 1
       ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.sourceId } } }
       : { version: 1, kind: "report", markdown: "# Owned integrated report\n\nEvidence from the captured thought.", sourceThoughtIds: [this.sourceId] })
       : job.kind === "evolve" && step === 1

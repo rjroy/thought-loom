@@ -7,6 +7,7 @@ import type { SearchComposerView, SearchTurnControlView } from "../src/domain/ag
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { createLogger } from "../src/logging";
 import { ScriptedClient } from "./agentic-search-capability-fixture";
+import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
 
 const credentials = { user: "owned-user-012345678901234567890123456789", ai: "owned-agent-01234567890123456789012345678" };
 const logger = createLogger("error", () => {});
@@ -34,12 +35,13 @@ for (const stopFirst of [false, true]) test(`configless runtime locally deletes 
       migrate(seed, logger);
       new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-LIBRARY-CONTENT", title: null, titleAuthor: null,
         author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "fixture", parentId: null, sourceIds: [] });
+      sealDailyReview(seed);
     } finally { seed.close(); }
     const beforeLibrary = readonly(dbPath, library);
     configured = await startDaemon({ dbPath, port: 0, credentials, agent: { service: { url: "http://127.0.0.1:44991" }, directory: dir,
       model: { providerID: "owned-provider", id: "owned-model" }, effort: { quick: null, standard: null, thorough: null } } }, () => {}, {
       startTimer: callback => { poll = callback; return () => {}; }, resolveAgentService: async () => ({ url: "http://127.0.0.1:44991" }),
-      createPublicClient: () => client, logSink: () => {},
+      createPublicClient: () => client, logSink: () => {}, now: () => sealedReviewNow,
     });
     const created = await request(configured, "/search-sessions", { method: "POST", body: {}, key: "session-key" });
     expect(created.status).toBe(201);
@@ -63,7 +65,7 @@ for (const stopFirst of [false, true]) test(`configless runtime locally deletes 
     expect(priorSteps).toEqual([expect.objectContaining({ position: 0, prompt_id: prompt.id, submit_owner: oldBinding.execution_owner_id })]);
 
     const disabled = { startTimer: () => () => {}, resolveAgentService: async () => { forbiddenCalls++; throw new Error("unexpected resolver"); },
-      createPublicClient: () => { forbiddenCalls++; throw new Error("unexpected client"); }, logSink: () => {} };
+      createPublicClient: () => { forbiddenCalls++; throw new Error("unexpected client"); }, logSink: () => {}, now: () => sealedReviewNow };
     plain = await startDaemon({ dbPath, port: 0, credentials }, () => {}, disabled);
     const metadata = await request(plain, `/search-sessions/${session.id}`);
     expect(metadata.status).toBe(200); expect(metadata.headers.get("cache-control")).toContain("no-store");

@@ -255,7 +255,7 @@ test("logical-3 preserves restored export local Stop across capture and restore,
   finally { source.close(); }
   const output = join(f.dir,"export-capture"); await mkdir(output,{mode:0o700});
   const first = await captureBackup({databasePath:f.source,mediaDirectory:`${f.source}.media`,outputDirectory:output,logger});
-  expect((JSON.parse(await readFile(join(first.snapshotDirectory,"manifest.json"),"utf8")) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-5");
+  expect((JSON.parse(await readFile(join(first.snapshotDirectory,"manifest.json"),"utf8")) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-6");
   const restored = await restoreBackup({snapshotDirectory:first.snapshotDirectory,targetDirectory:join(f.dir,"export-first"),restoredAt,logger});
   const firstDb = new Database(restored.databasePath);
   let originalFence: unknown;
@@ -324,7 +324,7 @@ test("final restore installs the exact recovered snapshot on one exclusively own
   }
   finally { await reference.dispose(); }
   const sourceBefore = tables(f.source), manifest = await readFile(join(f.snapshot.snapshotDirectory, "manifest.json"));
-  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-5");
+  expect((JSON.parse(manifest.toString()) as {appSchema:string}).appSchema).toBe("thoughtloom-logical-6");
   const boundaries: { message: string; inode: bigint; marker: boolean; competing?: number | null; schemaObjects?: number }[] = [];
   const boundaryLogger = createLogger("verbose", record => {
     if (["[restore] target ownership acquired", "[restore] target marker durable", "[restore] target database committed", "[restore] target validated"].includes(record.message)) {

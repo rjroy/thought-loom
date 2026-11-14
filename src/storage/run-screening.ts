@@ -12,7 +12,7 @@ export class SqliteRunScreeningState extends SqliteRunAggregate {
   /** A generated subject's dedicated creation owner suppresses duplicate screening in ordinary follow-ups. */
   ownsScreening(runId: string): boolean {
     const run = this.require(runId), intent = this.readWeaveIntent(runId), purpose = this.weavePurpose(run);
-    return run.kind === "weave" && intent !== null && (purpose === "connection-only" ||
+    return run.kind === "weave" && intent !== null && (purpose === "daily-review" || purpose === "connection-only" ||
       purpose === "ordinary" && !hasConnectionDiscovery(this.db,intent.subjectId));
   }
   private pass(runId: string): ScreeningPass | null {
