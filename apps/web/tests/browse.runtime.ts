@@ -40,8 +40,8 @@ export function browseDaemon(token: string) {
   let createdConnection = false;
   const items = Array.from({ length: 51 }, (_, index) => ({
     id: `browse-${String(index).padStart(2, "0")}`, text: `Owned browse text ${index}`, title: `Owned browse title ${index}`,
-    titleAuthor: "user", author: index % 2 ? "ai" : "user", kind: index % 2 ? "developing-idea" : "captured-original",
-    createdAt: `2030-01-${String(Math.floor(index / 2) + 1).padStart(2, "0")}T00:00:00.000Z`, origin: "fixture", parentId: null, sourceIds: [],
+    titleAuthor: "user", author: index === 1 ? "source" : index % 2 ? "ai" : "user", kind: index === 1 ? "imported-original" : index % 2 ? "developing-idea" : "captured-original",
+    createdAt: `2030-01-${String(Math.floor(index / 2) + 1).padStart(2, "0")}T00:00:00.000Z`, origin: index === 1 ? "markdown-import" : "fixture", parentId: null, sourceIds: [],
   }));
   return {
     attempts,
@@ -128,6 +128,7 @@ async function checkRapidBrowseIntent(page: Page): Promise<void> {
   const authors = page.getByRole("group", { name: "Authorship" });
   const ai = authors.getByRole("checkbox", { name: "AI" });
   const user = authors.getByRole("checkbox", { name: "You" });
+  const source = authors.getByRole("checkbox", { name: /^Imported source$/i });
   const rejected = page.getByRole("checkbox", { name: "Show rejected" });
   const location = (value: string) => {
     const url = new URL(value);
@@ -148,6 +149,7 @@ async function checkRapidBrowseIntent(page: Page): Promise<void> {
   try {
     await sort.selectOption({ label: "Oldest first" });
     await ai.click();
+    await source.click();
     predecessor = page.url();
     await rejected.click();
     await assertFinal();
@@ -391,6 +393,9 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await expect(page.getByRole("heading", { name: "Browse", exact: true })).toBeVisible();
   await expect(link).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Owned browse title 50", { exact: true })).toBeVisible();
+  const authors = page.getByRole("group", { name: "Authorship" });
+  const source = authors.getByRole("checkbox", { name: /^Imported source$/i });
+  await expect(source).toBeChecked();
   await checkBrowseWhimsy(page);
   await expect(page.getByText("Owned browse title 0", { exact: true })).toHaveCount(0);
   const rows = page.getByRole("list", { name: "Ideas" }).getByRole("listitem");
@@ -401,6 +406,29 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
   for (let i = 0; i < 51; i++) await expect(page.getByText(`Owned browse title ${i}`, { exact: true })).toHaveCount(1);
   await checkMapJourney(page, fixture, options.origin);
+  const userFilter = authors.getByRole("checkbox", { name: "You" });
+  const aiFilter = authors.getByRole("checkbox", { name: "AI" });
+  await userFilter.uncheck();
+  await aiFilter.uncheck();
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByText("Owned browse title 1", { exact: true })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.getAll("author")).toEqual(["source"]);
+  await expect.poll(() => new URL(fixture.attempts.at(-1) ?? "", "http://fixture.invalid").searchParams.getAll("author")).toEqual(["source"]);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(source).toBeChecked();
+  await expect(userFilter).not.toBeChecked();
+  await expect(aiFilter).not.toBeChecked();
+  await expect(rows).toHaveCount(1);
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await source.uncheck();
+  await expect(page.getByText("Owned browse title 1", { exact: true })).toHaveCount(0);
+  await expect.poll(() => new URL(page.url()).searchParams.getAll("author")).toEqual(["user", "ai"]);
+  await page.reload({ waitUntil: "networkidle" });
+  await expect(source).not.toBeChecked();
+  await expect(userFilter).toBeChecked();
+  await expect(aiFilter).toBeChecked();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(source).toBeChecked();
   await checkRapidBrowseIntent(page);
   const sort = page.getByRole("combobox", { name: "Sort" });
   const ai = page.getByRole("group", { name: "Authorship" }).getByRole("checkbox", { name: "AI" });
@@ -411,12 +439,12 @@ export async function checkBrowseBrowser(page: Page, fixture: ReturnType<typeof 
   await expect(user).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Show rejected" })).toBeChecked();
   await user.uncheck();
-  await expect(page.getByText("Select You or AI to show ideas.")).toBeVisible();
+  await expect(page.getByText("Select at least one authorship filter to show ideas.")).toBeVisible();
   const before = fixture.attempts.length;
   await page.getByRole("button", { name: "Refresh list" }).click();
   assert.equal(fixture.attempts.length, before, "empty authors must not query daemon");
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(user).toBeChecked(); await expect(ai).toBeChecked();
+  await expect(user).toBeChecked(); await expect(ai).toBeChecked(); await expect(source).toBeChecked();
   await expect(sort).toHaveValue("oldest");
   await expect(page.getByRole("checkbox", { name: "Show rejected" })).not.toBeChecked();
   fixture.setEmpty(true);

@@ -13,7 +13,7 @@ import { ContentGlyph } from "./content-glyph";
 import { MediaSourceDetails } from "./media-source-details";
 import styles from "./browse.module.css";
 
-const defaults = (): BrowseQuery => ({ sort: "newest", author: ["user", "ai"], scope: "normal" });
+const defaults = (): BrowseQuery => ({ sort: "newest", author: ["user", "ai", "source"], scope: "normal" });
 const material = {
   "captured-original": "Original capture", "user-contribution": "Contribution", "ai-interpretation": "Interpretation",
   "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Image or PDF",
@@ -115,7 +115,7 @@ export function BrowseView() {
       if (same) void controller.refresh();
     } else void controller.refresh();
   }
-  const filtered = query.author.length !== 2 || query.scope !== "normal";
+  const filtered = query.author.length !== 3 || query.scope !== "normal";
   const loading = valid && (state.phase === "idle" || state.phase === "loading");
   const ready = valid && state.phase === "ready";
   const items = valid ? state.items : [];
@@ -141,14 +141,14 @@ export function BrowseView() {
         <aside className={styles.filters} aria-label="Browse filters">
           <fieldset>
             <legend>Authorship</legend>
-            {(["user", "ai"] as const).map(author => <label className={styles.choice} key={author}>
+            {(["user", "ai", "source"] as const).map(author => <label className={styles.choice} key={author}>
               <input type="checkbox" checked={query.author.includes(author)} onChange={event => {
                 const checked = event.currentTarget.checked;
                 change(current => ({ ...current,
                   author: checked ? [...current.author, author] : current.author.filter(value => value !== author),
                 }));
               }} />
-              <span>{author === "user" ? "You" : "AI"}</span>
+              <span>{author === "user" ? "You" : author === "ai" ? "AI" : "Imported source"}</span>
             </label>)}
           </fieldset>
           <div className={styles.filterFooter}>
@@ -159,7 +159,7 @@ export function BrowseView() {
               }} />
               <span>Show rejected</span>
             </label>
-            <button className={styles.textButton} type="button" onClick={() => change(current => ({ ...current, author: ["user", "ai"], scope: "normal" }))}>Clear filters</button>
+            <button className={styles.textButton} type="button" onClick={() => change(current => ({ ...current, author: ["user", "ai", "source"], scope: "normal" }))}>Clear filters</button>
           </div>
         </aside>
         <Image src="/backgrounds/browse-cat.png" alt="" aria-hidden="true"
@@ -182,7 +182,7 @@ export function BrowseView() {
         </div>}
         {ready && items.length === 0 && !problem && <div className={styles.empty}>
           <h2>{filtered ? "No ideas match these filters" : "No ideas yet"}</h2>
-          {!query.author.length ? <p>Select You or AI to show ideas.</p>
+          {!query.author.length ? <p>Select at least one authorship filter to show ideas.</p>
             : filtered ? <p>Choose another authorship filter or clear filters to browse again.</p>
               : <><p>Capture a thought to give yourself something to return to.</p><Link href="/capture" prefetch={false}>Capture a thought</Link></>}
         </div>}
