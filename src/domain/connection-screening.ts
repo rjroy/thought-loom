@@ -1,4 +1,5 @@
 import { record } from "./validation";
+import type { Thought } from "./thought";
 
 export const SCREENING_NOMINATION_THRESHOLD = 0.60;
 export interface ScreeningPolicy {
@@ -7,6 +8,9 @@ export interface ScreeningPolicy {
   readonly judgeIdentity: string;
 }
 export type ScreeningFailure = "screening-unavailable" | "eligibility-changed" | "configuration-changed";
+/** Private historical fact, separate from a model's probability. */
+export interface ScreeningExclusion { readonly kind: "already-connected"; readonly connectionId: string }
+export type ScreeningFinalization = { readonly kind: "pending" } | { readonly kind: "ready"; readonly thoughts: readonly Thought[] };
 export function screeningPolicy(judgeIdentity: string): string {
   if (!judgeIdentity.trim()) throw new Error("Screening identity required");
   return JSON.stringify({version:"connection-screening-1",threshold:SCREENING_NOMINATION_THRESHOLD,judgeIdentity});

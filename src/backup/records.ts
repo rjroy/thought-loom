@@ -72,7 +72,10 @@ export function validateRecords(db: Database): void {
     WHERE r.kind!='weave' OR r.weave_subject_id IS NOT p.subject_id OR t.kind='media-original'
       OR p.candidate_count!=(SELECT count(*) FROM main.run_screening_pairs j WHERE j.run_id=p.run_id)
       OR (p.status='collecting' AND s.input IS NOT NULL)
-      OR (p.status='complete' AND (s.input IS NULL OR EXISTS(SELECT 1 FROM main.run_screening_pairs j WHERE j.run_id=p.run_id AND j.judgment_json IS NULL))) LIMIT 1`);
+      OR (p.status='complete' AND (s.input IS NULL OR EXISTS(SELECT 1 FROM main.run_screening_pairs j WHERE j.run_id=p.run_id AND j.judgment_json IS NULL AND j.excluded_connection_id IS NULL))) LIMIT 1`);
+  noRows(db,`SELECT 1 FROM main.run_screening_pairs j JOIN main.run_screening_passes p ON p.run_id=j.run_id
+    LEFT JOIN main.connections c ON c.id=j.excluded_connection_id WHERE j.excluded_connection_id IS NOT NULL AND
+      (p.status!='complete' OR c.id IS NULL OR NOT ((c.from_id=p.subject_id AND c.to_id=j.candidate_id) OR (c.to_id=p.subject_id AND c.from_id=j.candidate_id))) LIMIT 1`);
   noRows(db,`SELECT 1 FROM main.run_screening_pairs j JOIN main.run_screening_passes p ON p.run_id=j.run_id
     JOIN main.thoughts t ON t.id=j.candidate_id WHERE t.kind='media-original' OR j.candidate_id=p.subject_id
       OR (j.judgment_json IS NOT NULL AND (NOT EXISTS(SELECT 1 FROM main.run_context c WHERE c.run_id=j.run_id AND c.kind='thought' AND c.ref_id=j.candidate_id)
@@ -345,14 +348,25 @@ export function validateBytes(snapshot: SqlSnapshot): void {
       catch { check(false,"inconsistent-source"); }
     }
     const complete = new Set(screening.rows.filter(row => text(row,"status") === "complete").map(row => text(row,"run_id")));
+    const subjects = new Map(screening.rows.map(row => [text(row,"run_id"),text(row,"subject_id")]));
+    const connections = new Map(table(snapshot,"connections").rows.map(row => [text(row,"id"),row]));
     for (const pair of pairs) {
-      if (pair.values.judgment_json.storage === "null") continue;
+      const runId = text(pair,"run_id"), candidateId = text(pair,"candidate_id"), exclusion = pair.values.excluded_connection_id;
+      // Older inventories have no exclusion column and retain their strict all-judged/full-read rules.
+      const excluded = exclusion !== undefined && exclusion.storage !== "null";
+      if (excluded) {
+        const connection = connections.get(text(pair,"excluded_connection_id")), subjectId = subjects.get(runId);
+        check(complete.has(runId) && connection !== undefined &&
+          ((text(connection,"from_id") === subjectId && text(connection,"to_id") === candidateId) ||
+           (text(connection,"to_id") === subjectId && text(connection,"from_id") === candidateId)),"inconsistent-source");
+      }
+      if (pair.values.judgment_json.storage === "null") { check(!complete.has(runId) || excluded,"inconsistent-source"); continue; }
       let score: number;
       try { score = parseScreeningJudgment(text(pair,"judgment_json")); }
       catch { check(false,"inconsistent-source"); }
-      const runId = text(pair,"run_id"), policy = policies.get(runId);
+      const policy = policies.get(runId);
       check(policy !== undefined,"inconsistent-source");
-      if (complete.has(runId) && score >= policy.threshold) {
+      if (complete.has(runId) && score >= policy.threshold && !excluded) {
         const witness = JSON.stringify([runId,text(pair,"candidate_id")]);
         check(fullReads.has(witness),"inconsistent-source");
       }

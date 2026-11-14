@@ -345,6 +345,62 @@ test("late screening judgment from a stale owner cannot overwrite its successor'
   }
 }));
 
+test("an edge added for a queued pair skips its call and continues every remaining pair", async () => fixture(async f => {
+  for (let i=0;i<8;i++) f.store.saveThought({id:`candidate-${i}`,text:`owned candidate ${i}`,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = f.ops.admitWeave("user",{subjectId:"root",triggerId:"queued-exclusion"});
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), calls:string[] = [];
+  const native = new OwnedNative(new SqliteAgentBindings(f.db),() => complete("no findings"));
+  const instance = new RunWorker({db:f.db,id:f.id,now,bindingFor:binding,native:() => native,
+    connectionScreening:{identity:"owned-queued-exclusion",async judge(pair) {
+      calls.push(pair.thoughtB.id); if (calls.length === 4) entered.resolve();
+      if (Number(pair.thoughtB.id.at(-1)) < 4) await release.promise;
+      return 0.9;
+    }}});
+  const flight = instance.tick(run.id);
+  try {
+    await enteredWithin(entered.promise);
+    f.store.saveConnection({id:"queued-edge",fromId:"candidate-4",toId:"root",category:"extends",proposedBy:"user",explanation:"Owned queued relation",sourceIds:[]});
+    release.resolve(); await flight; await drive(instance,f,run.id);
+    expect(calls.toSorted()).toEqual([0,1,2,3,5,6,7].map(i => `candidate-${i}`));
+    const prompt = JSON.parse(native.submitted[0]?.input ?? "null") as {nominations:{id:string}[]};
+    expect(prompt.nominations.map(thought => thought.id).toSorted()).toEqual(calls.toSorted());
+    expect(f.db.query("SELECT judgment_json,excluded_connection_id FROM run_screening_pairs WHERE run_id=? AND candidate_id='candidate-4'").get(run.id))
+      .toEqual({judgment_json:null,excluded_connection_id:"queued-edge"});
+    expect(f.db.query("SELECT status,failure_code FROM run_screening_passes WHERE run_id=?").get(run.id)).toEqual({status:"complete",failure_code:null});
+  } finally { release.resolve(); await flight; instance.pause(); await instance.drain(); }
+}));
+
+test("a skipped pair becoming unconnected before prompt commit stays pending and resumes after reopen", async () => screeningRestartFixture(async f => {
+  for (let i=0;i<5;i++) f.store.saveThought({id:`candidate-${i}`,text:`owned candidate ${i}`,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  const run = new SqliteRunOperations(f.db,{id:f.id,now}).admitWeave("user",{subjectId:"root",triggerId:"pending-exclusion"});
+  const calls:string[] = [];
+  const first = screeningRestartWorker(f.db,f.id,{identity:"owned-pending-exclusion",async judge(pair) {
+    calls.push(pair.thoughtB.id);
+    if (pair.thoughtB.id === "candidate-0") f.store.saveConnection({id:"temporary-edge",fromId:"candidate-4",toId:"root",category:"related",proposedBy:"user",explanation:"Owned temporary relation",sourceIds:[]});
+    return 0.9;
+  }},record => {
+    if (record.message === "[worker] screening complete") new RejectionService(new SqliteRejectionRepository(f.db)).rejectConnection("user","temporary-edge");
+  });
+  try {
+    await first.instance.tick(run.id);
+    expect(calls.toSorted()).toEqual([0,1,2,3].map(i => `candidate-${i}`));
+    expect(new SqliteRunProtocolRepository(f.db).steps(run.id)[0]?.input).toBeNull();
+    expect(f.db.query("SELECT status,failure_code FROM run_screening_passes WHERE run_id=?").get(run.id)).toEqual({status:"collecting",failure_code:null});
+    expect(f.db.query("SELECT 1 FROM agent_bindings WHERE run_id=?").get(run.id)).toBeNull();
+    expect(first.native.submitted).toEqual([]); expect(first.native.bindingsSeen).toEqual([]);
+    first.instance.pause(); await first.instance.drain(); f.reopen();
+    const resumedCalls:string[] = [];
+    const resumed = screeningRestartWorker(f.db,f.id,{identity:"owned-pending-exclusion",async judge(pair) { resumedCalls.push(pair.thoughtB.id); return 0.9; }});
+    try {
+      for (let i=0;i<12 && resumed.native.submitted.length === 0;i++) await resumed.instance.tick(run.id);
+      expect(resumedCalls).toEqual(["candidate-4"]);
+      const prompt = JSON.parse(resumed.native.submitted[0]?.input ?? "null") as {nominations:{id:string}[]};
+      expect(prompt.nominations.map(thought => thought.id).toSorted()).toEqual([0,1,2,3,4].map(i => `candidate-${i}`));
+      expect(resumed.native.submitted[0]?.input).not.toContain("temporary-edge");
+    } finally { resumed.instance.pause(); await resumed.instance.drain(); }
+  } finally { first.instance.pause(); await first.instance.drain(); }
+}));
+
 test("default-level worker diagnostics classify initial preparation failures without exposing private data", async () => fixture(async f => {
   const records: LogRecord[] = [];
   const logger = createLogger(undefined, record => records.push(record));

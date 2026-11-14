@@ -1,8 +1,9 @@
-import { parseScreeningJudgment, parseScreeningPolicy, screeningJudgment, type ScreeningFailure } from "../domain/connection-screening";
+import { parseScreeningJudgment, parseScreeningPolicy, screeningJudgment, type ScreeningExclusion, type ScreeningFailure, type ScreeningFinalization } from "../domain/connection-screening";
 import { RunConflictError, type Claim } from "../domain/run";
 import type { Thought } from "../domain/thought";
 import { SqliteRunAggregate } from "./run-aggregate";
 import { hasConnectionDiscovery } from "./weave-admission";
+import { searchEligibilitySql } from "./search-eligibility";
 
 interface ScreeningPass { readonly subjectId: string; readonly policyJson: string; readonly status: "collecting" | "complete" | "fallback" }
 interface ScreeningPair { readonly candidateId: string; readonly judgmentJson: string | null }
@@ -31,6 +32,13 @@ export class SqliteRunScreeningState extends SqliteRunAggregate {
   private sameCandidates(runId: string, subjectId: string): boolean {
     const expected = new Set(this.pairs(runId).map(pair => pair.candidateId)), actual = this.candidateIds(subjectId);
     return expected.size === actual.length && actual.every(id => expected.has(id));
+  }
+  /** Identity-only AI-normal lookup; supporting-source rejection redacts provenance, not this active edge. */
+  private exclusion(subjectId: string, candidateId: string): ScreeningExclusion | null {
+    const row = this.db.query<{id:string},[string,string,string,string]>(`SELECT edge.id FROM connections edge
+      WHERE ((edge.from_id=? AND edge.to_id=?) OR (edge.from_id=? AND edge.to_id=?))
+        AND ${searchEligibilitySql("'connection'","edge.id")} ORDER BY edge.rowid LIMIT 1`).get(subjectId,candidateId,candidateId,subjectId);
+    return row ? {kind:"already-connected",connectionId:row.id} : null;
   }
   private fallback(runId: string, generation: number, category: ScreeningFailure): void {
     const pass = this.pass(runId);
@@ -61,11 +69,11 @@ export class SqliteRunScreeningState extends SqliteRunAggregate {
         this.fallback(run.id,claim.generation,"configuration-changed"); return [];
       }
       if (!this.sameCandidates(run.id,subjectId)) { this.fallback(run.id,claim.generation,"eligibility-changed"); return []; }
-      return this.pairs(run.id).filter(pair => pair.judgmentJson === null).map(pair => pair.candidateId);
+      return this.pairs(run.id).filter(pair => pair.judgmentJson === null && !this.exclusion(subjectId,pair.candidateId)).map(pair => pair.candidateId);
     });
   }
   /** Commit exposure before network entry, not a Weaver full-read witness. */
-  screeningPair(claim: Claim, subjectId: string, candidateId: string): {subject: Thought; candidate: Thought} | null {
+  screeningPair(claim: Claim, subjectId: string, candidateId: string): {subject: Thought; candidate: Thought} | ScreeningExclusion | null {
     return this.guarded("authorize screening pair",claim,(run,visible) => {
       const pass = this.pass(run.id);
       if (!pass || pass.subjectId !== subjectId || pass.status !== "collecting") return null;
@@ -75,6 +83,8 @@ export class SqliteRunScreeningState extends SqliteRunAggregate {
           candidate.kind === "media-original" || candidateId === subjectId) {
         this.fallback(run.id,claim.generation,"eligibility-changed"); return null;
       }
+      const exclusion = this.exclusion(subjectId,candidateId);
+      if (exclusion) return exclusion;
       this.track(run.id,{kind:"thought",id:subjectId}); this.track(run.id,{kind:"thought",id:candidateId});
       return {subject,candidate};
     });
@@ -99,19 +109,28 @@ export class SqliteRunScreeningState extends SqliteRunAggregate {
     this.guarded("record screening failure",claim,run => this.fallback(run.id,claim.generation,"screening-unavailable"));
   }
   /** Called within prepareInitial's guarded transaction: complete, select, witness and exact prompt commit are atomic. */
-  protected screeningNominations(claim: Claim, subjectId: string): readonly Thought[] | undefined {
+  protected screeningNominations(claim: Claim, subjectId: string): ScreeningFinalization | undefined {
     const pass = this.pass(claim.runId);
     if (!pass || pass.status === "fallback") return undefined;
     if (pass.subjectId !== subjectId) throw new RunConflictError("Screening subject changed");
     const pairs = this.pairs(claim.runId);
-    if (!this.sameCandidates(claim.runId,subjectId) || pairs.some(pair => pair.judgmentJson === null)) {
+    if (!this.sameCandidates(claim.runId,subjectId)) {
       this.fallback(claim.runId,claim.generation,"eligibility-changed"); return undefined;
     }
+    const exclusions = new Map<string,ScreeningExclusion>();
+    for (const pair of pairs) {
+      const exclusion = this.exclusion(subjectId,pair.candidateId);
+      if (exclusion) exclusions.set(pair.candidateId,exclusion);
+      else if (pair.judgmentJson === null) return {kind:"pending"};
+    }
+    // Exclusions describe this exact prompt snapshot, never a collecting-pass negative cache.
+    for (const [candidateId,exclusion] of exclusions) this.db.run(`UPDATE run_screening_pairs SET excluded_connection_id=?
+      WHERE run_id=? AND candidate_id=?`,[exclusion.connectionId,claim.runId,candidateId]);
     const policy = parseScreeningPolicy(pass.policyJson);
-    const nominated = new Set(pairs.filter(pair => pair.judgmentJson !== null && parseScreeningJudgment(pair.judgmentJson) >= policy.threshold).map(pair => pair.candidateId));
+    const nominated = new Set(pairs.filter(pair => !exclusions.has(pair.candidateId) && pair.judgmentJson !== null && parseScreeningJudgment(pair.judgmentJson) >= policy.threshold).map(pair => pair.candidateId));
     const thoughts = this.rejection().listThoughts({actor:"ai",mode:"normal"}).filter(thought => nominated.has(thought.id));
     for (const thought of thoughts) this.trackThought(claim.runId,thought);
     if (pass.status === "collecting") this.db.run("UPDATE run_screening_passes SET status='complete' WHERE run_id=?",[claim.runId]);
-    return thoughts;
+    return {kind:"ready",thoughts};
   }
 }

@@ -8,15 +8,17 @@ import { stageRestoreSnapshot, recoverRestoreStage, restoreBackup } from "../src
 import { decodeManifest } from "../src/backup/decode";
 import { encodeManifest } from "../src/backup/format";
 import { startDaemon } from "../src/daemon/runtime";
-import { screeningPolicy } from "../src/domain/connection-screening";
 import { RunAdmissionService, RunFenceError } from "../src/domain/run";
+import { RejectionService } from "../src/domain/rejection";
 import { createLogger } from "../src/logging";
 import { SqliteRunOperations } from "../src/storage/run-operations";
 import { SqliteRunRepository } from "../src/storage/run";
 import { SqliteRunWorkerState } from "../src/storage/run-worker";
 import { SqliteStore } from "../src/storage/sqlite";
+import { SqliteRejectionRepository } from "../src/storage/rejection";
 
 const logger = createLogger("verbose",() => {}), now = () => "2030", restoredAt = "2031-02-03T04:05:06.000Z";
+const policy = JSON.stringify({version:"connection-screening-1",threshold:0.6,judgeIdentity:"owned-backup-judge"});
 const credentials = {user:"user-0123456789-0123456789-abcdef",ai:"agent-0123456789-0123456789-abcdef"};
 interface Fixture {readonly dir:string;readonly snapshot:string;readonly runIds:readonly string[];readonly history:unknown;
   readonly discovery:{readonly origin:string;readonly subjects:readonly string[];readonly owners:readonly string[]};
@@ -39,14 +41,29 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
       const ops = new SqliteRunOperations(db,sources), runs = new SqliteRunRepository(db,sources), state = new SqliteRunWorkerState(db,sources);
       for (const status of ["collecting","complete","fallback"] as const) {
         const run = ops.admitWeave("user",{subjectId:"root",triggerId:`backup-${status}`}), claim = runs.claim(run.id);
-        runIds.push(run.id); state.beginScreening(claim,"root",screeningPolicy("owned-backup-judge"));
+        runIds.push(run.id); state.beginScreening(claim,"root",policy);
         state.screeningPair(claim,"root","candidate");
         if (status !== "fallback") state.recordScreeningJudgment(claim,"root","candidate",0.75);
         else state.screeningFailed(claim);
         if (status === "complete") state.prepareInitial(claim,() => "fallback",() => "owned exact prompt\r\n");
         // Terminal history permits the next distinct invitation on this subject, without inventing native submission.
-        if (status !== "fallback") { runs.stop(run.id); expect(state.settleUnsubmitted(run.id)).toBe(true); }
+        runs.stop(run.id); expect(state.settleUnsubmitted(run.id)).toBe(true);
       }
+      for (const judged of [true,false]) {
+        const run = ops.admitWeave("user",{subjectId:"root",triggerId:`backup-excluded-${judged}`}), claim = runs.claim(run.id);
+        runIds.push(run.id); state.beginScreening(claim,"root",policy);
+        if (judged) {
+          state.screeningPair(claim,"root","candidate"); state.recordScreeningJudgment(claim,"root","candidate",0.9);
+          store.saveConnection({id:"historical-edge",fromId:"candidate",toId:"root",category:"supports",proposedBy:"user",explanation:"Owned historical relation",sourceIds:[]});
+        }
+        state.prepareInitial(claim,() => { throw new Error("Must not fall back"); },(_context,nominations) => {
+          expect(nominations).toEqual([]); return "owned excluded prompt\r\n";
+        });
+        runs.stop(run.id); expect(state.settleUnsubmitted(run.id)).toBe(true);
+      }
+      new RejectionService(new SqliteRejectionRepository(db,logger)).rejectConnection("user","historical-edge");
+      store.saveThought({id:"foreign",text:"Owned foreign endpoint",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+      store.saveConnection({id:"foreign-edge",fromId:"candidate",toId:"foreign",category:"related",proposedBy:"user",explanation:"Owned foreign relation",sourceIds:[]});
       const admission = new RunAdmissionService({...sources,repository:runs}).admit("user","evolve",{parentId:"root",text:"Owned backup contribution"});
       if (!admission.contribution) throw new Error("Expected contribution");
       const development = runs.commit(runs.claim(admission.run.id),{id:"owned-legacy-development",type:"development",parentId:admission.contribution.id,text:"Owned backup development",sourceIds:[]}).thought;
@@ -73,15 +90,18 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
 
 test("current capture, staged recovery and offline installation preserve screening history and fence execution", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-6");
-  expect(manifest.tables.filter(table => table.name.startsWith("run_screening_")).map(table => table.rowCount)).toEqual(["3","3"]);
+  expect(manifest.appSchema).toBe("thoughtloom-logical-7");
+  expect(manifest.tables.filter(table => table.name.startsWith("run_screening_")).map(table => table.rowCount)).toEqual(["5","5"]);
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger});
   function verify(path: string, fenced: boolean): void {
     const db = new Database(path,{create:false,readwrite:true});
     try {
       expect(history(db)).toEqual(f.history);
-      expect(db.query("SELECT input FROM run_steps WHERE input IS NOT NULL").all()).toEqual([{input:"owned exact prompt\r\n"}]);
+      expect(db.query("SELECT input FROM run_steps WHERE input IS NOT NULL ORDER BY input").all()).toEqual([{input:"owned exact prompt\r\n"},{input:"owned excluded prompt\r\n"},{input:"owned excluded prompt\r\n"}]);
+      expect(db.query("SELECT judgment_json,excluded_connection_id FROM run_screening_pairs WHERE excluded_connection_id IS NOT NULL ORDER BY judgment_json DESC").all())
+        .toEqual([{judgment_json:'{"score":0.9}',excluded_connection_id:"historical-edge"},{judgment_json:null,excluded_connection_id:"historical-edge"}]);
+      expect(db.query("SELECT connection_id FROM rejected_connections WHERE connection_id='historical-edge'").get()).toEqual({connection_id:"historical-edge"});
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
       for (const [index,owner] of f.discovery.owners.entries()) {
         expect(db.query("SELECT weave_subject_id AS subject,weave_trigger_id AS origin FROM runs WHERE id=?").get(owner))
@@ -97,7 +117,7 @@ test("current capture, staged recovery and offline installation preserve screeni
         for (const runId of [...f.runIds,f.discovery.origin,...f.discovery.owners,...f.direct.owners]) {
           expect(() => runs.claim(runId)).toThrow(RunFenceError);
           const claim = {runId,generation:runs.get(runId)?.generation ?? -1};
-          expect(() => state.beginScreening(claim,"root",screeningPolicy("new-config"))).toThrow(RunFenceError);
+          expect(() => state.beginScreening(claim,"root",policy)).toThrow(RunFenceError);
           expect(() => state.recordScreeningJudgment(claim,"root","candidate",1)).toThrow(RunFenceError);
           expect(() => state.screeningPair(claim,"root","candidate")).toThrow(RunFenceError);
         }
@@ -108,6 +128,36 @@ test("current capture, staged recovery and offline installation preserve screeni
     verify(stage.databasePath,false); await recoverRestoreStage(stage,{restoredAt,logger}); verify(stage.databasePath,true);
   } finally { await stage.dispose(); }
   verify((await restoreBackup({snapshotDirectory:f.snapshot,targetDirectory:join(f.dir,"target"),restoredAt,logger})).databasePath,true);
+}),45000);
+
+test.each(["missing","foreign-pair","missing-connection","positive-without-proof","collecting"] as const)("restore refuses hash-consistent screening exclusion %s", async fault => owned(async f => {
+  const path = join(f.snapshot,"tables","run_screening_pairs.json"), payload = JSON.parse(await readFile(path,"utf8")) as {
+    columns:string[];rows:{rowid:unknown;values:(string|{$integer:string}|null)[]}[];
+  };
+  const run = payload.columns.indexOf("run_id"), exclusion = payload.columns.indexOf("excluded_connection_id");
+  const row = payload.rows.find(row => row.values[run] === f.runIds[fault === "collecting" ? 0 : fault === "positive-without-proof" ? 3 : 4]);
+  if (!row) throw new Error("Missing owned exclusion");
+  row.values[exclusion] = fault === "collecting" ? "historical-edge" : fault === "foreign-pair" ? "foreign-edge" : fault === "missing-connection" ? "not-a-connection" : null;
+  const bytes = new TextEncoder().encode(`${JSON.stringify(payload)}\n`); await writeFile(path,bytes,{mode:0o600});
+  const manifestPath = join(f.snapshot,"manifest.json"), manifest = decodeManifest(await readFile(manifestPath));
+  await writeFile(manifestPath,encodeManifest({...manifest,tables:manifest.tables.map(entry => entry.name === "run_screening_pairs" ? {
+    ...entry,byteLength:String(bytes.length),sha256:createHash("sha256").update(bytes).digest("hex"),
+  } : entry)}),{mode:0o600});
+  const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
+  await expect(stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger})).rejects.toMatchObject({code:"invalid-records"});
+}),45000);
+
+test.each(["missing","foreign-pair","missing-connection","collecting"] as const)("capture refuses an inconsistent screening exclusion %s", async fault => owned(async f => {
+  const db = new Database(join(f.dir,"owned.sqlite"));
+  try {
+    db.exec("PRAGMA foreign_keys=OFF; DROP TRIGGER screening_pair_update;");
+    db.run("UPDATE run_screening_pairs SET excluded_connection_id=? WHERE run_id=?",[
+      fault === "collecting" ? "historical-edge" : fault === "foreign-pair" ? "foreign-edge" : fault === "missing-connection" ? "not-a-connection" : null,f.runIds[fault === "collecting" ? 0 : 4] ?? "missing",
+    ]);
+  } finally { db.close(); }
+  const output = join(f.dir,"refused-capture"); await mkdir(output,{mode:0o700});
+  await expect(captureBackup({databasePath:join(f.dir,"owned.sqlite"),mediaDirectory:join(f.dir,"owned.sqlite.media"),outputDirectory:output,logger}))
+    .rejects.toMatchObject({code:"inconsistent-source"});
 }),45000);
 
 test.each(["empty-subject","mismatched-subject","invalid-source"] as const)("restore refuses a hash-consistent direct discovery %s", async fault => owned(async f => {

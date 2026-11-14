@@ -227,8 +227,9 @@ export class RunWorker {
           ? context.thoughts.find(thought => thought.id === job.subjectId && thought.kind !== "media-original") : undefined;
         if (subject && this.state.ownsScreening(runId)) await this.screenConnections(owner,subject.id,this.dependencies.connectionScreening);
         this.active(owner);
-        this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths),
+        const prepared = this.state.prepareInitial(owner,context => initialWorkerPrompt(context,binding,paths),
           (context,nominations) => initialWorkerPrompt(context,binding,paths,nominations));
+        if (prepared.input === null) return; // A skipped pair became unconnected; continue screening next tick.
         stage = "bind-session";
         this.bindings.bind(runId,binding,owner);
         return;
@@ -304,6 +305,7 @@ export class RunWorker {
           this.localFence(claim.runId);
           const pair = this.state.screeningPair(claim,subjectId,id);
           if (!pair) { failed = true; return; }
+          if ("kind" in pair) continue;
           if (pair.subject.text === null || pair.candidate.text === null) throw new Error("Screening eligibility changed");
           const score = await port.judge({thoughtA:{id:pair.subject.id,text:pair.subject.text},thoughtB:{id:pair.candidate.id,text:pair.candidate.text}});
           this.localFence(claim.runId);
