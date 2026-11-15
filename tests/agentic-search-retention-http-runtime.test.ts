@@ -56,7 +56,7 @@ test("configured HTTP Delete returns before held native admission and retains on
     const seed = new Database(path);
     try {
       migrate(seed, createLogger("error", () => {}));
-      new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-OWNED-LIBRARY", title: null, titleAuthor: null,
+      new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-OWNED-LIBRARY", title: "Owned library", titleAuthor: "user",
         author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "fixture", parentId: null, sourceIds: [] });
       sealDailyReview(seed);
     } finally { seed.close(); }

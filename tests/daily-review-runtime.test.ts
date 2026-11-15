@@ -14,7 +14,7 @@ const reviewComplete = {version:1,kind:"review-complete",titleCheck:"complete",c
 const initialTime = "2031-01-01T12:00:00.000Z";
 type Review = {runId:string;thoughtId:string;completedAt:string|null;status:string};
 
-async function fixture(options: {configured:boolean;unavailable?:boolean;count?:number;script?:(index:number,input:string) => object;client?:ScriptedClient},
+async function fixture(options: {configured:boolean;unavailable?:boolean;count?:number;pretitleOthers?:boolean;script?:(index:number,input:string) => object;client?:ScriptedClient},
   action:(f:{path:string;clock:{now:string};client:ScriptedClient;calls:{resolve:number;clients:number};read:<T>(fn:(db:Database) => T) => T;pulse:() => void;stop:() => Promise<void>}) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join("/tmp/opencode","daily-runtime-")), path = join(dir,"owned.sqlite");
   const clock = {now:initialTime};
@@ -26,7 +26,7 @@ async function fixture(options: {configured:boolean;unavailable?:boolean;count?:
     try {
       migrate(db);
       const store = new SqliteStore(db);
-      for (let i=0;i<(options.count ?? 1);i++) store.saveThought({id:`subject-${i}`,text:`Owned text ${i}`,title:null,titleAuthor:null,
+      for (let i=0;i<(options.count ?? 1);i++) store.saveThought({id:`subject-${i}`,text:`Owned text ${i}`,title:options.pretitleOthers && i > 0 ? `Owned title ${i}` : null,titleAuthor:options.pretitleOthers && i > 0 ? "user" : null,
         author:"user",kind:"captured-original",createdAt:"2030-01-01T00:00:00.000Z",origin:"fixture",parentId:null,sourceIds:[]});
     } finally { db.close(); }
     const deps: RuntimeDependencies = {now:() => clock.now,logSink:() => {},
@@ -65,7 +65,7 @@ test("unconfigured daemon never reserves a daily batch or constructs a native cl
   expect(f.calls).toEqual({resolve:0,clients:0});
 }));
 
-test("unavailable agent preserves today's queued identities across polls and admits only a later current UTC date", async () => fixture({configured:true,unavailable:true,count:3},async f => {
+test("unavailable agent preserves today's queued identities across polls and admits only a later current UTC date", async () => fixture({configured:true,unavailable:true,count:3,pretitleOthers:true},async f => {
   await until(() => batches(f.read).length > 0,f.pulse);
   expect(batches(f.read)).toEqual(["2031-01-01"]);
   const first = reviews(f.read);
@@ -85,15 +85,14 @@ test("unavailable agent preserves today's queued identities across polls and adm
   expect(reviews(f.read)).toEqual(later);
 }));
 
-test("real runtime review completes with the shared clock while a concurrent user title wins", async () => {
+test("real connection review completes with the shared clock while a concurrent user title remains intact", async () => {
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const client = new ScriptedClient((index,input) => {
   if (index === 0) {
     const prompt = JSON.parse(input) as {context:{job:{purpose:string}}};
-    expect(prompt.context.job.purpose).toBe("daily-review");
-    return {version:1,kind:"request",request:{capability:"title-fill",arguments:{title:"Late AI label"}}};
+    expect(prompt.context.job.purpose).toBe("connection-review");
   }
-  return reviewComplete;
+  return {version:1,kind:"complete",reply:"No connection"};
   });
   let held = true;
   client.beforePrompt = async () => { if (held) { held = false; entered.resolve(); await release.promise; } };

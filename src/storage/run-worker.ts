@@ -88,7 +88,7 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
     const subject = subjectId === null || subjectId === undefined ? undefined : visible.get(subjectId);
     if (!subject) throw new RunConflictError("Run subject identity is unavailable");
     const purpose = this.weavePurpose(run);
-    if (purpose === "media-title-only") {
+    if (purpose === "media-title-only" || purpose === "title-only") {
       return {job:{kind:"weave",subjectId:subject.id,purpose},thoughts:[subject],connections:[],responses:[]};
     }
     const thoughts: Thought[] = [];

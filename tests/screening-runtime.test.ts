@@ -92,7 +92,7 @@ async function runtimeCase(response: "success" | "invalid" | "missing" | "out-of
       const store = new SqliteStore(db);
       for (const [id,text] of [["subject","owned subject content"],["candidate","owned candidate content"]]) {
         if (!id || !text) throw new Error("Invalid test seed");
-        store.saveThought({id,text,title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+        store.saveThought({id,text,title:`Owned ${id}`,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
       }
       let sequence = 0;
       const id = () => `fixture${String(++sequence).padStart(24,"0")}`;

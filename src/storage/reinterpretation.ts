@@ -3,7 +3,7 @@ import { ReinterpretationConflictError, reinterpretationTrigger, type Reinterpre
   type ReinterpretationRepository, type ReinterpretationSnapshot, type WeaveRunControl } from "../domain/reinterpretation";
 import { RunConflictError, RunNotFoundError, type RunSources } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
-import { interpretationPurpose, resolveWeavePurpose } from "../domain/weave-scheduling";
+import { interpretationPurpose, resolveWeavePurpose, type WeaveScheduleKind } from "../domain/weave-scheduling";
 import { createLogger, type Logger } from "../logging";
 import { SqliteAgentRuns } from "./agent";
 import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
@@ -11,7 +11,7 @@ import { immediate } from "./transaction";
 import { admitWeave } from "./weave-admission";
 
 interface SubjectControl {readonly kind:MaterialKind;readonly rejected:number}
-interface RetirementIdentity { readonly status:string; readonly generation:number; readonly triggerId:string; readonly retiredAt:string|null }
+interface RetirementIdentity { readonly status:string; readonly generation:number; readonly triggerId:string; readonly retiredAt:string|null; readonly scheduleKind:WeaveScheduleKind|null }
 export interface RetirementSnapshot { readonly runId:string; readonly retiredAt:string|null; readonly eligibility:ReinterpretationEligibility }
 
 /** A weave trigger is the durable receipt. No network calls, content reads or independent command journal. */
@@ -43,12 +43,12 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
   }
   private snapshot(subjectId: string, requestKey: string, subject: SubjectControl): ReinterpretationSnapshot {
     const receipt = this.db.query<{id:string},[string,string]>(`SELECT id FROM runs
-      WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? ORDER BY rowid LIMIT 1`).get(subjectId,reinterpretationTrigger(requestKey));
+      WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? AND weave_schedule_kind IS NULL ORDER BY rowid LIMIT 1`).get(subjectId,reinterpretationTrigger(requestKey));
     const run = receipt ? this.run(receipt.id) : null;
     return {receipt:run ? {subjectId,requestKey,runId:run.id} : null,run,eligibility:this.eligibility(subjectId,subject)};
   }
   private retirementIdentity(subjectId: string, runId: string): RetirementIdentity {
-    const row = this.db.query<RetirementIdentity,[string,string]>(`SELECT status,generation,weave_trigger_id AS triggerId,weave_retired_at AS retiredAt
+    const row = this.db.query<RetirementIdentity,[string,string]>(`SELECT status,generation,weave_trigger_id AS triggerId,weave_retired_at AS retiredAt,weave_schedule_kind AS scheduleKind
       FROM runs WHERE id=? AND kind='weave' AND weave_subject_id=? AND weave_trigger_id IS NOT NULL`).get(runId,subjectId);
     if (!row) throw new RunNotFoundError();
     return row;
@@ -71,7 +71,7 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
     try {
       const subject = this.subject(subjectId);
       expected = this.retirementIdentity(subjectId,runId);
-      if (!["failed","interrupted"].includes(expected.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,expected.triggerId))) {
+      if (!["failed","interrupted"].includes(expected.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,expected.triggerId,expected.scheduleKind))) {
         throw new RunConflictError("Weave cannot be retired");
       }
     }
@@ -81,7 +81,7 @@ export class SqliteReinterpretations implements ReinterpretationRepository {
         const snapshot = immediate(this.db,() => {
           const subject = this.subject(subjectId), current = this.retirementIdentity(subjectId,runId);
           if (current.status !== expected.status || current.generation !== expected.generation || current.triggerId !== expected.triggerId ||
-              !["failed","interrupted"].includes(current.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,current.triggerId))) {
+              current.scheduleKind !== expected.scheduleKind || !["failed","interrupted"].includes(current.status) || !interpretationPurpose(resolveWeavePurpose(subject.kind,current.triggerId,current.scheduleKind))) {
             throw new RunConflictError("Weave cannot be retired");
           }
           const retiredAt = current.retiredAt ?? this.sources.now();

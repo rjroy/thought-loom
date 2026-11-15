@@ -60,7 +60,7 @@ async function fixture(action: (f: {
 }
 
 function seed(store: SqliteStore): void {
-  store.saveThought({id:"subject",text:"owned subject",title:null,titleAuthor:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+  store.saveThought({id:"subject",text:"owned subject",title:"Owned subject",titleAuthor:"user",author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
 }
 function state(db:Database, id:string): string {
   const run = db.query<{status:string},[string]>("SELECT status FROM runs WHERE id=?").get(id);

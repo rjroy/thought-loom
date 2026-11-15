@@ -14,7 +14,7 @@ import { insertRun, readRun } from "./run-record";
 import { immediate } from "./transaction";
 import { requireSearchExecutionOwner, searchExecutionContextValid } from "./search-run-authority";
 import { searchRevision } from "../domain/search-session-guards";
-import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose } from "../domain/weave-scheduling";
+import { assertWeaveCapability, resolveWeavePurpose, type WeavePurpose, type WeaveScheduleKind } from "../domain/weave-scheduling";
 import { isReadCapability } from "../domain/capability";
 import { interruptOrdinaryRun, issuedRunThoughts, logCommittedInterruption, ordinaryRunContextValid, runAssociations, scopedRunVisibility, type InterruptionDiagnostic, type InterruptionReason, type RunVisibility } from "./run-fences";
 import { assertRunNotRestoreFenced } from "./restore-fences";
@@ -71,6 +71,19 @@ export class SqliteRunAggregate {
     return readRun(this.db,id);
   }
   protected require(id: string): RunRecord { const run = this.loadRun(id); if (!run) throw new RunNotFoundError(); return run; }
+  /** Called inside the fenced publication transaction, after checking the run's purpose. */
+  protected hasSubjectTitle(run: RunRecord): boolean {
+    const subjectId = run.kind === "weave" ? this.readWeaveIntent(run.id)?.subjectId : run.kind === "evolve" ? run.inputThoughtId : null;
+    // Generic legacy weave admissions have no fixed subject or title-fill authority.
+    if (!subjectId && run.kind === "weave") return true;
+    if (!subjectId) throw new RunConflictError("Run subject identity is unavailable");
+    const title = this.db.query<{title:string | null},[string]>("SELECT title FROM thought_titles WHERE thought_id=?").get(subjectId);
+    if (!title || title.title === null) {
+      this.logger.warning("[run storage] completion refused: subject title missing", {runId:run.id,kind:run.kind,generation:run.generation});
+      return false;
+    }
+    return true;
+  }
   protected active(claim: Claim): RunRecord {
     assertRunNotRestoreFenced(this.db,claim.runId);
     if (this.db.query("SELECT 1 FROM runs WHERE id=? AND weave_retired_at IS NOT NULL").get(claim.runId)) throw new RunFenceError();
@@ -139,29 +152,29 @@ export class SqliteRunAggregate {
     if (!row || row.subjectId === null || row.triggerId === null) return null;
     return { subjectId: row.subjectId, triggerId: row.triggerId };
   }
-  private weaveSubject(run: RunRecord): { readonly kind: MaterialKind; readonly triggerId: string } | null {
+  private weaveSubject(run: RunRecord): { readonly kind: MaterialKind; readonly triggerId: string; readonly scheduleKind: WeaveScheduleKind | null } | null {
     if (run.kind !== "weave") return null;
     const intent = this.readWeaveIntent(run.id);
     if (!intent) return null; // Legacy unknown input keeps its existing, limited operation checks.
-    const subject = this.db.query<{ kind: MaterialKind }, [string]>("SELECT kind FROM thoughts WHERE id=?").get(intent.subjectId);
+    const subject = this.db.query<{ kind: MaterialKind; scheduleKind:WeaveScheduleKind | null }, [string,string]>("SELECT t.kind,r.weave_schedule_kind AS scheduleKind FROM thoughts t JOIN runs r ON r.id=? WHERE t.id=?").get(run.id,intent.subjectId);
     if (!subject) throw new RunNotFoundError();
-    return { kind: subject.kind, triggerId: intent.triggerId };
+    return { kind: subject.kind, triggerId: intent.triggerId, scheduleKind:subject.scheduleKind };
   }
   protected weavePurpose(run: RunRecord): WeavePurpose {
     const subject = this.weaveSubject(run);
-    return subject === null ? "ordinary" : resolveWeavePurpose(subject.kind,subject.triggerId);
+    return subject === null ? "ordinary" : resolveWeavePurpose(subject.kind,subject.triggerId,subject.scheduleKind);
   }
   protected requireWeaveCapability(run: RunRecord, capability: string): void {
     assertWeaveCapability(this.weavePurpose(run),capability);
   }
   private requireWeaveHistory(run: RunRecord, purpose: WeavePurpose): void {
-    if (purpose !== "media-title-only" && purpose !== "connection-only" && purpose !== "daily-review") return;
+    if (purpose !== "media-title-only" && purpose !== "title-only" && purpose !== "connection-only" && purpose !== "connection-review" && purpose !== "daily-review") return;
     const intent = this.readWeaveIntent(run.id);
-    if (purpose === "daily-review") {
+    if (purpose === "daily-review" || purpose === "connection-review") {
       if (!intent) throw new RunForbiddenError("Daily review subject unavailable");
       requireDailyReviewMembership(this.db,run.id,intent.subjectId,intent.triggerId);
     }
-    if ((purpose === "connection-only" || purpose === "daily-review") && (this.issued(run.id).length || this.db.query(`SELECT 1 FROM run_replies
+    if ((purpose === "connection-only" || purpose === "connection-review" || purpose === "title-only" || purpose === "daily-review") && (this.issued(run.id).length || this.db.query(`SELECT 1 FROM run_replies
       WHERE run_id=? AND (draft_json IS NOT NULL OR response_id IS NOT NULL)`).get(run.id))) {
       throw new RunForbiddenError("Restricted weave cannot publish thoughts or public replies");
     }

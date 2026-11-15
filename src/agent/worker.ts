@@ -219,11 +219,11 @@ export class RunWorker {
       if (step.input === null) {
         stage = "prepare-initial";
         const context = run.kind === "search" ? null : this.state.initialContext(owner);
-        const paths = context === null || (context.job.kind === "weave" && context.job.purpose === "media-title-only")
+        const paths = context === null || (context.job.kind === "weave" && (context.job.purpose === "media-title-only" || context.job.purpose === "title-only"))
           ? [] : await this.mediaPaths(owner,run.kind,binding,context.thoughts);
         this.active(owner);
         const job = context?.job;
-        const subject = context && job?.kind === "weave" && job.purpose !== "media-title-only" && job.purpose !== "reinterpretation"
+        const subject = context && job?.kind === "weave" && job.purpose !== "media-title-only" && job.purpose !== "title-only" && job.purpose !== "reinterpretation"
           ? context.thoughts.find(thought => thought.id === job.subjectId && thought.kind !== "media-original") : undefined;
         if (subject && this.state.ownsScreening(runId)) await this.screenConnections(owner,subject.id,this.dependencies.connectionScreening);
         this.active(owner);
@@ -343,7 +343,7 @@ export class RunWorker {
     }
     if (step.envelope?.kind === "complete" || step.envelope?.kind === "report" || step.envelope?.kind === "review-complete") {
       this.state.finish(claim,step.promptId);
-      if (this.runs.get(claim.runId)?.status === "failed") this.logger.error("[worker] source interpretation missing",{runId:claim.runId,kind});
+      if (this.runs.get(claim.runId)?.status === "failed") this.logger.error("[worker] run completion requirements unmet",{runId:claim.runId,kind});
       else this.logger.info("[worker] run completed", { runId: claim.runId, kind });
       this.forget(claim.runId); return;
     }

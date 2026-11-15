@@ -24,7 +24,7 @@ function oneOwner(db: Database, subjectId:string): Owner {
   expect(found).toHaveLength(1);
   const owner = found[0];
   if (!owner) throw new Error("Expected the saved thought's discovery owner");
-  expect(resolveWeavePurpose("ai-interpretation",owner.triggerId)).toBe("connection-only");
+  expect(resolveWeavePurpose("ai-interpretation",owner.triggerId,null)).toBe("connection-only");
   return owner;
 }
 function screenedWorker(f: MediaPathFixture, script: (index:number,input:string) => object) {
@@ -185,12 +185,15 @@ test("connection-only cannot connect unrelated endpoints or act as interpretatio
 test("all generated text creation owners screen exhaustively, including siblings and reinterpretation, without duplicate follow-up screening", async () => mediaPathFixture(async f => {
   const admission = f.admissions.admit("user","evolve",{parentId:f.subjectId,text:"Owned screened contribution"});
   if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user",admission.contribution.id,"Screened contribution");
   const evolve = f.worker(index => index < 2 ? pathRequest("development",{parentId:admission.contribution?.id,text:`Owned generated development ${index}`,sourceIds:[]}) : pathComplete("Owned discussion"));
   await f.finish(evolve.instance,admission.run.id);
   const developments = issued(f.db,admission.run.id), latest = developments.at(-1);
   if (!latest) throw new Error("Expected developments");
-  const ordinary = owners(f.db,latest).find(owner => resolveWeavePurpose("developing-idea",owner.triggerId) === "ordinary");
+  const ordinary = owners(f.db,latest).find(owner => resolveWeavePurpose("developing-idea",owner.triggerId,null) === "ordinary");
   if (!ordinary) throw new Error("Expected ordinary latest-development follow-up");
+  f.titles.setUser("user",latest,"Latest development");
+  f.titles.setUser("user",f.source.id,"Source label");
   const followup = screenedWorker(f,index => index < 2 ? pathRequest("interpretation",{text:`Owned sibling interpretation ${index}`,sourceIds:[]}) : pathComplete("Owned follow-up"));
   const reinterpretations = new SqliteReinterpretations(f.db,f.sources), reinterpretation = reinterpretations.admit(f.source.id,"new-owned-source").snapshot.run;
   if (!reinterpretation) throw new Error("Expected reinterpretation run");
@@ -205,7 +208,7 @@ test("all generated text creation owners screen exhaustively, including siblings
     const textIds = f.db.query<{id:string},[]>("SELECT id FROM thoughts WHERE kind!='media-original' ORDER BY id").all().map(row => row.id);
     const before = {thoughts:f.db.query("SELECT id FROM thoughts ORDER BY rowid").all(),runs:f.db.query("SELECT id FROM runs ORDER BY rowid").all(),responses:f.db.query("SELECT id FROM responses ORDER BY rowid").all()};
     for (const subjectId of generated) {
-      const discovery = owners(f.db,subjectId).filter(owner => resolveWeavePurpose("developing-idea",owner.triggerId) === "connection-only");
+      const discovery = owners(f.db,subjectId).filter(owner => resolveWeavePurpose("developing-idea",owner.triggerId,null) === "connection-only");
       expect(discovery).toHaveLength(1);
       const owner = discovery[0]; if (!owner) throw new Error("Expected creation owner");
       const w = screenedWorker(f,() => pathComplete("No useful connection")); workers.push(w);
@@ -290,6 +293,7 @@ test("Evolve contribution and every development acquire independent discovery ow
   const admission = f.admissions.admit("user","evolve",{parentId:f.subjectId,text:"Owned contribution"});
   const contribution = admission.contribution;
   if (!contribution) throw new Error("Expected a contribution");
+  f.titles.setUser("user",contribution.id,"Owned contribution");
   const w = f.worker(index => index < 2 ? pathRequest("development",{parentId:contribution.id,text:`Owned development ${index}`,sourceIds:[]}) : pathComplete("Conversation complete"));
   await f.until(w.instance,admission.run.id,() => issued(f.db,admission.run.id).length === 2);
   const developments = issued(f.db,admission.run.id);

@@ -43,7 +43,8 @@ test("screening storage is additive and logical-5 does not change the frozen log
     for (const old of legacy) expect(current.find(shape => shape.name === old.name)).toEqual(old);
     for (const old of current) {
       const actual = validateSourceSchema(db).find(shape => shape.name === old.name);
-      expect(actual).toEqual(old.name === "run_screening_pairs" ? {...old,columns:[...old.columns,"excluded_connection_id"].sort()} : old);
+      expect(actual).toEqual(old.name === "run_screening_pairs" ? {...old,columns:[...old.columns,"excluded_connection_id"].sort()} :
+        old.name === "runs" ? {...old,columns:[...old.columns,"weave_schedule_kind"].sort()} : old);
     }
     migrate(db);
     expect(db.query("SELECT * FROM run_screening_passes").all()).toEqual([]);

@@ -472,7 +472,7 @@ test("held native import does not block a second import or ordinary weave", asyn
   const other = imports.admitFile("user", batch.id, "other", "other.md", encode("Other unique content"));
   const timer = await configured(path, client);
   try {
-    const response = await fetch(new URL("/thoughts", timer.daemon.url), { method: "POST", headers: { authorization: `Bearer ${credentials.user}`, "content-type": "application/json" }, body: JSON.stringify({ text: "Ordinary fixture thought" }), signal: AbortSignal.timeout(1500) });
+    const response = await fetch(new URL("/thoughts", timer.daemon.url), { method: "POST", headers: { authorization: `Bearer ${credentials.user}`, "content-type": "application/json" }, body: JSON.stringify({ text: "Ordinary fixture thought", title: "Ordinary fixture" }), signal: AbortSignal.timeout(1500) });
     expect(response.status).toBe(201);
     const captured: unknown = await response.json();
     if (typeof captured !== "object" || captured === null || !("id" in captured) || typeof captured.id !== "string") throw new Error("Missing ordinary thought identity");

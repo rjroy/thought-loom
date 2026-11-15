@@ -69,6 +69,7 @@ test("real runtime binds search setup to its registered owner before the native 
     migrate(db, logger);
     let sequence = 0; const id = () => `fixture${String(++sequence).padStart(24, "0")}`;
     const store = new SqliteStore(db), { runId } = setup(db, store, id);
+    db.run("UPDATE thought_titles SET title='Owned target',title_author='user' WHERE thought_id='target'");
     sealDailyReview(db);
     const captured: ({ execution_owner_id: string | null } | null)[] = [];
     class OwnedClient extends ScriptedClient {

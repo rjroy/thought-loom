@@ -15,6 +15,8 @@ import { RunFenceError } from "../src/domain/run";
 import { SqliteDailyReviews } from "../src/storage/daily-review";
 import { SqliteReinterpretations } from "../src/storage/reinterpretation";
 import { SqliteRunRepository } from "../src/storage/run";
+import { SqliteScheduledTitles } from "../src/storage/title-scheduling";
+import { migrate } from "../src/storage/sqlite";
 import { dailyReviewFixture, reviewPolicy, type DailyReviewFixture } from "./fixtures/daily-review";
 
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -28,7 +30,7 @@ async function owned(action: (fixture: BackupFixture) => Promise<void>, reviews 
     for (const id of ["a","b","c","d","e"]) f.seed(id);
     const runIds: string[] = [];
     if (reviews) {
-      const batch = f.admit(); if (batch.kind !== "admitted") throw new Error("Expected owned batch");
+      const batch = f.admitLegacy(); if (batch.kind !== "admitted") throw new Error("Expected owned batch");
       runIds.push(...batch.runIds);
       if (!runIds[0] || !runIds[1]) throw new Error("Expected two owned members");
       f.complete(f.prepare(runIds[0])); f.prepare(runIds[1]);
@@ -48,7 +50,7 @@ async function owned(action: (fixture: BackupFixture) => Promise<void>, reviews 
 
 test("current capture/recovery/installation preserve successful review metadata and seal without reviving incomplete work", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-7");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-8");
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger:f.sources.logger});
   try {
@@ -75,13 +77,13 @@ test("current capture/recovery/installation preserve successful review metadata 
   } finally { db.close(); }
 }),45000);
 
-const legacySchemas: readonly BackupAppSchema[] = ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4","thoughtloom-logical-5","thoughtloom-logical-6"];
+const legacySchemas: readonly BackupAppSchema[] = ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4","thoughtloom-logical-5","thoughtloom-logical-6","thoughtloom-logical-7"];
 test.each(legacySchemas)("%s restoration verifies additive defaults and preserves every original projection byte", async schema => owned(async f => {
   const original = decodeManifest(await readFile(join(f.snapshot,"manifest.json"))), destination = join(f.dir,`legacy-${schema}`);
   await mkdir(join(destination,"tables"),{recursive:true,mode:0o700});
   const tables = [];
   for (const shape of shapesForSchema(schema)) {
-    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)),"thoughtloom-logical-7");
+    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)),"thoughtloom-logical-8");
     const rows: RawRow[] = current.map(row => ({rowid:row.rowid,values:Object.fromEntries(shape.columns.map(name => [name,row.values[name]]))}));
     const bytes = encodeTable(shape,rows), path = `tables/${shape.name}.json`;
     await writeFile(join(destination,path),bytes,{mode:0o600});
@@ -94,7 +96,7 @@ test.each(legacySchemas)("%s restoration verifies additive defaults and preserve
   try {
     const db = new Database(stage.databasePath,{safeIntegers:true});
     try {
-      if (schema === "thoughtloom-logical-6") {
+      if (schema === "thoughtloom-logical-6" || schema === "thoughtloom-logical-7") {
         const numeric = new Database(stage.databasePath);
         try { expect(reviewRows(numeric)).toEqual(f.reviewsBefore); } finally { numeric.close(); }
         expect(f.reviewsBefore[0]?.rows.length).toBeGreaterThan(0);
@@ -110,7 +112,61 @@ test.each(legacySchemas)("%s restoration verifies additive defaults and preserve
       }
     } finally { db.close(); }
   } finally { await stage.dispose(); }
-},schema === "thoughtloom-logical-6"),45000);
+},schema === "thoughtloom-logical-6" || schema === "thoughtloom-logical-7"),45000);
+
+test("logical-8 roundtrip preserves legacy and new review protocols and title work without reviving runs", async () => dailyReviewFixture(async f => {
+  for (const id of ["a","b","c","d","e"]) f.seed(id);
+  const legacy = f.admitLegacy();
+  if (legacy.kind !== "admitted" || !legacy.runIds[0]) throw new Error("Expected legacy review");
+  for (const id of legacy.runIds) f.complete(f.prepare(id));
+  const current = f.admit("2031-01-02T12:00:00.000Z");
+  if (current.kind !== "admitted" || !current.runIds[0]) throw new Error("Expected connection review");
+  for (const id of current.runIds) f.complete(f.prepare(id));
+  const titles = new SqliteScheduledTitles(f.db,f.sources).admitDueBatch(f.clock.now,true);
+  if (titles.kind !== "admitted" || !titles.runIds[0]) throw new Error("Expected scheduled titles");
+  const titleId = titles.runIds[0], claim = f.prepare(titleId), run = f.run(titleId);
+  const titledSubject = f.ops.weaveIntent(titleId)?.subjectId;
+  if (!titledSubject) throw new Error("Expected title subject");
+  const request = {capability:"title-fill",arguments:{title:"Owned scheduled title"}} as const;
+  f.steps.completeStep(claim,run.promptId,{version:1,kind:"request",request});
+  const result = f.capabilities.dispatch(claim,run.promptId,request);
+  const next = f.steps.advance(claim,run.promptId,result,{promptId:f.sources.id(),input:"Owned confirmed title result"});
+  f.steps.completeStep(claim,next.promptId,{version:1,kind:"complete",reply:"Title saved"});
+  f.state.finish(claim,next.promptId);
+  expect(f.run(titleId).status).toBe("completed"); expect(f.runs.reply(titleId)).toBeNull();
+  const ids = [...legacy.runIds,...current.runIds,...titles.runIds];
+  const rows = f.db.query("SELECT id,weave_subject_id,weave_trigger_id,status FROM runs ORDER BY rowid").all();
+  const steps = f.db.query("SELECT run_id,position,prompt_id,input,envelope_json,result_json FROM run_steps ORDER BY run_id,position").all();
+  const reviewsBeforeMigration = reviewRows(f.db);
+  migrate(f.db,f.sources.logger);
+  expect(f.db.query("SELECT id,weave_subject_id,weave_trigger_id,status FROM runs ORDER BY rowid").all()).toEqual(rows);
+  expect(f.db.query("SELECT run_id,position,prompt_id,input,envelope_json,result_json FROM run_steps ORDER BY run_id,position").all()).toEqual(steps);
+  expect(reviewRows(f.db)).toEqual(reviewsBeforeMigration);
+  const output = join(f.dir,"mixed-output"); await mkdir(output,{mode:0o700});
+  const backup = await captureBackup({databasePath:f.path,mediaDirectory:f.media,outputDirectory:output,logger:f.sources.logger});
+  expect(decodeManifest(await readFile(join(backup.snapshotDirectory,"manifest.json"))).appSchema).toBe("thoughtloom-logical-8");
+  const mislabeled = join(f.dir,"mislabeled-logical-7");
+  await cp(backup.snapshotDirectory,mislabeled,{recursive:true,errorOnExist:true});
+  const manifestPath = join(mislabeled,"manifest.json"), currentManifest = decodeManifest(await readFile(manifestPath));
+  await writeFile(manifestPath,encodeManifest({...currentManifest,appSchema:"thoughtloom-logical-7"}),{mode:0o600});
+  const stagingParent = join(f.dir,"mislabeled-stage"); await mkdir(stagingParent,{mode:0o700});
+  await expect(stageRestoreSnapshot({snapshotDirectory:mislabeled,stagingParentDirectory:stagingParent,logger:f.sources.logger}))
+    .rejects.toMatchObject({code:"invalid-snapshot"});
+  const restored = await restoreBackup({snapshotDirectory:backup.snapshotDirectory,targetDirectory:join(f.dir,"mixed-target"),restoredAt,logger:f.sources.logger});
+  const db = new Database(restored.databasePath);
+  try {
+    const historical = db.query("SELECT id,weave_subject_id,weave_trigger_id,status FROM runs ORDER BY rowid").all() as {id:string;status:string}[];
+    const original = rows as {id:string;status:string}[];
+    expect(historical.map(row => ({...row,status:original.find(item => item.id === row.id)?.status}))).toEqual(original);
+    for (const row of historical) expect(row.status).toBe(original.find(item => item.id === row.id)?.status === "queued" ? "interrupted" : "completed");
+    expect(db.query("SELECT run_id,position,prompt_id,input,envelope_json,result_json FROM run_steps ORDER BY run_id,position").all()).toEqual(steps);
+    expect(new SqliteRunRepository(db,f.sources).reply(titleId)).toBeNull();
+    expect(db.query("SELECT title,title_author FROM thought_titles WHERE thought_id=?").get(titledSubject)).toEqual({title:"Owned scheduled title",title_author:"ai"});
+    for (const id of ids) expect(() => new SqliteRunRepository(db,f.sources).claim(id)).toThrow(RunFenceError);
+    expect(new SqliteScheduledTitles(db,f.sources).admitDueBatch(f.clock.now,true).kind).toBe("already-admitted");
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { db.close(); }
+}),45000);
 
 test.each(["wrong-trigger","wrong-policy","wrong-ceiling","missing-success","false-success","incomplete-envelope"] as const)(
   "restore refuses hash-consistent daily review %s corruption", async fault => owned(async f => {

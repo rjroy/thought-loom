@@ -209,7 +209,23 @@ export function migrate(db: Database, logger: Logger = createLogger()): void {
         BEGIN SELECT RAISE(ABORT,'weave retirement immutable'); END;
         CREATE TRIGGER IF NOT EXISTS runs_weave_retirement_terminal BEFORE UPDATE OF status ON runs
         WHEN OLD.weave_retired_at IS NOT NULL AND NEW.status IS NOT OLD.status
-        BEGIN SELECT RAISE(ABORT,'retired weave status immutable'); END;`);
+         BEGIN SELECT RAISE(ABORT,'retired weave status immutable'); END;`);
+      if (!db.query<{name:string},[]>("PRAGMA table_info(runs)").all().some(column => column.name === "weave_schedule_kind")) {
+        db.exec("ALTER TABLE runs ADD COLUMN weave_schedule_kind TEXT CHECK(weave_schedule_kind IN ('title-only','connection-review'))");
+      }
+      db.exec(`DROP TRIGGER IF EXISTS runs_weave_trigger_unique;
+        CREATE TRIGGER runs_weave_trigger_unique BEFORE INSERT ON runs
+        WHEN NEW.kind='weave' AND NEW.weave_subject_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM runs WHERE kind='weave' AND weave_subject_id=NEW.weave_subject_id AND weave_trigger_id=NEW.weave_trigger_id
+            AND weave_schedule_kind IS NEW.weave_schedule_kind)
+        BEGIN SELECT RAISE(ABORT,'UNIQUE constraint failed: runs.weave_subject_id, runs.weave_trigger_id'); END;
+        CREATE TRIGGER IF NOT EXISTS runs_weave_schedule_immutable BEFORE UPDATE OF weave_schedule_kind ON runs
+        BEGIN SELECT RAISE(ABORT,'weave schedule kind immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS runs_weave_schedule_valid BEFORE INSERT ON runs
+        WHEN NEW.weave_schedule_kind IS NOT NULL AND (NEW.kind!='weave' OR NEW.weave_subject_id IS NULL OR
+          NOT ((NEW.weave_schedule_kind='title-only' AND NEW.weave_trigger_id GLOB 'scheduled-title:????-??-??') OR
+            (NEW.weave_schedule_kind='connection-review' AND NEW.weave_trigger_id GLOB 'connection-review:????-??-??')))
+        BEGIN SELECT RAISE(ABORT,'invalid scheduled weave identity'); END;`);
       migrateRunScreening(db);
       migrateDailyReview(db);
       if (db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='search_revisions'").get()) db.exec(`

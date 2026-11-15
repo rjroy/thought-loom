@@ -85,6 +85,7 @@ async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: st
 }
 
 test("ordinary weave screens every eligible other thought before nominating threshold matches to Weaver", async () => fixture(async f => {
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user","root","Subject");
   const candidates = Array.from({length:32}, (_, index) => ({id:`candidate-${index}`, text:`distinct owned candidate text ${index}`}));
   for (const candidate of [...candidates, {id:"rejected-candidate",text:"rejected owned content"}]) {
     f.store.saveThought({...candidate, title:null, author:"user", kind:"captured-original", createdAt:now(), origin:"fixture", parentId:null, sourceIds:[]});
@@ -512,7 +513,7 @@ test("weave prompt gives intent-driven source guidance without broadening restri
 });
 
 test("controlled link-list weave saves searchable sibling summaries and a partial-failure outcome", async () => fixture(async f => {
-  f.store.saveThought({ id: "links", text: "https://example.test/one\nhttps://example.test/two\nhttps://example.test/missing", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  f.store.saveThought({ id: "links", text: "https://example.test/one\nhttps://example.test/two\nhttps://example.test/missing", title: "Links", author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
   const run = f.ops.admitWeave("user", { subjectId: "links", triggerId: "link-list" });
   const outputs = [
     request("interpretation", { text: "Albatross findings [source](https://example.test/one)", sourceIds: [] }),
@@ -541,6 +542,7 @@ test("controlled link-list weave saves searchable sibling summaries and a partia
 }));
 
 test("owned SDK HTTP history with native activity saves a weave receipt and final reply once", async () => fixture(async f => {
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user","root","Subject");
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "native-history" });
   const inputs: { id: string; text: string }[] = [];
   const history: unknown[] = [];
@@ -620,6 +622,7 @@ test("worker without native configuration leaves an unbound queued run untouched
 }));
 
 test("weave can search and read a candidate then connect it to the preloaded subject without rereading it", async () => fixture(async f => {
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user","root","Subject");
   f.store.saveThought({ id: "candidate", text: "zircon candidate", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "discovery" });
   const outputs = [request("search", { query: "zircon" }), request("readThought", { id: "candidate" }), request("connection", { fromId: "root", toId: "candidate", category: "related", explanation: "The subject and candidate share a fixture theme", sourceIds: ["root", "candidate"] }), complete("done")];
@@ -665,6 +668,7 @@ test("worker persists scoped initial context and ordered development result befo
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "my contribution" });
   if (!admission.contribution) throw new Error("Expected contribution");
   const contributionId = admission.contribution.id;
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user",contributionId,"Contribution");
   const w = worker(f, index => index === 0 ? request("development", { parentId: contributionId, text: "saved development", sourceIds: [] }) : complete("actual response"));
   await drive(w.instance, f, admission.run.id);
   expect(f.runs.get(admission.run.id)?.status).toBe("completed");
@@ -683,6 +687,7 @@ test("worker persists scoped initial context and ordered development result befo
 }));
 
 test("lost admission acknowledgement and shutdown recover existing prompt without resubmission or rebinding", async () => fixture(async f => {
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user","root","Subject");
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "one" });
   const first = worker(f, () => complete("no findings"));
   // Build the adapter before the first dispatch and simulate admission followed by lost acknowledgement.
@@ -884,6 +889,7 @@ test("title-clear waits behind a started weave across successor preparation and 
     for (let i = 0; i < 8 && restarted.native.submitted.length === 0; i++) await restarted.instance.tick(first.id);
     expect(restarted.native.submitted).toEqual([{ promptId: successor.promptId, input: successor.input }]);
     expect(f.runs.get(waiting.id)).toEqual(before);
+    titles.setUser("user", "root", "Concurrent user title");
     await drive(restarted.instance, f, first.id);
     expect(f.runs.get(first.id)?.status).toBe("completed");
     for (let i = 0; i < 8 && restarted.native.submitted.length < 2; i++) await restarted.instance.tick(waiting.id);
@@ -1011,6 +1017,7 @@ test("malformed completed model output cannot become a fallback reply", async ()
 test("valid reply without developments attaches once to the original contribution", async () => fixture(async f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "clarify" });
   if (!admission.contribution) throw new Error("Expected contribution");
+  new TitleService(new SqliteTitleRepository(f.db)).setUser("user",admission.contribution.id,"Question");
   const w = worker(f, () => complete("clarifying question"));
   await drive(w.instance, f, admission.run.id);
   expect(f.runs.get(admission.run.id)?.status).toBe("completed");

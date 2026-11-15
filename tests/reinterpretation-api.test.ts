@@ -23,9 +23,9 @@ function write(f: MediaApiFixture, action: (db: Database) => void): void {
 function seed(f: MediaApiFixture): void {
   write(f, db => {
     const store = new SqliteStore(db);
-    store.saveThought({ id: "root", text: "PRIVATE ROOT TEXT", title: null, author: "user", kind: "captured-original", createdAt: stamp, origin: "fixture", parentId: null, sourceIds: [] });
-    store.saveThought({ id: "subject", text: "PRIVATE AI SUBJECT", title: null, author: "ai", kind: "ai-interpretation", createdAt: stamp, origin: "fixture", parentId: "root", sourceIds: [] });
-    store.saveThought({ id: "prior", text: "PRIVATE PRIOR INTERPRETATION", title: null, author: "ai", kind: "ai-interpretation", createdAt: stamp, origin: "fixture", parentId: "subject", sourceIds: [] });
+    store.saveThought({ id: "root", text: "PRIVATE ROOT TEXT", title: "Owned root", author: "user", kind: "captured-original", createdAt: stamp, origin: "fixture", parentId: null, sourceIds: [] });
+    store.saveThought({ id: "subject", text: "PRIVATE AI SUBJECT", title: "Owned subject", author: "ai", kind: "ai-interpretation", createdAt: stamp, origin: "fixture", parentId: "root", sourceIds: [] });
+    store.saveThought({ id: "prior", text: "PRIVATE PRIOR INTERPRETATION", title: "Owned prior", author: "ai", kind: "ai-interpretation", createdAt: stamp, origin: "fixture", parentId: "subject", sourceIds: [] });
   });
 }
 function control(value: Record<string, unknown>) {

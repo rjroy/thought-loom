@@ -3,6 +3,16 @@ import { record } from "./validation";
 export interface DailyReviewPolicy { readonly rotationDays: number; readonly maxPerDay: number }
 export const defaultDailyReviewPolicy: DailyReviewPolicy = Object.freeze({rotationDays:30,maxPerDay:20});
 export const dailyReviewPrefix = "daily-review:";
+export const connectionReviewPrefix = "connection-review:";
+export const scheduledTitlePrefix = "scheduled-title:";
+function scheduledDate(trigger: string, prefix: string): string | null {
+  if (!trigger.startsWith(prefix)) return null;
+  const date = trigger.slice(prefix.length);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || dailyReviewInstant(`${date}T00:00:00Z`).slice(0,10) !== date) throw new Error("Invalid scheduled trigger");
+  return date;
+}
+export const connectionReviewDate = (trigger: string): string | null => scheduledDate(trigger,connectionReviewPrefix);
+export const scheduledTitleDate = (trigger: string): string | null => scheduledDate(trigger,scheduledTitlePrefix);
 export interface DailyReviewCandidate {
   readonly id: string;
   readonly createdAt: string;

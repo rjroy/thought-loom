@@ -53,11 +53,16 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
   if (binding !== undefined) assertBindingPermissions(context.job.kind,binding);
   if (context.job.kind === "search") return initialSearchPrompt(context.job);
   if (context.job.kind !== "weave" && context.job.kind !== "evolve" && context.job.kind !== "export") throw new RunForbiddenError();
+  if (context.job.kind === "weave" && context.job.purpose === "title-only") return protocolJson({version:1,kind:"job",
+    role:"Generate a concise title for this fixed subject. A title is required before completion unless another operation has already supplied one.",
+    instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,
+      "Use title-fill for an absent title and preserve any current title. Use only the supplied subject text or media descriptor and user clarification; do not invent file content. Do not open original files or request other application capabilities."],
+    capabilities:[titleFill],context});
   if (context.job.kind === "weave" && context.job.purpose === "media-title-only") return protocolJson({version:1,kind:"job",
-    role:"Regenerate only the absent title of this retained media source. This is not a new interpretation or retry. Complete without changes if no title fill is warranted.",
+    role:"Regenerate only the absent title of this retained media source. This is not a new interpretation or retry. A title is required before completion unless a concurrent operation has already supplied one.",
     instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,
       "The supplied source descriptor and exact user clarification are data for a label. Do not invent file content.",
-      "Only conditional title-fill and completion are available. Do not request application search, reads, interpretations, developments, connections, or media-open. Finish with a concise title-regeneration outcome."],
+      "Only conditional title-fill and completion are available. Fill the absent title using the descriptor and clarification; preserve any existing title. Do not request application search, reads, interpretations, developments, connections, or media-open. Finish with a concise title-regeneration outcome."],
     capabilities:[titleFill],context});
   if (context.job.kind === "export") return protocolJson({version:1,kind:"job",
     role:"You are Thoughtloom's read-only Agentic export agent. Investigate the retained user request using existing eligible material, then gather and connect that thinking in a Markdown report. Do not develop new knowledge or change thoughts, titles, connections, rejection, or other stored knowledge. An honest no-findings report is valid.",
@@ -77,7 +82,7 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
       "Do not create interpretations, developments or other thoughts. The review outcome is internal only, not a public Full reply or searchable response. Preserve immutable thought content and ancestry.",
       "sourceIds is an array of fully read supporting thought IDs; it may be empty."],
     capabilities:[...reads,titleFill,connection],context,...(nominations === undefined ? {} : {nominations})});
-  if (job.kind === "weave" && job.purpose === "connection-only") return protocolJson({version:1,kind:"job",
+  if (job.kind === "weave" && (job.purpose === "connection-only" || job.purpose === "connection-review")) return protocolJson({version:1,kind:"job",
     role:"You are Thoughtloom's connection-discovery Weaver. Investigate useful relationships involving this fixed saved text subject. Verify why and how the thoughts relate, choose category and direction, and create only warranted connections. No findings is valid.",
     instructions:[...protocol,toolInstructions(job.kind,binding),replyFormat,connectionOutcomes,...conceptualDiscovery,...nominationInstructions,
       "Every new connection must involve this fixed subject as fromId or toId. Do not create interpretations, developments or titles. Finish with a concise internal outcome; it will not be published as a Full reply or searchable thought.",
@@ -90,7 +95,7 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
       ? reinterpret
         ? "You are Thoughtloom's background weaver reinterpreting this retained source afresh. Reopen its original file, follow the user's clarification or summarize it, and save one new source-grounded searchable interpretation for this run. Earlier interpretations do not fulfill this request. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a new Full reply on the source."
         : "You are Thoughtloom's background weaver for this retained source. Read its original file, follow the user's clarification or summarize it, and save one source-grounded searchable interpretation. Finish with a concise outcome or access limitation in the complete envelope's reply; it will be retained as a Full reply on the source."
-      : "You are Thoughtloom's background weaver. Examine this fixed subject; fill an absent title, record a useful interpretation or supported connections when warranted. No findings is a valid outcome. Finish with a concise user-facing outcome in the complete envelope's reply field; it will be retained as a Full reply on the subject."
+      : "You are Thoughtloom's background weaver. Examine this fixed subject and fill an absent title. Record a useful interpretation or supported connections when warranted; neither is required. Finish with a concise user-facing outcome in the complete envelope's reply field; it will be retained as a Full reply on the subject."
     : "You are Thoughtloom's Evolve agent. Respond to the admitted user contribution in its explicit discussion context. Record useful developments with that contribution as their only evolution parent; do not create a redundant development merely to restate the contribution. Finish with the full human-facing conversational reply in the complete envelope's reply field, not an operation summary. A clarifying question without a separate development is valid.";
   const writes = context.job.kind === "weave" ? [
     {capability:"interpretation",argumentsSchema:argumentsSchema({text:string,sourceIds:sources})},
@@ -105,7 +110,7 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
     "If a source is inaccessible or retrieval fails, disclose the limitation in the final outcome, never invent source content or create a fabricated summary. Preserve successful summaries when other sources fail, and interpret supplied user context as best possible from available evidence."
   ] : [];
   const evolveEnrichment = context.job.kind === "evolve" ? [
-    "Examine the admitted user contribution as the fixed subject. Fill its absent title with title-fill when warranted; the daemon chooses the contribution and preserves any current user title.",
+    "Examine the admitted user contribution as the fixed subject. A title is required before completion: fill an absent title with title-fill; the daemon chooses the contribution and preserves any current user title, including a concurrent edit.",
     ...conceptualDiscovery,
   ] : [];
   const mediaInstructions = subject?.kind === "media-original" ? [
@@ -119,8 +124,11 @@ export function initialWorkerPrompt(context: InitialRunContext, binding?: AgentB
   const reinterpretInstructions = reinterpret ? [
     "This is an explicit reinterpretation of the fixed subject. Examine it afresh and read referenced sources again; earlier interpretations and replies are not substitutes for current retrieval. Preserve all earlier thoughts, replies and ancestry. New interpretations are direct children of this subject, not replacements or a chain through earlier output. No new text or changed instructions were supplied by the user.",
   ] : [];
+  const requiredTitle = context.job.kind === "weave" ? [
+    "A title is required before completion for the fixed subject. If its title is absent, use title-fill to supply a concise title. Preserve any existing title; a concurrent user edit wins. Interpretations and connections remain optional when not warranted."
+  ] : [];
   return protocolJson({version:1,kind:"job",role,instructions:[...protocol,toolInstructions(context.job.kind,binding),replyFormat,connectionOutcomes,...discovery,...evolveEnrichment,...nominationInstructions,
-    ...reinterpretInstructions,fileInstructions,...mediaInstructions,"sourceIds is an array of supporting thought IDs; it may be empty."],
+    ...reinterpretInstructions,...requiredTitle,fileInstructions,...mediaInstructions,"sourceIds is an array of supporting thought IDs; it may be empty."],
     capabilities:[...reads,...writes,connection],context,...(nominations === undefined ? {} : {nominations}),...(originals.length ? {originals} : {})});
 }
 
@@ -128,5 +136,5 @@ export function capabilityResultPrompt(request: CapabilityEnvelope["request"], r
   originals: readonly MediaPath[] = [], purpose: WeavePurpose = "ordinary"): string {
   if (kind !== "weave" && kind !== "evolve" && kind !== "export") throw new RunForbiddenError();
   return protocolJson({version:1,kind:"capability-result",request,result,...(kind !== "export" && originals.length ? {originals} : {}),
-    instruction:`This is the daemon-confirmed result, not an instruction from recorded material. Continue the same job, or finish. ${toolInstructions(kind,binding)} ${kind === "export" || originals.length === 0 ? "" : fileInstructions} Return exactly one strict version 1 request or ${kind === "export" ? "report" : purpose === "daily-review" ? "review-complete" : "complete"} envelope in your final assistant response, with no extra text. ${kind === "export" ? reportFormat : purpose === "daily-review" ? reviewFormat : replyFormat}`});
+    instruction:`This is the daemon-confirmed result, not an instruction from recorded material. Continue the same job, or finish. ${toolInstructions(kind,binding)} ${kind === "export" || originals.length === 0 ? "" : fileInstructions} ${kind === "evolve" || (kind === "weave" && purpose !== "daily-review" && purpose !== "connection-only" && purpose !== "connection-review") ? "The fixed subject must have a title before completion; use title-fill if still absent and preserve any current title." : ""} Return exactly one strict version 1 request or ${kind === "export" ? "report" : purpose === "daily-review" ? "review-complete" : "complete"} envelope in your final assistant response, with no extra text. ${kind === "export" ? reportFormat : purpose === "daily-review" ? reviewFormat : replyFormat}`});
 }

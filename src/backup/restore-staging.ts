@@ -235,7 +235,7 @@ export async function stageRestoreSnapshot(options: RestoreStageOptions): Promis
     }
     const decoded: SqlSnapshot = {tables:captured,sequences:source.manifest.sequences,
       rowCount:captured.reduce((count,table) => count+BigInt(table.rows.length),0n).toString()};
-    try { validateBytes(decoded); mediaManifest(decoded,source.manifest); }
+    try { validateBytes(decoded,source.manifest.appSchema ?? "thoughtloom-logical-1"); mediaManifest(decoded,source.manifest); }
     catch (error) { if (error instanceof RestoreStagingError) throw error; throw new RestoreStagingError("invalid-records"); }
     guard(); work = await StageWorkspace.create(options.stagingParentDirectory,source.root,guard);
     await work.write(work.root,".restore-in-progress",encoder.encode(`${JSON.stringify({version:1,phase:"staging",manifestSha256:source.manifestSha256})}\n`),guard);

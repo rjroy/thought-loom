@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { RunStatus } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
-import { interpretationPurpose, resolveWeavePurpose } from "../domain/weave-scheduling";
+import { interpretationPurpose, resolveWeavePurpose, type WeaveScheduleKind } from "../domain/weave-scheduling";
 import { recordedSubjectCancellationSafe } from "./run-cancellation";
 import { isRunRestoreFenced } from "./restore-fences";
 
@@ -16,11 +16,11 @@ export interface SubjectWeaveWork {
 export type WeaveBlockReason = "work-active" | "work-unsettled" | "work-unverified";
 const active = (status: RunStatus): boolean => ["queued","submitting","running","uncertain"].includes(status);
 
-interface SubjectWork extends SubjectWeaveWork { readonly kind: string; readonly subjectId: string | null; readonly triggerId: string | null }
+interface SubjectWork extends SubjectWeaveWork { readonly kind: string; readonly subjectId: string | null; readonly triggerId: string | null; readonly scheduleKind:WeaveScheduleKind | null }
 /** Fixed-subject weaves plus the run that created an admitted input/issued thought. Context readers do not own it. */
 function subjectWork(db: Database, subjectId: string, creators = true): readonly SubjectWork[] {
   return db.query<SubjectWork,[string]>(`SELECT r.id,r.kind,r.status,r.weave_subject_id AS subjectId,
-    r.weave_trigger_id AS triggerId,r.cancellation_state AS cancellation,r.weave_retired_at AS retiredAt,
+    r.weave_trigger_id AS triggerId,r.weave_schedule_kind AS scheduleKind,r.cancellation_state AS cancellation,r.weave_retired_at AS retiredAt,
     (r.generation>0 OR EXISTS(SELECT 1 FROM agent_bindings b WHERE b.run_id=r.id) OR EXISTS(
       SELECT 1 FROM run_steps s WHERE s.run_id=r.id AND (s.position>0 OR s.input IS NOT NULL OR
       s.state!='prepared' OR s.native_state!='unknown' OR s.envelope_json IS NOT NULL OR s.result_json IS NOT NULL))) AS started,
@@ -37,7 +37,7 @@ function subjectWork(db: Database, subjectId: string, creators = true): readonly
 /** Keep interpretation ownership/history separate from cross-purpose execution coordination. */
 export function subjectWeaveWork(db: Database, subjectId: string, kind: MaterialKind): readonly SubjectWeaveWork[] {
   return subjectWork(db,subjectId,false).filter(row => row.triggerId !== null &&
-    interpretationPurpose(resolveWeavePurpose(kind,row.triggerId)));
+    interpretationPurpose(resolveWeavePurpose(kind,row.triggerId,row.scheduleKind)));
 }
 
 function subjectBlockReason(db: Database, work: SubjectWork): WeaveBlockReason | null {
@@ -65,22 +65,22 @@ export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): Weav
 /** Caller owns its existing read/write transaction. Already-submitted work is observed separately, never redispatched. */
 export function weaveDispatchAllowed(db: Database, runId: string): boolean {
   if (isRunRestoreFenced(db,runId) || db.query("SELECT 1 FROM runs WHERE id=? AND weave_retired_at IS NOT NULL").get(runId)) return false;
-  const run = db.query<{kind:string;subjectId:string|null;triggerId:string|null;materialKind:MaterialKind|null},[string]>(
-    `SELECT r.kind,r.weave_subject_id AS subjectId,r.weave_trigger_id AS triggerId,t.kind AS materialKind
+  const run = db.query<{kind:string;subjectId:string|null;triggerId:string|null;materialKind:MaterialKind|null;scheduleKind:WeaveScheduleKind|null},[string]>(
+    `SELECT r.kind,r.weave_subject_id AS subjectId,r.weave_trigger_id AS triggerId,r.weave_schedule_kind AS scheduleKind,t.kind AS materialKind
      FROM runs r LEFT JOIN thoughts t ON t.id=r.weave_subject_id WHERE r.id=?`).get(runId);
   if (!run) return false;
   if (run.kind !== "weave" || run.subjectId === null || run.triggerId === null) return true; // Never infer an unknown legacy subject.
   if (run.materialKind === null) return false;
-  const materialKind = run.materialKind, purpose = resolveWeavePurpose(materialKind,run.triggerId);
+  const materialKind = run.materialKind, purpose = resolveWeavePurpose(materialKind,run.triggerId,run.scheduleKind);
   const owned = subjectWork(db,run.subjectId).filter(work => subjectBlockReason(db,work) !== null);
   const daily = owned.filter(work => work.kind === "weave" && work.subjectId === run.subjectId && work.triggerId !== null &&
-    resolveWeavePurpose(materialKind,work.triggerId) === "daily-review");
-  if (purpose === "daily-review" || daily.length) {
+    ["daily-review","connection-review","title-only"].includes(resolveWeavePurpose(materialKind,work.triggerId,work.scheduleKind)));
+  if (["daily-review","connection-review","title-only"].includes(purpose) || daily.length) {
     // Daily admission starts only on an idle subject. Later ordinary/discovery invitations wait behind
     // that reservation; they must not make an untouched daily owner wait on them in turn.
     const review = daily[0];
-    if (review && purpose !== "daily-review") return false;
-    if (purpose === "daily-review") {
+    if (review && review.id !== runId) return false;
+    if (["daily-review","connection-review","title-only"].includes(purpose)) {
       if (review?.id !== runId) return false;
       const beforeReview = owned.slice(0,owned.findIndex(work => work.id === runId));
       return beforeReview.length === 0 && !owned.some(work => work.id !== runId && work.started && subjectBlockReason(db,work) !== null);

@@ -258,6 +258,7 @@ describe("durable run SQLite boundary", () => {
     const claim = service.claim(admission.run.id);
     const first = service.execute(claim, { ...operation, id: "first", parentId: inputId });
     const second = service.execute(claim, { ...operation, id: "second", parentId: admission.contribution.id });
+    db.run("UPDATE thought_titles SET title='Question',title_author='user' WHERE thought_id=?", [inputId]);
     const response = { id: "final-ordered", text: "complete", role: "addendum", state: "complete", thoughtIds: [first.thought.id, second.thought.id] } as const;
     expect(() => service.finish(claim, { ...response, thoughtIds: [second.thought.id, first.thought.id] })).toThrow(RunConflictError);
     expect(new SqliteStore(db).getResponse(response.id)).toBeNull();

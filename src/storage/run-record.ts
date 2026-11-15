@@ -1,6 +1,9 @@
 import type { Database } from "bun:sqlite";
 import type { RunKind, RunRecord } from "../domain/run";
 import type { WeaveIntent } from "../domain/run-operations";
+import { resolveWeavePurpose, type WeaveScheduleKind } from "../domain/weave-scheduling";
+import { RunConflictError } from "../domain/run";
+import type { MaterialKind } from "../domain/thought";
 import { assertBindingPermissions, normalizeBinding, type AgentBinding } from "../agent/binding";
 import { assertRunNotRestoreFenced } from "./restore-fences";
 
@@ -25,8 +28,13 @@ export function readAgentBinding(db: Database, runId: string): AgentBinding | nu
   return binding;
 }
 
-export function insertRun(db: Database, run: RunRecord, intent: WeaveIntent | null = null): void {
+export function insertRun(db: Database, run: RunRecord, intent: WeaveIntent | null = null, scheduleKind: WeaveScheduleKind | null = null): void {
   assertRunNotRestoreFenced(db,run.id);
-  db.run(`INSERT INTO runs (id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`,[run.id,run.kind,run.status,run.sessionId,run.promptId,run.createdAt,run.generation,run.inputThoughtId,intent?.subjectId ?? null,intent?.triggerId ?? null]);
+  if (scheduleKind !== null) {
+    if (run.kind !== "weave" || intent === null) throw new RunConflictError("Scheduled weave identity required");
+    const subject = db.query<{kind:MaterialKind},[string]>("SELECT kind FROM thoughts WHERE id=?").get(intent.subjectId);
+    if (!subject || resolveWeavePurpose(subject.kind,intent.triggerId,scheduleKind) !== scheduleKind) throw new RunConflictError("Scheduled weave purpose differs");
+  }
+  db.run(`INSERT INTO runs (id,kind,status,session_id,prompt_id,created_at,generation,input_thought_id,weave_subject_id,weave_trigger_id,weave_schedule_kind)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`,[run.id,run.kind,run.status,run.sessionId,run.promptId,run.createdAt,run.generation,run.inputThoughtId,intent?.subjectId ?? null,intent?.triggerId ?? null,scheduleKind]);
 }

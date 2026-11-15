@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { captureBackup } from "../src/backup/capture";
 import { stageRestoreSnapshot, recoverRestoreStage, restoreBackup } from "../src/backup/restore-staging";
-import { decodeManifest } from "../src/backup/decode";
-import { encodeManifest } from "../src/backup/format";
+import { decodeManifest, decodeTable } from "../src/backup/decode";
+import { encodeManifest, encodeTable } from "../src/backup/format";
+import { shapesForSchema } from "../src/backup/schema";
 import { startDaemon } from "../src/daemon/runtime";
 import { RunAdmissionService, RunFenceError } from "../src/domain/run";
 import { RejectionService } from "../src/domain/rejection";
@@ -61,6 +62,13 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
         });
         runs.stop(run.id); expect(state.settleUnsubmitted(run.id)).toBe(true);
       }
+      for (const [index,triggerId] of ["scheduled-title:not-a-date","connection-review:not-a-date"].entries()) {
+        const subjectId = `legacy-collision-${index}`;
+        store.saveThought({id:subjectId,text:"Owned legacy collision",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
+        const run = ops.admitWeave("user",{subjectId,triggerId}), claim = runs.claim(run.id);
+        state.prepareInitial(claim,() => `Exact legacy ${triggerId}`);
+        runs.stop(run.id); expect(state.settleUnsubmitted(run.id)).toBe(true); runIds.push(run.id);
+      }
       new RejectionService(new SqliteRejectionRepository(db,logger)).rejectConnection("user","historical-edge");
       store.saveThought({id:"foreign",text:"Owned foreign endpoint",title:null,author:"user",kind:"captured-original",createdAt:now(),origin:"fixture",parentId:null,sourceIds:[]});
       store.saveConnection({id:"foreign-edge",fromId:"candidate",toId:"foreign",category:"related",proposedBy:"user",explanation:"Owned foreign relation",sourceIds:[]});
@@ -90,7 +98,7 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
 
 test("current capture, staged recovery and offline installation preserve screening history and fence execution", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-7");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-8");
   expect(manifest.tables.filter(table => table.name.startsWith("run_screening_")).map(table => table.rowCount)).toEqual(["5","5"]);
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger});
@@ -98,7 +106,9 @@ test("current capture, staged recovery and offline installation preserve screeni
     const db = new Database(path,{create:false,readwrite:true});
     try {
       expect(history(db)).toEqual(f.history);
-      expect(db.query("SELECT input FROM run_steps WHERE input IS NOT NULL ORDER BY input").all()).toEqual([{input:"owned exact prompt\r\n"},{input:"owned excluded prompt\r\n"},{input:"owned excluded prompt\r\n"}]);
+      expect(db.query("SELECT input FROM run_steps WHERE input IS NOT NULL ORDER BY input").all()).toEqual([
+        {input:"Exact legacy connection-review:not-a-date"},{input:"Exact legacy scheduled-title:not-a-date"},
+        {input:"owned exact prompt\r\n"},{input:"owned excluded prompt\r\n"},{input:"owned excluded prompt\r\n"}]);
       expect(db.query("SELECT judgment_json,excluded_connection_id FROM run_screening_pairs WHERE excluded_connection_id IS NOT NULL ORDER BY judgment_json DESC").all())
         .toEqual([{judgment_json:'{"score":0.9}',excluded_connection_id:"historical-edge"},{judgment_json:null,excluded_connection_id:"historical-edge"}]);
       expect(db.query("SELECT connection_id FROM rejected_connections WHERE connection_id='historical-edge'").get()).toEqual({connection_id:"historical-edge"});
@@ -128,6 +138,34 @@ test("current capture, staged recovery and offline installation preserve screeni
     verify(stage.databasePath,false); await recoverRestoreStage(stage,{restoredAt,logger}); verify(stage.databasePath,true);
   } finally { await stage.dispose(); }
   verify((await restoreBackup({snapshotDirectory:f.snapshot,targetDirectory:join(f.dir,"target"),restoredAt,logger})).databasePath,true);
+}),45000);
+
+test("frozen logical-7 restore preserves nonnull screening exclusions and defaults schedule markers", async () => owned(async f => {
+  const legacy = join(f.dir,"logical-7"); await cp(f.snapshot,legacy,{recursive:true,errorOnExist:true});
+  const path = join(legacy,"tables","runs.json"), current = decodeTable("runs",await readFile(path),"thoughtloom-logical-8");
+  const shape = shapesForSchema("thoughtloom-logical-7").find(item => item.name === "runs");
+  if (!shape) throw new Error("Expected frozen runs shape");
+  const bytes = encodeTable(shape,current.map(row => ({rowid:row.rowid,values:Object.fromEntries(shape.columns.map(name => [name,row.values[name]]))})));
+  await writeFile(path,bytes,{mode:0o600});
+  const manifestPath = join(legacy,"manifest.json"), manifest = decodeManifest(await readFile(manifestPath));
+  await writeFile(manifestPath,encodeManifest({...manifest,appSchema:"thoughtloom-logical-7",tables:manifest.tables.map(entry => entry.name === "runs"
+    ? {...entry,byteLength:String(bytes.length),sha256:createHash("sha256").update(bytes).digest("hex")} : entry)}),{mode:0o600});
+  const parent = join(f.dir,"legacy-stage"); await mkdir(parent,{mode:0o700});
+  const selectedDigest = createHash("sha256").update(await readFile(manifestPath)).digest("hex");
+  const stage = await stageRestoreSnapshot({snapshotDirectory:legacy,stagingParentDirectory:parent,logger});
+  try {
+    expect(stage.manifestSha256).toBe(selectedDigest);
+    const db = new Database(stage.databasePath);
+    try {
+      expect(history(db)).toEqual(f.history);
+      expect(db.query("SELECT excluded_connection_id FROM run_screening_pairs WHERE excluded_connection_id IS NOT NULL").all()).toHaveLength(2);
+      expect(db.query("SELECT id FROM runs WHERE weave_schedule_kind IS NOT NULL").all()).toEqual([]);
+      expect(db.query("SELECT weave_trigger_id FROM runs WHERE weave_subject_id LIKE 'legacy-collision-%' ORDER BY weave_subject_id").all())
+        .toEqual([{weave_trigger_id:"scheduled-title:not-a-date"},{weave_trigger_id:"connection-review:not-a-date"}]);
+      expect(db.query("SELECT input FROM run_steps WHERE input LIKE 'Exact legacy %' ORDER BY input").all()).toEqual([
+        {input:"Exact legacy connection-review:not-a-date"},{input:"Exact legacy scheduled-title:not-a-date"}]);
+    } finally { db.close(); }
+  } finally { await stage.dispose(); }
 }),45000);
 
 test.each(["missing","foreign-pair","missing-connection","positive-without-proof","collecting"] as const)("restore refuses hash-consistent screening exclusion %s", async fault => owned(async f => {

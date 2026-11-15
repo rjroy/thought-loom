@@ -6,7 +6,7 @@ import { SqliteStore } from "../src/storage/sqlite";
 import { ScriptedClient } from "./agentic-search-capability-fixture";
 import { bounded } from "./fixtures/media-files";
 import { pathBinding, pathComplete } from "./fixtures/media-path-worker";
-import { dailyReviewFixture, reviewComplete, type DailyReviewFixture } from "./fixtures/daily-review";
+import { dailyReviewFixture, type DailyReviewFixture } from "./fixtures/daily-review";
 
 function makeWorker(f: DailyReviewFixture, client: ScriptedClient, screening: ConnectionScreeningPort, db = f.db) {
   return new RunWorker({db,...f.sources,connectionScreening:screening,bindingFor:run => pathBinding(run,f.dir),
@@ -47,7 +47,7 @@ test.each(["creation", "daily"] as const)("%s screening excludes visible connect
     id = batch.runIds[0];
     expect(f.ops.weaveIntent(id)?.subjectId).toBe("a");
   }
-  const calls:string[] = [], client = new ScriptedClient(() => purpose === "daily" ? reviewComplete : pathComplete("No findings"));
+  const calls:string[] = [], client = new ScriptedClient(() => pathComplete("No findings"));
   const w = makeWorker(f,client,{identity:"owned-exclusion",async judge(pair) { calls.push(pair.thoughtB.id); return pair.thoughtB.id === "negative" ? 0.1 : 0.9; }});
   try {
     await finish(w,f,id);

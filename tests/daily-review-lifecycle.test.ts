@@ -15,7 +15,7 @@ import { pathBinding } from "./fixtures/media-path-worker";
 import { dailyReviewFixture, reviewComplete, reviewPolicy, type DailyReviewFixture } from "./fixtures/daily-review";
 
 function admit(f: DailyReviewFixture): string {
-  const batch = f.admit(); if (batch.kind !== "admitted" || !batch.runIds[0]) throw new Error("Expected owned review");
+  const batch = f.admitLegacy(); if (batch.kind !== "admitted" || !batch.runIds[0]) throw new Error("Expected owned review");
   return batch.runIds[0];
 }
 function worker(f: DailyReviewFixture, client: ScriptedClient, connectionScreening?: ConnectionScreeningPort, db = f.db) {
@@ -170,7 +170,7 @@ test("active edges with rejected provenance skip screening, but a later day's re
   f.seed("a"); f.seed("z"); f.seed("PRIVATE-SOURCE-ID");
   f.store.saveConnection({id:"owned-visible-edge",fromId:"z",toId:"a",category:"supports",proposedBy:"user",explanation:"Owned active relation",sourceIds:["PRIVATE-SOURCE-ID"]});
   f.rejection.rejectThought("user","PRIVATE-SOURCE-ID");
-  const firstBatch = f.admit(); if (firstBatch.kind !== "admitted") throw new Error("Expected owned first batch");
+  const firstBatch = f.admitLegacy(); if (firstBatch.kind !== "admitted") throw new Error("Expected owned first batch");
   const firstId = firstBatch.runIds.find(id => f.ops.weaveIntent(id)?.subjectId === "a");
   if (!firstId) throw new Error("Expected owned a review");
   const firstCalls:string[] = [], firstClient = new ScriptedClient(() => reviewComplete);
@@ -185,7 +185,7 @@ test("active edges with rejected provenance skip screening, but a later day's re
   } finally { first.pause(); await first.drain(); }
   for (const id of firstBatch.runIds.filter(id => id !== firstId)) { f.runs.stop(id); f.state.settleUnsubmitted(id); }
   f.rejection.rejectConnection("user","owned-visible-edge");
-  const nextBatch = f.admit("2031-01-02T12:00:00.000Z"); if (nextBatch.kind !== "admitted") throw new Error("Expected owned next batch");
+  const nextBatch = f.admitLegacy("2031-01-02T12:00:00.000Z"); if (nextBatch.kind !== "admitted") throw new Error("Expected owned next batch");
   const nextId = nextBatch.runIds.find(id => f.ops.weaveIntent(id)?.subjectId === "a");
   if (!nextId) throw new Error("Expected a fresh a review");
   const nextCalls:string[] = [], nextClient = new ScriptedClient(() => reviewComplete);

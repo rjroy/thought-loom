@@ -99,15 +99,20 @@ class FixtureClient implements PublicClient {
     if (job.kind === "evolve" && this.holdEvolve) await new Promise<void>(done => { this.releaseHeld = done; });
     const step = history.length;
     const output = job.purpose === "daily-review" ? {version:1,kind:"review-complete",titleCheck:"complete",connectionCheck:"complete"} :
-      job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: "No further findings" } : job.kind === "export" ? (step === 1
+      job.purpose === "connection-only" || job.purpose === "connection-review" ? { version: 1, kind: "complete", reply: "No further findings" } :
+      job.purpose === "media-title-only" || job.purpose === "title-only" ? (step === 1
+        ? {version:1,kind:"request",request:{capability:"title-fill",arguments:{title:"Owned generated media title"}}}
+        : {version:1,kind:"complete",reply:"Media title regenerated"}) : job.kind === "export" ? (step === 1
       ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.sourceId } } }
       : { version: 1, kind: "report", markdown: "# Owned integrated report\n\nEvidence from the captured thought.", sourceThoughtIds: [this.sourceId] })
       : job.kind === "evolve" && step === 1
         ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "Owned integrated development", sourceIds: [] } } }
+        : job.kind === "evolve" && step === 2
+          ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Owned integrated contribution" } } }
         : job.kind === "weave" && step === 1
           ? { version: 1, kind: "request", request: { capability: "interpretation", arguments: { text: job.purpose === "reinterpretation" ? "Owned fresh integrated interpretation" : "Owned integrated interpretation", sourceIds: [string(job.subjectId)] } } }
-        : job.kind === "weave" && job.purpose !== "reinterpretation" && step === 2 && !(Array.isArray(first.originals) && first.originals.length > 0)
-          ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Owned generated title" } } }
+        : job.kind === "weave" && step === 2
+          ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: Array.isArray(first.originals) && first.originals.length > 0 ? "Owned generated media title" : "Owned generated title" } } }
         : { version: 1, kind: "complete", reply: job.kind === "evolve" ? "Owned integrated reply" : job.purpose === "reinterpretation" ? "Owned fresh reinterpretation reply" : "No further findings" };
     const messages = this.messages.get(input.sessionID); assert.ok(messages);
     const n = messages.length * 10 + 10;
@@ -494,6 +499,8 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await evolveCheck;
     fake.release();
     await until("Evolve completion", async () => record((await daemonCall(running, `/runs/${runId}`)).value).status === "completed", pulse);
+    const titledContribution = record((await daemonCall(running, `/thoughts/${encodeURIComponent(string(contribution.id))}`)).value);
+    assert.equal(titledContribution.title,"Owned integrated contribution"); assert.equal(titledContribution.titleAuthor,"ai");
     await page.getByRole("button", { name: "Check this run" }).click();
     await expect(page.getByText("Owned integrated reply")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Owned integrated development" })).toBeVisible();
@@ -504,8 +511,8 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     const developmentId = string(completedEvolve.confirmedThoughtIds[0]);
     const followups = dbRows(dbPath, "SELECT id, kind, status, weave_subject_id, weave_trigger_id FROM runs WHERE kind = 'weave'")
       .map(record).filter(row => row.weave_subject_id === developmentId);
-    const ordinary = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id)) === "ordinary");
-    const discovery = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id)) === "connection-only");
+    const ordinary = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id),null) === "ordinary");
+    const discovery = followups.filter(row => resolveWeavePurpose("developing-idea",string(row.weave_trigger_id),null) === "connection-only");
     assert.equal(ordinary.length, 1, "the confirmed development must retain its ordinary title/interpretation follow-up");
     assert.equal(discovery.length, 1, "the confirmed development must have exactly one connection-only creation owner");
     assert.equal(followups.length, 2, "no extra or unclassified follow-up work may be admitted");
@@ -689,15 +696,15 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     assert.ok(imageInterpretation); assert.equal(imageInterpretation.parentId,imageThoughtId);
     assert.equal(imageInterpretation.text,"Owned integrated interpretation");
     const canonicalMedia = record((await daemonCall(running,`/thoughts/${encodeURIComponent(imageThoughtId)}?scope=normal`)).value);
-    assert.equal(canonicalMedia.text,null); assert.equal(canonicalMedia.title,null);
+    assert.equal(canonicalMedia.text,null); assert.equal(canonicalMedia.title,"Owned generated media title"); assert.equal(canonicalMedia.titleAuthor,"ai");
     assert.equal(record(canonicalMedia.mediaSource).clarification,imageClarification);
     fake.sourceId = imageThoughtId;
 
     await page.goto(`${origin}/explore?q=cobalt&author=source&kind=media-original`, {waitUntil:"networkidle"});
     const imageCard = page.locator("article").filter({has:page.locator(`a[href^="/ideas/${encodeURIComponent(imageThoughtId)}"]`)});
-    await expect(imageCard).toBeVisible(); await expect(imageCard).toContainText(imageName);
+    await expect(imageCard).toBeVisible(); await expect(imageCard).toContainText("Owned generated media title");
     await imageCard.locator(`a[href^="/ideas/${encodeURIComponent(imageThoughtId)}"]`).first().click();
-    await expect(page.getByRole("heading",{level:1,name:imageName})).toBeVisible();
+    await expect(page.getByRole("heading",{level:1,name:"Owned generated media title"})).toBeVisible();
     await expect(page.getByText(imageClarification,{exact:true})).toBeVisible();
     await expect(page.getByText(/original authorship unverified/i).first()).toBeVisible();
     await expect(page.locator(`a[href^="/ideas/${encodeURIComponent(string(imageInterpretation.id))}"]`).first()).toBeVisible();
@@ -709,7 +716,7 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await expect(page.getByRole("textbox",{name:"Your contribution"})).toBeVisible();
     if (viewport.width < 500) await page.getByRole("button",{name:/^Starting thought/}).click();
     const imageRail = page.locator("#evolve-starting-context");
-    await expect(imageRail.getByRole("heading",{name:imageName,exact:true})).toBeVisible();
+    await expect(imageRail.getByRole("heading",{name:"Owned generated media title",exact:true})).toBeVisible();
     await expect(imageRail.getByText(/PNG image.*original authorship unverified/i)).toBeVisible();
     const railClarification = imageRail.getByText(imageClarification,{exact:true});
     await expect(railClarification).toBeVisible();
@@ -717,7 +724,7 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await searchWalkthrough(page,origin,running,dbPath,imageThoughtId,"cobalt",viewport.width < 600,pulse);
 
     await page.goto(`${origin}/export?thoughtId=${encodeURIComponent(imageThoughtId)}`,{waitUntil:"networkidle"});
-    await expect(page.getByText(imageName,{exact:true}).first()).toBeVisible();
+    await expect(page.getByText("Owned generated media title",{exact:true}).first()).toBeVisible();
     const mediaBeforeExport = knowledge(dbPath);
     await page.getByRole("button",{name:/create simple export/i}).click();
     const mediaSimple = page.getByRole("region",{name:"Simple Markdown preview"});

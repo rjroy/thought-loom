@@ -118,10 +118,13 @@ try {
         output={version:1,kind:'report',markdown:'# Fixture report\n\nFixture explanation, not verified fact.',sourceThoughtIds:[last.result.thought.id]};
       } else throw new Error('Unexpected export capability');
     }
+    else if (job.context.job.kind==='weave' && (job.context.job.purpose==='connection-only' || job.context.job.purpose==='connection-review')) output=complete('No findings.');
+    else if (job.context.job.kind==='weave' && job.context.job.purpose==='daily-review') output={version:1,kind:'review-complete',titleCheck:'complete',connectionCheck:'complete'};
     else if (job.context.job.kind==='weave') output=last.kind==='job' ? request('title-fill',{title:'Fixture generated title'}) : complete('No findings.');
     else if (last.kind==='job') output=request('readThought',{id:job.context.job.contributionId});
     else if (last.request.capability==='readThought') output=request('development',{parentId:job.context.job.contributionId,text:'fixture development',sourceIds:[]});
-    else if (last.request.capability==='development') output=complete('fixture human reply');
+    else if (last.request.capability==='development') output=request('title-fill',{title:'Fixture contribution title'});
+    else if (last.request.capability==='title-fill') output=complete('fixture human reply');
     else throw new Error('unexpected capability');
     return new Response(frame({content:typeof output==='string'?output:JSON.stringify(output)},null)+frame({},'stop')+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
   }});
@@ -165,6 +168,7 @@ try {
   const titled=await until('weave title',async()=>{const r=await call(`/thoughts/${rootId}`); return r.data.title==='Fixture generated title' ? r.data : null;}); steps.push({op:'weave title fill',thought:titled});
   const admission=await call(`/thoughts/${rootId}/evolve`,'POST',{text:'fixture question'}); assert.equal(admission.status,201); const runId=admission.data.run.id; const contributionId=admission.data.contribution.id; steps.push({op:'evolve admission',admission:admission.data});
   const view=await until('evolve completion',async()=>{const r=await call(`/runs/${runId}`); if(r.data.status==='failed'||r.data.status==='interrupted') throw new Error(`evolve ${r.data.status}`); return r.data.status==='completed'?r.data:null;}) as RunView;
+  const contribution=await call(`/thoughts/${contributionId}`); assert.equal(contribution.data.title,'Fixture contribution title'); assert.equal(contribution.data.titleAuthor,'ai');
   assert.equal(view.confirmedThoughtIds.length,1); const thought=await call(`/thoughts/${view.confirmedThoughtIds[0]}`); const response=await call(`/responses/${view.responseId}`);
   assert.equal(thought.data.text,'fixture development'); assert.equal(thought.data.parentId,contributionId); assert.equal(thought.data.author,'ai'); assert.equal(response.data.text,'fixture human reply'); assert.equal(response.data.state,'complete'); assert.equal(response.data.role,'addendum'); assert.deepEqual(response.data.thoughtIds,view.confirmedThoughtIds);
   steps.push({op:'application completed evolve',view,thought:thought.data,response:response.data});

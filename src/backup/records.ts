@@ -5,7 +5,7 @@ import { validateSourceSchema } from "./schema";
 import { check, type Guard } from "./capture-files";
 import { parseScreeningJudgment, parseScreeningPolicy } from "../domain/connection-screening";
 import { assertWeaveCapability, connectionDiscoveryPrefix, directConnectionDiscoveryPrefix } from "../domain/weave-scheduling";
-import { dailyReviewCeiling, dailyReviewDate, dailyReviewInstant, dailyReviewPrefix, dailyReviewTrigger, parseDailyReviewPolicy } from "../domain/daily-review";
+import { connectionReviewDate, connectionReviewPrefix, dailyReviewCeiling, dailyReviewDate, dailyReviewInstant, dailyReviewPrefix, dailyReviewTrigger, parseDailyReviewPolicy, scheduledTitleDate, scheduledTitlePrefix } from "../domain/daily-review";
 import { parseCapabilityRequest } from "../domain/capability";
 import { createConnection } from "../domain/connection";
 import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
@@ -61,11 +61,12 @@ export function validateRecords(db: Database): void {
   ordered(db,"daily_review_items","review_date");
   noRows(db,`SELECT 1 FROM main.daily_review_batches b WHERE b.admitted_count!=(SELECT count(*) FROM main.daily_review_items i WHERE i.review_date=b.review_date) LIMIT 1`);
   noRows(db,`SELECT 1 FROM main.daily_review_items i JOIN main.runs r ON r.id=i.run_id JOIN main.thoughts t ON t.id=i.thought_id
-    WHERE r.kind!='weave' OR r.weave_subject_id IS NOT i.thought_id OR r.weave_trigger_id IS NOT 'daily-review:'||i.review_date
+    WHERE r.kind!='weave' OR r.weave_subject_id IS NOT i.thought_id OR NOT ((r.weave_schedule_kind IS NULL AND r.weave_trigger_id='daily-review:'||i.review_date)
+       OR (r.weave_schedule_kind='connection-review' AND r.weave_trigger_id='connection-review:'||i.review_date))
       OR t.kind='media-original' OR (i.completed_at IS NOT NULL)!=(r.status='completed')
       OR EXISTS(SELECT 1 FROM main.run_issued_thoughts x WHERE x.run_id=r.id)
       OR EXISTS(SELECT 1 FROM main.run_replies x WHERE x.run_id=r.id AND (x.draft_json IS NOT NULL OR x.response_id IS NOT NULL)) LIMIT 1`);
-  noRows(db,`SELECT 1 FROM main.runs r WHERE r.kind='weave' AND (substr(r.weave_trigger_id,1,13)='daily-review:' OR r.weave_trigger_id='daily-review')
+  noRows(db,`SELECT 1 FROM main.runs r WHERE r.kind='weave' AND ((r.weave_schedule_kind IS NULL AND (substr(r.weave_trigger_id,1,13)='daily-review:' OR r.weave_trigger_id='daily-review')) OR r.weave_schedule_kind='connection-review')
     AND NOT EXISTS(SELECT 1 FROM main.daily_review_items i WHERE i.run_id=r.id) LIMIT 1`);
   noRows(db,`SELECT 1 FROM main.run_screening_passes p JOIN main.runs r ON r.id=p.run_id
     JOIN main.thoughts t ON t.id=p.subject_id JOIN main.run_steps s ON s.run_id=r.id AND s.position=0
@@ -286,8 +287,11 @@ function validateDailyReviews(snapshot: SqlSnapshot): void {
     }
     for (const item of items) {
       const id = text(item,"run_id"), subjectId = text(item,"thought_id"), date = text(item,"review_date"), run = runs.get(id);
-      check(run !== undefined && text(run,"kind") === "weave" && text(run,"weave_subject_id") === subjectId &&
-        text(run,"weave_trigger_id") === dailyReviewTrigger(date),"inconsistent-source");
+      check(run !== undefined && text(run,"kind") === "weave" && text(run,"weave_subject_id") === subjectId,"inconsistent-source");
+      const marker = run.values.weave_schedule_kind;
+      const purpose = !marker || marker.storage === "null" ? "daily-review" : text(run,"weave_schedule_kind");
+      check((purpose === "daily-review" && text(run,"weave_trigger_id") === dailyReviewTrigger(date)) ||
+        (purpose === "connection-review" && text(run,"weave_trigger_id") === `${connectionReviewPrefix}${date}`),"inconsistent-source");
       const history = (steps.get(id) ?? []).toSorted((a,b) => Number(integer(a,"position") - integer(b,"position")));
       const retainedReceipts = receipts.get(id) ?? [];
       check(history.length > 0,"inconsistent-source");
@@ -302,20 +306,20 @@ function validateDailyReviews(snapshot: SqlSnapshot): void {
             text(run,"status") !== "completed" &&
             !retainedReceipts.some(receipt => text(receipt,"operation_id") === text(step,"prompt_id"));
           if (uneffectedFinalRequest) continue;
-          const request = parseCapabilityRequest(envelope.request); assertWeaveCapability("daily-review",request.capability);
+          const request = parseCapabilityRequest(envelope.request); assertWeaveCapability(purpose === "daily-review" ? "daily-review" : "connection-review",request.capability);
           if (request.capability === "connection") check(request.arguments.fromId === subjectId || request.arguments.toId === subjectId,"inconsistent-source");
-        } else check(envelope.kind === "review-complete" && position === history.length-1,"inconsistent-source");
+        } else check(envelope.kind === (purpose === "daily-review" ? "review-complete" : "complete") && position === history.length-1,"inconsistent-source");
         if (position < history.length-1) check(text(step,"state") === "processed" && step.values.result_json.storage !== "null","inconsistent-source");
       }
       for (const receipt of retainedReceipts) {
         check(text(receipt,"format") === "step","inconsistent-source");
-        const operation = parseStepOperation(JSON.parse(text(receipt,"operation_json"))); assertWeaveCapability("daily-review",operation.type);
+        const operation = parseStepOperation(JSON.parse(text(receipt,"operation_json"))); assertWeaveCapability(purpose === "daily-review" ? "daily-review" : "connection-review",operation.type);
         if (operation.type === "connection") check(operation.fromId === subjectId || operation.toId === subjectId,"inconsistent-source");
       }
       if (item.values.completed_at.storage !== "null") {
         const at = text(item,"completed_at"), last = history.at(-1);
         check(dailyReviewInstant(at) === at && text(run,"status") === "completed" && last !== undefined && text(last,"state") === "completed" &&
-          parseEnvelope(text(last,"envelope_json")).kind === "review-complete","inconsistent-source");
+          parseEnvelope(text(last,"envelope_json")).kind === (purpose === "daily-review" ? "review-complete" : "complete"),"inconsistent-source");
       } else check(text(run,"status") !== "completed","inconsistent-source");
     }
     // A review-only envelope cannot be laundered into an ordinary or unowned historical run.
@@ -323,17 +327,62 @@ function validateDailyReviews(snapshot: SqlSnapshot): void {
       let envelope: unknown;
       try { envelope = JSON.parse(text(step,"envelope_json")); } catch { continue; } // Unrelated legacy protocol is not reinterpreted here.
       if (envelope && typeof envelope === "object" && "kind" in envelope && envelope.kind === "review-complete") {
-        check(byRun.has(id),"inconsistent-source");
+        const run = runs.get(id);
+        check(byRun.has(id) && run !== undefined && (!run.values.weave_schedule_kind || run.values.weave_schedule_kind.storage === "null") && text(run,"weave_trigger_id").startsWith(dailyReviewPrefix),"inconsistent-source");
       }
     }
     for (const run of runs.values()) if (run.values.weave_trigger_id.storage === "text" &&
-      (text(run,"weave_trigger_id").startsWith(dailyReviewPrefix) || text(run,"weave_trigger_id") === "daily-review")) {
-      check(dailyReviewDate(text(run,"weave_trigger_id")) !== null && byRun.has(text(run,"id")),"inconsistent-source");
+      (((!run.values.weave_schedule_kind || run.values.weave_schedule_kind.storage === "null") && (text(run,"weave_trigger_id").startsWith(dailyReviewPrefix) || text(run,"weave_trigger_id") === "daily-review")) ||
+        (run.values.weave_schedule_kind?.storage === "text" && text(run,"weave_schedule_kind") === "connection-review"))) {
+      const trigger = text(run,"weave_trigger_id");
+      check((dailyReviewDate(trigger) ?? connectionReviewDate(trigger)) !== null && byRun.has(text(run,"id")),"inconsistent-source");
+    }
+    const titleCounts = new Map<string,number>();
+    const titleSubjects = new Set<string>();
+    const issued = table(snapshot,"run_issued_thoughts").rows, replies = table(snapshot,"run_replies").rows;
+    for (const run of runs.values()) {
+      if (!run.values.weave_schedule_kind || run.values.weave_schedule_kind.storage === "null") continue;
+      const marker = text(run,"weave_schedule_kind");
+      check(marker === "title-only" || marker === "connection-review","inconsistent-source");
+      check(text(run,"kind") === "weave" && run.values.weave_subject_id.storage === "text" && run.values.weave_trigger_id.storage === "text","inconsistent-source");
+      const trigger = text(run,"weave_trigger_id");
+      if (marker === "connection-review") {
+        check(connectionReviewDate(trigger) !== null && byRun.has(text(run,"id")),"inconsistent-source");
+        continue;
+      }
+      const date = scheduledTitleDate(trigger), id = text(run,"id");
+      check(date !== null && text(run,"kind") === "weave" && run.values.weave_subject_id.storage === "text","inconsistent-source");
+      const admitted = text(run,"created_at"), subjectKey = JSON.stringify([trigger,text(run,"weave_subject_id")]);
+      check(dailyReviewInstant(admitted) === admitted && admitted.slice(0,10) === date && !titleSubjects.has(subjectKey),"inconsistent-source");
+      titleSubjects.add(subjectKey);
+      const count = (titleCounts.get(trigger) ?? 0)+1; titleCounts.set(trigger,count);
+      check(count <= 20 && !issued.some(row => text(row,"run_id") === id) &&
+        !replies.some(row => text(row,"run_id") === id),"inconsistent-source");
+      const history = (steps.get(id) ?? []).toSorted((a,b) => Number(integer(a,"position")-integer(b,"position")));
+      check(history.length > 0,"inconsistent-source");
+      for (const [position,step] of history.entries()) {
+        if (step.values.envelope_json.storage === "null") { check(position === history.length-1,"inconsistent-source"); continue; }
+        const envelope = parseEnvelope(text(step,"envelope_json"));
+        if (envelope.kind === "request") {
+          const uneffected = position === history.length-1 && text(step,"state") === "completed" && step.values.result_json.storage === "null" && text(run,"status") !== "completed" &&
+            !(receipts.get(id) ?? []).some(receipt => text(receipt,"operation_id") === text(step,"prompt_id"));
+          if (!uneffected) assertWeaveCapability("title-only",parseCapabilityRequest(envelope.request).capability);
+        } else check(envelope.kind === "complete" && position === history.length-1,"inconsistent-source");
+        if (position < history.length-1) check(text(step,"state") === "processed" && step.values.result_json.storage !== "null","inconsistent-source");
+      }
+      for (const receipt of receipts.get(id) ?? []) {
+        check(text(receipt,"format") === "step","inconsistent-source");
+        assertWeaveCapability("title-only",parseStepOperation(JSON.parse(text(receipt,"operation_json"))).type);
+      }
+      if (text(run,"status") === "completed") {
+        const last = history.at(-1);
+        check(last !== undefined && text(last,"state") === "completed" && last.values.envelope_json.storage === "text" && parseEnvelope(text(last,"envelope_json")).kind === "complete","inconsistent-source");
+      }
     }
   } catch { check(false,"inconsistent-source"); }
 }
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
-export function validateBytes(snapshot: SqlSnapshot): void {
+export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-8"): void {
   validateApplicationIntegers(snapshot);
   validateConnectionReceipts(snapshot);
   validateDailyReviews(snapshot);

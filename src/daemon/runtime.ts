@@ -43,6 +43,7 @@ import { SqliteAgentInstructions } from "../storage/agent-instructions";
 import { ExportHistoryService } from "../domain/export-history";
 import { SqliteAgenticExports } from "../storage/agentic-export";
 import { SqliteDailyReviews } from "../storage/daily-review";
+import { SqliteScheduledTitles } from "../storage/title-scheduling";
 
 /** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
@@ -82,6 +83,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
   let mediaValidator: MediaValidator | undefined;
   let backupScheduler: BackupScheduler | undefined;
   let dailyReview: DailyReviewDriver | undefined;
+  let titleScheduling: DailyReviewDriver | undefined;
   let acceptingRequests = true;
   const requestFlights = new Set<Promise<Response>>();
   async function close(force: boolean): Promise<boolean> {
@@ -91,6 +93,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
     // Seal/abort synchronously, and join capture/Git before originals, database and execution ownership are released.
     try { if (backupScheduler) pending.push(backupScheduler.stop()); } catch { failed = true; }
     try { if (dailyReview) pending.push(dailyReview.stop()); } catch { failed = true; }
+    try { if (titleScheduling) pending.push(titleScheduling.stop()); } catch { failed = true; }
     // Pause the worker synchronously before awaiting either drain; a late native callback cannot advance local work.
     try { worker?.pause(); } catch { failed = true; }
     try { if (supervisor) pending.push(supervisor.stop()); } catch { failed = true; }
@@ -231,6 +234,10 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       dailyReview = new DailyReviewDriver({now:scheduling.now,admit:at => { owner.assertHeld(); return reviews.admitDueBatch(at,true); },
         startTimer,notifyWork:() => activeSupervisor.notifyWork(),logger:diagnostics});
       dailyReview.start();
+      const titles = new SqliteScheduledTitles(db,scheduling);
+      titleScheduling = new DailyReviewDriver({now:scheduling.now,admit:at => { owner.assertHeld(); return titles.admitDueBatch(at,true); },
+        startTimer,notifyWork:() => activeSupervisor.notifyWork(),logger:diagnostics});
+      titleScheduling.start();
     }
     const url = server.url.toString();
     let stopping: Promise<void> | undefined;
