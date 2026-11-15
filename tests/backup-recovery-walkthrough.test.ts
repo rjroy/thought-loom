@@ -292,7 +292,7 @@ test("owned online Git revision restores through the standalone command without 
     expect(JSON.stringify(await connections.json())).toContain(connected);
     expect((await request(`/runs/${queued.id}/stop`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(200);
     expect(historicalFacts(restoredPath, queued.id, cleanupRun, importFile)).toEqual(history);
-    const fresh = text((await json("/thoughts", { text: "fresh independent restored work" }, 201)).id);
+    const fresh = text((await json("/thoughts", { text: "fresh independent restored work", title: "Fresh restored work" }, 201)).id);
     await waitFor(() => restoredClient.prompts.length > 0, "fresh native work");
     const freshRun = read(restoredPath, db => db.query<{ id: string }, [string]>("SELECT id FROM runs WHERE weave_subject_id=?").get(fresh));
     if (!freshRun) throw new Error("Missing fresh run");

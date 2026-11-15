@@ -209,8 +209,13 @@ test("configured media admission gives the normal worker real PNG and PDF paths 
   expect(f.client.scriptErrors).toEqual([]);
   const diagnostics = JSON.stringify([f.events,f.logs]);
   for (const privateValue of [mediaApiCredentials.user,mediaApiCredentials.ai,mediaClarification,f.directory]) expect(diagnostics).not.toContain(privateValue);
-},{configured:true,script:(_index,input) => object(JSON.parse(input)).kind === "job"
-  ? pathRequest("interpretation",{text:"Owned searchable media interpretation.",sourceIds:[]}) : pathComplete("Saved the owned media interpretation.")}),30000);
+},{configured:true,script:(_index,input) => {
+  const prompt = object(JSON.parse(input));
+  if (prompt.kind === "job") return object(object(prompt.context).job).purpose === "connection-only"
+    ? pathComplete("No connection warranted.") : pathRequest("interpretation",{text:"Owned searchable media interpretation.",sourceIds:[]});
+  return object(prompt.request).capability === "interpretation"
+    ? pathRequest("title-fill",{title:"Owned media title"}) : pathComplete("Saved the owned media interpretation.");
+}}),30000);
 
 test("media HTTP retry reuses a failed original after normal cancellation without duplicating its interpretation", async () => {
   let interpret = false;
@@ -244,7 +249,7 @@ test("media HTTP retry reuses a failed original after normal cancellation withou
     expect(f.read(db => db.query("SELECT count(*) AS n FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(first.thought.id))).toEqual({n:1});
     const mediaRuns = f.read(db => db.query<{id:string;status:string;trigger:string},[string]>(
       "SELECT id,status,weave_trigger_id AS trigger FROM runs WHERE kind='weave' AND weave_subject_id=? ORDER BY rowid").all(first.thought.id));
-    expect(mediaRuns.map(run => [run.id,run.status,resolveWeavePurpose("media-original",run.trigger)])).toEqual([
+    expect(mediaRuns.map(run => [run.id,run.status,resolveWeavePurpose("media-original",run.trigger,null)])).toEqual([
       [first.runId,"failed","ordinary"],[runId,"completed","ordinary"],
     ]);
     const initialPrompts = f.client.prompts.filter(prompt => object(JSON.parse(prompt.text)).kind === "job" &&
@@ -265,7 +270,7 @@ test("media HTTP retry reuses a failed original after normal cancellation withou
     expect(discoveryRuns).toHaveLength(1);
     const discovery = discoveryRuns[0];
     if (!discovery) throw new Error("Expected the interpretation's discovery owner");
-    expect(resolveWeavePurpose("ai-interpretation",discovery.trigger)).toBe("connection-only");
+    expect(resolveWeavePurpose("ai-interpretation",discovery.trigger,null)).toBe("connection-only");
     expect(connectionDiscoveryOrigin(discovery.trigger)).toBe(runId);
     const discoveryPrompt = () => f.client.prompts.find(prompt => object(JSON.parse(prompt.text)).kind === "job" &&
       f.client.sessions.get(prompt.sessionID)?.metadata.runId === discovery.id);
@@ -282,7 +287,8 @@ test("media HTTP retry reuses a failed original after normal cancellation withou
   },{configured:true,script:(_index,input) => {
     if (!interpret) return pathComplete("The owned source could not be understood.");
     const prompt = object(JSON.parse(input));
-    if (prompt.kind !== "job") return pathComplete("Saved the retried interpretation.");
+    if (prompt.kind !== "job") return object(prompt.request).capability === "interpretation"
+      ? pathRequest("title-fill",{title:"Retried media title"}) : pathComplete("Saved the retried interpretation.");
     if (object(object(prompt.context).job).purpose === "connection-only") return pathComplete("No connection warranted.");
     return pathRequest("interpretation",{text:"Retried owned interpretation.",sourceIds:[]});
   }});

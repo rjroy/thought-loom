@@ -97,6 +97,7 @@ test("title clear invites regeneration transactionally; later distinct clears ge
 test("Evolve finish atomically saves canonical reply and targeted follow-up on latest issued development", () => fixture(f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "question" });
   if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user", admission.contribution.id, "Question");
   const claim = f.service.claim(admission.run.id);
   const first = f.service.execute(claim, { id: "op-first", type: "development", parentId: admission.contribution.id, text: "first result", sourceIds: [] });
   const last = f.service.execute(claim, { id: "op-last", type: "development", parentId: admission.contribution.id, text: "last result", sourceIds: [] });
@@ -127,6 +128,7 @@ test("Evolve finish atomically saves canonical reply and targeted follow-up on l
 test("Evolve fallback adds no ordinary contribution weave; metadata and connection writes do not recursively schedule", () => fixture(f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "fallback input" });
   if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user", admission.contribution.id, "Fallback");
   const claim = f.service.claim(admission.run.id);
   f.service.finish(claim, { id: "fallback", role: "fallback", state: "complete", text: "question back", thoughtIds: [admission.contribution.id] });
   const before = jobs(f.db);
@@ -141,6 +143,7 @@ test("Evolve fallback adds no ordinary contribution weave; metadata and connecti
 test("Evolve completion retains its reply and queues a follow-up while the target already has a weave", () => fixture(f => {
   const admission = f.service.admit("user", "evolve", { parentId: "root", text: "question while busy" });
   if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user", admission.contribution.id, "Busy question");
   const claim = f.service.claim(admission.run.id);
   const result = f.service.execute(claim, { id: "busy-development", type: "development", parentId: admission.contribution.id, text: "target for follow-up", sourceIds: [] });
   const existing = f.operations.admitWeave("user", { subjectId: result.thought.id, triggerId: "already-active" });

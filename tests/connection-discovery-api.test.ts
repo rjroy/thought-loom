@@ -59,7 +59,7 @@ test.each(cases)("direct $route HTTP creation atomically queues one connection-o
   if (!owner) throw new Error("Expected discovery owner");
   expect(owner.status).toBe("queued");
   expect(owner.triggerId).toBe(`connection-discovery-direct:${thought.id}`);
-  expect(resolveWeavePurpose(item.kind,owner.triggerId)).toBe("connection-only");
+  expect(resolveWeavePurpose(item.kind,owner.triggerId,null)).toBe("connection-only");
   expect(db.query("SELECT kind FROM runs WHERE kind!='weave'").all()).toEqual([]);
   expect(db.query<{n:number},[string]>("SELECT COUNT(*) AS n FROM thoughts WHERE parent_id=?").get(thought.id)?.n).toBe(0);
   expect(owners(db,thought.id)).toEqual(runs);

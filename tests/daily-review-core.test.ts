@@ -11,9 +11,9 @@ const trigger = "daily-review:2031-01-01";
 const completion = {version:1,kind:"review-complete",titleCheck:"complete",connectionCheck:"complete"} as const;
 
 test("daily review trigger resolves to its restricted purpose for text thoughts", () => {
-  expect(resolveWeavePurpose("captured-original",trigger)).toBe("daily-review");
-  expect(resolveWeavePurpose("ai-interpretation",trigger)).toBe("daily-review");
-  expect(resolveWeavePurpose("captured-original","capture:owned")).toBe("ordinary");
+  expect(resolveWeavePurpose("captured-original",trigger,null)).toBe("daily-review");
+  expect(resolveWeavePurpose("ai-interpretation",trigger,null)).toBe("daily-review");
+  expect(resolveWeavePurpose("captured-original","capture:owned",null)).toBe("ordinary");
 });
 
 test("review completion accepts exactly the two affirmative check markers", () => {

@@ -86,7 +86,7 @@ function knowledge(db: Database): unknown {
 }
 
 test("owned decoded facade drives a new Weaver with unattended native permissions", async () => fixture(async (db, store, worker, client, id) => {
-  store.saveThought({ id: "subject", text: "fixture thought", title: null, titleAuthor: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+  store.saveThought({ id: "subject", text: "fixture thought", title: "Fixture title", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
   const run = new SqliteRunOperations(db, { id, now, logger }).admitWeave("user", { subjectId: "subject", triggerId: "fixture-trigger" });
   await drive(worker, db, run.id);
   expect(status(db, run.id)).toBe("completed");

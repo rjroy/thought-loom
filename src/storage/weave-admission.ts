@@ -60,8 +60,8 @@ function admit(db: Database, sources: WeaveSources, input: WeaveIntent, directCr
       const subject = db.query<{ kind: MaterialKind }, [string]>(`SELECT t.kind FROM thoughts t WHERE t.id=? AND NOT EXISTS
         (SELECT 1 FROM rejected_thoughts r WHERE r.thought_id=t.id)`).get(intent.subjectId);
       if (!subject) throw new RunNotFoundError();
-      const purpose = resolveWeavePurpose(subject.kind,intent.triggerId);
-      if (purpose === "daily-review") throw new RunForbiddenError("Daily review requires owned batch admission");
+      const purpose = resolveWeavePurpose(subject.kind,intent.triggerId,null);
+      if (purpose === "daily-review") throw new RunForbiddenError("Scheduled work requires owned batch admission");
       const originRunId = connectionDiscoveryOrigin(intent.triggerId);
       const directSubjectId = directConnectionDiscoverySubject(intent.triggerId);
       if (purpose === "connection-only" && directSubjectId === null) {
@@ -78,7 +78,7 @@ function admit(db: Database, sources: WeaveSources, input: WeaveIntent, directCr
         AND NOT EXISTS(SELECT 1 FROM run_issued_thoughts i WHERE i.thought_id=t.id)`).get(intent.subjectId))) {
         throw new RunConflictError("Direct discovery source differs from its thought");
       }
-      const existing = db.query(`SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? ORDER BY rowid LIMIT 1`)
+      const existing = db.query(`SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=? AND weave_trigger_id=? AND weave_schedule_kind IS NULL ORDER BY rowid LIMIT 1`)
         .get(intent.subjectId,intent.triggerId) as {id:string} | null;
       if (existing) {
         const run = readRun(db,existing.id);

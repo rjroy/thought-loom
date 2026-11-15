@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite";
 
 /** Additive metadata only. Execution and native uncertainty stay in the existing run journal. */
 export function migrateDailyReview(db: Database): void {
+  // Replace only the authority triggers: existing batch/member records remain byte-for-byte unchanged.
+  db.exec("DROP TRIGGER IF EXISTS daily_review_items_update; DROP TRIGGER IF EXISTS daily_review_run_membership;");
   db.exec(`CREATE TABLE IF NOT EXISTS daily_review_batches (
     review_date TEXT PRIMARY KEY NOT NULL CHECK(length(review_date)=10),
     admitted_at TEXT NOT NULL,
@@ -38,16 +40,18 @@ export function migrateDailyReview(db: Database): void {
     OR NEW.position IS NOT OLD.position OR OLD.completed_at IS NOT NULL OR NEW.completed_at IS NULL
     OR NOT EXISTS(SELECT 1 FROM runs r JOIN run_steps s ON s.run_id=r.id
       WHERE r.id=OLD.run_id AND r.status='completed' AND r.kind='weave' AND r.weave_subject_id=OLD.thought_id
-        AND r.weave_trigger_id='daily-review:'||OLD.review_date AND s.position=(SELECT max(position) FROM run_steps WHERE run_id=r.id)
-        AND s.state='completed' AND json_extract(s.envelope_json,'$.kind')='review-complete'
-        AND json_extract(s.envelope_json,'$.titleCheck')='complete' AND json_extract(s.envelope_json,'$.connectionCheck')='complete')
+        AND s.position=(SELECT max(position) FROM run_steps WHERE run_id=r.id) AND s.state='completed'
+        AND ((r.weave_schedule_kind IS NULL AND r.weave_trigger_id='daily-review:'||OLD.review_date AND json_extract(s.envelope_json,'$.kind')='review-complete'
+          AND json_extract(s.envelope_json,'$.titleCheck')='complete' AND json_extract(s.envelope_json,'$.connectionCheck')='complete')
+          OR (r.weave_schedule_kind='connection-review' AND r.weave_trigger_id='connection-review:'||OLD.review_date AND json_extract(s.envelope_json,'$.kind')='complete')))
     OR EXISTS(SELECT 1 FROM restore_fences f WHERE f.entity_kind='run' AND f.entity_id=OLD.run_id)
   BEGIN SELECT RAISE(ABORT,'review completion immutable or unconfirmed'); END;
   CREATE TRIGGER IF NOT EXISTS daily_review_items_delete BEFORE DELETE ON daily_review_items
   BEGIN SELECT RAISE(ABORT,'review membership immutable'); END;
   CREATE TRIGGER IF NOT EXISTS daily_review_run_membership BEFORE INSERT ON runs
-  WHEN NEW.kind='weave' AND (substr(NEW.weave_trigger_id,1,13)='daily-review:' OR NEW.weave_trigger_id='daily-review') AND NOT EXISTS(
+  WHEN NEW.kind='weave' AND ((NEW.weave_schedule_kind IS NULL AND (substr(NEW.weave_trigger_id,1,13)='daily-review:' OR NEW.weave_trigger_id='daily-review')) OR NEW.weave_schedule_kind='connection-review') AND NOT EXISTS(
     SELECT 1 FROM daily_review_items i WHERE i.run_id=NEW.id AND i.thought_id=NEW.weave_subject_id
-      AND NEW.weave_trigger_id='daily-review:'||i.review_date)
+      AND ((NEW.weave_schedule_kind IS NULL AND NEW.weave_trigger_id='daily-review:'||i.review_date) OR
+        (NEW.weave_schedule_kind='connection-review' AND NEW.weave_trigger_id='connection-review:'||i.review_date)))
   BEGIN SELECT RAISE(ABORT,'daily review requires owned membership'); END;`);
 }

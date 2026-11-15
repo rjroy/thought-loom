@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { dailyReviewCeiling, dailyReviewInstant, dailyReviewPolicy, dailyReviewPolicyJson, dailyReviewTrigger,
+import { connectionReviewPrefix, dailyReviewCeiling, dailyReviewInstant, dailyReviewPolicy, dailyReviewPolicyJson,
   defaultDailyReviewPolicy, selectDailyReviewSubjects, type DailyReviewAdmission, type DailyReviewCandidate,
   type DailyReviewCommands, type DailyReviewPolicy } from "../domain/daily-review";
 import { RunConflictError, type RunRecord, type RunSources } from "../domain/run";
@@ -56,7 +56,7 @@ export class SqliteDailyReviews implements DailyReviewCommands {
             promptId:nonEmpty(this.sources.promptId?.() ?? this.sources.id(),"promptId"),createdAt:instant,generation:0,inputThoughtId:null,nativeState:"unknown"};
           // Deferred run FK allows membership to authorize the guarded run INSERT in this same transaction.
           this.db.run("INSERT INTO daily_review_items(run_id,review_date,thought_id,position) VALUES (?,?,CAST(? AS TEXT),?)",[run.id,date,utf8.encode(subjectId),position]);
-          insertRun(this.db,run,{subjectId,triggerId:dailyReviewTrigger(date)});
+          insertRun(this.db,run,{subjectId,triggerId:`${connectionReviewPrefix}${date}`},"connection-review");
           runIds.push(run.id);
         }
         return {kind:"admitted",date,runIds:Object.freeze(runIds)};

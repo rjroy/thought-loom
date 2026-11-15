@@ -11,6 +11,7 @@ import { bounded } from "./fixtures/media-files";
 import { mediaPathFixture, pathBinding, pathComplete, pathRequest, promptStrings } from "./fixtures/media-path-worker";
 
 test("normal Weaver reopens a retained source by its shared absolute file path", async () => mediaPathFixture(async f => {
+  f.titles.setUser("user",f.subjectId,"Comparison");
   const run = f.ops.admitWeave("user",{subjectId:f.subjectId,triggerId:"compare-retained-source"});
   const w = f.worker(index => index === 0 ? pathRequest("readThought",{id:f.source.id}) : pathComplete("Compared the source."));
   await f.until(w.instance,run.id,() => w.client.prompts.length === 2);
@@ -31,6 +32,7 @@ test("normal Weaver reopens a retained source by its shared absolute file path",
 }));
 
 test("initial media weaving requests a summary and publishes its searchable interpretation through normal operations", async () => mediaPathFixture(async f => {
+  f.titles.setUser("user",f.source.id,"Image label");
   const run = f.ops.admitWeave("user",{subjectId:f.source.id,triggerId:`media-import:${f.source.mediaSource.id}`});
   const summary = "Chromatic fixture summary: a red region beside a blue region.";
   const w = f.worker(index => index === 0 ? pathRequest("interpretation",{text:summary,sourceIds:[]}) : pathComplete("Saved the source summary."));
@@ -44,7 +46,7 @@ test("initial media weaving requests a summary and publishes its searchable inte
   expect(instructions).toMatch(/summari[sz]e|summary/i);
   expect(instructions).toMatch(/(?:open|read|inspect).*(?:file|original)|(?:file|original).*(?:open|read|inspect)/i);
   expect(f.requestedSources).toEqual([f.source.mediaSource.id]);
-  expect(f.store.getThought(f.source.id)).toEqual(f.source);
+  expect(f.store.getThought(f.source.id)).toEqual({...f.source,title:"Image label",titleAuthor:"user"});
   expect(Array.from(await readFile(f.path))).toEqual(Array.from(f.bytes));
   const children = f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id);
   expect(children).toHaveLength(1);
@@ -59,6 +61,17 @@ test("initial media weaving requests a summary and publishes its searchable inte
   expect(f.runs.reply(run.id)).toMatchObject({text:"Saved the source summary.",state:"complete"});
   await w.instance.tick(run.id);
   expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id)).toEqual(children);
+},null));
+
+test("saved media interpretation with no title fails without losing the model outcome", async () => mediaPathFixture(async f => {
+  const run = f.ops.admitWeave("user",{subjectId:f.source.id,triggerId:`media-import:${f.source.mediaSource.id}`});
+  const w = f.worker(index => index === 0 ? pathRequest("interpretation",{text:"Owned source interpretation",sourceIds:[]}) : pathComplete("Source interpreted."));
+  await f.finish(w.instance,run.id);
+  expect(f.run(run.id).status).toBe("failed");
+  expect(f.store.getThought(f.source.id)?.title).toBeNull();
+  expect(f.runs.reply(run.id)).toMatchObject({text:"Source interpreted.",state:"interrupted"});
+  expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id))
+    .toContainEqual(expect.objectContaining({text:"Owned source interpretation"}));
 },null));
 
 test("failed source weaving retries the retained original through the normal worker", async () => mediaPathFixture(async f => {
@@ -97,6 +110,7 @@ test("failed source weaving retries the retained original through the normal wor
   expect(failed.client.prompts).toHaveLength(1);
 
   const retry = media.retry("user",sourceId,"retained-retry");
+  f.titles.setUser("user",f.source.id,"Image label");
   expect(retry.id).not.toBe(first.id);
   expect(f.ops.weaveIntent(retry.id)).toEqual({subjectId:f.source.id,triggerId:`media-retry:${sourceId}:retained-retry`});
   expect(media.retry("user",sourceId,"retained-retry")).toEqual(retry);
@@ -128,13 +142,15 @@ test("failed source weaving retries the retained original through the normal wor
   expect(retried.client.prompts).toHaveLength(2);
   expect(f.db.query("SELECT id FROM runs WHERE weave_subject_id=? ORDER BY rowid").all(f.source.id)).toEqual([{id:first.id},{id:retry.id}]);
   expect(f.db.query("SELECT rowid,* FROM media_sources ORDER BY rowid").all()).toEqual(metadata);
-  expect(f.store.getThought(f.source.id)).toEqual(f.source);
+  expect(f.store.getThought(f.source.id)).toEqual({...f.source,title:"Image label",titleAuthor:"user"});
   expect(Array.from(await readFile(f.path))).toEqual(Array.from(f.bytes));
   expect(f.rejection.listThoughts({actor:"user",mode:"normal"}).filter(thought => thought.parentId === f.source.id)).toEqual(children);
 }));
 
 test("Evolve receives the eligible ancestor's original path and exact user clarification", async () => mediaPathFixture(async f => {
   const admission = f.admissions.admit("user","evolve",{parentId:f.source.id,text:"Explain the color contrast."});
+  if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user",admission.contribution.id,"Color contrast");
   const w = f.worker(() => pathComplete("The recorded original informed this reply."));
   await f.finish(w.instance,admission.run.id);
   expect(f.run(admission.run.id).status).toBe("completed");
@@ -152,6 +168,8 @@ test("Evolve receives the eligible ancestor's original path and exact user clari
 
 test("Evolve can reopen an independently read eligible supporting original without exposing paths in ordinary records", async () => mediaPathFixture(async f => {
   const admission = f.admissions.admit("user","evolve",{parentId:f.subjectId,text:"Use the retained source as a comparison."});
+  if (!admission.contribution) throw new Error("Expected contribution");
+  f.titles.setUser("user",admission.contribution.id,"Source comparison");
   const w = f.worker(index => index === 0 ? pathRequest("readThought",{id:f.source.id}) : pathComplete("Compared the supporting original."));
   await f.until(w.instance,admission.run.id,() => w.client.prompts.length === 2);
   const initial = w.client.prompts[0], next = w.client.prompts[1];

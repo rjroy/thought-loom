@@ -28,7 +28,7 @@ function setup(db: Database) {
   let subjectSequence = 0;
   const admit = (triggerId: string) => {
     const subjectId = `subject-${++subjectSequence}`;
-    store.saveThought({ id: subjectId, text: "owned subject", title: null, author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
+    store.saveThought({ id: subjectId, text: "owned subject", title: "Owned subject", author: "user", kind: "captured-original", createdAt: now(), origin: "fixture", parentId: null, sourceIds: [] });
     return ops.admitWeave("user", { subjectId, triggerId });
   };
   return { db, runs, service, ops, steps, admit };

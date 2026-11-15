@@ -149,13 +149,15 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     this.guarded("finish", claim, (run,visible) => {
       if (run.kind !== "weave" && run.kind !== "evolve") throw new RunForbiddenError();
       if (this.weavePurpose(run) !== "ordinary") throw new RunForbiddenError("Media work requires canonical prompt completion");
-      const value = createSharedResponse(response);
-      this.checkAssociations(run,value,visible);
+      const checked = createSharedResponse(response);
+      this.checkAssociations(run,checked,visible);
+      const missingTitle = checked.state === "complete" && !this.hasSubjectTitle(run);
+      const value = missingTitle ? createSharedResponse({...checked,state:"interrupted"}) : checked;
       new SqliteSharedResponses(this.db,this.logger).save(value);
       this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id", [claim.runId,value.id]);
       const intent = evolveWeaveIntent(run,value,this.issued(run.id));
-      if (this.sources.scheduleWeave && intent) admitWeave(this.db,this.sources,intent);
-      this.db.run("UPDATE runs SET status=?,generation=generation+1 WHERE id=?", [value.state === "complete" ? "completed" : "interrupted",claim.runId]);
+      if (!missingTitle && this.sources.scheduleWeave && intent) admitWeave(this.db,this.sources,intent);
+      this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=CASE WHEN ? THEN 'pending' ELSE cancellation_state END WHERE id=?", [missingTitle ? "failed" : value.state === "complete" ? "completed" : "interrupted",missingTitle ? 1 : 0,claim.runId]);
       if (value.state === "interrupted") this.noteInterruption(run,"interrupted-reply");
     });
   }

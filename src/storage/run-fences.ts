@@ -76,12 +76,12 @@ export function interruptOrdinaryRun(db: Database, run: RunRecord, _reason: "sto
   const associations = runAssociations(db,run);
   let internalOutcome = false;
   if (run.kind === "weave") {
-    const subject = db.query<{ subjectId: string | null; triggerId: string | null; kind: Thought["kind"] | null }, [string]>(
-      `SELECT run.weave_subject_id AS subjectId,run.weave_trigger_id AS triggerId,thought.kind
+    const subject = db.query<{ subjectId: string | null; triggerId: string | null; kind: Thought["kind"] | null; scheduleKind: import("../domain/weave-scheduling").WeaveScheduleKind | null }, [string]>(
+      `SELECT run.weave_subject_id AS subjectId,run.weave_trigger_id AS triggerId,run.weave_schedule_kind AS scheduleKind,thought.kind
        FROM runs run LEFT JOIN thoughts thought ON thought.id=run.weave_subject_id WHERE run.id=?`).get(run.id);
     if (subject && subject.subjectId !== null && subject.triggerId !== null) {
       if (subject.kind === null) throw new RunNotFoundError();
-      internalOutcome = subject.kind === "media-original" || ["connection-only","daily-review"].includes(resolveWeavePurpose(subject.kind,subject.triggerId));
+      internalOutcome = subject.kind === "media-original" || ["connection-only","connection-review","title-only","daily-review"].includes(resolveWeavePurpose(subject.kind,subject.triggerId,subject.scheduleKind));
     }
   }
   // Source-root replies are finalized by the Weaver; interruption never publishes a draft summary.

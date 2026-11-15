@@ -234,9 +234,10 @@ describe("typed operations on durable run aggregate", () => {
     expect(db.query("SELECT COUNT(*) AS n FROM responses").get()).toEqual({ n: 1 });
   }));
 
-  test("malformed model output cannot become fallback; an explicit final Evolve reply uses the input once", () => fixture(({ service, runs, steps, store }) => {
+  test("malformed model output cannot become fallback; an explicit final Evolve reply uses the input once", () => fixture(({ service, runs, steps, store, db }) => {
     const admission = service.admit("user", "evolve", { parentId: "subject", text: "user question" });
     if (!admission.contribution) throw new Error("Expected contribution");
+    db.run("UPDATE thought_titles SET title='Question',title_author='user' WHERE thought_id=?", [admission.contribution.id]);
     const claim = service.claim(admission.run.id);
     steps.prepare(claim, { promptId: admission.run.promptId, input: "context" });
     expect(() => parseEnvelope('{"version":1,"kind":"complete","reply":"truncated')).toThrow(ProtocolValidationError);

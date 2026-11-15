@@ -4,9 +4,10 @@ import type { SharedResponse } from "./shared-response";
 import type { MaterialKind, Thought } from "./thought";
 import { nonEmpty } from "./validation";
 import { isReinterpretationTrigger } from "./reinterpretation";
-import { dailyReviewDate } from "./daily-review";
+import { connectionReviewDate, dailyReviewDate, scheduledTitleDate } from "./daily-review";
 
-export type WeavePurpose = "ordinary" | "media-title-only" | "reinterpretation" | "connection-only" | "daily-review";
+export type WeavePurpose = "ordinary" | "media-title-only" | "title-only" | "reinterpretation" | "connection-only" | "daily-review" | "connection-review";
+export type WeaveScheduleKind = "title-only" | "connection-review";
 const titleClearPrefix = "title-clear:";
 export const connectionDiscoveryPrefix = "connection-discovery:";
 export const directConnectionDiscoveryPrefix = "connection-discovery-direct:";
@@ -36,7 +37,16 @@ export function interpretationPurpose(purpose: WeavePurpose): boolean {
 }
 
 /** An explicit title clear never schedules a new source interpretation. */
-export function resolveWeavePurpose(kind: MaterialKind, triggerId: string): WeavePurpose {
+export function resolveWeavePurpose(kind: MaterialKind, triggerId: string, scheduleKind: WeaveScheduleKind | null): WeavePurpose {
+  if (scheduleKind === "title-only") {
+    if (scheduledTitleDate(triggerId) === null) throw new RunForbiddenError("Invalid scheduled title identity");
+    return "title-only";
+  }
+  if (scheduleKind === "connection-review") {
+    if (connectionReviewDate(triggerId) === null) throw new RunForbiddenError("Invalid connection review identity");
+    if (kind === "media-original") throw new RunForbiddenError("Connection review requires a text thought");
+    return "connection-review";
+  }
   if (dailyReviewDate(triggerId) !== null) {
     if (kind === "media-original") throw new RunForbiddenError("Daily review requires a text thought");
     return "daily-review";
@@ -53,8 +63,8 @@ export function assertWeaveCapability(purpose: WeavePurpose, capability: string)
   if (purpose === "daily-review" && !["search","readThought","readConnection","readResponse","connection","title-fill"].includes(capability)) {
     throw new RunForbiddenError("Daily review permits only scoped reads, subject title fill and connections");
   }
-  if (purpose === "media-title-only" && capability !== "title-fill") throw new RunForbiddenError("Media title regeneration permits only title fill and completion");
-  if (purpose === "connection-only" && !["search","readThought","readConnection","readResponse","connection"].includes(capability)) {
+  if ((purpose === "media-title-only" || purpose === "title-only") && capability !== "title-fill") throw new RunForbiddenError("Title work permits only title fill and completion");
+  if ((purpose === "connection-only" || purpose === "connection-review") && !["search","readThought","readConnection","readResponse","connection"].includes(capability)) {
     throw new RunForbiddenError("Connection discovery permits only scoped reads and connections");
   }
 }

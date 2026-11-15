@@ -38,7 +38,7 @@ export function compareRestoreRecords(snapshot: SqlSnapshot, manifest: BackupMan
 }
 /** Internal current-schema witness, generated only after validating the loaded source projection. */
 export function restoredManifest(snapshot: SqlSnapshot, source: BackupManifest): BackupManifest {
-  return {...source,appSchema:"thoughtloom-logical-7",tables:snapshot.tables.map(captured => {
+  return {...source,appSchema:"thoughtloom-logical-8",tables:snapshot.tables.map(captured => {
     const encoded = encodeTable(captured.shape,captured.rows);
     return {name:captured.shape.name,path:`tables/${captured.shape.name}.json`,rowCount:String(captured.rows.length),byteLength:String(encoded.length),sha256:digest(encoded)};
   })};
@@ -82,10 +82,11 @@ export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly
     check(restoreSchemaFingerprint(db) === JSON.stringify(schema),"inconsistent-source"); assertRestoreFenceSchema(db);
     const loaded = readSqlSnapshot(db,guard); validateBytes(loaded);
     const sourceSchema = manifest.appSchema ?? "thoughtloom-logical-1";
-    if (sourceSchema !== "thoughtloom-logical-7") {
+    if (sourceSchema !== "thoughtloom-logical-8") {
       // Validate explicit additive defaults and compare every original byte against its frozen projection.
-      check(table(loaded,"run_screening_pairs").rows.every(row => row.values.excluded_connection_id.storage === "null"),"inconsistent-source");
-      if (sourceSchema !== "thoughtloom-logical-6") {
+      check(table(loaded,"runs").rows.every(row => row.values.weave_schedule_kind.storage === "null"),"inconsistent-source");
+      if (sourceSchema !== "thoughtloom-logical-7") check(table(loaded,"run_screening_pairs").rows.every(row => row.values.excluded_connection_id.storage === "null"),"inconsistent-source");
+      if (sourceSchema !== "thoughtloom-logical-6" && sourceSchema !== "thoughtloom-logical-7") {
         check(table(loaded,"daily_review_batches").rows.length === 0 && table(loaded,"daily_review_items").rows.length === 0,"inconsistent-source");
         if (sourceSchema !== "thoughtloom-logical-5") check(table(loaded,"run_screening_passes").rows.length === 0 && table(loaded,"run_screening_pairs").rows.length === 0,"inconsistent-source");
       }
@@ -100,7 +101,7 @@ export function loadRestoreDatabase(file: RestoreDatabaseFile, decoded: readonly
           Buffer.from(row.values.local_disposition.bytes).equals(retained)),"inconsistent-source");
       }
       const legacy = readSqlSnapshot(db,guard,shapesForSchema(sourceSchema));
-      validateBytes(legacy); compareRestoreRecords(legacy,manifest);
+      validateBytes(legacy,sourceSchema); compareRestoreRecords(legacy,manifest);
     } else compareRestoreRecords(loaded,manifest);
     const verified = restoredManifest(loaded,manifest);
     guard(); db.exec("COMMIT"); return {schema:JSON.stringify(schema),manifest:verified};

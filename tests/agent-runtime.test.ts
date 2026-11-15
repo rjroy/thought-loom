@@ -71,6 +71,7 @@ class Client implements PublicClient {
     const output = job.purpose === "daily-review" ? {version:1,kind:"review-complete",titleCheck:"complete",connectionCheck:"complete"} : job.kind === "export" ? (turn === 1 ? { version: 1, kind: "request", request: this.exportWrite ?? { capability: "search", arguments: { query: "cobalt" } } } :
       turn === 2 ? { version: 1, kind: "request", request: { capability: "readThought", arguments: { id: this.exportSourceId } } } :
         { version: 1, kind: "report", markdown: "# Fixture report\n\nExisting thinking, not new knowledge.", sourceThoughtIds: [this.exportSourceId] }) :
+      job.kind === "evolve" && turn === 2 && !this.completeFirst ? { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Fixture contribution title" } } } :
       turn > 1 || this.completeFirst || job.purpose === "connection-only" ? { version: 1, kind: "complete", reply: job.kind === "evolve" ? "fixture human reply" : "no further findings" } :
       job.kind === "evolve" ? { version: 1, kind: "request", request: { capability: "development", arguments: { parentId: string(job.contributionId), text: "fixture development", sourceIds: [] } } } :
         { version: 1, kind: "request", request: { capability: "title-fill", arguments: { title: "Fixture generated title" } } };
@@ -114,7 +115,7 @@ function seedExport(path: string) {
     migrate(db);
     const store = new SqliteStore(db);
     store.saveThought({ id: "export-source", text: "cobalt existing human thinking", title: "Owned source", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2030", origin: "fixture", parentId: null, sourceIds: [] });
-    store.saveThought({ id: "export-ai", text: "an AI hypothesis", title: null, titleAuthor: null, author: "ai", kind: "ai-interpretation", createdAt: "2031", origin: "fixture", parentId: "export-source", sourceIds: ["export-source"] });
+    store.saveThought({ id: "export-ai", text: "an AI hypothesis", title: "Owned AI hypothesis", titleAuthor: "ai", author: "ai", kind: "ai-interpretation", createdAt: "2031", origin: "fixture", parentId: "export-source", sourceIds: ["export-source"] });
     // Seal the owned test date using the real admission and Stop boundaries, so export-specific assertions remain isolated.
     let sequence = 0;
     const sources = {id:() => `sealed-export-${++sequence}`,now:() => "2031-01-01T12:00:00.000Z"};
@@ -356,8 +357,12 @@ for (const kind of ["weave", "evolve"] as const) test(`persisted legacy deny ${k
     worker = new ConfiguredRunWorker({ db, ...sources, config: { ...agent, directory: "/tmp/opencode/new-config-directory", model: { providerID: "new-provider", id: "new-model" } },
       resolve: async () => ({ url: legacy.serviceUrl }), client: () => client });
     const reopened = new SqliteRunRepository(db, sources);
-    for (let i = 0; i < 12 && reopened.get(run.id)?.status !== "completed"; i++) await worker.tick(run.id);
-    expect(reopened.get(run.id)?.status).toBe("completed");
+    for (let i = 0; i < 12 && reopened.get(run.id)?.status !== "failed"; i++) await worker.tick(run.id);
+    expect(reopened.get(run.id)?.status).toBe("failed");
+    expect(reopened.reply(run.id)).toMatchObject({state:"interrupted",text:kind === "evolve" ? "fixture human reply" : "no further findings"});
+    const subjectId = kind === "weave" ? "legacy-root" : run.inputThoughtId;
+    if (!subjectId) throw new Error("Expected legacy subject");
+    expect(new SqliteStore(db).getThought(subjectId)?.title).toBeNull();
     expect(db.query("SELECT * FROM agent_bindings WHERE run_id=?").get(run.id)).toEqual(saved);
     expect(new SqliteAgentBindings(db).get(run.id)).toEqual(legacy);
     expect(new SqliteRunProtocolRepository(db).steps(run.id).map(step => ({ promptId: step.promptId, input: step.input }))).toEqual([{ promptId: run.promptId, input }]);
@@ -398,7 +403,7 @@ test("a failed pre-dispatch history read retries the same persisted prompt witho
   const db = new Database(join(dir, "preflight.sqlite"));
   try {
     migrate(db);
-    new SqliteStore(db).saveThought({ id: "preflight-subject", text: "test-owned context", title: null, author: "user", kind: "captured-original", createdAt: "2031", origin: "fixture", parentId: null, sourceIds: [] });
+    new SqliteStore(db).saveThought({ id: "preflight-subject", text: "test-owned context", title: "Preflight", author: "user", kind: "captured-original", createdAt: "2031", origin: "fixture", parentId: null, sourceIds: [] });
     let sequence = 0;
     const sources = { id: () => `preflight-${++sequence}`, now: () => "2031" };
     const operations = new SqliteRunOperations(db, sources);
@@ -515,7 +520,7 @@ test("a captured URL exposes the completed controlled Weaver outcome as a Full r
   const timer = controlled(client);
   const daemon = await bounded(startDaemon({ dbPath: path, port: 0, credentials: { user, ai }, agent }, () => {}, timer.deps), "start");
   try {
-    const captured = await call(daemon, "/thoughts", "POST", { text: "https://example.test/unavailable" });
+    const captured = await call(daemon, "/thoughts", "POST", { text: "https://example.test/unavailable", title: "Unavailable link" });
     expect(captured.status).toBe(201);
     const root = string(object(captured.data).id);
     const db = new Database(path, { readonly: true });

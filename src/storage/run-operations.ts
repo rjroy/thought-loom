@@ -136,9 +136,9 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
       if (run.promptId !== promptId) throw new RunFenceError("Prompt is no longer current");
       const step = this.currentStep(run.id);
       const purpose = this.weavePurpose(run);
-      if (purpose === "daily-review") {
-        if (step.input === null || step.state !== "completed" || step.envelope?.kind !== "review-complete") {
-          throw new RunConflictError("Daily review requires both completed checks");
+      if (purpose === "daily-review" || purpose === "connection-review") {
+        if (step.input === null || step.state !== "completed" || (purpose === "daily-review" ? step.envelope?.kind !== "review-complete" : step.envelope?.kind !== "complete")) {
+          throw new RunConflictError("Review requires its canonical completion");
         }
         const completedAt = dailyReviewInstant(this.sources.now());
         this.db.run("UPDATE runs SET status='completed',generation=generation+1,cancellation_state='none' WHERE id=?",[run.id]);
@@ -156,6 +156,13 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
         this.db.run("UPDATE runs SET status='completed',generation=generation+1,cancellation_state='none' WHERE id=?",[run.id]);
         return;
       }
+      if (purpose === "title-only") {
+        if (issued.length) throw new RunForbiddenError("Scheduled title work cannot issue thoughts");
+        const missing = !this.hasSubjectTitle(run);
+        this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=? WHERE id=?",
+          [missing ? "failed" : "completed",missing ? "pending" : "none",run.id]);
+        return;
+      }
       if (purpose === "media-title-only") {
         if (issued.length) throw new RunForbiddenError("Media title-only work cannot publish issued knowledge");
         // A later complete envelope cannot launder a retained forbidden request or a legacy receipt.
@@ -169,16 +176,17 @@ export class SqliteRunOperations extends SqliteRunAggregate implements RunOperat
           assertWeaveCapability("media-title-only",parseStepOperation(JSON.parse(receipt.operation)).type);
         }
       }
-      const response = createSharedResponse({ id: this.sources.id(), text: step.envelope.reply, state: "complete",
-        role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
-      new SqliteSharedResponses(this.db,this.logger).save(response);
-      this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
       const missingInterpretation = purpose !== "media-title-only" &&
         this.db.query("SELECT 1 FROM thoughts WHERE id=? AND kind='media-original'").get(intent.subjectId) !== null &&
         (purpose === "reinterpretation" ? !this.hasIssuedInterpretation(run.id,intent.subjectId) :
           this.db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(intent.subjectId) === null);
+      const missingTitle = !missingInterpretation && !this.hasSubjectTitle(run);
+      const response = createSharedResponse({ id: this.sources.id(), text: step.envelope.reply, state: missingTitle ? "interrupted" : "complete",
+        role: issued.length ? "addendum" : "fallback", thoughtIds: [intent.subjectId,...issued] });
+      new SqliteSharedResponses(this.db,this.logger).save(response);
+      this.db.run("INSERT INTO run_replies (run_id,response_id) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET draft_json=NULL,response_id=excluded.response_id",[run.id,response.id]);
       this.db.run("UPDATE runs SET status=?,generation=generation+1,cancellation_state=? WHERE id=?",
-        [missingInterpretation ? "failed" : "completed",missingInterpretation ? "pending" : "none",run.id]);
+        [missingInterpretation || missingTitle ? "failed" : "completed",missingInterpretation || missingTitle ? "pending" : "none",run.id]);
     });
   }
   fail(claim: Claim): void {

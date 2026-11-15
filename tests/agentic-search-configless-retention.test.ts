@@ -33,7 +33,7 @@ for (const stopFirst of [false, true]) test(`configless runtime locally deletes 
     const seed = new Database(dbPath);
     try {
       migrate(seed, logger);
-      new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-LIBRARY-CONTENT", title: null, titleAuthor: null,
+      new SqliteStore(seed).saveThought({ id: "library", text: "PRIVATE-LIBRARY-CONTENT", title: "Owned library", titleAuthor: "user",
         author: "user", kind: "captured-original", createdAt: "2030-01-01T00:00:00.000Z", origin: "fixture", parentId: null, sourceIds: [] });
       sealDailyReview(seed);
     } finally { seed.close(); }
