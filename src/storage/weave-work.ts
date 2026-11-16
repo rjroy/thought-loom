@@ -4,6 +4,7 @@ import type { MaterialKind } from "../domain/thought";
 import { interpretationPurpose, resolveWeavePurpose, type WeaveScheduleKind } from "../domain/weave-scheduling";
 import { recordedSubjectCancellationSafe } from "./run-cancellation";
 import { isRunRestoreFenced } from "./restore-fences";
+import { isRunLocallyStopped } from "./local-work-stop-fence";
 
 export interface SubjectWeaveWork {
   readonly id: string;
@@ -41,6 +42,7 @@ export function subjectWeaveWork(db: Database, subjectId: string, kind: Material
 }
 
 function subjectBlockReason(db: Database, work: SubjectWork): WeaveBlockReason | null {
+  if (isRunLocallyStopped(db,work.id)) return null;
   if (work.kind === "weave") return weaveWorkBlockReason(db,work);
   if (isRunRestoreFenced(db,work.id)) return null;
   if (["queued","submitting","running"].includes(work.status)) return "work-active";
@@ -54,6 +56,7 @@ export function dailyReviewSubjectBlocked(db: Database, subjectId: string): bool
 }
 
 export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): WeaveBlockReason | null {
+  if (isRunLocallyStopped(db,work.id)) return null;
   if (work.retiredAt !== null || isRunRestoreFenced(db,work.id)) return null;
   if (["queued","submitting","running"].includes(work.status)) return "work-active";
   if (work.status === "uncertain" || work.cancellation === "pending") return "work-unsettled";
@@ -64,6 +67,7 @@ export function weaveWorkBlockReason(db: Database, work: SubjectWeaveWork): Weav
 
 /** Caller owns its existing read/write transaction. Already-submitted work is observed separately, never redispatched. */
 export function weaveDispatchAllowed(db: Database, runId: string): boolean {
+  if (isRunLocallyStopped(db,runId)) return false;
   if (isRunRestoreFenced(db,runId) || db.query("SELECT 1 FROM runs WHERE id=? AND weave_retired_at IS NOT NULL").get(runId)) return false;
   const run = db.query<{kind:string;subjectId:string|null;triggerId:string|null;materialKind:MaterialKind|null;scheduleKind:WeaveScheduleKind|null},[string]>(
     `SELECT r.kind,r.weave_subject_id AS subjectId,r.weave_trigger_id AS triggerId,r.weave_schedule_kind AS scheduleKind,t.kind AS materialKind
@@ -87,7 +91,7 @@ export function weaveDispatchAllowed(db: Database, runId: string): boolean {
     }
   }
   if (!interpretationPurpose(purpose)) return true;
-  const work = subjectWeaveWork(db,run.subjectId,run.materialKind).filter(item => item.retiredAt === null && !isRunRestoreFenced(db,item.id));
+  const work = subjectWeaveWork(db,run.subjectId,run.materialKind).filter(item => item.retiredAt === null && !isRunRestoreFenced(db,item.id) && !isRunLocallyStopped(db,item.id));
   if (work.some(item => item.cancellation === "pending" || (!active(item.status) && weaveWorkBlockReason(db,item) !== null))) return false;
   const candidates = work.filter(item => active(item.status));
   const incumbent = candidates.find(item => item.started) ?? candidates[0];

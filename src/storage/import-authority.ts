@@ -6,20 +6,24 @@ import { protocolJson } from "../domain/run-protocol";
 import { record } from "../domain/validation";
 import { equalBytes, importManifest, ImportPreservationError, sourceText } from "../domain/markdown-import-contract";
 import { isRestoreFenced, isRunRestoreFenced } from "./restore-fences";
+import { assertRunLocallyTracked, isFileLocallyStopped, localFileStoppedSql, localRunStoppedSql } from "./local-work-stop-fence";
 
 interface ImportRestoreOwner { readonly id: string; readonly importId: string; readonly runId: string | null }
 
 /** Fixed f-alias predicate for owned import scans/settlement, applied before their technical LIMIT. */
-export const unfencedImportFileSql = `NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE
+export const unfencedImportFileSql = `(NOT EXISTS(SELECT 1 FROM main.restore_fences rf WHERE
   (rf.entity_kind='import-file' AND rf.entity_id=f.id) OR
   (rf.entity_kind='import-batch' AND rf.entity_id=f.import_id) OR
-  (rf.entity_kind='run' AND rf.entity_id=f.run_id))`;
+  (rf.entity_kind='run' AND rf.entity_id=f.run_id))
+  AND NOT ${localFileStoppedSql("f.id")} AND NOT ${localRunStoppedSql("f.run_id")})`;
 
 export function isImportOwnerRestoreFenced(db: Database, owner: ImportRestoreOwner): boolean {
   return isRestoreFenced(db,"import-file",owner.id) || isRestoreFenced(db,"import-batch",owner.importId) ||
     (owner.runId !== null && isRunRestoreFenced(db,owner.runId));
 }
 export function assertImportOwnerNotRestoreFenced(db: Database, owner: ImportRestoreOwner): void {
+  if (isFileLocallyStopped(db,owner.id)) throw new RunFenceError("Import local tracking stopped");
+  if (owner.runId !== null) assertRunLocallyTracked(db,owner.runId);
   if (isImportOwnerRestoreFenced(db,owner)) throw new RunFenceError("Restored import is historical only");
 }
 export function isImportRunRestoreFenced(db: Database, runId: string): boolean {
@@ -30,6 +34,7 @@ export function isImportRunRestoreFenced(db: Database, runId: string): boolean {
   return isImportOwnerRestoreFenced(db,owner);
 }
 export function assertImportRunNotRestoreFenced(db: Database, runId: string): void {
+  assertRunLocallyTracked(db,runId);
   if (isImportRunRestoreFenced(db,runId)) throw new RunFenceError("Restored import is historical only");
 }
 

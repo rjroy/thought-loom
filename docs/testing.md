@@ -24,6 +24,96 @@ bun --no-env-file run typecheck
 
 Ordinary tests supply their own configuration and data rather than relying on your running daemon. They do not require a browser, model provider, or OpenCode service. Native acceptance is a separate explicit opt-in described below.
 
+### Background work reads
+
+```sh
+bun --no-env-file test tests/background-work-api.test.ts
+```
+
+The owned daemon and SQLite fixtures cover library-wide counts and pages,
+automatic discovery work, runless import waiters, linked-file deduplication and
+detail, purged Search cleanup with unknown creation time, cursor binding and
+ordering, authentication, redaction and restore-fenced identities. They also
+compare settled legacy cancellation journals with the shared proof predicate,
+including pending-cancellation precedence. An independent SQLite reader checks
+for commits during reads, and native service resolution/client tripwires check
+that these requests do not contact the agent. Fixtures use synthetic data and a
+controlled agent, not a personal library or operator service.
+
+The read cases establish a daemon read boundary, not remote cancellation,
+browser behavior or large-library performance. Local-stop authority has its
+separate cases below. See the [read contract](daemon-api.md#background-work-reads).
+
+#### Durable local-stop authority
+
+```sh
+bun --no-env-file test tests/background-work-api.test.ts tests/reinterpretation-api.test.ts tests/agentic-search-cleanup-runtime.test.ts tests/markdown-import-runtime.test.ts tests/media-source-migration.test.ts
+bun --no-env-file test tests/background-work-api.test.ts --test-name-pattern 'malformed|logical-8 projected restore'
+```
+
+The five-file boundary uses existing owned daemon/SQLite and held native
+fixtures, not a second harness or an operator service. HTTP cases cover
+user-only authority, fresh exact run/file-reservation identities, bounded
+`Idempotency-Key`, explicit remote-uncertainty acknowledgment, replay/conflicts,
+stale generation/waiter confirmation, read-only receipt recovery after lost
+acknowledgment, rejected/deleted owners and read-only repository action denial.
+A null lookup is deliberately followed by a later same-identity command: it is
+not proof that a delayed write cannot commit.
+
+All five kinds, linked files, runless waiters and purged Search cleanup retain
+native facts/output and receipts across restart. Blocker tests retain a second
+unresolved owner, refuse automatic replacement and exercise later ordinary Stop
+without re-enabling cleanup. Held ordinary execution and `cleanupTail`, Search
+ACK/cleanup, direct Search cleanup, direct import ticks and import-driver work
+must actually join before confirmation; released continuations cannot publish
+or start further native cleanup. Configured restart runs real scans with native
+tripwires. Log sentinels check that fixture content does not escape.
+
+Migration uses the independently frozen populated pre-media SQL predecessor,
+including reopen and a fault after actual local-stop DDL to check whole-upgrade
+rollback. Backup cases capture logical-9 decisions, including rowless identity,
+and compare their exact append-only rows through staging/recovery. Six
+hash-recomputed malformed controls exercise identity/target mismatch, invalid
+key/time, generation overflow, surplus identity fields and conflicting run
+ownership; they must reject as `invalid-records` before staging publication.
+The logical-8 restore fixture is a **projection built from current owned
+capture**, not archived historical snapshot bytes. It uses the frozen logical-8
+inventory, expects no inferred local-stop records and preserves native,
+interruption and retirement facts. Inventory controls keep logical-1 through
+logical-8 free of the new table.
+
+Backend fixtures do not establish provider behavior, browser integration,
+large-library performance, arbitrary process crashes or external-tool undo.
+See the [command semantics](daemon-api.md#stop-local-tracking).
+
+#### Settings recovery client
+
+```sh
+bun --no-env-file test tests/web-background-controller.test.ts tests/web-background-request.test.ts
+THOUGHTLOOM_TEST_BACKGROUND_WORK=all bun --no-env-file run web:test:runtime
+```
+
+The controlled client tests cover fresh confirmation identities, eligibility
+changes, exact generation strings, storage before dispatch, storage failure,
+duplicate-write prevention, stale reads and pagination. They preserve confirmed
+rows and counts after a refresh failure and protect confirmation or pending
+write rows from unrelated reads and view changes.
+
+The focused browser mode uses the existing owned production Next build,
+synthetic daemon and Chromium. It checks guarded fixed-purpose proxy routes,
+Settings entry and return navigation, read states, changed-identity refusal and
+lost-acknowledgment recovery. Recovery observes an actual null receipt response
+before the fixture provides the saved receipt; both lookups retain the original
+target and key, with no additional POST. Narrower `routes` and `browser` values
+are available for investigation; prefer `all` for combined checks after one
+build.
+
+These checks establish browser and proxy behavior, not real-daemon persistence
+or provider cancellation. The backend tests above establish durable authority
+separately; the shared-record integration harness checks the broader client
+against its owned Hono/SQLite daemon and fake agent. Neither browser harness
+uses an operator service or personal library.
+
 The focused `bun --no-env-file test tests/required-title-completion.test.ts tests/media-path-worker.test.ts tests/media-admission.test.ts tests/agent-runtime.test.ts` suites check required-title publication and prompt guidance, concurrent user titles, retained media failure limitations and saved interpretation outcomes, and legacy lost-ack recovery without prompt rewriting or resubmission. They use owned SQLite, media and native fixtures; they do not establish independent title scheduling or provider compliance. This describes the intended test boundary, not a passing result.
 
 ### Daily review
@@ -36,7 +126,7 @@ bun --no-env-file test tests/daily-review-driver.test.ts tests/daily-review-runt
 bun --no-env-file test tests/media-source-migration.test.ts tests/restore-coordination.test.ts tests/connection-discovery.test.ts tests/connection-deduplication.test.ts
 ```
 
-These suites use test-owned UTC clocks, IDs, policy values, SQLite files and the deterministic native client. Policy unit tests inject their own rotation/cap rather than freezing production tuning. They cover independent title admissions, current-title races, unavailable media originals, deterministic connection-review rotation, busy-before-limit selection, atomic/sealed admissions across connections/reopen, no-change completion, restricted history/successors, screening/fallback, rejection/Stop/restore fences and observation-only uncertain restart. Explicit historical combined-review fixtures retain their two-check protocol without rewriting admitted identities. Driver controls cover boot, coalescing, empty/busy/error retry cadence, UTC rollover/backward time and stopped callbacks. The owned daemon fixture checks configured and configless startup, unavailable-agent identities, completion with a shared clock, concurrent title and held-prompt shutdown. Current capture/recovery/installation retain successful metadata and seals; frozen logical-1 through logical-7 projections retain their original semantics. The mixed logical-8 roundtrip checks old and new purposes and refuses the new records mislabeled as logical-7. Hash-consistent malformed daily records are refused. These are controlled checks, not evidence of actual provider quality or a passing rerun on any particular revision.
+These suites use test-owned UTC clocks, IDs, policy values, SQLite files and the deterministic native client. Policy unit tests inject their own rotation/cap rather than freezing production tuning. They cover independent title admissions, current-title races, unavailable media originals, deterministic connection-review rotation, busy-before-limit selection, atomic/sealed admissions across connections/reopen, no-change completion, restricted history/successors, screening/fallback, rejection/Stop/restore fences and observation-only uncertain restart. Explicit historical combined-review fixtures retain their two-check protocol without rewriting admitted identities. Driver controls cover boot, coalescing, empty/busy/error retry cadence, UTC rollover/backward time and stopped callbacks. The owned daemon fixture checks configured and configless startup, unavailable-agent identities, completion with a shared clock, concurrent title and held-prompt shutdown. Current capture/recovery/installation retain successful metadata and seals; frozen logical-1 through logical-7 projections retain their original semantics. The mixed-purpose logical-9 capture is projected to logical-8 for its compatibility restore, and refuses the new records mislabeled as logical-7. These are constructed version projections, not archived historical bytes. Hash-consistent malformed daily records are refused. These are controlled checks, not evidence of actual provider quality or a passing rerun on any particular revision.
 
 The shared-record source-copy allowlist includes `agent/daily-review-driver.ts`, `domain/daily-review.ts`, `storage/daily-review.ts`, `storage/daily-review-schema.ts`, `storage/daily-review-authority.ts` and `storage/title-scheduling.ts`. Its fake agent must distinguish legacy combined reviews from new connection-only and title-only work.
 
@@ -141,7 +231,7 @@ Further controls are still needed for Evolve/media admission across historical f
 bun --no-env-file test tests/restore-decode.test.ts tests/restore-staging.test.ts
 ```
 
-The decoder cases use test-owned raw cells for signed-int64 extrema, BLOBs, nullable fields, BOM/CRLF text and canonical row/key ordering; they reject malformed storage tags, null primary keys, invalid UTF-8/base64, duplicate identities and incomplete/noncanonical manifests. Staging uses an owned current-schema daemon/SQLite/capture fixture, not the frozen migration predecessor with its extra unsupported table. It compares all 42 raw table projections, retained rowids/sequences/media bytes, existing fences and original run facts, checks derived search/SQL integrity and reinstated immutable guards, and checks closed-DB disposal. Recomputed-hash missing-parent/seal cases must fail as invalid records; missing/extra/symlinked payloads, digest/JSON-budget mismatches and pre-abort must preserve caller entries. Unknown disposal content must remain untouched. These describe the suites, not a claim that this working-tree revision passed.
+The decoder cases use test-owned raw cells for signed-int64 extrema, BLOBs, nullable fields, BOM/CRLF text and canonical row/key ordering; they reject malformed storage tags, null primary keys, invalid UTF-8/base64, duplicate identities and incomplete/noncanonical manifests. Staging uses an owned current-schema daemon/SQLite/capture fixture, not the frozen migration predecessor with its extra unsupported table. It compares every current raw table projection, retained rowids/sequences/media bytes, existing fences and original run facts, checks derived search/SQL integrity and reinstated immutable guards, and checks closed-DB disposal. Recomputed-hash missing-parent/seal cases must fail as invalid records; missing/extra/symlinked payloads, digest/JSON-budget mismatches and pre-abort must preserve caller entries. Unknown disposal content must remain untouched. These describe the suites, not a claim that this working-tree revision passed.
 
 RC-01 staging cases recompute canonical bytes and hashes with oversized `eligibility`, `retrieval`, `catalog`, retained-document sequence and preserved import-file rowid values; these must fail as `invalid-records` without changing caller entries or the source snapshot. A positive control retains the inclusive safe maximum for catalog/document sequence and full-int64 ordinary-run generation/manifest high-water values. The other designated application revision/cursor fields use the same shared range check but are not individually exercised by these cases; capture-side range refusal is not separately established by this staging suite. No passing rerun is claimed here.
 
@@ -159,7 +249,7 @@ Search-generation overflow, concurrent recover/dispose joins, unusual identity-b
 bun --no-env-file test tests/restore-target.test.ts tests/restore-command.test.ts
 ```
 
-The target suite uses a genuine owned capture with BOM text, retained Markdown/media, sequence high-water values and historical runs. Its reference is a separately staged/recovered copy. It compares the final 42-table/sequence state and originals, FTS/integrity/guards, an existing-empty and an absent target, the unchanged source snapshot and the fixed target DB inode. At synchronous target ownership/marker/commit/validation logs, it inspects the actual inode/marker; the durable-marker boundary also starts an owned competing process against the real execution lease and confirms the main DB still has no schema. Refusal cases cover occupied/symlink targets, invalid input, pre-abort and a genuinely held zero-byte placeholder lease. Aborts after the durable marker and after DB commit must retain the marker, release ownership and block daemon startup before resolver/client creation. These are source-read test boundaries, not a report of a passing rerun.
+The target suite uses a genuine owned capture with BOM text, retained Markdown/media, sequence high-water values and historical runs. Its reference is a separately staged/recovered copy. It compares every current table/sequence and original, FTS/integrity/guards, an existing-empty and an absent target, the unchanged source snapshot and the fixed target DB inode. At synchronous target ownership/marker/commit/validation logs, it inspects the actual inode/marker; the durable-marker boundary also starts an owned competing process against the real execution lease and confirms the main DB still has no schema. Refusal cases cover occupied/symlink targets, invalid input, pre-abort and a genuinely held zero-byte placeholder lease. Aborts after the durable marker and after DB commit must retain the marker, release ownership and block daemon startup before resolver/client creation. These are source-read test boundaries, not a report of a passing rerun.
 
 Command cases isolate parsing/exit behavior with a typed restore-operation dependency, controlled clock, signal and supplied environment. They reject unknown/duplicate/missing/relative/NUL/hash-invalid arguments before service entry, ignore unrelated role/agent/backup settings, check failure/cancellation joins and safe logs, and import the real module in an owned no-env-file child without installing signal handlers or reading its dotenv. They do not themselves perform a full command-driven installation or OS-signal walkthrough.
 
@@ -176,6 +266,11 @@ bun --no-env-file test tests/backup-format.test.ts tests/backup-schema.test.ts t
 The format/schema suites use test-owned raw bytes/integers and migrated in-memory databases for canonical encoding and compiled inventory boundaries. The media migration suite additionally uses its independently frozen populated predecessor to check additive empty fence storage, immutability and preservation through repeat migration/reopen. Migration may preserve an unrelated custom table while backup inventory validation deliberately refuses it as unsupported. These commands describe the focused validation boundary, not a claim that this working-tree revision has passed. The encoder validates metadata shapes, not actual source/file membership or hashes; the separate entity guards do not create fences or implement a loader.
 
 Daemon source-copy allowlists must include `storage/restore-fences-schema.ts`, `storage/restore-fences.ts`, `storage/search-projections.ts`, `domain/export-history.ts`, `storage/export-lifecycle-sql.ts` and the actual backup runtime closure: scheduler/whole-attempt/capture/Git/workspace codecs now also import `backup/records.ts`, `backup/snapshot.ts` and `backup/decode.ts`. Include the fixed `capture-worker.ts` subprocess entry and its reader inputs for configured capture. The integration bootstrap includes these dependencies even when automatic backup is disabled; the standalone `restore-staging.ts` API is not a daemon runtime import. The separate browser foundation harness needs no backup inputs unless its own import closure changes. No private environment or ignored build output is a fixture.
+
+The shared-record source copy also includes `domain/local-work-stop.ts` and
+`storage/local-work-stop.ts`, `storage/local-work-stop-schema.ts`,
+`storage/local-work-stop-fence.ts` for the actual runtime/backup import closure.
+Their presence does not add a browser local-stop journey or Settings route.
 
 ```sh
 bun --no-env-file test tests/backup-capture.test.ts
@@ -293,7 +388,7 @@ Screening HTTP and export-specific runtime fixtures seal a test-owned UTC date t
 
 The Search retention, execution-provenance, reinterpretation retirement and backup-recovery walkthrough fixtures use the same real admission and unsubmitted Stop settlement boundary to isolate their native-session and historical-replay assertions. Their admission and daemon startup share a test-owned fixed UTC clock and day. The walkthrough captures the seal with its owned history; the reinterpretation fixture seals that day immediately before its configured restart.
 
-Restart fixtures wait on observable committed SQL judgment/fallback checkpoints through the instance logger, then pause/drain and reopen the owned database. They assert that only unfinished calls resume, saved nominations survive, known failure is sticky, prepared exact prompt/identity survives changed judge configuration, and stale results cannot overwrite a successor. Storage cases check changed-policy/candidate-set fallback, canonical finite JSON, atomic prompt/full-read rollback, and Stop/reject→restore/restore fences. Populated predecessor fixtures check failure after real screening and exclusion-column DDL rolls back schema/data and preserves history through successful migration/reopen. Backup cases exercise logical-8 capture, stage/recovery/offline installation with collecting/complete/fallback and explicit exclusion records, exact progress/prompt preservation and historical execution fences, plus hash-consistent missing-full-read refusal. The frozen logical-4 restore fixture preserves retirement and execution while checking explicitly empty progress; logical-1 through logical-3 fixtures remain separate compatibility controls. These are coverage boundaries, not claims that every suite was rerun or that live model quality was established.
+Restart fixtures wait on observable committed SQL judgment/fallback checkpoints through the instance logger, then pause/drain and reopen the owned database. They assert that only unfinished calls resume, saved nominations survive, known failure is sticky, prepared exact prompt/identity survives changed judge configuration, and stale results cannot overwrite a successor. Storage cases check changed-policy/candidate-set fallback, canonical finite JSON, atomic prompt/full-read rollback, and Stop/reject→restore/restore fences. Populated predecessor fixtures check failure after real screening and exclusion-column DDL rolls back schema/data and preserves history through successful migration/reopen. Backup cases exercise logical-9 capture, stage/recovery/offline installation with collecting/complete/fallback and explicit exclusion records, exact progress/prompt preservation and historical execution fences, plus hash-consistent missing-full-read refusal. The logical-4 projected restore fixture preserves retirement and execution while checking explicitly empty progress; logical-1 through logical-3 fixtures remain separate compatibility controls. These are coverage boundaries, not claims that every suite was rerun or that live model quality was established.
 
 Connected-pair cases use actual workers and owned SQLite/fake agents: creation and daily direction/category/proposer exclusions, rejected-edge eligibility, held-call nomination suppression and reopened progress. Additional worker checks add an edge for a queued pair beyond the concurrency window, prove remaining calls continue, then reject a skipped edge before prompt commit and verify pending/no-binding behavior and resumed judgment after reopen. Storage checks retain genuine scores alongside exclusions and roll exclusions/witnesses/input back together on renderer failure. Daily cases verify rejected provenance redaction and fresh later-day reconsideration. Capture/staging reject missing, nonexistent or foreign-pair proofs; valid historical exclusions survive later rejection and inert restoration. Logical-1 through logical-6 inventories remain frozen, including the original positive-score full-read checks. No new runtime file requires a source-copy allowlist change, and these are not large-library performance or live-provider checks.
 
@@ -789,7 +884,9 @@ Adapter tests also exercise the maintained public SDK against owned loopback HTT
 
 The worker core has a manual polling seam for controlled tests. It reuses durable steps, bindings, capability results and canonical replies. A tick is an execution boundary, not a model effort quota. Local pause is distinct from user Stop: it fences callbacks without undoing saved work or initiating cancellation. `agent-runtime` exercises configured scheduling, Evolve/status/Stop HTTP routes, role restrictions and unavailable-service behavior through an owned daemon with injected service/client dependencies.
 
-`bun --no-env-file test tests/opencode-adapter.test.ts tests/worker.test.ts` exercises ordinary cancellation using controlled native history and test-owned SQLite. Regression cases distinguish positive terminal evidence from an empty inbox/inactive snapshot after an uncertain submission, incomplete or mismatched history, native outages, and foreign ownership. Real-adapter cases check all dispatched steps through paginated history, settled native-tool turns, and correlated failed/interrupted terminal boundaries without assistant prose; removing an earlier boundary must leave cleanup pending. A real-adapter worker case preserves an earlier dispatched step when the current step is a prepared successor, including worker restart; a separate control preserves local settlement before genuine initial submission. These checks do not establish live-service timing or prove safe replacement admission from a historical `settled` flag. Reinterpretation admission has separate checks below.
+`bun --no-env-file test tests/opencode-adapter.test.ts tests/worker.test.ts tests/supervisor.test.ts` exercises ordinary cancellation using controlled native history and test-owned SQLite. Regression cases distinguish positive terminal evidence from an empty inbox/inactive snapshot after an uncertain submission, queued-prompt removal, incomplete or mismatched history, native outages, and foreign ownership. Real-adapter cases check all dispatched steps through paginated history, settled native-tool turns, and correlated failed/interrupted terminal boundaries without assistant prose; removing an earlier boundary must leave cleanup pending. Already-sufficient terminal history must settle without calling an unavailable interrupt. Completed `content-filter`, `unknown` and permitted tool-bearing assistants must establish cancellation completion without becoming publishable output. A real-adapter worker case preserves an earlier dispatched step when the current step is a prepared successor, including worker restart; a separate control preserves local settlement before genuine initial submission.
+
+Retry checks use an injected daemon clock and controlled native responses, not real sleeps or a live service. The validation boundary includes the [ordinary cleanup cadence](server-startup.md#native-sdk-compatibility): immediate first attempt, 2/4/8/16/32/60-second delays measured after attempt completion, continued 60-second cap, backwards-clock rebasing, generation/restart reset and shared-flight exclusion of overlapping attempts. Publication and prompt replay remain fenced; retired runs retain lawful cleanup. Diagnostic checks must distinguish first/category-change Warning from repeated Verbose events and exclude private prompt/output/error/credential sentinels. These commands and requirements describe the test boundary, not a report that every current case has passed. They do not establish live-service timing, reproduce the original production trigger, or prove safe replacement admission from a historical `settled` flag. Import/search cleanup and reinterpretation admission have separate checks.
 
 `bun --no-env-file test tests/reinterpretation-api.test.ts tests/worker.test.ts tests/supervisor.test.ts tests/restore-coordination.test.ts` checks historical recovery and the keyed reinterpretation boundary. Owned HTTP/SQLite fixtures cover user-authored roots and AI subjects, exact-key replay, rejection scopes, and supervisor → worker → adapter reconciliation for failed/interrupted settled-but-unverified weaves. Positive proof preserves historical status, generation, input and saved knowledge before permitting a fresh key; missing, foreign or active native evidence remains blocked. Worker tests retain all-step, prepared-successor, journal-fence and rollback controls; supervisor tests distinguish unverified candidates from proven and restore-fenced work. A historical `settled` flag alone is not evidence of safety. These fixtures do not use a provider or operator service and do not prove multiprocess contention or browser behavior.
 

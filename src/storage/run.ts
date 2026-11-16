@@ -13,6 +13,7 @@ import { searchRevision } from "../domain/search-session-guards";
 import { weaveDispatchAllowed } from "./weave-work";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
 import { isImportRunRestoreFenced } from "./import-authority";
+import { isRunLocallyStopped, localRunStoppedSql } from "./local-work-stop-fence";
 
 /** Durable transaction boundary; never invokes a model or network while holding a SQLite lock. */
 export class SqliteRunRepository extends SqliteRunAggregate implements RunRepository {
@@ -63,6 +64,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
     this.transitionNative(claim,status,nativeState,promptId);
   }
   stop(id: string): void { this.transaction("stop", id, () => {
+    if (isRunLocallyStopped(this.db,id)) return;
     if (isRunRestoreFenced(this.db,id)) return; // Historical control read, never ordinary interruption/cancellation intent.
     const run = this.require(id);
     if (run.kind === "import" && isImportRunRestoreFenced(this.db,run.id)) return;
@@ -71,6 +73,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
       const trigger = connectionDiscoveryTrigger(run.id);
       const dependents = this.db.query<{id:string},[string]>(`SELECT r.id FROM runs r WHERE r.kind='weave' AND r.weave_trigger_id=?
         AND r.status IN ('queued','submitting','running','uncertain') AND r.weave_retired_at IS NULL
+        AND NOT ${localRunStoppedSql("r.id")}
         AND NOT EXISTS(SELECT 1 FROM restore_fences f WHERE f.entity_kind='run' AND f.entity_id=r.id)`).all(trigger);
       for (const child of dependents) {
         this.finalInterrupt(this.require(child.id));

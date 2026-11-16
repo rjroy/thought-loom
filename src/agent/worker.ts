@@ -24,6 +24,7 @@ import { SqliteSearchCleanup } from "../storage/search-cleanup";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
 import { SqliteSearchRetention } from "../storage/search-retention";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
+import { assertRunLocallyTracked, isRunLocallyStopped } from "../storage/local-work-stop-fence";
 
 /** Native calls are outside SQLite transactions. Production supplies OpenCodeAdapter. */
 export interface WorkerNative {
@@ -99,6 +100,15 @@ class WorkerBindings extends SqliteAgentBindings {
 }
 const terminal = (run: RunRecord): boolean => ["completed","interrupted","failed"].includes(run.status);
 interface RunFlight { readonly execution: Promise<void>; readonly cleanupTail: Promise<void>; retired: boolean }
+type CancellationRetryCategory = "native-pending" | "binding-conflict" | "authority-fenced" | "native-unavailable" | "local-failure";
+interface CancellationRetry {
+  readonly generation: number;
+  readonly delayMs: number;
+  readonly finishedAt: number;
+  readonly category: CancellationRetryCategory;
+}
+const CANCELLATION_RETRY_INITIAL_MS = 2_000;
+const CANCELLATION_RETRY_MAX_MS = 60_000;
 
 /** Manual polling seam; the daemon supervisor owns scheduling and can drive independent runs. */
 export class RunWorker {
@@ -114,7 +124,10 @@ export class RunWorker {
   private readonly exports: SqliteAgenticExports;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,RunFlight>();
+  // Technical cadence only. Durable journals remain authoritative; a new worker reconciles immediately after restart.
+  private readonly cancellationRetries = new Map<string,CancellationRetry>();
   private readonly retirements = new Map<string,Promise<unknown>>();
+  private readonly localStops = new Map<string,Promise<unknown>>();
   private readonly cleanup: SqliteSearchCleanup;
   private retention: SqliteSearchRetention | undefined;
   private readonly cleanupListeners = new Set<() => void>();
@@ -137,14 +150,14 @@ export class RunWorker {
     this.cleanup = new SqliteSearchCleanup(db,dependencies.executionOwner,this.logger);
   }
   tick(runId: string, beforePoll?: () => Promise<void>): Promise<void> {
-    if (this.paused || !this.dependencies.native || this.retirements.has(runId)) return Promise.resolve();
+    if (this.paused || !this.dependencies.native || this.retirements.has(runId) || this.localStops.has(runId)) return Promise.resolve();
     const existing = this.flights.get(runId);
     if (existing) return existing.cleanupTail;
     // Defer execution until the in-flight entry exists; simultaneous polls share one boundary, not two submissions.
     const execution = Promise.resolve().then(async () => {
       if (this.paused) return;
       this.dependencies.executionOwner?.assertHeld();
-      if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
+      if (isRunRestoreFenced(this.dependencies.db,runId) || isRunLocallyStopped(this.dependencies.db,runId)) { this.forget(runId); return; }
       if (this.cleanup.isPurged(runId)) return; // Cancellation-only identity, never infer an execution run/binding from its outbox.
       if (beforePoll) await beforePoll();
       if (!this.paused && !this.flights.get(runId)?.retired) {
@@ -166,9 +179,11 @@ export class RunWorker {
   }
   private localFence(runId: string): void {
     if (this.paused) throw new WorkerPaused();
+    if (this.localStops.has(runId)) throw new RunFenceError("Local stop is joining entered work");
     if (this.flights.get(runId)?.retired) throw new WorkerRetired();
     this.dependencies.executionOwner?.assertHeld();
     assertRunNotRestoreFenced(this.dependencies.db,runId);
+    assertRunLocallyTracked(this.dependencies.db,runId);
   }
   private transport(): WorkerNative {
     const factory = this.dependencies.native;
@@ -409,28 +424,63 @@ export class RunWorker {
     if (this.paused || !["interrupted","failed"].includes(run.status)) return;
     if (isRunRestoreFenced(this.dependencies.db,run.id)) return;
     const cancellation = this.steps.cancellation(run.id);
-    if (cancellation !== "pending" && !(["weave","evolve"].includes(run.kind) && cancellation === "settled" && !recordedSubjectCancellationSafe(this.dependencies.db,run.id))) return;
-    if (this.state.settleUnsubmitted(run.id)) return;
+    if (cancellation !== "pending" && !(["weave","evolve"].includes(run.kind) && cancellation === "settled" && !recordedSubjectCancellationSafe(this.dependencies.db,run.id))) {
+      this.cancellationRetries.delete(run.id); return;
+    }
+    if (this.state.settleUnsubmitted(run.id)) { this.cancellationRetries.delete(run.id); return; }
     const binding = this.bindings.get(run.id);
     if (!binding) return;
     const step = this.steps.steps(run.id).at(-1);
     if (!step || step.input === null) return; // Unknown legacy input/binding is never fabricated for cleanup.
-    this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId});
+    const now = Date.parse(this.dependencies.now());
+    if (!Number.isFinite(now)) return; // Invalid local time cannot authorize an unbounded native retry loop.
+    const previous = this.cancellationRetries.get(run.id);
+    const retry = previous?.generation === run.generation ? previous : undefined;
+    if (!retry) this.cancellationRetries.delete(run.id);
+    else if (now < retry.finishedAt) {
+      // Rebase a backwards wall-clock jump instead of waiting longer than the bounded technical delay.
+      this.cancellationRetries.set(run.id,{...retry,finishedAt:now}); return;
+    } else if (now - retry.finishedAt < retry.delayMs) return;
+    this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId,generation:run.generation});
+    let stage = "journal";
     try {
       const journal = this.bindings.cancellationJournal(run.id,{promptId:step.promptId,input:step.input});
+      stage = "native";
       const result = await this.transport().cancel(run.id,binding,{promptId:step.promptId,input:step.input});
       this.localFence(run.id);
-      if (result === "settled") this.state.settleOrdinaryCancellation(journal,binding);
+      if (result === "settled") {
+        stage = "settlement";
+        this.state.settleOrdinaryCancellation(journal,binding);
+        this.cancellationRetries.delete(run.id);
+      } else this.deferCancellation(run,now,"native-pending");
       this.logger.verbose("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
-    } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
+    } catch (error) {
+      if (this.paused) return;
+      const category = error instanceof AgentBindingError ? "binding-conflict" : error instanceof RunFenceError ? "authority-fenced"
+        : stage === "native" ? "native-unavailable" : "local-failure";
+      this.deferCancellation(run,now,category);
+    }
+  }
+  private deferCancellation(run: RunRecord, startedAt: number, category: CancellationRetryCategory): void {
+    const previous = this.cancellationRetries.get(run.id);
+    const delayMs = Math.min(previous ? previous.delayMs * 2 : CANCELLATION_RETRY_INITIAL_MS,CANCELLATION_RETRY_MAX_MS);
+    const finishedAt = Date.parse(this.dependencies.now());
+    this.cancellationRetries.set(run.id,{generation:run.generation,delayMs,finishedAt:Number.isFinite(finishedAt) ? finishedAt : startedAt,category});
+    const context = {runId:run.id,generation:run.generation,category,retryAfterMs:delayMs};
+    if (!previous || previous.category !== category) this.logger.warning("[worker] cancellation remains pending",context);
+    else this.logger.verbose("[worker] cancellation retry deferred",context);
   }
   private async cleanupRun(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
+    if (this.localStops.has(runId) || isRunLocallyStopped(this.dependencies.db,runId)) {
+      this.forget(runId); this.cancellationRetries.delete(runId); return;
+    }
     this.dependencies.executionOwner?.assertHeld();
-    if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
+    if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); this.cancellationRetries.delete(runId); return; }
     const run = this.runs.get(runId);
-    if (run?.kind === "search" || !run) { await this.cleanupSearch(runId); return; }
+    if (run?.kind === "search" || !run) { this.cancellationRetries.delete(runId); await this.cleanupSearch(runId); return; }
     if (terminal(run)) { this.forget(runId); await this.cancel(run); }
+    else this.cancellationRetries.delete(runId);
   }
   private async cleanupSearch(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
@@ -442,6 +492,7 @@ export class RunWorker {
       if (!native.cancelSearch) return;
       const authorize = () => {
         if (this.paused) throw new WorkerPaused();
+        this.localFence(runId);
         assertRunNotRestoreFenced(this.dependencies.db,runId);
         this.cleanup.authorize(identity);
       };
@@ -455,6 +506,21 @@ export class RunWorker {
   }
   /** Trusted retention hook; this is not cancellation or a change to execution ownership. */
   forgetSearchClock(runId: string): void { this.searchClock.forget(runId); }
+  /** Gate synchronously, then join the captured execution AND cleanup tail; never await a newly-created lane or self. */
+  stopLocalTracking<T>(runId:string,commit:()=>T):Promise<T> {
+    const preceding=this.localStops.get(runId), flight=this.flights.get(runId);
+    const operation=Promise.resolve().then(async () => {
+      if (preceding) await preceding.catch(() => {});
+      if (flight) await flight.cleanupTail.catch(() => {});
+      if (this.paused) throw new WorkerPaused();
+      this.dependencies.executionOwner?.assertHeld();
+      const result=commit();
+      this.forget(runId); this.cancellationRetries.delete(runId);
+      return result;
+    });
+    this.localStops.set(runId,operation);
+    return operation.finally(() => { if (this.localStops.get(runId) === operation) this.localStops.delete(runId); });
+  }
   /** Join this run's real execution, then commit synchronously while new ticks are excluded. */
   retireWeave<T>(runId: string, commit: () => T): Promise<T> {
     const preceding = this.retirements.get(runId);
@@ -498,6 +564,7 @@ export class RunWorker {
   pause(): void {
     if (this.paused) return;
     this.paused = true;
+    this.cancellationRetries.clear();
     this.searchClock.clear();
     this.cleanupListeners.clear();
     this.logger.verbose("[worker] paused",{ownedRuns:this.owners.size,activeTicks:this.flights.size});

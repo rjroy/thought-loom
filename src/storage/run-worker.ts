@@ -20,6 +20,7 @@ import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences"
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { SqliteAgentInstructions } from "./agent-instructions";
 import type { WeavePurpose } from "../domain/weave-scheduling";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 /** Orchestration transactions on the existing aggregate, never a second job journal or native-call boundary. */
 export class SqliteRunWorkerState extends SqliteRunScreeningState {
@@ -153,6 +154,7 @@ export class SqliteRunWorkerState extends SqliteRunScreeningState {
   }
   settleUnsubmitted(runId: string): boolean {
     return this.transaction("settle unsubmitted worker",runId,() => {
+      assertRunLocallyTracked(this.db,runId);
       assertRunNotRestoreFenced(this.db,runId);
       const run = this.require(runId);
       if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,runId);

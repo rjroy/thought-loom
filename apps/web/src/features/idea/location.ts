@@ -8,6 +8,7 @@ export function decodeIdeaLocation(id: string, params: URLSearchParams): IdeaLoc
   const target = params.get("returnTo");
   let returnTo = "/explore", inferred: IdeaScope = "normal";
   if (target === "/explore") returnTo = target;
+  else if (target === "/settings/background-work") returnTo = target;
   else if (target && safeBrowseReturnTo(target)) returnTo = target;
   else if (target && safeSearchReturn(target)) returnTo = target;
   else if (target?.startsWith("/explore?") && !/[\\#\x00-\x1f\x7f]/.test(target)) {

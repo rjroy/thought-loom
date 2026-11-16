@@ -13,6 +13,7 @@ import { SqliteSearchCleanup } from "../src/storage/search-cleanup";
 import { createHash } from "node:crypto";
 import { migrate, SqliteStore } from "../src/storage/sqlite";
 import { ScriptedClient, candidateFromSuccessor, config, discovery, find, knowledge, logger, now, request, setup } from "./agentic-search-capability-fixture";
+import { localStopLane } from "./fixtures/background-local-stop";
 
 async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -50,6 +51,41 @@ function cleanup(db: Database, runId: string): Cleanup | null {
 async function poll(worker: ConfiguredRunWorker, runId: string, done: () => boolean): Promise<void> {
   for (let i = 0; i < 48 && !done(); i++) { await bounded(worker.tick(runId),"worker tick"); await Bun.sleep(1); }
 }
+
+test("direct Search local-stop authority joins the registered cleanup tail before its synchronous commit", async () => {
+  await fixture(() => ({version:1,kind:"search-reply",reply:"PRIVATE late output",disposition:"done",sourceThoughtIds:[]}),
+    async (db,store,worker,client,id) => {
+      const {runId}=setup(db,store,id);
+      await poll(worker,runId,() => client.prompts.length === 1);
+      stopService(db,id).stop("user",runId);
+      const entered=Promise.withResolvers<void>(), release=Promise.withResolvers<void>();
+      client.beforeHistory=async () => { entered.resolve(); await release.promise; };
+      let tickJoined=false, committed=false, closing:Promise<void>|undefined;
+      const tick=worker.tick(runId).then(() => { tickJoined=true; });
+      try {
+        await bounded(entered.promise,"direct Search cleanup entry");
+        const before=knowledge(db), pending=cleanup(db,runId);
+        closing=localStopLane(worker).stopLocalTracking(runId,() => {
+          expect(tickJoined).toBe(true);
+          expect(knowledge(db)).toEqual(before);
+          expect(cleanup(db,runId)).toEqual(pending);
+          committed=true;
+        });
+        await Promise.resolve(); await Promise.resolve();
+        expect(committed).toBe(false);
+        release.resolve();
+        await bounded(Promise.all([tick,closing]),"direct Search local close");
+        expect(committed).toBe(true);
+        expect(client.interrupts).toEqual([]);
+        expect(client.inboxCancellations).toEqual([]);
+        expect(client.prompts).toHaveLength(1);
+      } finally {
+        release.resolve(); client.beforeHistory=undefined;
+        await bounded(tick,"direct Search tick cleanup");
+        if (closing) await bounded(closing,"direct Search close cleanup");
+      }
+    });
+});
 
 test("Stop records cleanup, retains content, and empty native history cannot settle an uncertain admitted prompt", async () => {
   await fixture(() => ({ version: 1, kind: "search-reply", reply: "PRIVATE-NATIVE-OUTPUT", disposition: "done", sourceThoughtIds: [] }), async (db,store,worker,client,id,lease) => {

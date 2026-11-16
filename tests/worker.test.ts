@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AgentUncertainError, createPublicClient, OpenCodeAdapter, type AgentBinding, type NativeSession, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
+import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, type AgentBinding, type NativeSession, type Observation, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { RunWorker, type ConnectionScreeningPort, type ScreeningPair, type WorkerNative } from "../src/agent/worker";
 import { initialWorkerPrompt } from "../src/agent/worker-prompts";
 import { RejectionService } from "../src/domain/rejection";
@@ -74,9 +74,9 @@ class OwnedNative implements WorkerNative {
   }
   async cancel(_runId: string, _value: AgentBinding, _prompt: PersistedPrompt): Promise<"pending" | "settled"> { this.cancellations++; return "settled"; }
 }
-function worker(f: ReturnType<typeof setup>, output: (index: number) => string, selected: (run: RunRecord) => AgentBinding | null = binding) {
+function worker(f: ReturnType<typeof setup>, output: (index: number) => string, selected: (run: RunRecord) => AgentBinding | null = binding, clock: () => string = now) {
   const native = new OwnedNative(new SqliteAgentBindings(f.db), output);
-  const instance = new RunWorker({ db: f.db, id: f.id, now, bindingFor: selected, native: () => native });
+  const instance = new RunWorker({ db: f.db, id: f.id, now: clock, bindingFor: selected, native: () => native });
   return { instance, native };
 }
 async function drive(instance: RunWorker, f: ReturnType<typeof setup>, runId: string) {
@@ -963,11 +963,21 @@ for (const historicalSettled of [false, true]) test(`a prepared successor cannot
   } finally { restarted.instance.pause(); await restarted.instance.drain(); }
 }));
 
-test("terminal pending cancellation retries until settled without reviving or resubmitting", async () => fixture(async f => {
+test("terminal pending cancellation backs off and retries without overlap, revival or resubmission", async () => fixture(async f => {
   const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "cancel-retry" });
-  const w = worker(f, () => complete("late output"));
+  let time = Date.parse(now());
+  const w = worker(f, () => complete("late output"), binding, () => new Date(time).toISOString());
   let attempts = 0;
-  w.native.cancel = async () => { attempts++; return attempts === 1 ? "pending" : "settled"; };
+  let entered = false, release: () => void = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  w.native.cancel = async () => {
+    attempts++;
+    if (time < Date.parse(now()) + 60_000) return "pending";
+    entered = true;
+    await held;
+    return "settled";
+  };
+  try {
   for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(run.id);
   expect(w.native.submitted).toHaveLength(1);
   f.service.stop("user", run.id);
@@ -975,12 +985,131 @@ test("terminal pending cancellation retries until settled without reviving or re
   expect(attempts).toBe(1);
   expect(f.steps.cancellation(run.id)).toBe("pending");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
-  await w.instance.tick(run.id);
+  for (let i = 0; i < 4; i++) { time += 250; await w.instance.tick(run.id); }
+  expect(attempts).toBe(1);
+  time += 60_000;
+  const retry = w.instance.tick(run.id);
+  for (let i = 0; i < 100 && !entered; i++) await Promise.resolve();
+  if (!entered) throw new Error("Cancellation retry did not start after advancing the owned clock");
+  const overlapping = w.instance.tick(run.id);
+  await Promise.resolve();
   expect(attempts).toBe(2);
+  release();
+  await Promise.all([retry, overlapping]);
   expect(f.steps.cancellation(run.id)).toBe("settled");
   expect(f.runs.get(run.id)?.status).toBe("interrupted");
   expect(w.native.submitted).toHaveLength(1);
   expect(f.runs.reply(run.id)).toBeNull();
+  } finally { release(); w.instance.pause(); await w.instance.drain(); }
+}));
+
+test("ordinary cancellation retry delays double to the cap and reset on restart and generation change", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "retry-policy" });
+  let time = Date.parse(now());
+  const clock = () => new Date(time).toISOString();
+  const first = worker(f, () => complete("never publish"), binding, clock);
+  let calls = 0;
+  first.native.cancel = async () => { calls++; return "pending"; };
+  try {
+    for (let i = 0; i < 8 && first.native.submitted.length === 0; i++) await first.instance.tick(run.id);
+    expect(first.native.submitted).toHaveLength(1);
+    f.service.stop("user", run.id);
+    await first.instance.tick(run.id);
+    expect(calls).toBe(1);
+    // These are explicit retry policy boundaries, not inputs to the algorithm under test.
+    for (const [index, delay] of [2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000].entries()) {
+      time += delay - 1;
+      await first.instance.tick(run.id);
+      expect(calls).toBe(index + 1);
+      time++;
+      await first.instance.tick(run.id);
+      expect(calls).toBe(index + 2);
+    }
+    expect(calls).toBe(8);
+    first.instance.pause();
+    await first.instance.drain();
+    const restarted = worker(f, () => complete("never publish"), binding, clock);
+    let restartedCalls = 0;
+    restarted.native.cancel = async () => { restartedCalls++; return "pending"; };
+    try {
+      await restarted.instance.tick(run.id);
+      expect(restartedCalls).toBe(1);
+      expect(f.steps.cancellation(run.id)).toBe("pending");
+      f.db.run("UPDATE runs SET generation=generation+1 WHERE id=?", [run.id]);
+      await restarted.instance.tick(run.id);
+      expect(restartedCalls).toBe(2);
+      expect(restarted.native.submitted).toEqual([]);
+      expect(f.runs.reply(run.id)).toBeNull();
+    } finally { restarted.instance.pause(); await restarted.instance.drain(); }
+  } finally { first.instance.pause(); await first.instance.drain(); }
+}));
+
+test("backward cancellation clock rebases the delay and settlement stops retries", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "retry-clock" });
+  let time = Date.parse(now());
+  const w = worker(f, () => complete("never publish"), binding, () => new Date(time).toISOString());
+  let calls = 0;
+  w.native.cancel = async () => ++calls === 1 ? "pending" : "settled";
+  try {
+    for (let i = 0; i < 8 && w.native.submitted.length === 0; i++) await w.instance.tick(run.id);
+    expect(w.native.submitted).toHaveLength(1);
+    f.service.stop("user", run.id);
+    await w.instance.tick(run.id);
+    time -= 100_000;
+    await w.instance.tick(run.id);
+    time += 1_999;
+    await w.instance.tick(run.id);
+    expect(calls).toBe(1);
+    time++;
+    await w.instance.tick(run.id);
+    expect(calls).toBe(2);
+    expect(f.steps.cancellation(run.id)).toBe("settled");
+    time += 120_000;
+    await w.instance.tick(run.id);
+    expect(calls).toBe(2);
+    expect(w.native.submitted).toHaveLength(1);
+    expect(f.runs.reply(run.id)).toBeNull();
+  } finally { w.instance.pause(); await w.instance.drain(); }
+}));
+
+test("cancellation warnings classify changes without exposing native exception details", async () => fixture(async f => {
+  const run = f.ops.admitWeave("user", { subjectId: "root", triggerId: "retry-diagnostics" });
+  let time = Date.parse(now()), calls = 0;
+  const records: LogRecord[] = [];
+  const native = new OwnedNative(new SqliteAgentBindings(f.db), () => complete("private output sentinel"));
+  const instance = new RunWorker({ db: f.db, id: f.id, now: () => new Date(time).toISOString(), bindingFor: binding,
+    native: () => native, logger: createLogger("verbose", record => records.push(record)) });
+  native.cancel = async () => {
+    calls++;
+    if (calls <= 2) return "pending";
+    if (calls <= 4) throw new Error("private native exception sentinel");
+    if (calls === 5) throw new AgentBindingError("private binding exception sentinel");
+    if (calls === 6) throw new RunFenceError("private authority exception sentinel");
+    return "settled";
+  };
+  try {
+    for (let i = 0; i < 8 && native.submitted.length === 0; i++) await instance.tick(run.id);
+    expect(native.submitted).toHaveLength(1);
+    f.service.stop("user", run.id);
+    for (let i = 0; i < 6; i++) { await instance.tick(run.id); time += 60_000; }
+    f.db.exec(`CREATE TRIGGER test_retry_settlement_fault BEFORE UPDATE OF cancellation_state ON runs
+      WHEN NEW.cancellation_state='settled' BEGIN SELECT RAISE(ABORT,'private storage exception sentinel'); END;`);
+    try {
+      await instance.tick(run.id);
+      expect(f.steps.cancellation(run.id)).toBe("pending");
+    } finally { f.db.exec("DROP TRIGGER test_retry_settlement_fault"); }
+    time += 60_000;
+    await instance.tick(run.id);
+    expect(calls).toBe(8);
+    expect(f.steps.cancellation(run.id)).toBe("settled");
+    const warnings = records.filter(record => record.message === "[worker] cancellation remains pending");
+    expect(warnings.map(record => record.context?.category)).toEqual(["native-pending", "native-unavailable", "binding-conflict", "authority-fenced", "local-failure"]);
+    expect(warnings.every(record => record.level === "warning" && record.context?.runId === run.id)).toBe(true);
+    expect(records.filter(record => record.message === "[worker] cancellation retry deferred").map(record => record.context?.category))
+      .toEqual(["native-pending", "native-unavailable"]);
+    expect(JSON.stringify(records)).not.toContain("private");
+    expect(native.submitted).toHaveLength(1);
+  } finally { instance.pause(); await instance.drain(); }
 }));
 
 test("retired interrupted weave cannot publish a previously observed late result or submit again", async () => fixture(async f => {

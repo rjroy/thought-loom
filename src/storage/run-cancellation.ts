@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { RunFenceError, type NativeState } from "../domain/run";
 import { protocolJson, type OrdinaryCancellationJournal, type StepState } from "../domain/run-protocol";
 import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 interface JournalRow {
   readonly position: number;
@@ -15,6 +16,7 @@ interface JournalRow {
 
 /** Caller owns a short transaction. A settled bit is retained as identity, never accepted as terminal evidence. */
 export function ordinaryCancellationJournal(db: Database, runId: string): OrdinaryCancellationJournal {
+  assertRunLocallyTracked(db,runId);
   assertRunNotRestoreFenced(db,runId);
   const run = db.query<{kind:string;status:string;generation:number;initialPromptId:string;cancellation:string},[string]>(
     `SELECT kind,status,generation,prompt_id AS initialPromptId,cancellation_state AS cancellation FROM runs WHERE id=?`).get(runId);

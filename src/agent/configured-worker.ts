@@ -52,7 +52,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
       let adapter: OpenCodeAdapter | undefined;
       const owned=async (runId: string, binding: AgentBinding): Promise<OpenCodeAdapter> => {
         assertImportRunNotRestoreFenced(dependencies.db,runId);
-        localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
+        localFence({runId}); this.assertOwner(); await this.resolve(); localFence({runId}); this.assertOwner();
         assertImportRunNotRestoreFenced(dependencies.db,runId);
         const service=this.service;
         if (this.paused || !service || service.url!==binding.serviceUrl) throw new AgentUnavailableError("Import-owned service is unavailable");
@@ -65,7 +65,7 @@ export class ConfiguredRunWorker implements SupervisedWorker {
       const native: ImportNative={
         bindingFor:async run => {
           assertImportRunNotRestoreFenced(dependencies.db,run.id);
-          localFence(); this.assertOwner(); await this.resolve(); localFence(); this.assertOwner();
+          localFence({runId:run.id}); this.assertOwner(); await this.resolve(); localFence({runId:run.id}); this.assertOwner();
           assertImportRunNotRestoreFenced(dependencies.db,run.id);
           const service=this.service, config=dependencies.config;
           if (!service || this.paused) throw new AgentUnavailableError("Import agent service is unavailable");
@@ -157,14 +157,15 @@ export class ConfiguredRunWorker implements SupervisedWorker {
   }
   tick(runId: string): Promise<void> { return this.worker.tick(runId,() => this.beforePoll(runId)); }
   retireWeave<T>(runId: string, commit: () => T): Promise<T> { return this.worker.retireWeave(runId,commit); }
+  stopLocalTracking<T>(runId:string,commit:()=>T):Promise<T> { return this.worker.stopLocalTracking(runId,commit); }
   searchRetention(): SqliteSearchRetention | null { return this.worker.searchRetention(); }
   onSearchCleanupAvailable(notify: () => void): () => void { return this.worker.onSearchCleanupAvailable(notify); }
   pause(): void { this.paused = true; this.worker.pause(); this.importWorker.pause(); }
   /** Final run-lane/shared-resolver join after listener producers finish; the import driver owns its file lanes. */
   async drain(): Promise<readonly PromiseSettledResult<void>[]> {
     this.pause();
-    const [runs,resolution] = await Promise.all([this.worker.drain(),Promise.allSettled(this.resolving ? [this.resolving] : [])]);
-    return [...runs,...resolution];
+    const [runs,resolution,imports] = await Promise.all([this.worker.drain(),Promise.allSettled(this.resolving ? [this.resolving] : []),this.importWorker.drain()]);
+    return [...runs,...resolution,...imports];
   }
   /** Trusted retention hook; clears timing metadata only, never native work or run authority. */
   forgetSearchClock(runId: string): void { this.worker.forgetSearchClock(runId); }

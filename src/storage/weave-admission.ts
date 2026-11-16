@@ -9,6 +9,7 @@ import { nonEmpty, record } from "../domain/validation";
 import { insertRun, readRun } from "./run-record";
 import { subjectWeaveWork, weaveWorkBlockReason } from "./weave-work";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "./restore-fences";
+import { isRunLocallyStopped } from "./local-work-stop-fence";
 
 export type WeaveSources = RunSources;
 
@@ -36,7 +37,7 @@ export function sourceWeaveEligibility(db: Database, subjectId: string): {
   if (db.query("SELECT 1 FROM thoughts WHERE parent_id=? AND kind='ai-interpretation'").get(subjectId)) {
     return {runId,retry:{eligible:false,reason:"interpretation-exists"}};
   }
-  const live = work.filter(item => !isRunRestoreFenced(db,item.id));
+  const live = work.filter(item => !isRunRestoreFenced(db,item.id) && !isRunLocallyStopped(db,item.id));
   for (const item of live) {
     const reason = weaveWorkBlockReason(db,item);
     if (reason !== null) return {runId,retry:{eligible:false,reason:reason === "work-active" ? "work-active" : "work-unsettled"}};

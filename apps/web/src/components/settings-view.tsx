@@ -6,6 +6,7 @@ import { createSettingsController, settingsCanSave, settingsDirty } from "../fea
 import { createAgentInstructionsClient } from "../features/settings/request";
 import { instructionFields, type InstructionField } from "../features/settings/types";
 import styles from "./settings.module.css";
+import { BackgroundWorkEntry } from "./background-work-entry";
 
 const labels: Record<InstructionField, { name: string; description: string }> = {
   weaver: { name: "Weaver", description: "Interpretations and connections" },
@@ -35,6 +36,7 @@ export function SettingsView() {
 
   return <section className={styles.workspace} aria-labelledby="settings-heading">
     <h1 id="settings-heading">Settings</h1>
+    <BackgroundWorkEntry />
     <div className={styles.introRow}>
       <div className={styles.intro}>
         <h2>Additional agent instructions</h2>

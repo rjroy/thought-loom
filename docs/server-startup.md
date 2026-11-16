@@ -321,7 +321,45 @@ The maintained published `@opencode/client` package is pinned to **2.2.5**. The 
 
 The adapter correlates retained prompt IDs and exact text against complete paginated parent-session history, the saved endpoint/session and owner/run/protocol metadata. The final parent assistant and successful idle boundary, with no active or inbox work, identify the result; intermediate tool or child output is never used as an application reply. Native tools, delegation, compaction and opaque bookkeeping do not by themselves invalidate a permissive run. Queued non-user work, including compaction, blocks submission, publication and cancellation settlement until drained; it is not an owned prompt to cancel. Viewing a session or changing unrelated native metadata, model or directory does not change ownership. Restricted sessions retain and verify their saved deny policy and reject actual tool or standalone shell execution evidence. A foreign actual user input is a conflict, not adopted or intentionally cancelled as Thoughtloom work. Missing evidence stays uncertain and an uncertain acknowledgement is not a reason to resend. See the [adapter and native-tool checks](testing.md#business-behavior-protected); synthetic SDK responses do not establish compatibility with every service or model.
 
-Ordinary run cancellation requires positive terminal evidence for potentially submitted prompts across the retained step journal. An empty inbox, an inactive session, or a cancellation acknowledgement alone cannot prove that a delayed submission will never arrive. Cleanup joins local execution before reconciling; genuinely never-submitted initial work can still settle locally. Missing or contradictory native evidence leaves cancellation pending, potentially indefinitely. Stop still fences local publication immediately, but does not certify remote termination or undo external effects. This ordinary adapter path is shared by Weave, Evolve and Agentic export; Markdown import and conversational-search cleanup retain their separate contracts. Historical `settled` flags alone are not a certificate for future replacement work.
+Ordinary run cancellation requires positive terminal evidence for potentially submitted prompts across the retained step journal. An empty inbox, an inactive session, a cancellation acknowledgement, or removal of a queued prompt alone cannot prove that a delayed submission will never arrive or that its execution ended. Cleanup joins local execution before reconciling; genuinely never-submitted initial work can still settle locally. Missing or contradictory native evidence leaves cancellation pending, potentially indefinitely. Stop still fences local publication immediately, but does not certify remote termination or undo external effects. This ordinary adapter path is shared by Weave, Evolve and Agentic export; Markdown import and conversational-search cleanup retain their separate contracts. Historical `settled` flags alone are not a certificate for future replacement work.
+
+Cancellation terminal proof is separate from publishable output. A correlated completed assistant followed by a successful idle boundary can prove that its native turn ended even with a `content-filter` or `unknown` finish, or tool-bearing output where the saved policy permits tools. Those replies do not become publishable; restricted sessions still reject forbidden tool evidence. Correlated failed/interrupted turns can end without completed assistant prose. If the first fenced observation already proves every dispatched turn terminal, with an empty inbox and inactive session, cleanup settles without a gratuitous interrupt or inbox cancellation.
+
+Eligible ordinary cleanup makes its first native attempt immediately when its joined lane is polled. Unresolved results or failures defer subsequent attempts by **2, 4, 8, 16, 32, then 60 seconds**, remaining at 60 seconds. Each delay starts after the preceding attempt finishes; timer ticks during the delay issue no native cleanup call, and overlapping ticks still share the same flight. A backwards daemon-clock jump rebases the wait instead of extending it indefinitely. This cadence is process-local and scoped to the run generation, not durable settlement evidence: settlement, removal from eligible cleanup, restore fencing, durable local stop or worker pause clears it; a generation change or daemon restart permits an immediate attempt only if cleanup is still eligible, then rebuilds the cadence. Retirement still leaves existing lawful native cleanup best effort under this policy; it is not remote settlement. This cadence adds no schema or API/UI timing field, and does not change import/Search's separate retry policies. Explicit local stop below ends retries in all three paths. See [logging](#logging) for sanitized retry diagnostics.
+
+### Durable local tracking stop
+
+The owned daemon installs the user-only [background-work reads and local-stop
+controller](daemon-api.md#background-work-reads) before readiness, with or
+without agent configuration. No new environment variable, native service
+discovery or operator-service change is required. This is a backend capability;
+the approved Settings entry and recovery screen are not implemented yet.
+
+An acknowledged **Stop local tracking** permanently ends local execution,
+late publication and every future cleanup retry for the selected identity,
+including ordinary cancellation, purged Search cleanup and import/waiter work,
+across restart. It is distinct from ordinary Stop (which leaves cleanup
+pending) and interpretation retirement (whose lawful cleanup continues).
+The runtime gates new entry before awaiting actual entered execution/cleanup
+promises, including direct ticks, Search ACK tails and import-driver work.
+Only after joining does it revalidate the exact generation/reservation and
+commit the append-only [receipt/fence](database-schema.md#local_work_stops).
+It starts no native interrupt. A held call can delay confirmation; a client
+timeout is not proof the command failed or that remote work ended.
+
+Native cancellation/step/cleanup facts, accepted payloads and saved output stay
+retained. Only the selected work's local blocker/reservation is released;
+sibling owners are not stopped and existing queued work may proceed normally.
+No replacement interpretation/import/export is admitted by the command. A
+Search turn's slot closes; export deletion can become eligible but remains
+separate and explicit. Remote work or already-started tools can continue and
+overlap later work; sent context and external effects cannot be undone.
+
+After a lost acknowledgment, recover the original target/key receipt through
+reads. A null lookup does not rule out a delayed POST committing later; never
+automatically resend or replace the request identity. The recorded decision
+continues to fence configured and configless startup, and logical-9 backups
+preserve it. Older backups restore with no inferred local-stop decisions.
 
 ### Retained media and shared filesystem
 
@@ -368,6 +406,22 @@ See [production upgrades/recovery](production-deployment.md#5-back-up-upgrade-an
 Successful idle polling does not produce Info messages. Invalid configured levels fail startup with a sanitized configuration error. Thought contents, credentials and raw sensitive exceptions are not diagnostic payloads, even at Verbose.
 
 The normal worker's local-processing failure is an Error diagnostic visible at the default level. It includes the run ID, claim generation, a fixed operation stage and a safe category (`protocol-validation`, `binding`, `run-conflict` or `unexpected`). These identify where processing failed and the recognized error type, not the underlying cause; exception messages, stacks, payloads and model output are not logged. Native service unavailability and cancellation retain their separate diagnostics and behavior. The cause of the previously reported first-question Evolve failure remains unknown; its non-recurrence does not establish a fix.
+
+Ordinary cleanup logs `cancellation remains pending` at Warning after its first unresolved attempt in a worker/run generation, or when its retry category changes. It includes `runId`, `generation`, `retryAfterMs` and one fixed category: `native-pending`, `binding-conflict`, `authority-fenced`, `native-unavailable` or `local-failure`. Repeated same-category attempts log `cancellation retry deferred` at Verbose; skipped backoff ticks do not emit a cancellation retry event. Committed native settlement remains an Info event.
+
+The adapter's Verbose cancellation observations include a fixed reason: `terminal-history`, `auxiliary-queued`, `owned-input-queued`, `native-active`, `admission-evidence-missing` or `terminal-evidence-incomplete`. Unresolved calls include the operation and a category of `binding-conflict`, `authority-fenced`, `session-missing` or `native-unresolved`. These classifications describe observed gates or recognized error types, not a proven root cause. They are transient diagnostics, not persisted run reasons, remote-settlement proof or new API/UI fields. Prompt text, model output, raw errors and credentials are never included.
+
+Background-work summary/page/detail read attempt/outcome diagnostics are
+Verbose. The local-stop storage boundary logs Info
+`[background work] local stop attempt` with `targetType` and `targetId`, then
+`[background work] local stop recorded` after commit with those identities,
+`replayed` and `remoteState:"unknown"`. A failure inside its commit boundary
+logs Warning `local stop refused` with the same prefix and target fields;
+preflight or lane-join refusals need not emit that storage outcome. HTTP
+attempt/outcome events still report the sanitized route, method and status.
+These events include neither request key/expected JSON nor owner content,
+private paths, native bindings or raw errors. The durable receipt is the
+decision record; a diagnostic attempt alone is not confirmation.
 
 The run storage diagnostic `interruption committed` is an Info event for a committed interruption at the run repository boundary, an agent-service Stop, or an eager media-source rejection. It includes the run ID, categorical reason, previous and new status and generation, and the resulting cancellation state. `stopped` identifies a Stop request; `context-invalidated` means required AI-visible context was no longer eligible; `quarantined` means native ownership or history could not be safely correlated; `interrupted-reply` identifies an interrupted reply passed to the ordinary repository finish operation, not a claim that the normal native worker produces such replies. Pending cancellation is a request for later settlement, not proof that native work has stopped. Local failure cleanup that ends in `failed` is not logged as a committed interruption.
 

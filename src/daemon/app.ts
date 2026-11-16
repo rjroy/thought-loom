@@ -25,6 +25,9 @@ import type { RetirementSnapshot } from "../storage/reinterpretation";
 import { agentInstructionFields, agentInstructionMaxBytes, parseAgentInstructions, type AgentInstructionsRepository } from "../domain/agent-instructions";
 import { readBytes, strictObject, utf8 } from "./import-body";
 import { exportHistoryRequest, type ExportHistoryCursor, type ExportHistoryService } from "../domain/export-history";
+import type { BackgroundWorkRepository } from "../domain/background-work";
+import { createBackgroundWorkRoutes } from "./background-work-routes";
+import type { LocalStopController } from "../domain/local-work-stop";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -46,6 +49,8 @@ export interface AppOptions {
   readonly searchClockReceipts?: SearchClockReceipts;
   readonly simpleExport?: SimpleExportService;
   readonly exportHistory?: ExportHistoryService;
+  readonly backgroundWork?: BackgroundWorkRepository;
+  readonly localStops?:LocalStopController;
   readonly diagnostics?: Logger;
   readonly agents?: Pick<AgentService,"evolve" | "export" | "report" | "status" | "stop">;
   readonly imports?: { readonly commands: MarkdownImportRepository; readonly inspection: ImportInspectionRepository; readonly maxBytes: number };
@@ -106,6 +111,7 @@ function safePath(path: string): string {
   const parts = path.split("/");
   if (path === "/search") return "/search";
   if (path === "/settings/agent-instructions") return path;
+  if (parts[1] === "background-work") return parts.length <= 2 ? "/background-work" : "/background-work/:target";
   if (path === "/browse/thoughts") return path;
   if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
@@ -184,6 +190,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   });
 
   if (options.imports) app.route("/",createMarkdownImportRoutes(options.imports.commands,options.imports.inspection,options.imports.maxBytes));
+  if (options.backgroundWork) app.route("/",createBackgroundWorkRoutes(options.backgroundWork,options.localStops));
   if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
   if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics,options.reinterpretations.retirement));

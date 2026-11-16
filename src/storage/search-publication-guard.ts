@@ -4,6 +4,7 @@ import { searchRevision, searchString } from "../domain/agentic-search";
 import { record, ValidationError } from "../domain/validation";
 import { searchReferencesEligible } from "./search-eligibility";
 import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
 export interface SearchPublicationOwner {
@@ -22,6 +23,7 @@ interface StepRow { readonly promptId: string; readonly state: string; readonly 
 
 /** Read proof from the existing aggregate; never infer a binding, native completion or full read. */
 export function searchPublicationOwner(db: Database, claim: Claim, promptId: string): SearchPublicationOwner {
+  assertRunLocallyTracked(db,claim.runId);
   const data = record(claim);
   if (Object.keys(data).length !== 2 || !Object.hasOwn(data, "runId") || !Object.hasOwn(data, "generation")) throw new ValidationError("Invalid publication claim");
   searchString(claim.runId, "runId"); searchRevision(claim.generation); searchString(promptId, "promptId");
@@ -65,6 +67,7 @@ export function requireSearchFullReads(db: Database, owner: SearchPublicationOwn
 }
 /** Commit this observed contamination fence outside any publication effects, then report failure. */
 export function fenceSearchPublication(db: Database, owner: SearchPublicationOwner): void {
+  assertRunLocallyTracked(db,owner.runId);
   assertRunNotRestoreFenced(db,owner.runId);
   searchRevision(owner.generation + 1);
   db.run("UPDATE search_turns SET outcome_reason='context-invalidated' WHERE run_id=CAST(? AS TEXT) AND outcome_reason IS NULL", [text(owner.runId)]);

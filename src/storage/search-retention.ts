@@ -6,6 +6,7 @@ import { purgeSearchSessionContent } from "./search-purge";
 import type { Logger } from "../logging";
 import { isRunRestoreFenced } from "./restore-fences";
 import { assertRestoreFenceSchema } from "./restore-fences-schema";
+import { isRunLocallyStopped } from "./local-work-stop-fence";
 
 interface OwnedRun {
   readonly id: string; readonly status: string; readonly cancellation: string; readonly generation: number; readonly bound: number;
@@ -41,12 +42,12 @@ export class SqliteSearchRetention {
       FROM search_turns t JOIN runs r ON r.id=t.run_id WHERE t.session_id=CAST(? AS TEXT) ORDER BY t.position`).all(session) as OwnedRun[];
     for (const run of runs) {
       if (run.kind !== "search" || run.input !== null || run.subject !== null || run.trigger !== null) throw new SearchStorageError("search-retention-owner-unavailable");
-      if (isRunRestoreFenced(this.db,run.id)) continue; // Local erasure needs no new native or never-submitted certificate.
+      if (isRunRestoreFenced(this.db,run.id) || isRunLocallyStopped(this.db,run.id)) continue; // Local erasure needs no remote certificate.
       searchRevision(run.generation + 1);
       if (!run.bound && !this.neverAuthorizedUnbound(run)) throw new SearchConflictError("native-cleanup-required");
     }
     for (const run of runs) {
-      if (isRunRestoreFenced(this.db,run.id)) continue;
+      if (isRunRestoreFenced(this.db,run.id) || isRunLocallyStopped(this.db,run.id)) continue;
       const active = ["queued","submitting","running","uncertain"].includes(run.status);
       if (active) this.db.run("UPDATE search_turns SET outcome_reason=COALESCE(outcome_reason,'stopped') WHERE run_id=?",[run.id]);
       // Completed/failed/interrupted outcomes stay exactly those outcomes. Delete does not turn completed work into Stop.
@@ -61,7 +62,7 @@ export class SqliteSearchRetention {
     const changed = this.db.run(`UPDATE search_sessions SET title=NULL,deleted_at=?,last_activity_at=?,revision=revision+1
       WHERE id=CAST(? AS TEXT) AND deleted_at IS NULL`,[at,at,session]);
     if (changed.changes !== 1) throw new SearchStorageError("search-purge-owner-unavailable");
-    for (const run of runs) if (run.bound && !isRunRestoreFenced(this.db,run.id)) this.cleanup.sealInTransaction(run.id);
+    for (const run of runs) if (run.bound && !isRunRestoreFenced(this.db,run.id) && !isRunLocallyStopped(this.db,run.id)) this.cleanup.sealInTransaction(run.id);
     purgeSearchSessionContent(this.db,sessionId);
     this.owner.assertRegistered(this.db);
     const batch = Object.freeze(runs.map(run => run.id));

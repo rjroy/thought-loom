@@ -10,6 +10,7 @@ import { parseCapabilityRequest } from "../domain/capability";
 import { createConnection } from "../domain/connection";
 import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
 import { parseEnvelope, protocolJson } from "../domain/run-protocol";
+import { localStopReceipt } from "../domain/local-work-stop";
 
 export interface CapturedTable { readonly shape: TableShape; readonly rows: readonly RawRow[] }
 export interface SqlSnapshot {
@@ -381,9 +382,60 @@ function validateDailyReviews(snapshot: SqlSnapshot): void {
     }
   } catch { check(false,"inconsistent-source"); }
 }
+/** Receipt shape is the live command codec; only cross-row ownership/uniqueness belongs to snapshot validation. */
+function validateLocalWorkStops(snapshot:SqlSnapshot):void {
+  const stops=snapshot.tables.find(captured => captured.shape.name === "local_work_stops");
+  if (!stops) return; // Frozen logical-1 through logical-8 never infer this user decision.
+  const runs=new Map(table(snapshot,"runs").rows.map(row => [text(row,"id"),row]));
+  const files=new Map(table(snapshot,"markdown_import_files").rows.map(row => [text(row,"id"),row]));
+  const cleanup=new Set(table(snapshot,"search_native_cleanup").rows.map(row => text(row,"run_id")));
+  const targets=new Set<string>(), runLinks=new Set<string>(), fileLinks=new Set<string>();
+  const nullableText=(row:RawRow,column:string):string|null => row.values[column]?.storage === "null" ? null : text(row,column);
+  const unique=(seen:Set<string>,id:string):void => { check(!seen.has(id),"inconsistent-source"); seen.add(id); };
+  try {
+    for (const raw of stops.rows) {
+      // Do not drop surplus columns or coerce storage classes before invoking the exact receipt codec.
+      const values=Object.fromEntries(Object.entries(raw.values).map(([column,cell]) => {
+        if (cell.storage === "null") return [column,null];
+        check(cell.storage === "text","inconsistent-source");
+        return [column,decoder.decode(cell.bytes)];
+      }));
+      const receipt=localStopReceipt(values), identity=receipt.identity;
+      unique(targets,JSON.stringify([receipt.target.type,receipt.target.id]));
+      const runId=nullableText(raw,"run_id"), fileId=nullableText(raw,"import_file_id");
+      if (runId !== null) unique(runLinks,runId);
+      if (fileId !== null) unique(fileLinks,fileId);
+      const run=runId === null ? undefined : runs.get(runId), file=fileId === null ? undefined : files.get(fileId);
+      if (run) {
+        const expectedKind=identity.type === "run" ? identity.kind : "import";
+        check(text(run,"kind") === expectedKind && identity.generation !== null &&
+          integer(run,"generation").toString() === identity.generation &&
+          ["completed","failed","interrupted"].includes(text(run,"status")),"inconsistent-source");
+      } else if (runId !== null) {
+        // Only Search/export support run erasure. A null generation identifies a genuinely rowless cleanup owner.
+        check(identity.type === "run" && (identity.kind === "search" || identity.kind === "export"),"inconsistent-source");
+        if (identity.generation === null) check(identity.kind === "search" && cleanup.has(runId),"inconsistent-source");
+      }
+      if (fileId !== null) {
+        check(file !== undefined && nullableText(file,"run_id") === runId,"inconsistent-source");
+        if (identity.type === "import-file") {
+          check(text(file,"import_id") === identity.importId &&
+            nullableText(file,"waiting_on_file_id") === identity.waitingOnFileId,"inconsistent-source");
+          if (identity.outcome === null) {
+            check(text(file,"outcome") === "interrupted" && text(file,"reason_code") === "interrupted","inconsistent-source");
+          } else check(text(file,"outcome") === identity.outcome,"inconsistent-source");
+        } else {
+          check(identity.kind === "import" && run !== undefined && file.values.outcome.storage === "text","inconsistent-source");
+        }
+      }
+    }
+  } catch { check(false,"inconsistent-source"); }
+}
+
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
-export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-8"): void {
+export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-9"): void {
   validateApplicationIntegers(snapshot);
+  validateLocalWorkStops(snapshot);
   validateConnectionReceipts(snapshot);
   validateDailyReviews(snapshot);
   const screening = snapshot.tables.find(value => value.shape.name === "run_screening_passes");

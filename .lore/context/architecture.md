@@ -43,6 +43,24 @@ Ordinary cancellation requires a terminal boundary for every potentially dispatc
 
 As an explicit exception to waiting for remote proof, a user may acknowledge remote uncertainty and retire one failed or interrupted interpretation-capable weave. This permanently fences its local execution and publication and removes only that run as an admission and dispatch blocker. The earlier native work may still run or have external effects, including overlapping a replacement. Retirement is not native settlement or cancellation; existing lawful cleanup remains best effort. Other active or unsettled runs still block, and queued automatic work may proceed under normal serialization. There is no automatic retirement.
 
+The separate user-confirmed **Stop local tracking** decision ends **all** future
+local execution, publication and cleanup retries for its exact identity,
+including ordinary cancellation, rowless Search cleanup and import waiters,
+across restart. It is not retirement or ordinary Stop. The runtime gates new
+entry and joins actual entered execution/cleanup lanes before transactionally
+recording an append-only receipt/fence and releasing only its blocker or
+reservation. Native/cancellation journals, accepted input and saved output stay
+retained; no native interrupt, settlement claim, sibling cascade or replacement
+admission is implied. Existing queued work may proceed and external tools may
+continue or overlap later work. Receipts survive authorized owner deletion and
+backup/restore. Recovery after a lost acknowledgment reads the original
+target/key; null is not proof a delayed write cannot commit and never authorizes
+automatic replay. The [user-only bounded read/command contract](../../docs/daemon-api.md#background-work-reads)
+uses normal-scope safe owner metadata, not AI history access or native
+diagnostics. Backend authority is implemented separately from the approved
+Settings/recovery screen; the browser → Next.js → daemon boundary and visual
+approval gate still apply.
+
 ## Creation-owned connection discovery
 
 Creation-owned connection discovery uses ordinary durable weave journals and the existing supervisor, not another queue. A connection-only purpose is encoded with its immutable subject/creation-origin trigger and has application-scoped reads plus warranted connections involving that subject, but no thought/title writes or public reply publication. Creation, receipts/issued membership and discovery admission commit together. Ordinary interpretation work remains a distinct dispatch/admission/retirement class. Evolve Stop fences pending discovery for its saved contributions/developments using persisted origins; it does not undo saved connections or establish remote cancellation. Weaver's operator-managed native tool policy remains unchanged and is not a sandbox.

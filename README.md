@@ -30,6 +30,7 @@ Capture rough thoughts, find meaningful connections, and develop ideas through d
 - **Ask your library** questions in saved search conversations that rediscover existing ideas without adding new thoughts.
 - **Export Markdown**, either directly from an idea's development branches or as an AI-written report across your library.
 - **Control AI use** by rejecting and restoring thoughts or connections. Add installation-wide agent guidance in Settings.
+- **Review background work** from Settings to find unfinished work across your library and deliberately stop local tracking. Read the [recovery warnings](docs/user-guide.md#review-background-work): remote tools may still be running.
 
 Capture, ordinary search, Browse, manual connections and Simple export work without a configured model. Markdown import can use structural grouping without AI; images and PDFs can be retained while interpretation waits. Background weaving stays queued until agents are configured. Evolve, new conversational-search turns and AI report generation require agent configuration by the operator.
 

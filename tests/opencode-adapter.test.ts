@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { SessionInboxCompaction, SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageInfo, SessionMessageShell } from "@opencode/client";
 import { AgentBindingError, AgentUncertainError, createPublicClient, OpenCodeAdapter, resolveAgentService, type AgentBinding, type AgentBindings, type ImportTerminalEvidence, type InboxItem, type NativeMessage, type NativeSession, type PersistedPrompt, type PublicClient } from "../src/agent/opencode-adapter";
 import { normalizeBinding } from "../src/agent/binding";
+import { createLogger, type LogRecord } from "../src/logging";
 import { searchHistoryFacts } from "../src/agent/search-cleanup-history";
 import type { SearchCleanupIdentity } from "../src/agent/search-cleanup-contract";
 import { RunFenceError, RunService, type Claim, type NativeDispatcher } from "../src/domain/run";
@@ -405,6 +406,55 @@ describe("public OpenCode adapter over typed facade", () => {
     expect(client.calls.some(call => call.method === "interrupt")).toBe(true);
     await expect(adapter.submit(claim, binding, other)).rejects.toThrow(RunFenceError);
     expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(1);
+  });
+
+  test("already settled cancellation does not call an unavailable interrupt", async () => {
+    const client = new FakeClient();
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, binding);
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistantMessage("assistant", completeText, 2), idle("idle", 4)], cursor: {} });
+    client.interrupt = async input => { client.calls.push({ method: "interrupt", input }); throw new Error("fixture interrupt unavailable"); };
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("settled");
+    expect(client.calls.filter(call => call.method === "interrupt" || call.method === "cancel")).toEqual([]);
+  });
+
+  test("cancellation diagnostics classify observations and native failures without private details", async () => {
+    const client = new FakeClient();
+    const records: LogRecord[] = [];
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {}, createLogger("verbose", record => records.push(record)));
+    await adapter.ensureSession(claim, binding);
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1)], cursor: {} });
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistantMessage("assistant", completeText, 2), idle("idle", 4)], cursor: {} });
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("settled");
+    client.history = async () => { throw new Error("private native exception sentinel"); };
+    expect(await adapter.cancel(claim.runId, binding, prompt)).toBe("pending");
+    const observations = records.filter(record => record.message === "[agent] native cancellation observed");
+    expect(observations.map(record => record.context?.reason)).toEqual(["admission-evidence-missing", "terminal-evidence-incomplete", "terminal-history"]);
+    const failures = records.filter(record => record.message === "[agent] native cancellation unresolved");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.context).toMatchObject({ category: "native-unresolved", operation: "message.list", runId: claim.runId });
+    expect(JSON.stringify(records)).not.toContain("private native exception sentinel");
+    expect(JSON.stringify(records)).not.toContain(prompt.input);
+    expect(JSON.stringify(records)).not.toContain(completeText);
+  });
+
+  for (const variant of [
+    { finish: "content-filter", tools: false },
+    { finish: "unknown", tools: false },
+    { finish: "tool-calls", tools: true },
+  ]) test(`completed ${variant.finish} assistant proves cancellation but is not publishable`, async () => {
+    const client = new FakeClient();
+    const allowed: AgentBinding = { ...binding, permissions: [{ action: "*", resource: "*", effect: "allow" }] };
+    const adapter = new OpenCodeAdapter(client, new MemoryBindings(), () => {});
+    await adapter.ensureSession(claim, allowed);
+    const assistant: NativeMessage = { id: "assistant", type: "assistant", time: { created: 2, completed: 3 },
+      content: [{ type: "text", text: completeText }], finish: variant.finish, ...(variant.tools ? { hasTools: true as const } : {}) };
+    client.pages.set("first", { data: [userMessage(prompt.promptId, prompt.input, 1), assistant, idle("idle", 4)], cursor: {} });
+    expect(await adapter.observe(claim, allowed, [prompt])).toEqual({ state: "uncertain" });
+    expect(await adapter.cancel(claim.runId, allowed, prompt)).toBe("settled");
+    expect(client.calls.filter(call => call.method === "prompt")).toHaveLength(0);
   });
 
   test("ordinary cancellation proves every dispatched journal step, including a settled native-tool turn", async () => {
