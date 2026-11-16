@@ -1,9 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { RunFenceError, type ContextRef, type RunRecord } from "../domain/run";
 import { searchReferencesEligible } from "./search-eligibility";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 /** Structural ownership is separate from source eligibility. No raw conversation is read at native boundaries. */
 export function requireSearchExecutionOwner(db: Database, run: RunRecord): void {
+  assertRunLocallyTracked(db,run.id);
   const owner = db.query(`SELECT 1 FROM runs r JOIN search_turns t ON t.run_id=r.id
     JOIN search_sessions s ON s.id=t.session_id
     JOIN search_messages u ON u.session_id=t.session_id AND u.run_id=r.id AND u.role='user'

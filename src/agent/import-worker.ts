@@ -15,6 +15,7 @@ import { AgentUnavailableError, AgentUncertainError } from "./errors";
 import type { AgentBinding, ImportObservation, PersistedPrompt } from "./opencode-adapter";
 import { assertImportRunNotRestoreFenced, isImportRunRestoreFenced } from "../storage/import-authority";
 import { isRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
+import { assertRunLocallyTracked, isRunLocallyStopped } from "../storage/local-work-stop-fence";
 
 export interface ImportNative {
   bindingFor(run: RunRecord): Promise<AgentBinding>;
@@ -25,7 +26,7 @@ export interface ImportNative {
 }
 export interface ImportWorkerDependencies extends RunSources {
   readonly db: Database;
-  readonly native?: (bindings: SqliteAgentBindings, localFence: () => void) => ImportNative;
+  readonly native?: (bindings: SqliteAgentBindings, localFence: (owner?:Pick<Claim,"runId">) => void) => ImportNative;
   readonly parser?: MarkdownParser;
 }
 export const importTurn = (): Promise<void> => new Promise(resolve => { setImmediate(resolve); });
@@ -60,6 +61,8 @@ export class MarkdownImportWorker {
   // Only fixed-size execution metadata per live claimed run; no source, prompt or native history is retained here.
   private readonly owners = new Map<string,OwnedImport>();
   private readonly preparations = new Map<string,CachedPreparation>();
+  private readonly flights=new Map<string,Promise<void>>();
+  private readonly localStops=new Map<string,Promise<unknown>>();
   private native: ImportNative | undefined;
   private paused = false;
   constructor(private readonly dependencies: ImportWorkerDependencies) {
@@ -96,15 +99,21 @@ export class MarkdownImportWorker {
       }
     }
   }
-  private localFence(): void { if (this.paused) throw new RunFenceError("Import worker is paused"); }
+  private localFence(runId?:string): void {
+    if (this.paused) throw new RunFenceError("Import worker is paused");
+    if (runId !== undefined) {
+      if (this.localStops.has(runId)) throw new RunFenceError("Local stop is joining import work");
+      assertRunLocallyTracked(this.dependencies.db,runId);
+    }
+  }
   private transport(): ImportNative {
     this.localFence();
     const factory=this.dependencies.native;
     if (!factory) throw new AgentUnavailableError("Import agent is unconfigured");
-    return this.native ??= factory(this.bindings,() => this.localFence());
+    return this.native ??= factory(this.bindings,owner => this.localFence(owner?.runId));
   }
   private assertCurrent(claim: Claim): void {
-    this.localFence();
+    this.localFence(claim.runId);
     assertImportRunNotRestoreFenced(this.dependencies.db,claim.runId);
     const run=this.runs.get(claim.runId);
     if (!run || run.generation!==claim.generation || terminal(run)) throw new RunFenceError();
@@ -156,12 +165,21 @@ export class MarkdownImportWorker {
     owner.claim=claim;
     return claim;
   }
-  async tick(work: ImportLocalWork): Promise<void> {
+  tick(work:ImportLocalWork):Promise<void> {
+    if (this.paused || this.localStops.has(work.runId) || isRunLocallyStopped(this.dependencies.db,work.runId)) return Promise.resolve();
+    const prior=this.flights.get(work.runId);
+    if (prior) return prior;
+    const flight=Promise.resolve().then(() => this.poll(work)).finally(() => this.flights.delete(work.runId));
+    this.flights.set(work.runId,flight);
+    return flight;
+  }
+  private async poll(work: ImportLocalWork): Promise<void> {
     if (this.paused) return;
     let owner=this.owners.get(work.runId), claim=owner?.claim;
     let phase="claim";
     try {
-      if (isRunRestoreFenced(this.dependencies.db,work.runId) || isRestoreFenced(this.dependencies.db,"import-file",work.fileId)) {
+      if (this.localStops.has(work.runId) || isRunLocallyStopped(this.dependencies.db,work.runId) ||
+          isRunRestoreFenced(this.dependencies.db,work.runId) || isRestoreFenced(this.dependencies.db,"import-file",work.fileId)) {
         this.forget(work.runId); return;
       }
       const run=this.runs.get(work.runId);
@@ -196,6 +214,7 @@ export class MarkdownImportWorker {
       this.logger.info("[import worker] file completed",{runId:work.runId,fileId:work.fileId,thoughtCount:result.thoughtCount});
     } catch (error) {
       if (this.paused) return;
+      if (this.localStops.has(work.runId) || isRunLocallyStopped(this.dependencies.db,work.runId)) { this.forget(work.runId); return; }
       if (importBusy(error)) { this.logger.warning("[import worker] local work busy",{runId:work.runId,phase}); return; }
       if (!claim) { this.logger.error("[import worker] claim failed",{runId:work.runId}); return; }
       const current=this.runs.get(work.runId);
@@ -294,11 +313,26 @@ export class MarkdownImportWorker {
     this.logger.verbose("[import worker] cancellation attempt",{runId:run.id,promptId:prompt.promptId});
     try {
       const result=await this.transport().cancel({runId:run.id,generation:run.generation},binding,prompt);
-      this.localFence();
+      this.localFence(run.id);
       assertImportRunNotRestoreFenced(this.dependencies.db,run.id);
       if (result==="settled") this.protocol.settleCancellation(run.id);
       this.logger.verbose("[import worker] cancellation outcome",{runId:run.id,state:result});
     } catch { if (!this.paused) this.logger.verbose("[import worker] cancellation remains pending",{runId:run.id}); }
+  }
+  stopLocalTracking<T>(runId:string,commit:()=>T):Promise<T> {
+    const preceding=this.localStops.get(runId), flight=this.flights.get(runId);
+    const operation=Promise.resolve().then(async () => {
+      if (preceding) await preceding.catch(() => {});
+      if (flight) await flight.catch(() => {});
+      if (this.paused) throw new RunFenceError("Import worker is paused");
+      const result=commit(); this.forget(runId); return result;
+    });
+    this.localStops.set(runId,operation);
+    return operation.finally(() => { if (this.localStops.get(runId) === operation) this.localStops.delete(runId); });
+  }
+  async drain():Promise<readonly PromiseSettledResult<void>[]> {
+    if (!this.paused) throw new RunFenceError("Import drain requires pause");
+    return Promise.allSettled([...this.flights.values()]);
   }
   pause(): void { this.paused=true; this.preparations.clear(); this.owners.clear(); }
 }

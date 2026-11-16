@@ -41,7 +41,17 @@ export async function requestDaemon(config: WebConfig, request: DaemonRequest, d
   }
   // Receipt paths are GET-only, including keys that happen not to require escaping.
   if (pathname && /^\/thoughts\/[^/]+\/reinterpret\/by-key\//.test(pathname) && !reinterpretKeyPath) throw new Error("Invalid daemon path");
-  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !mediaUploadKeyPath && !reinterpretKeyPath)
+  const background = pathname?.match(/^\/background-work\/(runs|import-files)\/([^/]+)(?:\/local-stop(?:\/by-key\/([^/]+))?)?$/);
+  let backgroundPath = false;
+  if (background?.[2]) {
+    try {
+      const id = decodeURIComponent(background[2]), key = background[3] === undefined ? undefined : decodeURIComponent(background[3]);
+      backgroundPath = /^[A-Za-z0-9_~.:-]{1,512}$/.test(id) && id !== "." && id !== ".." && encodeURIComponent(id) === background[2] &&
+        (key === undefined || (request.method === "GET" && /^[A-Za-z0-9._:-]{1,128}$/.test(key) && encodeURIComponent(key) === background[3]));
+    } catch { /* Malformed encoding is not an allowed path. */ }
+  }
+  if (pathname && /^\/background-work\/(?:runs|import-files)\//.test(pathname) && !backgroundPath) throw new Error("Invalid daemon path");
+  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !mediaUploadKeyPath && !reinterpretKeyPath && !backgroundPath)
       || pathname.split("/").some(segment => segment === "." || segment === "..")
       || /[\\#\x00-\x1f\x7f]/.test(request.path)) {
     throw new Error("Invalid daemon path");

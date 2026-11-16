@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { LocalMarkdownImportDriver } from "../src/agent/import-driver";
+import { ConfiguredRunWorker } from "../src/agent/configured-worker";
 import { AgentSessionMissingError } from "../src/agent/errors";
 import type { InboxItem, NativeMessage, NativeSession, PublicClient } from "../src/agent/opencode-adapter";
 import type { AgentConfig } from "../src/daemon/agent-config";
@@ -17,6 +18,7 @@ import { SqliteMarkdownImports } from "../src/storage/markdown-import";
 import { SqliteRejectionRepository } from "../src/storage/rejection";
 import { SqliteRunRepository } from "../src/storage/run";
 import { migrate } from "../src/storage/sqlite";
+import { localStopLane } from "./fixtures/background-local-stop";
 
 const credentials = { user: "test-user-token-0123456789-abcdef012345", ai: "test-agent-token-0123456789-abcdef01234" };
 const history = { actor: "user", mode: "history" } as const;
@@ -343,6 +345,47 @@ class FailureClient extends ImportClient {
 }
 
 const configuredAgent: AgentConfig = { service: { url: "http://127.0.0.1:44991", token: "fixture-only-token" }, directory: "/tmp/opencode/import-agent-fixture", model: { providerID: "fixture", id: "model" }, effort: { quick: "q", standard: "s", thorough: "t" } };
+
+test("direct Import tick registers its entered native flight for local-stop joining, not only driver shutdown", async () => owned(async ({db,imports,sources}) => {
+  const bytes=encode("PRIVATE direct import"), batch=imports.createBatch("user","direct-close");
+  const file=imports.admitFile("user",batch.id,"direct-file","PRIVATE/direct.md",bytes);
+  if (!file.runId) throw new Error("Missing direct import run");
+  const runId=file.runId, client=new ImportClient(["b0","b1"]);
+  const entered=Promise.withResolvers<void>(), release=Promise.withResolvers<void>();
+  const prompt=client.prompt.bind(client);
+  client.prompt=async input => { entered.resolve(); await release.promise; return prompt(input); };
+  const worker=new ConfiguredRunWorker({db,...sources,config:configuredAgent,
+    resolve:async () => ({url:"http://127.0.0.1:44991"}),client:() => client});
+  let joined=false, committed=false, closing:Promise<void>|undefined;
+  const tick=worker.importWorker.tick({fileId:file.id,runId,generation:0,position:0}).then(() => { joined=true; });
+  try {
+    await boundedImportEntry(entered.promise);
+    const before=db.query("SELECT * FROM run_steps WHERE run_id=?").all(runId);
+    closing=localStopLane(worker.importWorker).stopLocalTracking(runId,() => {
+      expect(joined).toBe(true);
+      expect(db.query("SELECT * FROM run_steps WHERE run_id=?").all(runId)).toEqual(before);
+      expect(db.query("SELECT count(*) AS n FROM import_documents").get()).toEqual({n:0});
+      committed=true;
+    });
+    await Promise.resolve(); await Promise.resolve();
+    expect(committed).toBe(false);
+    release.resolve();
+    await Promise.all([tick,closing]);
+    expect(committed).toBe(true);
+    expect(client.prompts).toHaveLength(1);
+    expect(db.query("SELECT count(*) AS n FROM import_documents").get()).toEqual({n:0});
+  } finally {
+    release.resolve(); await tick;
+    if (closing) await closing;
+    worker.pause(); await worker.drain();
+  }
+}), 10000);
+
+async function boundedImportEntry(promise:Promise<void>):Promise<void> {
+  const timer=Promise.withResolvers<never>();
+  const timeout=setTimeout(() => timer.reject(new Error("Owned direct import did not enter native prompt")),4000);
+  try { await Promise.race([promise,timer.promise]); } finally { clearTimeout(timeout); }
+}
 
 async function configured(path: string, client: PublicClient, unavailable = false, onLog: (record: LogRecord) => void = () => {}) {
   const callbacks = new Set<() => void>();

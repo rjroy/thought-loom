@@ -1,3 +1,4 @@
+import { localRunStoppedSql } from "./local-work-stop-fence";
 /** Application-owned SQL shared by export lifecycle commands and immutable-delete guards. */
 export const exportTerminalStatuses = "'completed','interrupted','failed'";
 
@@ -12,7 +13,7 @@ export function exportSettledSql(run: string): string {
 
 export function exportDeletionReadySql(run: string, intent: string): string {
   return `(${run}.status IN (${exportTerminalStatuses}) AND
-    (${exportSettledSql(run)} OR (${exportRestoreFenceSql(`${run}.id`)} AND ${intent}.local_disposition='local-stopped')))`;
+    (${exportSettledSql(run)} OR ${localRunStoppedSql(`${run}.id`)} OR (${exportRestoreFenceSql(`${run}.id`)} AND ${intent}.local_disposition='local-stopped')))`;
 }
 
 /** The retained intent is consumed only by the final run-delete trigger, after all other owned rows. */

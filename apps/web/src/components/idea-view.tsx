@@ -604,7 +604,7 @@ export function IdeaView({ location }: { location: IdeaLocation | null }) {
     navigation.current = { destination: previous.href, href, title: titleOf(currentView.current.thought) };
   }, [previous, location, navigation]);
   useContextualBack(previous?.href ?? back,
-    previous ? `Previous thought: ${previous.title}` : back.startsWith("/browse/") ? "Back to map" : back.startsWith("/browse") ? "Back to list" : back.startsWith("/explore/ask/") ? "Back to search" : back === "/explore" ? "Back to Explore" : "Back to results",
+    previous ? `Previous thought: ${previous.title}` : back === "/settings/background-work" ? "Back to Background work" : back.startsWith("/browse/") ? "Back to map" : back.startsWith("/browse") ? "Back to list" : back.startsWith("/explore/ask/") ? "Back to search" : back === "/explore" ? "Back to Explore" : "Back to results",
     previous ? recordPreviousReturn : undefined);
 
   return (

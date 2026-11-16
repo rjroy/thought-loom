@@ -9,6 +9,7 @@ import { admitWeave } from "../src/storage/weave-admission";
 import { body, bounded, mediaApiFixture, object, text, type MediaApiFixture } from "./fixtures/media-import-api";
 import { insertMediaSource, mediaThought } from "./fixtures/media-source";
 import { sealDailyReview, sealedReviewNow } from "./fixtures/seal-daily-review";
+import { heldLocalStop, localStopLookup } from "./fixtures/background-local-stop";
 
 const stamp = "2030-01-01T00:00:00.000Z";
 const endpoint = (subject = "subject") => `/thoughts/${subject}/reinterpret`;
@@ -42,6 +43,61 @@ const retirement = (subject: string, runId: string) => `${endpoint(subject)}/ret
 const acknowledge = (raw = '{"acknowledgeRemoteUncertainty":true}'): RequestInit => ({
   method: "POST", headers: { "content-type": "application/json" }, body: raw,
 });
+
+for (const boundary of ["execution","cleanup"] as const) test(`local stop joins ordinary ${boundary === "cleanup" ? "cleanupTail, not just execution" : "execution"} before confirmation and fences its late continuation`, async () => mediaApiFixture(async f => {
+  seed(f);
+  const reached = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  let stopRequest: Promise<Response> | undefined;
+  try {
+    if (boundary === "execution") f.client.beforePrompt = async () => { reached.resolve(); await release.promise; };
+    const old = control(await body(await f.request(endpoint(),command(`local-stop-${boundary}`))));
+    if (boundary === "execution") await f.until(() => f.logs.some(record => record.message === "[agent] native call attempt" &&
+      record.context?.runId === old.runId && record.context?.operation === "session.prompt"),"owned prompt entered");
+    else {
+      await f.until(() => f.client.prompts.length === 1,"owned prompt acknowledged");
+      f.client.beforeHistory = async () => { reached.resolve(); await release.promise; };
+      expect((await f.request(`/runs/${old.runId}/stop`,command())).status).toBe(200);
+      await f.until(() => f.logs.some(record => record.message === "[agent] native cancellation attempt" &&
+        record.context?.runId === old.runId),"ordinary cleanup entered");
+    }
+    await bounded(reached.promise,`${boundary} held native boundary`);
+    const before = f.read(db => ({
+      steps:db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(old.runId),
+      cancellation:db.query("SELECT cancellation_state FROM runs WHERE id=?").get(old.runId),
+      knowledge:db.query("SELECT id,parent_id,text FROM thoughts ORDER BY id").all(),
+      replies:db.query("SELECT * FROM run_replies WHERE run_id=?").all(old.runId),
+    }));
+    const held = await heldLocalStop(f,{type:"run",id:old.runId},`held-${boundary}`);
+    stopRequest=held.pending;
+    expect(held.returned()).toBe(false);
+    expect((await f.request(endpoint(),command("while-locally-stopping"))).status).toBe(409);
+    release.resolve();
+    const response = await bounded(stopRequest,"ordinary local stop after full flight join");
+    expect(response.status).toBe(201);
+    const receipt = object((await body(response)).receipt);
+    expect(receipt).toMatchObject({state:"local-tracking-stopped",remoteState:"unknown"});
+    expect(await body(await f.request(localStopLookup({type:"run",id:old.runId},`held-${boundary}`)))).toEqual({receipt});
+    expect(f.read(db => ({
+      steps:db.query("SELECT * FROM run_steps WHERE run_id=? ORDER BY position").all(old.runId),
+      cancellation:db.query("SELECT cancellation_state FROM runs WHERE id=?").get(old.runId),
+      knowledge:db.query("SELECT id,parent_id,text FROM thoughts ORDER BY id").all(),
+      replies:db.query("SELECT * FROM run_replies WHERE run_id=?").all(old.runId),
+    }))).toEqual(before);
+    expect(f.client.prompts).toHaveLength(1);
+    expect(f.client.interrupts).toEqual([]);
+    expect(f.client.inboxCancellations).toEqual([]);
+    const reads = f.client.historyRequests.length;
+    const polls = f.logs.filter(record => record.message === "[supervisor] poll succeeded").length;
+    await f.until(() => f.logs.filter(record => record.message === "[supervisor] poll succeeded").length >= polls+3,"post-close supervisor scans");
+    expect(f.client.historyRequests).toHaveLength(reads);
+    expect(f.client.prompts).toHaveLength(1);
+    expect((await f.request(`/runs/${old.runId}/stop`,command())).status).toBe(200);
+    expect(f.client.interrupts).toEqual([]);
+  } finally {
+    release.resolve(); f.client.beforePrompt=undefined; f.client.beforeHistory=undefined;
+    if (stopRequest) await bounded(stopRequest,"held local-stop request cleanup");
+  }
+}, {configured:true,now:() => sealedReviewNow,script:() => ({version:1,kind:"complete",reply:"PRIVATE LATE REPLY"})}), 20000);
 
 for (const status of ["failed", "interrupted"] as const) test(`explicitly retired ${status} legacy work admits and dispatches a fresh weave without changing native facts`, async () => mediaApiFixture(async f => {
   seed(f);

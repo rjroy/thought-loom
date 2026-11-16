@@ -14,6 +14,7 @@ import { captureDaemon, checkCaptureBrowser, checkCaptureRoute } from "./capture
 import { searchDaemon, checkSearchRoute, checkExploreBrowser, checkExploreGlyphs } from "./explore.runtime";
 import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./browse.runtime";
 import { settingsDaemon, checkSettingsRoutes, checkSettingsBrowser } from "./settings.runtime";
+import { backgroundWorkDaemon, checkBackgroundRoutes, checkBackgroundBrowser, checkBackgroundLostAck, checkBackgroundIdentityChange } from "./background-work.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
 import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser, checkExportAdmissionRace } from "./export.runtime";
@@ -63,7 +64,13 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/explore/page.tsx", "apps/web/src/app/capture/page.tsx",
     "apps/web/src/app/settings/page.tsx", "apps/web/src/app/api/settings/agent-instructions/route.ts",
     "apps/web/src/components/settings-view.tsx", "apps/web/src/components/settings.module.css",
+    "apps/web/src/app/settings/background-work/page.tsx", "apps/web/src/components/background-work-entry.tsx",
+    "apps/web/src/components/background-work-view.tsx", "apps/web/src/components/background-work.module.css",
     "apps/web/src/features/settings/types.ts", "apps/web/src/features/settings/request.ts", "apps/web/src/features/settings/controller.ts",
+    "apps/web/src/features/background-work/types.ts", "apps/web/src/features/background-work/request.ts", "apps/web/src/features/background-work/controller.ts", "apps/web/src/features/background-work/server.ts",
+    "apps/web/src/app/api/background-work/route.ts", "apps/web/src/app/api/background-work/summary/route.ts",
+    "apps/web/src/app/api/background-work/[type]/[id]/route.ts", "apps/web/src/app/api/background-work/[type]/[id]/local-stop/route.ts",
+    "apps/web/src/app/api/background-work/[type]/[id]/local-stop/by-key/[key]/route.ts",
     "apps/web/src/server/agent-instructions.ts",
     "apps/web/src/app/api/capture/route.ts", "apps/web/src/features/capture/submission.ts",
     "apps/web/src/app/api/search/route.ts", "apps/web/src/server/search.ts",
@@ -268,13 +275,15 @@ async function main(): Promise<void> {
   const fixtureSearch = searchDaemon(token);
   const fixtureBrowse = browseDaemon(token);
   const fixtureSettings = settingsDaemon(token);
+  const fixtureBackgroundWork = backgroundWorkDaemon(token);
   const fixtureIdea = ideaDaemon(token);
   const fixtureEvolve = evolveDaemon(token);
   const fixtureExport = exportDaemon(token);
   const fixtureImport = importDaemon(token);
   const fixtureAgenticSearch = agenticSearchDaemon(token);
   daemon = createServer((request, response) => {
-    if (request.url?.startsWith("/settings/agent-instructions")) void fixtureSettings.handler(request, response);
+    if (request.url?.startsWith("/background-work")) void fixtureBackgroundWork.handler(request, response);
+    else if (request.url?.startsWith("/settings/agent-instructions")) void fixtureSettings.handler(request, response);
     else if (request.url?.startsWith("/browse/thoughts") || /^\/thoughts\/[^/]+\/neighborhood(?:\?|$)/.test(request.url ?? "")) void fixtureBrowse.handler(request, response);
     else if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
@@ -426,6 +435,29 @@ async function main(): Promise<void> {
     }
     const host = `127.0.0.1:${port}`;
     const probe = (method: string, path: string, headers: string, body = "") => raw(port, `${method} ${path} HTTP/1.0\r\n${headers}Connection: close\r\n\r\n${body}`);
+    const backgroundCase = process.env.THOUGHTLOOM_TEST_BACKGROUND_WORK;
+    if (backgroundCase) {
+      assert.ok(["routes","browser","all"].includes(backgroundCase), "Unknown focused background-work case");
+      const failures: string[] = [];
+      const check = async (name:string, action:() => Promise<void>) => {
+        try { await action(); } catch (error) { failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
+      };
+      if (backgroundCase !== "browser") await check("routes",() => checkBackgroundRoutes({origin,host,probe,daemon:fixtureBackgroundWork,token}));
+      if (backgroundCase !== "routes") {
+        const browser = await chromium.launch({executablePath:"/usr/bin/chromium",headless:true});
+        try {
+          const page = await browser.newPage({viewport:{width:1440,height:900}});
+          page.setDefaultTimeout(5000);
+          try {
+            await check("navigation and states",() => checkBackgroundBrowser(page,fixtureBackgroundWork,{origin,daemonOrigin,token}));
+            await check("changed identity",() => checkBackgroundIdentityChange(page,fixtureBackgroundWork,origin));
+            await check("lost acknowledgement",() => checkBackgroundLostAck(page,fixtureBackgroundWork,origin));
+          } finally { fixtureBackgroundWork.release(); await page.close(); }
+        } finally { await browser.close(); }
+      }
+      assert.deepEqual(failures,[],"Background-work checks failed");
+      return;
+    }
     if (process.env.THOUGHTLOOM_TEST_GUARDS === "1") {
       const additionalHost = new URL(additionalOrigin).host;
       for (const [allowedOrigin, allowedHost, otherOrigin] of [[origin, host, additionalOrigin], [additionalOrigin, additionalHost, origin]] as const) {

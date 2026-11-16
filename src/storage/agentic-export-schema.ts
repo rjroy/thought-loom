@@ -54,7 +54,8 @@ export function migrateExportLifecycle(db: Database): void {
     CREATE TRIGGER IF NOT EXISTS export_intents_retained_insert BEFORE INSERT ON export_intents
     WHEN NEW.local_disposition!='retained'
     BEGIN SELECT RAISE(ABORT,'new export must be retained'); END;
-    CREATE TRIGGER IF NOT EXISTS export_intents_disposition BEFORE UPDATE OF local_disposition ON export_intents
+    DROP TRIGGER IF EXISTS export_intents_disposition;
+    CREATE TRIGGER export_intents_disposition BEFORE UPDATE OF local_disposition ON export_intents
     WHEN NOT EXISTS(SELECT 1 FROM runs r WHERE r.id=OLD.run_id AND r.kind='export' AND r.status IN (${exportTerminalStatuses}) AND
       ((OLD.local_disposition='retained' AND NEW.local_disposition='local-stopped' AND ${exportRestoreFenceSql("r.id")})
        OR (OLD.local_disposition IN ('retained','local-stopped') AND NEW.local_disposition='deleting' AND ${exportDeletionReadySql("r","OLD")})))

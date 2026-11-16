@@ -22,7 +22,7 @@ These are server-side service credentials, not user accounts. The browser client
 - Text and reference fields must satisfy domain validation. Most creation fields are assigned by commands, not supplied by clients.
 - Ordinary record read routes accept only the optional `scope` query parameter, once. Browse and Search have their own parameters below. The command routes below reject query parameters.
 - Successful creates normally return `201`; queued file admissions and media interpretation retries use the `202`/replay contracts below. Reads and title changes return `200` JSON; rejection/restoration returns `204` with no body.
-- Ordinary record collections are plain arrays. Search returns results and filter counts; import and search-session catalogs have bounded pagination.
+- Ordinary record collections are plain arrays. Search returns results and filter counts; import, search-session and background-work catalogs have bounded pagination.
 
 ### Read scopes
 
@@ -37,6 +37,178 @@ Normal connection reads also exclude connections whose endpoints are rejected an
 User `history` and `show-rejected` thought and connection reads add `rejected: boolean`. This reports explicit rejection of that record, not rejection of a connection's endpoints. An active connection to a rejected thought can therefore have `rejected: false` in inspection reads. Normal thought/connection reads retain their existing record shapes, without this field. Inspection metadata does not change immutable thought content.
 
 AI can still read an active descendant of a rejected thought, but its returned `parentId` becomes null and rejected source IDs are removed. Persisted ancestry is not changed by this projection.
+
+## Background work reads
+
+These user-only daemon reads expose control metadata across the library. They
+do not offer inspection scopes, write state, contact a native agent or discover
+an agent service. The owned runtime also installs the separate
+[durable local-stop command](#stop-local-tracking) below, with or without agent
+configuration. These backend contracts do not imply that the Settings entry or
+background-work screen is implemented. Authenticated responses use
+`Cache-Control: private, no-store`.
+
+| Method and path | Result |
+| --- | --- |
+| `GET /background-work/summary` | `200` with `{"counts":{"needs-attention":0,"in-progress":0,"locally-closed":0}}` when there is no listed work. Counts cover each entire view, not just a loaded page. |
+| `GET /background-work` | `200` with `{items, nextCursor}`. |
+| `GET /background-work/runs/:id` | `200` with `{item}` for a known run, retained rowless Search cleanup identity or local-stop record surviving owner deletion. |
+| `GET /background-work/import-files/:id` | `200` with `{item}` for a known import file, including one linked to a run. |
+
+Unknown detail identities return `404`. Missing or invalid credentials return
+`401`, and the AI role receives `403`. Unknown or repeated query parameters,
+invalid values and malformed or mismatched cursors return `400`. Summary and
+detail routes accept no query parameters.
+
+The list accepts only these singleton parameters:
+
+| Parameter | Values and default |
+| --- | --- |
+| `view` | `needs-attention` (default), `in-progress`, or `locally-closed`. |
+| `limit` | Decimal integer from 1 through 100, default 25. |
+| `cursor` | Opaque continuation from the preceding page, at most 2048 characters. |
+
+Attention includes uncertainty, pending cancellation, failures and
+interruptions, including historically settled Weaver/Evolve work whose
+recorded journal does not prove safe cancellation. In-progress includes queued,
+submitting and running work, and runless waiting import files. A pending
+cancellation takes precedence over an otherwise active status. A durable local
+stop instead places its work in `locally-closed`, without claiming remote
+settlement or replacing its recorded failure/cancellation reason.
+
+Results include Weaver, Evolve, Search, Export and import work, including
+automatic work and unresolved Search cleanup retained after its run is purged.
+An import file linked to a run is listed once as that run, not again as a file;
+its file identity remains available through the detail route. Successful
+settled work and restore-fenced inert work without a local-stop record are
+excluded from the views and counts. A known restore-fenced target can still be
+read through its safe detail route. Detail can also return known terminal items
+not present in a view.
+
+Each item has:
+
+| Field | Meaning |
+| --- | --- |
+| `target` | `{type:"run" \| "import-file", id}`. |
+| `kind` | `weave`, `evolve`, `search`, `export`, or `import`. |
+| `status` | Recorded run status (`queued`, `submitting`, `running`, `uncertain`, `completed`, `interrupted`, `failed`); import-file outcome (`imported`, `skipped-identical`, `skipped-changed`, `failed`, `interrupted`) or `waiting`; or retained rowless Search cleanup state (`pending`, `settled`, `ownership-conflict`). A receipt-only deleted owner uses the local `interrupted` projection, not a recovered native outcome. |
+| `createdAt` | Original run or import-file creation timestamp, or null for rowless Search cleanup or a receipt-only identity after owner deletion. Never the time of the last poll or a guessed waiting-since time. |
+| `owner` | `{type, id, title}`, where type is `thought`, `search-session`, `import`, `export`, or `unknown`; ID and title can be null. |
+| `reason` | Null or `uncertain`, `cancellation-pending`, `failed`, `interrupted`, `ownership-conflict`, `waiting`, or `unverified`. |
+| `actions` | `{checkStatus:true, stopLocalTracking:boolean}`. A list action is advisory; load fresh detail before confirmation. Without a runtime local-stop controller, `stopLocalTracking` is always false. |
+| `localStop` | Detail-only optional `{identity,eligible,reason}` when the controller can identify the target. Identity is defined below; reason is null when eligible, otherwise `already-stopped`, `already-inert`, `nothing-outstanding` or `owner-unavailable`. |
+
+Owner titles follow normal visibility: a rejected thought or deleted Search
+session does not reveal its title. Items do not expose thought bodies, prompts,
+queries, requests, outputs, import filenames or paths, native bindings, or raw
+errors. A reason describes retained state, not a prediction of retry or remote
+settlement. There is no waiting-since or next-retry timestamp in this DTO.
+In particular, `unverified` is not proof that native work stopped.
+
+The list sorts known creation times oldest first, then null times, with ties
+ordered by target type and ID. It never substitutes a Search session timestamp
+for a purged run. Cursors are authenticated with a process-local key and bind
+the effective view and limit; repeat both on continuation, and start over after
+a daemon restart. Pagination is a live keyset walk, not a snapshot. Changes
+after the cursor boundary can appear on later pages; changes before it require
+a fresh listing, and work can leave a view between requests.
+
+### Stop local tracking
+
+This is a permanent **local** decision, not ordinary Stop, interpretation
+retirement, remote cancellation settlement or deletion. It supports all five
+run kinds, Search cleanup whose run was purged, linked import files and runless
+import waiters. Load the exact target's fresh detail and require
+`localStop.eligible`; do not infer authority from a list row or terminal status.
+Read-only repository construction does not install the command routes.
+
+| Method and path | Contract |
+| --- | --- |
+| `POST /background-work/runs/:id/local-stop` | Required `Idempotency-Key` and JSON command below. New decision: `201 {receipt}`; exact replay: `200 {receipt}`. |
+| `POST /background-work/import-files/:id/local-stop` | Same contract, with the file's exact reservation identity. |
+| `GET /background-work/runs/:id/local-stop/by-key/:key` | `200 {receipt}` or `200 {receipt:null}` for a known target/key; unknown target: `404`. No native call or write. |
+| `GET /background-work/import-files/:id/local-stop/by-key/:key` | Same recovery-read contract for the original file target. |
+
+All four routes are user-only and reject query parameters. The key uses the
+existing case-sensitive `[A-Za-z0-9._:-]{1,128}` grammar, without trimming or
+normalization. POST requires `application/json` (optional UTF-8 charset), a body
+of at most 4096 bytes, and exactly:
+
+```json
+{
+  "acknowledgeRemoteUncertainty": true,
+  "expected": {"type":"run","id":"<run-id>","kind":"weave","generation":"3"}
+}
+```
+
+Copy `expected` from the fresh detail, not from client-generated IDs or native
+metadata. Its exact union is:
+
+```text
+{type:"run", id, kind:"weave"|"evolve"|"export"|"search"|"import", generation:string|null}
+{type:"import-file", id, importId, runId:string|null, generation:string|null,
+ waitingOnFileId:string|null, outcome:null|"imported"|"skipped-identical"|"skipped-changed"|"failed"|"interrupted"}
+```
+
+Generations are canonical nonnegative decimal strings within signed int64;
+Search additionally uses the application's safe-integer bound. A run generation
+is null only for rowless Search cleanup. A file generation is null exactly when
+`runId` is null; a linked file cannot also have a waiting-on file. Clients supply
+no timestamp, native session/prompt identity or receipt fields.
+
+The receipt has exactly `{target,requestKey,identity,stoppedAt,
+state:"local-tracking-stopped",remoteState:"unknown"}`. `target` is the original
+`{type,id}`; `identity` is the original confirmed expectation, and `stoppedAt`
+is the daemon's recorded local decision time, not a remote completion time.
+Linked run/file identities share a fence, not interchangeable receipt targets:
+retain the original route, key and expected identity.
+
+Exact replay returns the original receipt before fresh eligibility checks,
+including after owner rejection or authorized Search/export deletion. Another
+key for that stopped work, changed expectation, stale generation/reservation,
+wrong target/kind or newly ineligible target returns `409` without retargeting.
+Missing targets return `404`; missing/invalid credentials return `401`, AI role
+`403`, invalid keys/identities/acknowledgment or extra fields `400`, oversized
+bodies `413`, unsupported content type `415`, and unexpected failures a sanitized
+`500`. Conflict responses use the ordinary `{error:"Conflict"}` shape, not a
+new durable reason or eligibility snapshot.
+
+**An absent receipt is only a read-time observation.** `200 {receipt:null}`
+does not prove that an earlier delayed POST cannot later commit. A timeout or
+failed read does not prove failure either. After uncertain acknowledgment,
+retain the exact target/key/expected payload and read that same receipt; never
+automatically replay the command, change keys or stop a replacement identity.
+Receipt reads remain user-only control access after rejection/deletion and
+expose no owner title, thought content, prompt, output, path or native binding.
+
+The runtime gates new local entry synchronously, joins actual entered execution
+and cleanup promises (including Search ACK/cleanup tails and direct/driver import
+work), then revalidates and transactionally records the receipt/fence. Success
+does not precede that join. It starts no native interrupt or cancellation call.
+An already-entered remote call may finish while the local command waits;
+subsequent application callbacks cannot publish or restart cleanup.
+
+The durable fence prevents future execution, late publication and **all** local
+retries for that identity, including ordinary cancellation, Search cleanup,
+import processing and waiter promotion, across restart. Active runs become
+locally interrupted without changing generation; pending import files become
+interrupted while retaining accepted payloads. Terminal statuses, native facts,
+cancellation/step/cleanup journals, saved output and drafts are not rewritten
+into success, settlement or a new reply. Ordinary Stop afterward cannot reopen
+the stopped work. Retirement remains different: its lawful cleanup continues.
+
+Only the selected work's blockers/reservation are released; a Search turn's
+active slot closes. Stopping one import holder does not stop its sibling files
+or waiters, which can proceed under normal admission; stopping a waiter cannot
+promote it. Evolve's independently owned discovery runs are not cascaded by this
+command. Existing queued work may become runnable, but no replacement run,
+interpretation, import or export is automatically admitted by the command.
+New user work remains a separate action subject to other blockers. Export Delete
+is also separate: its metadata can become `ready` after a local stop even while
+remote cancellation remains pending. Search Delete retains the fence/receipt
+and any existing cleanup facts without starting new cleanup for stopped work.
+None of these actions proves the remote agent stopped, withdraws sent context
+or undoes external tool effects.
 
 ## Additional agent instructions
 
@@ -256,7 +428,7 @@ All Agentic export routes are user-only. AI credentials receive `403` and missin
 
 Each item contains `id`, `status`, `createdAt`, the original `request`, `effort`, `restored` and `deletionState` (`stop-required`, `settling`, or `ready`). Legacy export runs without retained intent are not catalog entries. History exposes neither native identity nor protocol input. Results use a live descending `(createdAt,id)` keyset, not a snapshot. The opaque process-authenticated cursor binds the endpoint and limit; omitting the limit on continuation preserves it. Restart requires a fresh listing. Unknown or repeated parameters, invalid limits and malformed or mismatched cursors return `400`.
 
-Use `POST /runs/:id/stop` before deleting active work, then wait for cancellation settlement until metadata says `ready`. For a restored export, Stop acknowledges local discard without contacting the old provider; it does not imply remote work stopped. Local deletion removes the export's execution history and Markdown while preserving thoughts and unrelated records. It does not erase provider history, backups, or SQLite free pages/WAL.
+Use `POST /runs/:id/stop` before deleting active work, then wait for cancellation settlement until metadata says `ready`. Alternatively, an explicit [Stop local tracking](#stop-local-tracking) can acknowledge permanent local closure despite unknown remote work; Delete is still a separate command. For a restored export, Stop acknowledges local discard without contacting the old provider; it does not imply remote work stopped. Local deletion removes the export's execution history and Markdown while preserving thoughts, unrelated records and any durable local-stop receipt. It does not erase provider history, backups, or SQLite free pages/WAL.
 
 ### Admission: `POST /exports/agentic`
 
@@ -302,7 +474,7 @@ Fresh admission returns `202`; an exact subject/key replay returns `200` with th
 }
 ```
 
-Eligibility reasons are `null`, `subject-rejected`, `work-active`, `work-unsettled`, or `work-unverified`. Eligibility is advisory; admission transactionally checks all interpretation-capable weave work for the subject. A text title-clear job participates; genuinely media-title-only and automatic connection-only jobs do not fulfill or block interpretation. Unverified historical cancellation settlement cannot itself authorize replacement work. With agent configuration, the existing cleanup worker can re-observe the saved native identity and journal; positive terminal proof clears that blocker without resubmitting or reviving the old run. Missing or conflicting evidence remains blocked unless the user explicitly retires that specific run as described below. A fresh interpretation still requires an explicit new key; replaying the old key returns its old receipt. Configuration absence permits durable queue admission without native execution.
+Eligibility reasons are `null`, `subject-rejected`, `work-active`, `work-unsettled`, or `work-unverified`. Eligibility is advisory; admission transactionally checks all interpretation-capable weave work for the subject. A text title-clear job participates; genuinely media-title-only and automatic connection-only jobs do not fulfill or block interpretation. Unverified historical cancellation settlement cannot itself authorize replacement work. With agent configuration, the existing cleanup worker can re-observe the saved native identity and journal; positive terminal proof clears that blocker without resubmitting or reviving the old run. Missing or conflicting evidence remains blocked unless the user explicitly retires that specific eligible run as described below or uses [Stop local tracking](#stop-local-tracking). A fresh interpretation still requires an explicit new key; replaying the old key returns its old receipt. Configuration absence permits durable queue admission without native execution.
 
 New interpretations are immutable children of the selected thought, not replacements for earlier output. Each run retains its own Full reply through the existing response readers. A media reinterpretation can create one new interpretation for that run; a historical child cannot satisfy completion. If it produces no new interpretation, the run fails while retaining its complete limitation reply. Ordinary text/URL weaving may finish honestly with a fallback reply and no new thoughts.
 
@@ -323,6 +495,10 @@ These user-only, private/no-store control routes select one existing weave by it
 POST requires exactly `{"acknowledgeRemoteUncertainty":true}` and returns `200 {runId, retiredAt, remoteState:"unknown", eligibility}`. Repeating it returns the same recorded timestamp. Only failed or interrupted, intent-backed interpretation-capable weaves can be retired. Active, uncertain, completed, wrong-subject, missing-intent, media-title-only and connection-only runs cannot be retired. Missing or mismatched identities return `404`; an ineligible run returns `409`. Invalid bodies and query parameters return `400`; anonymous and AI callers receive `401` and `403` respectively. Retirement is available without agent configuration while the daemon holds its execution lease.
 
 Retirement joins the run's local execution flight, permanently fences local execution and publication, and removes only that run as a blocker. It does not create a new run or change cancellation and native journal facts. Existing lawful cancellation cleanup remains best effort. The remote operation may still be running or cause external effects, including overlapping later work. Other blockers still apply, and already queued automatic work can resume under ordinary serialization.
+
+Retirement does **not** end future cleanup retries. Use the separately confirmed
+[Stop local tracking](#stop-local-tracking) decision for that stronger local
+boundary; it is not an alias for this interpretation-only command.
 
 ### Evolve: `POST /thoughts/:id/evolve`
 
@@ -427,6 +603,11 @@ Native completion is not local completion: a response may still need validation 
 ### Stop: `POST /runs/:id/stop`
 
 Body: `{}`. Returns the same run-status shape after local authority is fenced, without waiting for native cancellation to settle. Confirmed saved thoughts remain saved; Stop does not reject or undo them. Pending native cancellation is reconciled separately. A safely identified unfinished reply can remain interrupted; raw machine JSON is not published as partial prose. Weaver/Evolve native tools run in a trusted operator environment; Stop cannot undo their external side effects. See the [tool-access policy](server-startup.md#agent-configuration).
+
+This Stop is not [Stop local tracking](#stop-local-tracking): ordinary Stop
+retains cleanup retries. For an already locally stopped identity, it is an
+idempotent control read and cannot rewrite native/cancellation facts, cascade
+into related work or re-enable local retries.
 
 Stopping an Evolve run also transactionally interrupts its still-pending connection-only owners for saved contributions/developments, using their durable creation origins. This fences held screening and late results across restart; completed connections remain. It is not a promise of immediate remote cancellation. The response continues to describe the selected Evolve run only.
 

@@ -31,6 +31,7 @@ export class LocalMarkdownImportDriver {
     this.startTimer=dependencies.startTimer;
   }
   private readonly startTimer: LocalImportDependencies["startTimer"];
+  stopLocalTracking<T>(runId:string,commit:()=>T):Promise<T> { return this.worker.stopLocalTracking(runId,commit); }
   start(): void {
     if (this.paused || this.cancelTimer) return;
     this.cancelTimer=this.startTimer(() => {
@@ -77,7 +78,7 @@ export class LocalMarkdownImportDriver {
     if (!this.paused) throw new Error("Local import drain requires pause");
     const scan = await Promise.allSettled(this.flight ? [this.flight] : []);
     const files = await Promise.allSettled([...this.flights.values()]);
-    return [...scan,...files];
+    return [...scan,...files,...await this.worker.drain()];
   }
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;

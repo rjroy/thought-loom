@@ -12,6 +12,7 @@ import { requireCurrentSearchPublication, requireSearchFullReads, searchPublicat
 import { retainedSearchSuccessorClock, type SqliteSearchPromptClock } from "./search-prompt-clock";
 import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
@@ -148,6 +149,7 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
   }
   settleCancellation(runId: string): void {
     this.transaction("settle cancellation",runId,() => {
+      assertRunLocallyTracked(this.db,runId);
       assertRunNotRestoreFenced(this.db,runId);
       const run = this.require(runId);
       if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,runId);

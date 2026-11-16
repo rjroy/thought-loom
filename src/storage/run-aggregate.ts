@@ -20,6 +20,7 @@ import { interruptOrdinaryRun, issuedRunThoughts, logCommittedInterruption, ordi
 import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { requireDailyReviewMembership } from "./daily-review-authority";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = RunVisibility;
@@ -85,6 +86,7 @@ export class SqliteRunAggregate {
     return true;
   }
   protected active(claim: Claim): RunRecord {
+    assertRunLocallyTracked(this.db,claim.runId);
     assertRunNotRestoreFenced(this.db,claim.runId);
     if (this.db.query("SELECT 1 FROM runs WHERE id=? AND weave_retired_at IS NOT NULL").get(claim.runId)) throw new RunFenceError();
     const run = this.require(claim.runId);
@@ -269,6 +271,7 @@ export class SqliteRunAggregate {
     if (response.thoughtIds.some(id => !visible({kind:"thought",id}))) throw new RunNotFoundError();
   }
   protected finalInterrupt(run: RunRecord, reason: "stopped" | "context-invalidated" | "failed" = "stopped", diagnosticReason: InterruptionReason | undefined = reason === "failed" ? undefined : reason): void {
+    assertRunLocallyTracked(this.db,run.id);
     assertRunNotRestoreFenced(this.db,run.id);
     if (diagnosticReason) this.noteInterruption(run,diagnosticReason);
     if (run.kind === "search") {

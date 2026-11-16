@@ -24,6 +24,7 @@ import { SqliteSearchCleanup } from "../storage/search-cleanup";
 import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservation } from "./search-cleanup-contract";
 import { SqliteSearchRetention } from "../storage/search-retention";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
+import { assertRunLocallyTracked, isRunLocallyStopped } from "../storage/local-work-stop-fence";
 
 /** Native calls are outside SQLite transactions. Production supplies OpenCodeAdapter. */
 export interface WorkerNative {
@@ -126,6 +127,7 @@ export class RunWorker {
   // Technical cadence only. Durable journals remain authoritative; a new worker reconciles immediately after restart.
   private readonly cancellationRetries = new Map<string,CancellationRetry>();
   private readonly retirements = new Map<string,Promise<unknown>>();
+  private readonly localStops = new Map<string,Promise<unknown>>();
   private readonly cleanup: SqliteSearchCleanup;
   private retention: SqliteSearchRetention | undefined;
   private readonly cleanupListeners = new Set<() => void>();
@@ -148,14 +150,14 @@ export class RunWorker {
     this.cleanup = new SqliteSearchCleanup(db,dependencies.executionOwner,this.logger);
   }
   tick(runId: string, beforePoll?: () => Promise<void>): Promise<void> {
-    if (this.paused || !this.dependencies.native || this.retirements.has(runId)) return Promise.resolve();
+    if (this.paused || !this.dependencies.native || this.retirements.has(runId) || this.localStops.has(runId)) return Promise.resolve();
     const existing = this.flights.get(runId);
     if (existing) return existing.cleanupTail;
     // Defer execution until the in-flight entry exists; simultaneous polls share one boundary, not two submissions.
     const execution = Promise.resolve().then(async () => {
       if (this.paused) return;
       this.dependencies.executionOwner?.assertHeld();
-      if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
+      if (isRunRestoreFenced(this.dependencies.db,runId) || isRunLocallyStopped(this.dependencies.db,runId)) { this.forget(runId); return; }
       if (this.cleanup.isPurged(runId)) return; // Cancellation-only identity, never infer an execution run/binding from its outbox.
       if (beforePoll) await beforePoll();
       if (!this.paused && !this.flights.get(runId)?.retired) {
@@ -177,9 +179,11 @@ export class RunWorker {
   }
   private localFence(runId: string): void {
     if (this.paused) throw new WorkerPaused();
+    if (this.localStops.has(runId)) throw new RunFenceError("Local stop is joining entered work");
     if (this.flights.get(runId)?.retired) throw new WorkerRetired();
     this.dependencies.executionOwner?.assertHeld();
     assertRunNotRestoreFenced(this.dependencies.db,runId);
+    assertRunLocallyTracked(this.dependencies.db,runId);
   }
   private transport(): WorkerNative {
     const factory = this.dependencies.native;
@@ -468,6 +472,9 @@ export class RunWorker {
   }
   private async cleanupRun(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
+    if (this.localStops.has(runId) || isRunLocallyStopped(this.dependencies.db,runId)) {
+      this.forget(runId); this.cancellationRetries.delete(runId); return;
+    }
     this.dependencies.executionOwner?.assertHeld();
     if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); this.cancellationRetries.delete(runId); return; }
     const run = this.runs.get(runId);
@@ -485,6 +492,7 @@ export class RunWorker {
       if (!native.cancelSearch) return;
       const authorize = () => {
         if (this.paused) throw new WorkerPaused();
+        this.localFence(runId);
         assertRunNotRestoreFenced(this.dependencies.db,runId);
         this.cleanup.authorize(identity);
       };
@@ -498,6 +506,21 @@ export class RunWorker {
   }
   /** Trusted retention hook; this is not cancellation or a change to execution ownership. */
   forgetSearchClock(runId: string): void { this.searchClock.forget(runId); }
+  /** Gate synchronously, then join the captured execution AND cleanup tail; never await a newly-created lane or self. */
+  stopLocalTracking<T>(runId:string,commit:()=>T):Promise<T> {
+    const preceding=this.localStops.get(runId), flight=this.flights.get(runId);
+    const operation=Promise.resolve().then(async () => {
+      if (preceding) await preceding.catch(() => {});
+      if (flight) await flight.cleanupTail.catch(() => {});
+      if (this.paused) throw new WorkerPaused();
+      this.dependencies.executionOwner?.assertHeld();
+      const result=commit();
+      this.forget(runId); this.cancellationRetries.delete(runId);
+      return result;
+    });
+    this.localStops.set(runId,operation);
+    return operation.finally(() => { if (this.localStops.get(runId) === operation) this.localStops.delete(runId); });
+  }
   /** Join this run's real execution, then commit synchronously while new ticks are excluded. */
   retireWeave<T>(runId: string, commit: () => T): Promise<T> {
     const preceding = this.retirements.get(runId);

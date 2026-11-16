@@ -6,6 +6,7 @@ import { RunConflictError } from "../domain/run";
 import type { MaterialKind } from "../domain/thought";
 import { assertBindingPermissions, normalizeBinding, type AgentBinding } from "../agent/binding";
 import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 /** One run identity/projection shared by aggregate operations and transactional weave admission. No initialization here. */
 export function readRun(db: Database, id: string): RunRecord | null {
@@ -29,6 +30,7 @@ export function readAgentBinding(db: Database, runId: string): AgentBinding | nu
 }
 
 export function insertRun(db: Database, run: RunRecord, intent: WeaveIntent | null = null, scheduleKind: WeaveScheduleKind | null = null): void {
+  assertRunLocallyTracked(db,run.id);
   assertRunNotRestoreFenced(db,run.id);
   if (scheduleKind !== null) {
     if (run.kind !== "weave" || intent === null) throw new RunConflictError("Scheduled weave identity required");

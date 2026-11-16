@@ -44,6 +44,9 @@ import { ExportHistoryService } from "../domain/export-history";
 import { SqliteAgenticExports } from "../storage/agentic-export";
 import { SqliteDailyReviews } from "../storage/daily-review";
 import { SqliteScheduledTitles } from "../storage/title-scheduling";
+import { SqliteBackgroundWork } from "../storage/background-work";
+import { SqliteLocalWorkStops } from "../storage/local-work-stop";
+import type { LocalStopController } from "../domain/local-work-stop";
 
 /** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
@@ -206,9 +209,20 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
       imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer,worker:configuredWorker.importWorker});
     } else imports=new LocalMarkdownImportDriver({db,...scheduling,startTimer});
     const reinterpretationStore = new SqliteReinterpretations(db,scheduling), runWorker = worker;
+    const stopStore=new SqliteLocalWorkStops(db,scheduling), importDriver=imports;
+    const localStops:LocalStopController={
+      snapshot:target => stopStore.snapshot(target),byKey:(target,key) => stopStore.byKey(target,key),
+      stop:(target,key,expected) => {
+        const plan=stopStore.prepare(target,key,expected);
+        const commit=() => { if (!acceptingRequests) throw new Error("Daemon stopping"); owner.assertHeld(); return plan.commit(); };
+        if (plan.runId === null) return Promise.resolve(commit());
+        return (expected.type === "import-file" || expected.kind === "import" ? importDriver : runWorker).stopLocalTracking(plan.runId,commit);
+      },
+    };
     const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       exportHistory:new ExportHistoryService(new SqliteAgenticExports(db,scheduling)),
+      backgroundWork:new SqliteBackgroundWork(db,diagnostics,localStops),localStops,
       agentInstructions:new SqliteAgentInstructions(db,diagnostics),
       imports:{commands:new SqliteMarkdownImports(db,scheduling),inspection:new SqliteImportInspection(db,scheduling),maxBytes:valid.importMaxBytes ?? 1048576},
       reinterpretations:{commands:new ReinterpretationService(reinterpretationStore),notify:() => supervisor?.notifyWork(),retirement:{

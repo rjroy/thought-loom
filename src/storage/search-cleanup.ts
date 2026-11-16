@@ -10,6 +10,7 @@ import { parseSearchCleanupEvidence, mergeCleanupFacts, type SearchCleanupEviden
 import { readSearchCleanupSnapshot } from "./search-cleanup-snapshot";
 import { immediate } from "./transaction";
 import { assertRunNotRestoreFenced } from "./restore-fences";
+import { assertRunLocallyTracked } from "./local-work-stop-fence";
 
 interface CleanupRow {
   readonly run_id: string; readonly session_id: string; readonly binding_json: string; readonly last_prompt_id: string;
@@ -50,6 +51,7 @@ export class SqliteSearchCleanup {
       WHERE c.run_id=? AND s.deleted_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runs WHERE id=c.run_id)`).get(runId) !== null;
   }
   prepare(runId: string): SearchCleanupIdentity | null {
+    assertRunLocallyTracked(this.db,runId);
     assertRunNotRestoreFenced(this.db,runId);
     // Non-search/active ticks take no additional write lock. The authoritative check repeats inside the snapshot transaction.
     if (!this.retained(runId) && !this.isPurged(runId)) return null;
@@ -69,6 +71,7 @@ export class SqliteSearchCleanup {
   }
   /** Seal before input erasure. Existing Stop/rejection/legacy records remain byte-identical, never replaced or backfilled. */
   sealInTransaction(runId: string): void {
+    assertRunLocallyTracked(this.db,runId);
     if (!this.db.inTransaction) throw new SearchCleanupJournalError();
     assertRunNotRestoreFenced(this.db,runId);
     this.owner?.assertRegistered(this.db);
@@ -91,6 +94,7 @@ export class SqliteSearchCleanup {
     this.logger.info("[search cleanup] snapshot applied in transaction",{runId});
   }
   private current(identity: SearchCleanupIdentity): CleanupRecord {
+    assertRunLocallyTracked(this.db,identity.runId);
     assertRunNotRestoreFenced(this.db,identity.runId);
     const row = this.row(identity.runId);
     if (!row || row.state !== "pending" || row.session_id !== identity.sessionId || row.binding_json !== identity.bindingJson ||
@@ -181,6 +185,7 @@ export class SqliteSearchCleanup {
   }
   /** Transport ACK only, before an active-claim post-await fence. No row creation, prose, execution or settlement. */
   recordAdmission(fact: SearchAdmissionFact): void {
+    assertRunLocallyTracked(this.db,fact.runId);
     assertRunNotRestoreFenced(this.db,fact.runId);
     if (!this.owner) return;
     this.owner.assertRegistered(this.db);

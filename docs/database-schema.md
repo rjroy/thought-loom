@@ -196,9 +196,63 @@ These tables are initialized by core migration through [`run-schema.ts`](../src/
 | `cancellation_state` | `TEXT` | `none` (default), `pending`, or `settled`; remote cancellation settlement is distinct from local interruption. |
 | `weave_retired_at` | `TEXT`, nullable | Write-once user-acknowledged retirement time for one failed or interrupted interpretation weave. Null is the default for old and new runs; it is not native settlement evidence. |
 
-Identity, kind, initial session/prompt identities, creation time and input identity are trigger-protected. Retirement cannot be cleared or rewritten, and a retired run's status cannot change. Deleting runs is blocked except for the [narrow tombstoned-search purge](#search-retention-and-purge-guards); other run kinds remain protected. Search input and weave-subject fields must be null. Status and generation otherwise remain mutable through guarded repository operations, not arbitrary model instructions. The internal `RunRecord.promptId` and `nativeState` project the current ordered step, rather than duplicating its native completion evidence in `runs`.
+Identity, kind, initial session/prompt identities, creation time and input identity are trigger-protected. Retirement cannot be cleared or rewritten, and a retired run's status cannot change. Deleting runs is blocked except for the [narrow tombstoned-search purge](#search-retention-and-purge-guards) and [authorized export purge](#agentic-export-artifacts); other run kinds remain protected. Search input and weave-subject fields must be null. Status and generation otherwise remain mutable through guarded repository operations, not arbitrary model instructions. The internal `RunRecord.promptId` and `nativeState` project the current ordered step, rather than duplicating its native completion evidence in `runs`.
 
 Evolve contribution creation and run admission commit together. The persisted input link identifies the exact contribution after restart and constrains where the run may add developments. A claim contains the run ID and generation. Claims currently have no time-based expiry; this is ownership fencing, not a model-runtime or effort quota.
+
+### `local_work_stops`
+
+[`local-work-stop-schema.ts`](../src/storage/local-work-stop-schema.ts) adds
+this append-only local decision table in the core migration transaction.
+Existing databases start with no records: interruption, pending/settled
+cancellation and interpretation retirement never imply this user decision.
+
+| Column | Type | Constraint / meaning |
+| --- | --- | --- |
+| `target_kind` | `TEXT` | `run` or `import-file`; first primary-key component. |
+| `target_id` | `TEXT` | Exact command target; second primary-key component. |
+| `request_key` | `TEXT` | Original case-sensitive `Idempotency-Key`; application grammar `[A-Za-z0-9._:-]{1,128}`. Not a globally unique key. |
+| `identity_json` | `TEXT` | JSON-valid exact canonical run or import-reservation identity from the confirmed detail; see the [DTO contract](daemon-api.md#stop-local-tracking). |
+| `stopped_at` | `TEXT` | Daemon local-decision timestamp, not remote completion evidence. |
+| `run_id` | `TEXT`, nullable | Exact fenced run identity, including a purged Search run. Required by the command codec for run targets; nullable for a runless file. |
+| `import_file_id` | `TEXT`, nullable | Exact fenced file for an import run/file decision; null for other kinds. |
+
+All other columns are non-null. There are **no foreign keys**, deliberately:
+authorized Search/export deletion must not erase the fence or receipt. Partial
+unique indexes on non-null `run_id` and `import_file_id` prevent a second decision
+through a linked alias. The target/link CHECK and update/delete/replacement
+triggers protect append-only identity. The shared domain receipt codec further
+validates exact fields/types, canonical identity bytes, target/link agreement,
+bounded key/generation and a parseable timestamp. Old records are not backfilled.
+
+The actual runtime controller, not a read-only repository, owns the
+[command](daemon-api.md#stop-local-tracking). It synchronously gates new entry,
+joins the registered execution **and cleanup** promises, then revalidates exact
+generation/reservation and commits the receipt/fence and local transitions in
+one root immediate transaction. It starts no native call. Active runs become
+`interrupted` without generation changes; pending import files become
+`interrupted`/`interrupted` while their payloads and reservation identities remain
+retained. Search's terminal-status trigger closes its active slot. Terminal
+statuses, cancellation facts, native/step/cleanup journals, saved output and
+drafts remain unchanged; this path neither uses generic Stop nor publishes an
+interrupted draft.
+
+The shared [local-stop fence](../src/storage/local-work-stop-fence.ts) governs
+direct authority and scans before their limits, including ordinary execution,
+publication and cancellation, rowless Search cleanup/ACK writes, import
+processing/cleanup and runless waiter promotion. It survives restart and denies
+later callbacks/ordinary Stop from re-enabling or reclassifying that work.
+Only its own admission/dispatch blocker or pending reservation is released;
+sibling owners are untouched and existing queued work may proceed normally.
+No replacement work is admitted by the command. Interpretation retirement still
+permits lawful cleanup and is not this stronger local boundary. Neither proves
+remote termination or reverses external effects.
+
+User-only control receipts survive owner rejection/deletion without exposing
+content or native bindings. The bounded background catalog places these
+identities in `locally-closed`; ownerless receipts have unknown owner/time rather
+than invented metadata. Logical-9 [backup compatibility](backup-restore.md#compatibility-and-evolution)
+preserves the records and their authority, including rowless identities.
 
 ### `run_steps`
 
@@ -235,7 +289,7 @@ A write-once `result_json` with `type:'import-partition'` is allowed only for it
 
 Stop fences local execution before remote cancellation settles. Pending settlement remains durable even after local interruption; marking cancellation settled never restores execution authority. For ordinary runs, a binding alone is not evidence of submission: an untouched initial step proven never submitted can settle locally without native cleanup. Submitted steps and ambiguous legacy history still require reconciliation. Search cannot use these ordinary settlement methods; its separate [retained cleanup tail](#retained-search-cancellation) requires joined execution and positive admission/terminal evidence. Configured workers process supported steps through the daemon-owned supervisor.
 
-For a failed or interrupted weave or Evolve run whose historical cancellation flag is already `settled` but whose journal does not prove safety, the existing bounded supervisor scan schedules the same joined ordinary cleanup path. Direct worker ticks use that same selection/proof boundary. It excludes already-proven and restore-fenced history. The adapter must establish terminal boundaries for every potentially dispatched step and current empty inbox/inactive state; missing, foreign or active evidence cannot authorize settlement. Terminal execution proof is independent of publishable protocol output, and already-sufficient fenced observations need no interrupt. The commit rechecks the complete journal, generation, binding and restore fence, then records terminal step bookkeeping without changing the run's terminal status or generation, saved input, protocol output, receipts or knowledge. This neither resubmits nor revives the old run or adopts a native reply. The [ordinary cleanup retry cadence](server-startup.md#native-sdk-compatibility) is process-local, not another durable journal or settlement fact. No schema change or separate recovery job is involved.
+For a failed or interrupted weave or Evolve run whose historical cancellation flag is already `settled` but whose journal does not prove safety, the existing bounded supervisor scan schedules the same joined ordinary cleanup path. Direct worker ticks use that same selection/proof boundary. It excludes already-proven, restore-fenced and locally stopped history. The adapter must establish terminal boundaries for every potentially dispatched step and current empty inbox/inactive state; missing, foreign or active evidence cannot authorize settlement. Terminal execution proof is independent of publishable protocol output, and already-sufficient fenced observations need no interrupt. The commit rechecks the complete journal, generation, binding and authority fences, then records terminal step bookkeeping without changing the run's terminal status or generation, saved input, protocol output, receipts or knowledge. This neither resubmits nor revives the old run or adopts a native reply. The [ordinary cleanup retry cadence](server-startup.md#native-sdk-compatibility) is process-local, not another durable journal or settlement fact. That reconciliation adds no schema or separate recovery job.
 
 ### `run_screening_passes` and `run_screening_pairs`
 
@@ -424,9 +478,9 @@ When the scheduling port is enabled, capture, an explicit user title-clear on an
 
 Admission reuses the first recorded subject/trigger match without resetting its status or results. A lookup index and insert trigger prevent future duplicates. Migration preserves legacy duplicate jobs and their histories rather than deleting or cancelling them. Network availability and agent configuration are outside these transactions. AI title fills, connection writes and interrupted replies do not schedule weaving. Run-created interpretations/developments admit only their dedicated connection-discovery owner; they do not recursively schedule interpretation-capable work.
 
-Explicit user reinterpretation uses `reinterpret:<request-key>` with the same immutable subject/trigger identity and uniqueness guard. No receipt table is added. A key identifies one admitted request, not a semantic content duplicate or an alias for unrelated active work. User-only receipt recovery reads the existing run; historical `settled` flags alone do not prove replacement eligibility. A valid recorded never-submitted or completed journal can establish safety. Otherwise an explicit per-run retirement can remove that run alone as a blocker while retaining remote uncertainty. See the [command and recovery contract](daemon-api.md#reinterpret-post-thoughtsidreinterpret).
+Explicit user reinterpretation uses `reinterpret:<request-key>` with the same immutable subject/trigger identity and uniqueness guard. No reinterpretation receipt table is added. A key identifies one admitted request, not a semantic content duplicate or an alias for unrelated active work. User-only receipt recovery reads the existing run; historical `settled` flags alone do not prove replacement eligibility. A valid recorded never-submitted or completed journal can establish safety. Otherwise explicit per-run retirement or [local stop](#local_work_stops) can remove that run alone as a blocker while retaining remote uncertainty; only local stop also ends cleanup. See the [command and recovery contract](daemon-api.md#reinterpret-post-thoughtsidreinterpret).
 
-Automatic invitations remain durable even when the subject is busy; a title edit or Evolve publication is not rolled back merely to avoid simultaneous weaving. Existing run metadata selects a started interpretation incumbent across prepared successors and restart, otherwise the oldest queued invitation. Waiting runs remain queued without generation churn. Worker entry, claim and native-submission authorization enforce this order, while already-submitted work remains observable and cancellable. Unresolved or unverified historical work blocks fresh dispatch unless that exact run was explicitly retired; other blockers still apply. Genuine media-title-only work is capability-restricted and can coexist; text title-clear work can interpret and participates in serialization. No separate queue table or scheduler is added.
+Automatic invitations remain durable even when the subject is busy; a title edit or Evolve publication is not rolled back merely to avoid simultaneous weaving. Existing run metadata selects a started interpretation incumbent across prepared successors and restart, otherwise the oldest queued invitation. Waiting runs remain queued without generation churn. Worker entry, claim and native-submission authorization enforce this order, while eligible already-submitted work remains observable and cancellable. Unresolved or unverified historical work blocks fresh dispatch unless that exact run was explicitly retired or locally stopped; other blockers still apply. Genuine media-title-only work is capability-restricted and can coexist; text title-clear work can interpret and participates in serialization. No separate queue table or scheduler is added.
 
 The immutable reinterpretation trigger also determines execution purpose. Initial media processing retains its prohibition on historical interpretation children; reinterpretation instead permits one new direct interpretation issued by the current run. Completion checks this run's issued output, not the existence of any historical child. A missing new media interpretation retains the complete limitation response but fails the run; ordinary text/URL no-findings replies can complete without a new thought.
 
@@ -447,9 +501,14 @@ The report preserves model Markdown and appends validated source thought IDs, ti
 
 The internal user-only `AgenticExports.list/get/delete/stop` storage/domain facet supplies export history independently of agent configuration. History contains only `id`, persisted `status`, `createdAt`, `request`, `effort`, `restored` and `deletionState` (`stop-required`, `settling`, `ready`); intent-less legacy and non-export runs are excluded. Pages default to 50, maximum 200, ordered by immutable creation time then ID descending. Typed keyset continuations bind the limit and last tuple. Pages are live, not a cross-request membership snapshot: concurrent admissions/deletions can change membership, and refresh is needed for newer rows ahead of the current position. These are internal continuations, not authenticated HTTP cursors. No history/deletion HTTP routes or client workflow are added by this storage foundation.
 
-Live active exports require ordinary explicit Stop; interrupted/failed exports remain undeletable until cancellation is settled. Completed exports with cancellation `none` or `settled` are ready. A restore-fenced, locally terminal export may instead acknowledge **local** Stop by changing only its intent disposition to `local-stopped`. The application-facing run Stop adapter uses this export-specific branch, preserving the historical status, generation, steps, binding, fence and cancellation evidence, without contacting the old agent. That acknowledged snapshot is ready for local deletion even if historical remote cancellation is unknown/pending. This is not native settlement; generic fenced Stop and all unrelated restored execution remain inert.
+Absent an explicit durable local-stop decision, live active exports require ordinary explicit Stop; interrupted/failed exports remain undeletable until cancellation is settled. Completed exports with cancellation `none` or `settled` are ready. A restore-fenced, locally terminal export may instead acknowledge **local** Stop by changing only its intent disposition to `local-stopped`. The application-facing run Stop adapter uses this export-specific branch, preserving the historical status, generation, steps, binding, fence and cancellation evidence, without contacting the old agent. That acknowledged snapshot is ready for local deletion even if historical remote cancellation is unknown/pending. This is not native settlement; generic fenced Stop and all unrelated restored execution remain inert.
 
-Delete rechecks eligibility in one immediate transaction, authorizes `deleting`, and removes the report, issued membership, operation receipts, reply bookkeeping/drafts, context, binding and all steps (including retained prompt/result/report copies), then the exact run fence. The final guarded run deletion consumes the remaining intent witness. Unexpected search/import ownership refuses deletion. Any failure rolls back the entire purge and preserves a preceding local Stop acknowledgement. Core migration installs the combined export/search delete guards after all schema foundations, retaining independent search ownership rules. Knowledge, referenced canonical responses, media, shared execution-owner registry rows and unrelated runs/fences are untouched. No deletion tombstone or content-bearing diagnostics are retained. Backup validation refuses a persisted `deleting` disposition. This is logical local deletion, not provider, downloaded-file, backup-history or SQLite free-page/WAL erasure.
+An explicit durable [local-stop record](#local_work_stops) is a separate route
+to deletion readiness for a terminal export, without changing its intent
+disposition or native cancellation facts. Delete remains explicit; its purge
+retains that append-only receipt/fence even after the run is gone.
+
+Delete rechecks eligibility in one immediate transaction, authorizes `deleting`, and removes the report, issued membership, operation receipts, reply bookkeeping/drafts, context, binding and all steps (including retained prompt/result/report copies), then the exact restore run fence. The final guarded run deletion consumes the remaining intent witness. Unexpected search/import ownership refuses deletion. Any failure rolls back the entire purge and preserves a preceding local Stop acknowledgement. Core migration installs the combined export/search delete guards after all schema foundations, retaining independent search ownership rules. Knowledge, referenced canonical responses, media, shared execution-owner registry rows, local-stop decisions and unrelated runs/fences are untouched. No deletion-specific tombstone or content-bearing diagnostics are retained. Backup validation refuses a persisted `deleting` disposition. This is logical local deletion, not provider, downloaded-file, backup-history or SQLite free-page/WAL erasure.
 
 ## Markdown import storage foundation
 
@@ -471,6 +530,12 @@ Positions, ordinals, lengths and offsets use nonnegative safe integers; part ran
 Admission validates literal relative paths without opening them and compares actual bytes for matching fingerprints. Path writes and locator/reservation lookups bind UTF-8 bytes through `CAST(? AS TEXT)`, preserving a leading U+FEFF and keeping prefixed and unprefixed paths distinct. Non-loose known-locator changed bytes win over cross-document dedupe; loose paths are metadata and legacy loose locators are ignored for identity. Request-key replay compares immutable inputs; batch sealing does not block an already-admitted replay. A partial unique index reserves pending-holder `(sha256,byte_length)` pairs library-wide; insert/update triggers reserve `(namespace_id,relative_path)` only for non-loose holders. Migration replaces the old universal locator index and seal trigger transactionally without changing existing records. A waiter owns no run and points to a pending holder, never another waiter. Bounded local waiter rechecks rerun admission after holder settlement; this is not native dispatch or an automatic retry of a terminal file.
 
 Finalization revalidates ownership, staged bytes, the durable manifest/partition and reservations. Document, imported thoughts and title/source metadata, complete parts, any non-loose original locator, document seal, weave admissions, file result, completed run and staged-byte deletion commit together. The shared immediate-transaction helper explicitly rolls back a failed deferred-FK commit before releasing the connection. Stop similarly fences a pending import, settles its file as interrupted and removes staging atomically; it never reverses a committed source or its independent weave jobs.
+
+[Stop local tracking](#local_work_stops) differs from that import Stop: it
+retains accepted payloads, interrupts only the selected pending file and ends
+all of its future processing/cleanup, including waiter promotion. Ending a
+holder's pending reservation does not close its batch or stop sibling waiters;
+they can be reconsidered normally without reviving the stopped file.
 
 Source detail/raw/parts require a user `history` inspection scope even when all segments are active. Thought provenance requires a user and respects the target thought's current read scope. Reports/lists never include document bodies. Internal lists use bounded keyset pages (default 50, maximum 200) with route/parent/scope/limit-bound typed continuations and a fixed membership high-water mark; opaque authenticated HTTP cursor encoding remains a future route responsibility. Source metadata, filenames, raw bytes, staging and partition journals never enter thought/response search, ordinary AI context or export membership traversal. Rejection/restoration follows evolution, not document membership.
 
@@ -770,6 +835,13 @@ Direct SQL creation is not the supported write boundary. For ordinary textual th
 ## Migrations
 
 The daemon calls `migrate()` on opening its database. Bootstrap and schema changes run in an immediate transaction and are safe to repeat; the implementation currently uses schema inspection, not a separate migration-version table.
+
+The additive local-stop migration creates only its empty table, unique indexes
+and immutable guards; it rewrites no historical disposition, native evidence or
+knowledge. It participates in that same transaction, so a failure after actual
+table DDL rolls back the complete upgrade before retry. The supported export
+deletion guard is refreshed to recognize explicit local closure, without
+deleting any data during migration.
 
 For the legacy schema with `thoughts.title`, migration:
 

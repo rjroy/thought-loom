@@ -4,7 +4,7 @@
 
 Thoughtloom is a library of connected thinking. Capture an unfinished thought, return to it later, and develop it without losing the original. AI can suggest interpretations and connections, help you explore your library, or develop an idea with you. Its contributions remain attributed to AI, not silently adopted as your own.
 
-Screenshots show the current desktop app with a synthetic community-garden library. AI-labelled text in these examples comes from a deterministic test agent, not a live model. Your library and generated results will differ. Import and export screenshots show setup, not completed operations.
+Screenshots show the current app with synthetic community-garden examples, not a personal library. AI-labelled text comes from a deterministic test agent, not a live model. Background-work examples use test-owned saved-status responses. Your library and generated results will differ. Import and export screenshots show setup, not completed operations.
 
 ## In this guide
 
@@ -18,6 +18,7 @@ Screenshots show the current desktop app with a synthetic community-garden libra
 - [Ask your library](#ask-your-library)
 - [Export your thinking](#export-your-thinking)
 - [Set additional agent instructions](#set-additional-agent-instructions)
+- [Review background work](#review-background-work)
 - [Reject and restore material](#reject-and-restore-material)
 - [Recover when something goes wrong](#recover-when-something-goes-wrong)
 
@@ -151,6 +152,8 @@ Use **Check interpretation** for current status and **Stop** for a known run. If
 
 An unsettled earlier interpretation can block new work. If **Retire this run…** is offered, read its warning carefully. Retirement permanently prevents that run from publishing in Thoughtloom and removes its local block. **It does not stop the remote agent.** Tools already started may still change external files or services, and may overlap replacement work. Retirement does not itself request another interpretation. Ask your operator for help if you cannot assess that risk.
 
+Retirement leaves best-effort stopping checks in place. To review unfinished work across your library, including an earlier run you cannot find, use [Settings → Review background work](#review-background-work). Its **Stop local tracking…** action is different: it ends local retries for the selected work.
+
 ## Import existing material
 
 Choose **Capture → Import**, then choose the type of material. Selecting files alone does not upload them.
@@ -236,13 +239,49 @@ Exports are portable reading material, not a complete restorable backup of Thoug
 
 ## Set additional agent instructions
 
-![Settings with four empty additional-instruction fields and Save changes.](images/user-guide/settings.png)
+![Settings with the Background work entry above four additional-instruction fields and Save changes.](images/user-guide/settings.png)
 
 Open **Settings** to add optional guidance for **Weaver**, **Evolve**, **Agentic Search** or **Agentic Export**. For example, Weaver guidance might say “Distinguish practical next steps from speculative possibilities.” Choose **Save changes** and wait for confirmation. Clear a field and save to remove its extra guidance.
 
 **These settings apply across the installation, not just your browser.** They supplement built-in guidance; they do not change the model, permissions or rejection rules. Saved instructions apply on the next agent turn, including in existing conversations, not to an active or already-prepared turn.
 
 There is no autosave or reload-persistent settings draft. If another browser saved conflicting changes, copy any edits you want to keep before deliberately reloading and reconciling them.
+
+## Review background work
+
+Choose **Settings → Review background work** to find saved background work across your library without opening thoughts one by one. The Settings entry shows how many items need attention. **Status unavailable** is not a zero count. The main navigation remains Explore, Browse, Capture and Settings.
+
+The recovery page has a direct, bookmarkable address at `/settings/background-work`. Its header arrow is **Back to Settings**. Preserve any unsaved instruction edits before leaving Settings; following the recovery link does not save them.
+
+![Background work showing an interrupted Weaver run, unverified Search work, available owner navigation and honest creation-time labels.](images/user-guide/background-work.png)
+
+| View | What it shows |
+| --- | --- |
+| **Needs attention** | Failed, interrupted, uncertain or unverified work, including work whose remote stopping is not confirmed. |
+| **In progress** | Ordinary queued, submitting, running or waiting work. Queued alone does not identify a problem. |
+| **Locally closed** | Work whose local tracking was explicitly stopped. This is not proof of remote cancellation. |
+
+Use **Refresh list** to read saved status again, or **Load more** to continue a longer list. Refresh does not start work or request cancellation. A failed refresh can leave last-confirmed information visible; it does not prove the work failed.
+
+Each row names its work type and available reason. **Weaver** does not tell you whether that run was interpreting, generating a title or finding connections. Missing reasons, titles and owning pages are labelled honestly. **Created** is the work's creation time, not when it became stuck; some rows say **Creation time unavailable**.
+
+Use **Open idea**, **Open search**, **Open import report** or **Open export** when an owning page is available. A missing title is not permission to fetch rejected content. This page does not offer a generic retry or promise that replacement work is eligible.
+
+### Stop local tracking
+
+When **Stop local tracking…** is available:
+
+1. Open it and review the exact run or import file. The app checks current eligibility rather than silently selecting different work.
+2. Read the warning and check the acknowledgment.
+3. Choose **Stop local tracking** and wait for confirmation. Cancel is available before submission, not while the command is pending.
+
+![Stop local tracking confirmation identifying the selected run and warning that remote tools and external effects may continue.](images/user-guide/background-work-confirmation.png)
+
+Confirmed **Local tracking stopped** means that this work's local retries end and its late results cannot publish in Thoughtloom, including after restart. Saved thoughts and confirmed output stay unchanged. Previously queued work may now proceed, but other work can still prevent new requests. This action does not start a replacement.
+
+**The remote agent may still be running.** Its tools can still change files or services and overlap later work. Local stopping cannot undo those changes. Ordinary **Stop** requests cancellation; **Retire this run…** prevents local interpretation publication and removes that run's block while leaving cleanup checks in place. Neither is the same as ending local tracking, and none proves external tools stopped.
+
+If **Local stop not confirmed** appears, keep this tab open and use **Check local stop**. The app stores the exact target, execution identity and request key in this tab's session before sending; reloading the same tab restores receipt recovery without resending the command. A missing receipt does not prove that a delayed command cannot still arrive. There is no resend or automatic replacement action. If recovery storage is unavailable, new local stops are paused; keep the displayed run/file IDs and ask the operator for help.
 
 ## Reject and restore material
 
@@ -269,7 +308,8 @@ The important distinction is between a failed read, a confirmed refusal and an u
 | Evolve admission unconfirmed | Keep the submitted snapshot and selected-point details. Do not send the contribution again; no run ID is confirmed in this workspace. |
 | Import or other keyed request unconfirmed | Keep its workspace open and use its specific Check action. An explicit same-request resend, where offered, is different from starting a new import or request. |
 | A known run cannot be checked | Retry its Check action. A failed status read is not evidence the run itself failed; previously confirmed output may still be shown. |
-| Stop is unconfirmed or cleanup remains pending | Check the same run. Do not treat the request as proof remote work stopped. Saved work remains. |
+| Stop is unconfirmed or cleanup remains pending | Check the same run. Use **Settings → Review background work** to find it across the library. Do not treat the request as proof remote work stopped. Saved work remains. |
+| Background work: **Local stop not confirmed** | Keep the same tab and use **Check local stop**. A missing receipt does not prove failure; do not send a replacement command. |
 | Original file cannot be downloaded | Try **Download original** again. The source record may still exist even if original bytes cannot be read. Ask the operator to check retained files and backups; do not assume a replacement was created. |
 | Settings save fails or conflicts | Keep or copy your edits. Retry a failed save deliberately; for a conflict, reload only after preserving wanted edits. |
 

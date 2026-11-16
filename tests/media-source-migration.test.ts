@@ -85,6 +85,49 @@ function fileFixture(action: (db: Database, path: string) => void): void {
 }
 
 describe("media source migration and immutable metadata", () => {
+  test("local-stop migration adds no historical disposition and preserves the populated frozen predecessor across reopen", () => fileFixture((db,path) => {
+    seedFrozen(db);
+    const before=preserved(db);
+    migrate(db);
+    expect(preserved(db)).toEqual(before);
+    expect(db.query("SELECT name FROM sqlite_schema WHERE type='table' AND name='local_work_stops'").get())
+      .toEqual({name:"local_work_stops"});
+    expect(db.query("SELECT * FROM local_work_stops").all()).toEqual([]);
+    const reopened=new Database(path);
+    try {
+      migrate(reopened);
+      expect(preserved(reopened)).toEqual(before);
+      expect(reopened.query("SELECT * FROM local_work_stops").all()).toEqual([]);
+      expect(reopened.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { reopened.close(); }
+  }));
+
+  test("failure after actual local-stop DDL rolls back the complete populated predecessor before clean retry", () => fileFixture(db => {
+    seedFrozen(db);
+    const schema=() => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name").all();
+    const beforeRows=preserved(db), beforeSchema=schema();
+    let injected=false;
+    const failing=new Proxy(db,{get(target,key) {
+      if (key === "exec") return (sql:string) => {
+        const result=target.exec(sql);
+        if (/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?local_work_stops\b/i.test(sql)) {
+          injected=true; throw new Error("owned local-stop DDL fault");
+        }
+        return result;
+      };
+      const member=Reflect.get(target,key,target);
+      return typeof member === "function" ? member.bind(target) : member;
+    }});
+    expect(() => migrate(failing)).toThrow("owned local-stop DDL fault");
+    expect(injected).toBe(true);
+    expect(db.inTransaction).toBe(false);
+    expect(schema()).toEqual(beforeSchema);
+    expect(preserved(db)).toEqual(beforeRows);
+    migrate(db);
+    expect(preserved(db)).toEqual(beforeRows);
+    expect(db.query("SELECT * FROM local_work_stops").all()).toEqual([]);
+  }));
+
   test("daily metadata DDL failure rolls back the populated frozen predecessor and additive retry preserves it", () => fileFixture((db,path) => {
     seedFrozen(db);
     const schema = () => db.query("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name").all();

@@ -41,7 +41,8 @@ export function ContextualBack() {
   if (!context) throw new Error("Contextual navigation requires its mounted provider.");
   const entry = context.entry;
   const contextualRoute = pathname.startsWith("/ideas/") || pathname === "/evolve" || pathname === "/export" || pathname === "/import" || pathname === "/import/media"
-    || pathname === "/explore/ask" || pathname.startsWith("/explore/ask/") || pathname === "/exports" || pathname.startsWith("/exports/");
+    || pathname === "/explore/ask" || pathname.startsWith("/explore/ask/") || pathname === "/exports" || pathname.startsWith("/exports/")
+    || pathname === "/settings/background-work";
   if (!contextualRoute || !entry || entry.pathname !== pathname) return null;
   return <span className="contextual-back" data-dismissed={dismissed}
     onPointerEnter={() => setDismissed(false)} onFocus={() => setDismissed(false)}
