@@ -403,7 +403,8 @@ test("positively reconciled interrupted submission permits a fresh receipt and n
   ]);
   f.client.holdOutput = false;
   await f.until(() => f.read(db => db.query<{cancellation_state:string},[string]>("SELECT cancellation_state FROM runs WHERE id=?").get(first.runId))?.cancellation_state === "settled", "positively reconciled cancellation");
-  expect(f.client.interrupts).toContain(prompt.sessionID);
+  // The terminal snapshot may arrive before cleanup; any earlier active interruption must be owned.
+  expect(f.client.interrupts.every(sessionId => sessionId === prompt.sessionID)).toBe(true);
   expect(f.read(db => db.query("SELECT position,prompt_id,input,state,native_state,envelope_json,result_json FROM run_steps WHERE run_id=? ORDER BY position").all(first.runId))).toEqual([
     {position:0,prompt_id:prompt.id,input:prompt.text,state:"completed",native_state:"completed",envelope_json:null,result_json:null},
   ]);
@@ -429,6 +430,30 @@ test("positively reconciled interrupted submission permits a fresh receipt and n
   await f.until(() => f.client.prompts.length >= 2,"replacement native submission");
   expect(f.client.prompts[1]?.sessionID).not.toBe(prompt.sessionID);
   expect(f.client.scriptErrors).toEqual([]);
+},{configured:true,script:() => ({version:1,kind:"complete",reply:"Owned fixture outcome"})}),20000);
+
+test("Stop interrupts represented active native work without treating its acknowledgement as settlement", async () => mediaApiFixture(async f => {
+  seed(f);
+  f.client.holdOutput = true;
+  const admitted = await f.request(endpoint(), command("active-stop"));
+  expect(admitted.status).toBe(202);
+  const first = control(await body(admitted));
+  await f.until(() => f.client.prompts.length === 1, "active native submission");
+  const prompt = f.client.prompts[0];
+  if (!prompt) throw new Error("Expected the owned submitted prompt");
+  expect((await f.request(`/runs/${first.runId}/stop`, {method:"POST",headers:{"content-type":"application/json"},body:"{}"})).status).toBe(200);
+  await f.stop();
+  f.client.interrupts.length = 0;
+  const db = new Database(f.dbPath), supervisor = historicalSupervisor(db, f);
+  try {
+    await supervisor.poll();
+    expect(f.client.interrupts).toEqual([prompt.sessionID]);
+    expect(db.query("SELECT status,cancellation_state FROM runs WHERE id=?").get(first.runId))
+      .toEqual({status:"interrupted",cancellation_state:"pending"});
+    expect(db.query("SELECT envelope_json,result_json FROM run_steps WHERE run_id=?").get(first.runId))
+      .toEqual({envelope_json:null,result_json:null});
+    expect(f.client.prompts).toHaveLength(1);
+  } finally { await supervisor.stop(); db.close(); }
 },{configured:true,script:() => ({version:1,kind:"complete",reply:"Owned fixture outcome"})}),20000);
 
 async function historicalSettledWeave(f: MediaApiFixture, status: "failed" | "interrupted") {

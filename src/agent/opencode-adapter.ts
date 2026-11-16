@@ -402,41 +402,56 @@ export class OpenCodeAdapter {
     };
     // An injected single-prompt port has no authority to adopt other native inputs. Production always supplies the SQL journal.
     const prompts = journal ? journal.steps.filter(step => step.state !== "prepared").map(step => this.prompt({promptId:step.promptId,input:step.input})) : [prompt];
-    const read = async <T>(action: () => Promise<T>): Promise<T> => { guard(); try { return await action(); } finally { guard(); } };
+    let operation = "observe";
+    const read = async <T>(name: string, action: () => Promise<T>): Promise<T> => {
+      guard(); operation = name;
+      try { return await action(); } finally { guard(); }
+    };
     const observe = async () => {
-      this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
-      const messages = await this.history(binding,input => read(() => this.client.history(input)));
-      const inbox = await read(() => this.client.inbox({sessionID:binding.sessionId}));
-      const active = await read(() => this.client.active());
-      this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
+      this.verifyOwner(runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
+      const messages = await this.history(binding,input => read("message.list",() => this.client.history(input)));
+      const inbox = await read("inbox.list",() => this.client.inbox({sessionID:binding.sessionId}));
+      const active = await read("session.active",() => this.client.active());
+      this.verifyOwner(runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
       const settled = cancellationHistorySettled(binding.sessionId,prompts,messages,inbox,active,binding);
-      return {messages,inbox,active,settled};
+      const admitted = new Set(messages.filter(message => message.type === "user").map(message => message.id));
+      const reason = settled ? "terminal-history" : inbox.some(item => item.type !== "user") ? "auxiliary-queued"
+        : inbox.length > 0 ? "owned-input-queued" : Object.hasOwn(active,binding.sessionId) ? "native-active"
+        : prompts.some(item => !admitted.has(item.promptId)) ? "admission-evidence-missing" : "terminal-evidence-incomplete";
+      return {messages,inbox,active,settled,reason};
     };
     this.logger.verbose("[agent] native cancellation attempt",{runId,promptId:prompt.promptId});
     try {
       const before = await observe();
+      if (before.settled) {
+        guard();
+        this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state:"settled",reason:before.reason});
+        return "settled";
+      }
       // Auxiliary queue work is not an owned user prompt or authority to interrupt a session.
       if (before.inbox.some(item => item.type !== "user")) {
-        this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state:"pending"});
+        this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state:"pending",reason:before.reason});
         return "pending";
       }
       for (const item of before.inbox) {
-        this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
-        await read(() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:item.id}));
+        this.verifyOwner(runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
+        await read("inbox.cancel",() => this.client.cancelInbox({sessionID:binding.sessionId,inboxID:item.id}));
       }
       const represented = new Set([...before.messages.filter(message => message.type === "user").map(message => message.id),...before.inbox.map(item => item.id)]);
       // An active flag alone cannot identify missing input. Idle interrupt is harmless but is never settlement proof.
       if (!Object.hasOwn(before.active,binding.sessionId) || (prompts.length > 0 && prompts.every(item => represented.has(item.promptId)))) {
-        this.verifyOwner(runId,binding,await read(() => this.client.sessionGet({sessionID:binding.sessionId})));
-        await read(() => this.client.interrupt({sessionID:binding.sessionId}));
+        this.verifyOwner(runId,binding,await read("session.get",() => this.client.sessionGet({sessionID:binding.sessionId})));
+        await read("session.interrupt",() => this.client.interrupt({sessionID:binding.sessionId}));
       }
       const after = await observe();
       guard();
       const state = after.settled ? "settled" : "pending";
-      this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state});
+      this.logger.verbose("[agent] native cancellation observed",{runId,promptId:prompt.promptId,state,reason:after.reason});
       return state;
     } catch (error) {
-      this.logger.verbose("[agent] native cancellation unresolved",{runId,promptId:prompt.promptId});
+      const category = error instanceof AgentBindingError ? "binding-conflict" : error instanceof RunFenceError ? "authority-fenced"
+        : error instanceof AgentSessionMissingError ? "session-missing" : "native-unresolved";
+      this.logger.verbose("[agent] native cancellation unresolved",{runId,promptId:prompt.promptId,operation,category});
       if (error instanceof AgentBindingError || error instanceof RunFenceError) throw error;
       return "pending";
     }

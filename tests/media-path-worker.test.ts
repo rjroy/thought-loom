@@ -75,6 +75,8 @@ test("saved media interpretation with no title fails without losing the model ou
 },null));
 
 test("failed source weaving retries the retained original through the normal worker", async () => mediaPathFixture(async f => {
+  let time = Date.parse(f.source.createdAt);
+  f.sources.now = () => new Date(time).toISOString();
   const media = new SqliteMediaAdmissions(f.db,f.sources), sourceId = f.source.mediaSource.id;
   const metadata = f.db.query("SELECT rowid,* FROM media_sources ORDER BY rowid").all();
   const first = f.ops.admitWeave("user",{subjectId:f.source.id,triggerId:`media-import:${sourceId}`});
@@ -101,6 +103,7 @@ test("failed source weaving retries the retained original through the normal wor
   expect(f.db.query("SELECT id FROM runs WHERE weave_subject_id=?").all(f.source.id)).toEqual([{id:first.id}]);
 
   holdEvidence = false;
+  time += 60_000; // Pass the bounded retry delay using the worker's owned clock.
   await bounded(failed.instance.tick(first.id),"normal failed-source cancellation");
   expect(failed.client.inboxCancellations).toEqual([]); // The fixture's admitted prompt was never queued in its inbox.
   expect(failed.client.interrupts.length).toBeGreaterThan(0);

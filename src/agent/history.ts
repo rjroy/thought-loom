@@ -133,9 +133,9 @@ export function cancellationHistorySettled(sessionId: string, prompts: readonly 
     // Interrupted/failed execution can terminate before an assistant is complete, or before one exists at all.
     if (idle.outcome !== "succeeded") return true;
     const final = boundaries.at(-2);
+    // Execution completion is not publication: finish reasons and permitted tool parts do not invalidate this boundary.
     return final?.type === "assistant" && typeof final.time.completed === "number" && Number.isFinite(final.time.completed) &&
-      final.time.completed >= final.time.created && final.time.completed <= idle.time.created &&
-      !final.hasTools && ["stop","length","error"].includes(final.finish ?? "");
+      final.time.completed >= final.time.created && final.time.completed <= idle.time.created;
   };
   for (const message of messages) {
     if (hasUntrackedNativeContext(message,nativeTools)) throw new AgentBindingError("Cancellation history contains untracked native context");

@@ -99,6 +99,15 @@ class WorkerBindings extends SqliteAgentBindings {
 }
 const terminal = (run: RunRecord): boolean => ["completed","interrupted","failed"].includes(run.status);
 interface RunFlight { readonly execution: Promise<void>; readonly cleanupTail: Promise<void>; retired: boolean }
+type CancellationRetryCategory = "native-pending" | "binding-conflict" | "authority-fenced" | "native-unavailable" | "local-failure";
+interface CancellationRetry {
+  readonly generation: number;
+  readonly delayMs: number;
+  readonly finishedAt: number;
+  readonly category: CancellationRetryCategory;
+}
+const CANCELLATION_RETRY_INITIAL_MS = 2_000;
+const CANCELLATION_RETRY_MAX_MS = 60_000;
 
 /** Manual polling seam; the daemon supervisor owns scheduling and can drive independent runs. */
 export class RunWorker {
@@ -114,6 +123,8 @@ export class RunWorker {
   private readonly exports: SqliteAgenticExports;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,RunFlight>();
+  // Technical cadence only. Durable journals remain authoritative; a new worker reconciles immediately after restart.
+  private readonly cancellationRetries = new Map<string,CancellationRetry>();
   private readonly retirements = new Map<string,Promise<unknown>>();
   private readonly cleanup: SqliteSearchCleanup;
   private retention: SqliteSearchRetention | undefined;
@@ -409,28 +420,60 @@ export class RunWorker {
     if (this.paused || !["interrupted","failed"].includes(run.status)) return;
     if (isRunRestoreFenced(this.dependencies.db,run.id)) return;
     const cancellation = this.steps.cancellation(run.id);
-    if (cancellation !== "pending" && !(["weave","evolve"].includes(run.kind) && cancellation === "settled" && !recordedSubjectCancellationSafe(this.dependencies.db,run.id))) return;
-    if (this.state.settleUnsubmitted(run.id)) return;
+    if (cancellation !== "pending" && !(["weave","evolve"].includes(run.kind) && cancellation === "settled" && !recordedSubjectCancellationSafe(this.dependencies.db,run.id))) {
+      this.cancellationRetries.delete(run.id); return;
+    }
+    if (this.state.settleUnsubmitted(run.id)) { this.cancellationRetries.delete(run.id); return; }
     const binding = this.bindings.get(run.id);
     if (!binding) return;
     const step = this.steps.steps(run.id).at(-1);
     if (!step || step.input === null) return; // Unknown legacy input/binding is never fabricated for cleanup.
-    this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId});
+    const now = Date.parse(this.dependencies.now());
+    if (!Number.isFinite(now)) return; // Invalid local time cannot authorize an unbounded native retry loop.
+    const previous = this.cancellationRetries.get(run.id);
+    const retry = previous?.generation === run.generation ? previous : undefined;
+    if (!retry) this.cancellationRetries.delete(run.id);
+    else if (now < retry.finishedAt) {
+      // Rebase a backwards wall-clock jump instead of waiting longer than the bounded technical delay.
+      this.cancellationRetries.set(run.id,{...retry,finishedAt:now}); return;
+    } else if (now - retry.finishedAt < retry.delayMs) return;
+    this.logger.verbose("[worker] cancellation attempt",{runId:run.id,promptId:step.promptId,generation:run.generation});
+    let stage = "journal";
     try {
       const journal = this.bindings.cancellationJournal(run.id,{promptId:step.promptId,input:step.input});
+      stage = "native";
       const result = await this.transport().cancel(run.id,binding,{promptId:step.promptId,input:step.input});
       this.localFence(run.id);
-      if (result === "settled") this.state.settleOrdinaryCancellation(journal,binding);
+      if (result === "settled") {
+        stage = "settlement";
+        this.state.settleOrdinaryCancellation(journal,binding);
+        this.cancellationRetries.delete(run.id);
+      } else this.deferCancellation(run,now,"native-pending");
       this.logger.verbose("[worker] cancellation outcome",{runId:run.id,promptId:step.promptId,state:result});
-    } catch { this.logger.verbose("[worker] cancellation remains pending",{runId:run.id,promptId:step.promptId}); }
+    } catch (error) {
+      if (this.paused) return;
+      const category = error instanceof AgentBindingError ? "binding-conflict" : error instanceof RunFenceError ? "authority-fenced"
+        : stage === "native" ? "native-unavailable" : "local-failure";
+      this.deferCancellation(run,now,category);
+    }
+  }
+  private deferCancellation(run: RunRecord, startedAt: number, category: CancellationRetryCategory): void {
+    const previous = this.cancellationRetries.get(run.id);
+    const delayMs = Math.min(previous ? previous.delayMs * 2 : CANCELLATION_RETRY_INITIAL_MS,CANCELLATION_RETRY_MAX_MS);
+    const finishedAt = Date.parse(this.dependencies.now());
+    this.cancellationRetries.set(run.id,{generation:run.generation,delayMs,finishedAt:Number.isFinite(finishedAt) ? finishedAt : startedAt,category});
+    const context = {runId:run.id,generation:run.generation,category,retryAfterMs:delayMs};
+    if (!previous || previous.category !== category) this.logger.warning("[worker] cancellation remains pending",context);
+    else this.logger.verbose("[worker] cancellation retry deferred",context);
   }
   private async cleanupRun(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
     this.dependencies.executionOwner?.assertHeld();
-    if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); return; }
+    if (isRunRestoreFenced(this.dependencies.db,runId)) { this.forget(runId); this.cancellationRetries.delete(runId); return; }
     const run = this.runs.get(runId);
-    if (run?.kind === "search" || !run) { await this.cleanupSearch(runId); return; }
+    if (run?.kind === "search" || !run) { this.cancellationRetries.delete(runId); await this.cleanupSearch(runId); return; }
     if (terminal(run)) { this.forget(runId); await this.cancel(run); }
+    else this.cancellationRetries.delete(runId);
   }
   private async cleanupSearch(runId: string): Promise<void> {
     if (this.paused || !this.dependencies.native) return;
@@ -498,6 +541,7 @@ export class RunWorker {
   pause(): void {
     if (this.paused) return;
     this.paused = true;
+    this.cancellationRetries.clear();
     this.searchClock.clear();
     this.cleanupListeners.clear();
     this.logger.verbose("[worker] paused",{ownedRuns:this.owners.size,activeTicks:this.flights.size});
