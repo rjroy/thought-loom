@@ -47,6 +47,7 @@ import { SqliteScheduledTitles } from "../storage/title-scheduling";
 import { SqliteBackgroundWork } from "../storage/background-work";
 import { SqliteLocalWorkStops } from "../storage/local-work-stop";
 import type { LocalStopController } from "../domain/local-work-stop";
+import { SqliteEvolveSessions } from "../storage/evolve-sessions";
 
 /** Optional owned transport/clock/backup seams; defaults use the real explicitly configured services. */
 export interface RuntimeDependencies {
@@ -219,7 +220,7 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
         return (expected.type === "import-file" || expected.kind === "import" ? importDriver : runWorker).stopLocalTracking(plan.runId,commit);
       },
     };
-    const app = createApp({ rejection, creation, titles, search, searchSessions, searchAgentsConfigured: valid.agent != null,
+    const app = createApp({ rejection, creation, titles, search, searchSessions, evolveSessions:new SqliteEvolveSessions(db,scheduling), searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       exportHistory:new ExportHistoryService(new SqliteAgenticExports(db,scheduling)),
       backgroundWork:new SqliteBackgroundWork(db,diagnostics,localStops),localStops,

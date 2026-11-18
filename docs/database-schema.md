@@ -42,6 +42,14 @@ Run claim/context/capability/preparation/binding/finalization and cancellation-s
 
 Unless marked nullable, columns below are `NOT NULL`. Every listed foreign key references the identified parent row. Library tables do not cascade deletion; the owned search-metadata cascades are identified separately below.
 
+### `evolve_sessions` and `evolve_turns`
+
+The additive [`evolve-sessions.ts`](../src/storage/evolve-sessions.ts) migration creates these private user-only admission tables without changing existing trees or runs. `evolve_sessions` has primary-key `id`, `anchor_id` and `continuation_id` FKs to `thoughts`, and `created_at`. Identity, anchor and creation time cannot be updated; deletion is forbidden. This phase initializes continuation to the anchor.
+
+`evolve_turns` has primary-key `id`, `session_id` FK, `request_key`, `parent_id` FK to a thought, exact user `text`, `admitted_at`, `status`, and `open_slot`. Unique `(session_id,request_key)` enforces keyed admission; unique `(session_id,open_slot)` and checks `open_slot=1` and `status='pending'` reserve one slot. Admission rows cannot be updated or deleted. Domain validation refuses malformed Unicode and NUL and limits retained turn text to 4096 UTF-8 bytes; HTTP separately bounds the entire JSON request body to 4096 bytes. Text and identity lookups/writes bind UTF-8 bytes to preserve an initial U+FEFF. Keys `.` and `..` are not accepted. Admission and replay comparison run in one immediate transaction. Creation and new admission check normal visibility; only the session anchor is currently a valid parent. Human history and known-key recovery remain available after rejection.
+
+These are retained intent and identity records, not `runs` or evidence of native execution. This phase has no reply, save receipt, execution, completion or context access. Supporting those later requires an explicit schema/lifecycle evolution and scoped rejection checks; no worker reads these rows today. Logical-10 backup includes both tables and their ordering rowids. Earlier snapshots restore them empty.
+
 ### `thoughts`
 
 | Column | Type | Constraint / meaning |

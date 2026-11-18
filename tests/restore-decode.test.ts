@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { decodeManifest, decodeTable } from "../src/backup/decode";
 import { BackupFormatError, encodeManifest, encodeTable, type BackupManifest, type RawRow } from "../src/backup/format";
-import { backupTableShapes } from "../src/backup/schema";
+import { backupTableShapes, shapesForSchema } from "../src/backup/schema";
 
 const encoder = new TextEncoder();
 const text = (value: string) => ({ storage: "text" as const, bytes: encoder.encode(value) });
@@ -79,7 +79,11 @@ test("table decoding rejects noncanonical cells, order, key/rowid violations and
 });
 
 test("manifest decoding requires the complete canonical inventory and exact typed sequences", () => {
-  expect(backupTableShapes.map(table => table.name)).toEqual([...currentNames,"run_screening_pairs","run_screening_passes","daily_review_batches","daily_review_items","local_work_stops"].sort());
+  const logical9 = [...currentNames,"run_screening_pairs","run_screening_passes","daily_review_batches","daily_review_items","local_work_stops"].sort();
+  expect(shapesForSchema("thoughtloom-logical-9").map(table => table.name)).toEqual(logical9);
+  const current = backupTableShapes.map(table => table.name);
+  expect(current.filter(name => logical9.includes(name))).toEqual(logical9);
+  expect(current.filter(name => !logical9.includes(name)).length).toBeGreaterThanOrEqual(2);
   const manifest: BackupManifest = { appSchema:"thoughtloom-logical-2", mediaStoreId: null, mediaMarker: null, originals: [],
     tables: tableEntries(currentNames),
     sequences: [{ name: "import_documents", value: 9223372036854775807n }],

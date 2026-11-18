@@ -11,6 +11,7 @@ import { createConnection } from "../domain/connection";
 import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
 import { parseEnvelope, protocolJson } from "../domain/run-protocol";
 import { localStopReceipt } from "../domain/local-work-stop";
+import { evolveKey, evolveTurnText, evolveValue } from "../domain/evolve-sessions";
 
 export interface CapturedTable { readonly shape: TableShape; readonly rows: readonly RawRow[] }
 export interface SqlSnapshot {
@@ -132,6 +133,9 @@ export function validateRecords(db: Database): void {
     t.open_slot IS NOT (r.status IN ('queued','submitting','running','uncertain')) OR
     NOT EXISTS(SELECT 1 FROM main.search_messages m WHERE m.run_id=t.run_id AND m.role='user') LIMIT 1`);
   noRows(db, `SELECT 1 FROM main.search_discoveries d JOIN main.run_steps s ON s.prompt_id=d.added_prompt_id WHERE s.run_id!=d.added_run_id LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.evolve_sessions WHERE continuation_id!=anchor_id LIMIT 1`);
+  noRows(db, `SELECT 1 FROM main.evolve_turns t JOIN main.evolve_sessions s ON s.id=t.session_id
+    WHERE t.parent_id!=s.anchor_id OR t.status!='pending' OR t.open_slot!=1 LIMIT 1`);
 }
 
 function readTable(db: Database, shape: TableShape): CapturedTable {
@@ -433,7 +437,33 @@ function validateLocalWorkStops(snapshot:SqlSnapshot):void {
 }
 
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
-export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-9"): void {
+export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-10"): void {
+  const evolveSessions = snapshot.tables.find(value => value.shape.name === "evolve_sessions");
+  const evolveTurns = snapshot.tables.find(value => value.shape.name === "evolve_turns");
+  check((evolveSessions === undefined) === (evolveTurns === undefined),"inconsistent-source");
+  if (evolveSessions && evolveTurns) {
+    const sessions = new Map(evolveSessions.rows.map(row => [text(row,"id"),row]));
+    const instant = (value: string) => {
+      const date = new Date(value);
+      return Number.isFinite(date.getTime()) && date.toISOString() === value;
+    };
+    for (const row of evolveSessions.rows) {
+      try {
+        evolveValue(text(row,"id"),"session id"); evolveValue(text(row,"anchor_id"),"anchor");
+        evolveValue(text(row,"continuation_id"),"continuation");
+      } catch { check(false,"inconsistent-source"); }
+      check(text(row,"continuation_id") === text(row,"anchor_id") && instant(text(row,"created_at")),"inconsistent-source");
+    }
+    for (const row of evolveTurns.rows) {
+      const owner = sessions.get(text(row,"session_id")), key = text(row,"request_key"), content = text(row,"text");
+      try {
+        evolveKey(key); evolveValue(text(row,"id"),"turn id"); evolveValue(text(row,"session_id"),"session id");
+        evolveValue(text(row,"parent_id"),"parent"); evolveTurnText(content);
+      } catch { check(false,"inconsistent-source"); }
+      check(owner !== undefined && text(row,"parent_id") === text(owner,"anchor_id") &&
+        text(row,"status") === "pending" && integer(row,"open_slot") === 1n && instant(text(row,"admitted_at")),"inconsistent-source");
+    }
+  }
   validateApplicationIntegers(snapshot);
   validateLocalWorkStops(snapshot);
   validateConnectionReceipts(snapshot);

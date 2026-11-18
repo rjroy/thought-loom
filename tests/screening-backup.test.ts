@@ -98,7 +98,7 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
 
 test("current capture, staged recovery and offline installation preserve screening history and fence execution", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-9");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-10");
   expect(manifest.tables.filter(table => table.name.startsWith("run_screening_")).map(table => table.rowCount)).toEqual(["5","5"]);
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger});
@@ -142,14 +142,15 @@ test("current capture, staged recovery and offline installation preserve screeni
 
 test("frozen logical-7 restore preserves nonnull screening exclusions and defaults schedule markers", async () => owned(async f => {
   const legacy = join(f.dir,"logical-7"); await cp(f.snapshot,legacy,{recursive:true,errorOnExist:true});
-  const path = join(legacy,"tables","runs.json"), current = decodeTable("runs",await readFile(path),"thoughtloom-logical-9");
+  const path = join(legacy,"tables","runs.json"), current = decodeTable("runs",await readFile(path));
   const shape = shapesForSchema("thoughtloom-logical-7").find(item => item.name === "runs");
   if (!shape) throw new Error("Expected frozen runs shape");
   const bytes = encodeTable(shape,current.map(row => ({rowid:row.rowid,values:Object.fromEntries(shape.columns.map(name => [name,row.values[name]]))})));
   await writeFile(path,bytes,{mode:0o600});
   const manifestPath = join(legacy,"manifest.json"), manifest = decodeManifest(await readFile(manifestPath));
-  await rm(join(legacy,"tables","local_work_stops.json"));
-  await writeFile(manifestPath,encodeManifest({...manifest,appSchema:"thoughtloom-logical-7",tables:manifest.tables.filter(entry => entry.name !== "local_work_stops").map(entry => entry.name === "runs"
+  const legacyNames = new Set(shapesForSchema("thoughtloom-logical-7").map(item => item.name));
+  for (const entry of manifest.tables) if (!legacyNames.has(entry.name)) await rm(join(legacy,entry.path));
+  await writeFile(manifestPath,encodeManifest({...manifest,appSchema:"thoughtloom-logical-7",tables:manifest.tables.filter(entry => legacyNames.has(entry.name)).map(entry => entry.name === "runs"
     ? {...entry,byteLength:String(bytes.length),sha256:createHash("sha256").update(bytes).digest("hex")} : entry)}),{mode:0o600});
   const parent = join(f.dir,"legacy-stage"); await mkdir(parent,{mode:0o700});
   const selectedDigest = createHash("sha256").update(await readFile(manifestPath)).digest("hex");
