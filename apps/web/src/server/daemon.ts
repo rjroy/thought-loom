@@ -22,6 +22,8 @@ export interface DaemonDependencies {
 export async function requestDaemon(config: WebConfig, request: DaemonRequest, deps: DaemonDependencies): Promise<Response> {
   const [pathname] = request.path.split("?");
   const searchTurnKeyPath = pathname !== undefined && /^\/search-sessions\/[A-Za-z0-9_~.-]+\/turns\/by-key\/[A-Za-z0-9._:-]{1,128}$/.test(pathname);
+  const evolveKeyPath = pathname !== undefined && request.method === "GET" &&
+    /^\/evolve-sessions\/[A-Za-z0-9_~.-]+\/turns\/(?:[A-Za-z0-9_~.-]+\/saves\/)?by-key\/[A-Za-z0-9._:-]{1,128}$/.test(pathname);
   const mediaKeySegment = pathname?.match(/^\/imports\/media\/by-key\/([^/]+)$/)?.[1];
   let encodedMediaKeyPath = false;
   if (mediaKeySegment && request.method === "GET") {
@@ -51,7 +53,7 @@ export async function requestDaemon(config: WebConfig, request: DaemonRequest, d
     } catch { /* Malformed encoding is not an allowed path. */ }
   }
   if (pathname && /^\/background-work\/(?:runs|import-files)\//.test(pathname) && !backgroundPath) throw new Error("Invalid daemon path");
-  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !mediaUploadKeyPath && !reinterpretKeyPath && !backgroundPath)
+  if (!pathname || (!/^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(pathname) && !searchTurnKeyPath && !evolveKeyPath && !mediaUploadKeyPath && !reinterpretKeyPath && !backgroundPath)
       || pathname.split("/").some(segment => segment === "." || segment === "..")
       || /[\\#\x00-\x1f\x7f]/.test(request.path)) {
     throw new Error("Invalid daemon path");

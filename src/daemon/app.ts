@@ -28,6 +28,8 @@ import { exportHistoryRequest, type ExportHistoryCursor, type ExportHistoryServi
 import type { BackgroundWorkRepository } from "../domain/background-work";
 import { createBackgroundWorkRoutes } from "./background-work-routes";
 import type { LocalStopController } from "../domain/local-work-stop";
+import { EvolveConflictError, EvolveNotFoundError, EvolvePageSizeError, type EvolveSessions } from "../domain/evolve-sessions";
+import { createEvolveSessionRoutes } from "./evolve-session-routes";
 
 export interface BoundaryEvent {
   readonly phase: "attempt" | "outcome";
@@ -44,6 +46,8 @@ export interface AppOptions {
   readonly titles: TitleService;
   readonly search?: SearchService;
   readonly searchSessions?: SearchSessions;
+  readonly evolveSessions?: EvolveSessions;
+  readonly notifyEvolveWork?: () => void;
   readonly searchAgentsConfigured?: boolean;
   readonly notifySearchAdmission?: () => void;
   readonly searchClockReceipts?: SearchClockReceipts;
@@ -114,6 +118,7 @@ function safePath(path: string): string {
   if (parts[1] === "background-work") return parts.length <= 2 ? "/background-work" : "/background-work/:target";
   if (path === "/browse/thoughts") return path;
   if (parts[1] === "search-sessions") return "/search-sessions" + (parts.length > 2 ? "/:id" : "");
+  if (parts[1] === "evolve-sessions") return "/evolve-sessions" + (parts.length > 2 ? "/:id" : "");
   if (path === "/exports/simple") return "/exports/simple";
   if (path === "/exports/agentic") return "/exports/agentic";
   if (parts[1] === "imports" && parts[2] === "media") return "/imports/media" + (parts[3] === "by-key" ? "/by-key/:key" : "");
@@ -142,11 +147,12 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   const browseSign = (value: string) => createHmac("sha256", browseSecret).update(value).digest();
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError || error instanceof SearchHttpError ? error.status :
+      error instanceof EvolvePageSizeError ? 413 :
       error instanceof AgentNotConfiguredError ? 503 :
       error instanceof MediaImportError ? error.code === "invalid-media" ? 422 : 503 :
-      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError || error instanceof SearchConflictError ? 409 :
+      error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError || error instanceof SearchConflictError || error instanceof EvolveConflictError ? 409 :
       error instanceof ForbiddenActorError || error instanceof CreationForbiddenError || error instanceof TitleForbiddenError || error instanceof RunForbiddenError || error instanceof ImportForbiddenError || error instanceof SearchForbiddenError ? 403 :
-      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError || error instanceof SearchNotFoundError ? 404 :
+      error instanceof CreationNotFoundError || error instanceof TitleNotFoundError || error instanceof SimpleExportNotFoundError || error instanceof RunNotFoundError || error instanceof ImportNotFoundError || error instanceof SearchNotFoundError || error instanceof EvolveNotFoundError ? 404 :
       error instanceof ImportPreservationError && error.message.startsWith("Unsupported source") ? 422 :
       error instanceof ValidationError ? 400 : 500;
     if (status === 500) diagnostics.error("[daemon] request failed", { method: c.req.method, path: safePath(new URL(c.req.url).pathname) });
@@ -163,6 +169,12 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     if (error instanceof ImportConflictError) return c.json({error:"Conflict",code:error.message === "import-sealed" ? "import-sealed" : "idempotency-conflict"},status);
     if (error instanceof ImportPreservationError && status===422) return c.json({error:"Unsupported source",code:error.message === "Unsupported source content" ? "unsupported-source-content" : "unsupported-source-encoding"},status);
     const path=safePath(new URL(c.req.url).pathname);
+    if (path.startsWith("/evolve-sessions")) {
+      const code = error instanceof EvolveConflictError ? error.code : error instanceof EvolvePageSizeError ? "record-too-large" : error instanceof SearchHttpError && error.status === 413 ? "request-too-large" :
+        error instanceof SearchHttpError && error.status === 415 ? "unsupported-media-type" : status === 400 ? "invalid-evolve-request" :
+        status === 403 ? "forbidden" : status === 404 ? "not-found" : "evolve-request-failed";
+      return c.json({error:status === 400 ? "Bad request" : status === 403 ? "Forbidden" : status === 404 ? "Not found" : status === 409 ? "Conflict" : status === 413 ? "Payload too large" : status === 415 ? "Unsupported media type" : "Internal server error",code},status);
+    }
     if (path.startsWith("/search-sessions")) {
       const code = error instanceof SearchHttpError ? error.code : error instanceof SearchConflictError ? error.code : error instanceof AgentNotConfiguredError ? "agents-not-configured" :
         status === 400 ? "invalid-search-request" : status === 403 ? "forbidden" : status === 404 ? "search-session-not-found" : "search-request-failed";
@@ -176,12 +188,12 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.use("*", async (c, next) => {
     const event = { method: c.req.method, path: safePath(new URL(c.req.url).pathname) };
-    if (event.path === "/settings/agent-instructions" || event.path.startsWith("/exports/agentic") || event.path.startsWith("/search-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
+    if (event.path === "/settings/agent-instructions" || event.path.startsWith("/exports/agentic") || event.path.startsWith("/search-sessions") || event.path.startsWith("/evolve-sessions") || event.path.startsWith("/runs/") || event.path.startsWith("/imports/markdown") || event.path.startsWith("/import-sources") || event.path.startsWith("/imports/media") || event.path.startsWith("/media-sources") || event.path.startsWith("/thoughts/:id/reinterpret") || event.path === "/import-namespaces" || event.path === "/thoughts/:id/import-source") c.header("cache-control","private, no-store");
     logger({ phase: "attempt", ...event });
     try {
       const auth = c.req.header("authorization");
       const actor = auth === `Bearer ${credentials.user}` ? "user" : auth === `Bearer ${credentials.ai}` ? "ai" : null;
-      if (!actor) { c.res = c.json({ error: "Unauthorized" }, 401); return; }
+      if (!actor) { c.header("cache-control","private, no-store"); c.res = c.json({ error: "Unauthorized" }, 401); return; }
       c.set("actor", actor);
       await next();
     } finally {
@@ -193,6 +205,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   if (options.backgroundWork) app.route("/",createBackgroundWorkRoutes(options.backgroundWork,options.localStops));
   if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
+  if (options.evolveSessions) app.route("/",createEvolveSessionRoutes(options.evolveSessions,options.notifyEvolveWork));
   if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics,options.reinterpretations.retirement));
 
   if (options.agentInstructions) {

@@ -598,7 +598,7 @@ test("next logical capture and staged recovery preserve append-only local-stop f
   await mkdir(output,{mode:0o700}); await mkdir(staging,{mode:0o700});
   const captured = await captureBackup({databasePath:f.dbPath,mediaDirectory:f.mediaDirectory,outputDirectory:output,logger});
   const manifest = decodeManifest(await readFile(join(captured.snapshotDirectory,"manifest.json")));
-  expect(String(manifest.appSchema)).toBe("thoughtloom-logical-9");
+  expect(String(manifest.appSchema)).toBe("thoughtloom-logical-11");
   expect(manifest.tables.find(table => table.name === "local_work_stops")?.rowCount).toBe("2");
   for (const schema of ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4",
     "thoughtloom-logical-5","thoughtloom-logical-6","thoughtloom-logical-7","thoughtloom-logical-8"] as const) {
@@ -695,7 +695,8 @@ test("logical-8 projected restore does not infer local-stop receipts from interr
     await writeFile(join(legacy,path),bytes);
     tables.push({name:shape.name,path,rowCount:String(rows.length),byteLength:String(bytes.length),sha256:createHash("sha256").update(bytes).digest("hex")});
   }
-  await rm(join(legacy,"tables","local_work_stops.json"));
+  const legacyNames = new Set(tables.map(table => table.name));
+  for (const entry of original.tables) if (!legacyNames.has(entry.name)) await rm(join(legacy,entry.path));
   await writeFile(join(legacy,"manifest.json"),encodeManifest({...original,appSchema:"thoughtloom-logical-8",tables}));
   const restored = await restoreBackup({snapshotDirectory:legacy,targetDirectory:join(f.directory,"logical8-target"),
     restoredAt:"2032-01-02T03:04:05.000Z",logger});

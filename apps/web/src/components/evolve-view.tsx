@@ -10,21 +10,19 @@ import {
 import styles from "./evolve.module.css";
 import { useContextualBack } from "./contextual-back";
 import { ContentGlyph } from "./content-glyph";
-import { MediaSourceDetails } from "./media-source-details";
 import { ThoughtMarkdown } from "./thought-markdown";
-
-const titleOf = (thought: IdeaThought) => thought.title ?? (thought.kind === "media-original" ? thought.mediaSource.name : thought.text.trim().split(/\s+/).slice(0, 5).join(" "));
-const hrefOf = (id: string) => `/ideas/${encodeURIComponent(id)}`;
-const kinds = {
-  "captured-original": "Original capture", "user-contribution": "Contribution",
-  "ai-interpretation": "Interpretation", "developing-idea": "Developing idea", "imported-original": "Imported source", "media-original": "Image or PDF",
-};
+import { Byline, hrefOf, StartingThought, titleOf } from "./evolve-context";
+import { SelectiveEvolve, SelectiveModeChoice } from "./evolve-selective";
+import { inspectionReturn } from "./evolve-selective-client";
 
 export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   const store = useEvolveStore();
   const [key, setKey] = useState<string | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
+  const [selectiveAnchor, setSelectiveAnchor] = useState<IdeaThought | null>(null);
+  const [returnedConversation, setReturnedConversation] = useState<string | null>(null);
   const [choicesOpen, setChoicesOpen] = useState(false);
+  const modeChoice = useRef<HTMLInputElement>(null);
+  const modeFocus = useRef(false);
   const changeButton = useRef<HTMLButtonElement>(null);
   const firstChoice = useRef<HTMLButtonElement>(null);
   const contributionField = useRef<HTMLTextAreaElement>(null);
@@ -32,9 +30,13 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   const workspace = useSyncExternalStore(store.subscribe, snapshot, () => null);
   useContextualBack(thoughtId ? hrefOf(thoughtId) : "/explore", thoughtId ? "Back to idea" : "Back to Explore");
 
-  useEffect(() => { if (thoughtId) setKey(store.open(thoughtId)); }, [store, thoughtId]);
   useEffect(() => {
-    if (!key) return;
+    const returned = inspectionReturn();
+    if (returned) setReturnedConversation(returned.conversationId);
+    else if (thoughtId) setKey(store.open(thoughtId));
+  }, [store, thoughtId]);
+  useEffect(() => {
+    if (!key || selectiveAnchor) return;
     let stopWatching: (() => void) | undefined;
     const visibility = () => {
       stopWatching?.();
@@ -43,11 +45,23 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
     visibility();
     document.addEventListener("visibilitychange", visibility);
     return () => { document.removeEventListener("visibilitychange", visibility); stopWatching?.(); };
-  }, [store, key]);
+  }, [store, key, selectiveAnchor]);
   useEffect(() => { if (choicesOpen) firstChoice.current?.focus(); }, [choicesOpen]);
+  useEffect(() => {
+    if (!selectiveAnchor && modeFocus.current) {
+      modeChoice.current?.focus();
+      modeFocus.current = false;
+    }
+  }, [selectiveAnchor]);
 
+  if (returnedConversation) return <SelectiveEvolve key={returnedConversation} conversationId={returnedConversation} />;
   if (!thoughtId) return <section className={styles.view}><h1>Evolve link not valid</h1><p>Choose Evolve from an idea to begin.</p></section>;
   if (!workspace || !key) return <section className={styles.view}><h1>Evolve</h1><p role="status">Opening the selected thought…</p></section>;
+  if (selectiveAnchor) return <SelectiveEvolve anchor={selectiveAnchor} initialDraft={workspace.draft}
+    onEntryDraft={text => store.draft(key, text)} onClassic={() => {
+      modeFocus.current = true;
+      setSelectiveAnchor(null);
+    }} />;
 
   const points = continuationPoints(workspace);
   const selected = points.find(item => item.id === workspace.continuationId);
@@ -73,25 +87,12 @@ export function EvolveView({ thoughtId }: { thoughtId: string | null }) {
   return <section className={styles.view}>
     <h1>Evolve</h1>
     <div className={styles.columns}>
-      <div className={styles.context}>
-        <button className={styles.contextToggle} type="button" aria-expanded={contextOpen}
-          aria-controls="evolve-starting-context" onClick={() => setContextOpen(!contextOpen)}>
-          <span>Starting thought{workspace.root ? ` · ${titleOf(workspace.root)}` : ""}</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d={contextOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>
-        </button>
-        <aside className={styles.rail} id="evolve-starting-context" data-open={contextOpen} aria-labelledby="evolve-starting-heading">
-          <h2 id="evolve-starting-heading">Starting thought</h2>
-          {workspace.rootState === "loading" ? <p role="status">Reading the starting thought…</p>
-            : workspace.root ? <>
-              <h3>{titleOf(workspace.root)}</h3><Byline thought={workspace.root} />
-              {workspace.root.kind === "media-original" ? <MediaSourceDetails source={workspace.root.mediaSource} compact /> : <ThoughtMarkdown className={styles.savedText} text={workspace.root.text} headingLevel={4} />}
-              <Link href={hrefOf(workspace.root.id)} prefetch={false}>Open idea</Link>
-            </> : <><p>Starting thought unavailable.</p><p className={styles.muted}>No history scope will be opened automatically.</p></>}
-        </aside>
-      </div>
+      <StartingThought thought={workspace.root} loading={workspace.rootState === "loading"} />
       <div className={styles.working}>
         <div className={styles.conversation}>
           {workspace.exchanges.length === 0 && <p className={styles.empty}>Add a question, challenge, or new thought.</p>}
+          {workspace.exchanges.length === 0 && workspace.root && workspace.rootState === "ready"
+            && <SelectiveModeChoice checked={false} onChange={() => setSelectiveAnchor(workspace.root)} inputRef={modeChoice} />}
           {workspace.exchanges.map((exchange, index) => <Exchange key={exchange.key} value={exchange}
             latest={index === workspace.exchanges.length - 1} workspace={workspace} />)}
         </div>
@@ -188,10 +189,6 @@ function Exchange({ value, latest, workspace }: {
       </div>
     </section>}
   </section>;
-}
-
-function Byline({ thought }: { thought: IdeaThought }) {
-  return <p className={styles.byline}><span className={thought.author === "user" ? styles.user : thought.author === "ai" ? styles.ai : styles.source}>{thought.author === "user" ? "You" : thought.author === "ai" ? "AI" : "Imported source"}</span> · <span className={styles.materialLabel}><ContentGlyph kind={thought.kind === "media-original" ? "imported-original" : thought.kind} size={20} />{kinds[thought.kind]}</span></p>;
 }
 
 function Development({ thought, unconfirmed = false }: { thought: IdeaThought; unconfirmed?: boolean }) {

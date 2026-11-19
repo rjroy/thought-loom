@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { BackupSchemaError, validateSourceSchema } from "../src/backup/schema";
+import { BackupSchemaError, shapesForSchema, validateSourceSchema } from "../src/backup/schema";
 import { migrate } from "../src/storage/sqlite";
 
 const included = [
@@ -13,8 +13,9 @@ const included = [
   "markdown_imports", "markdown_import_files", "markdown_import_payloads", "media_store", "media_sources",
   "search_sessions", "search_turns", "search_messages", "search_discoveries", "search_content_dependencies", "search_composer_contexts",
   "search_composer_dependencies", "search_revisions", "search_native_cleanup", "restore_fences", "agent_instructions", "run_screening_passes", "run_screening_pairs", "daily_review_batches", "daily_review_items", "local_work_stops",
+  "evolve_sessions", "evolve_turns", "evolve_saves", "evolve_turn_history",
 ].sort();
-const rowidTables = ["runs", "run_operation_receipts", "response_thoughts", "run_context", "markdown_import_files", "import_namespaces", "search_native_cleanup"].sort();
+const rowidTables = ["runs", "run_operation_receipts", "response_thoughts", "run_context", "markdown_import_files", "import_namespaces", "search_native_cleanup", "evolve_turns"].sort();
 
 function fixture(action: (db: Database) => void): void {
   const db = new Database(":memory:");
@@ -27,6 +28,12 @@ test("compiled inventory matches the fresh migrated schema, including closed col
   expect(inventory.find(table => table.name === "agent_instructions")?.columns).toEqual(["evolve","export","revision","search","singleton","weaver"]);
   expect(inventory.find(table => table.name === "run_steps")?.columns).toContain("guidance");
   expect(inventory.filter(table => table.preserveRowid).map(table => table.name).sort()).toEqual(rowidTables);
+  expect(inventory.filter(table => table.name.startsWith("evolve_"))).toEqual([
+    { name: "evolve_saves", columns: ["passage_start","position","prompt_id","request_key","selected_by","selection_index","source","source_turn_id","speaker","thought_id","turn_id"], primaryKey: ["thought_id"], preserveRowid: false },
+    { name: "evolve_sessions", columns: ["anchor_id","continuation_id","created_at","id"], primaryKey: ["id"], preserveRowid: false },
+    { name: "evolve_turn_history", columns: ["prior_turn_id","turn_id"], primaryKey: ["turn_id","prior_turn_id"], preserveRowid: false },
+    { name: "evolve_turns", columns: ["admitted_at","id","open_slot","parent_id","reply","request_key","run_id","session_id","status","text"], primaryKey: ["id"], preserveRowid: true },
+  ]);
   for (const table of inventory) {
     const quoted = table.name.replaceAll('"', '""');
     const actual = db.query<{ name: string; pk: number }, []>(`PRAGMA table_info("${quoted}")`).all();
@@ -39,6 +46,14 @@ test("compiled inventory matches the fresh migrated schema, including closed col
     expect(inventory.some(table => table.name === excluded)).toBe(false);
   }
 }));
+
+test("logical-10 retains its historical admission-only Evolve inventory", () => {
+  const evolve = shapesForSchema("thoughtloom-logical-10").filter(table => table.name.startsWith("evolve_"));
+  expect(evolve).toEqual([
+    { name: "evolve_sessions", columns: ["anchor_id","continuation_id","created_at","id"], primaryKey: ["id"], preserveRowid: false },
+    { name: "evolve_turns", columns: ["admitted_at","id","open_slot","parent_id","request_key","session_id","status","text"], primaryKey: ["id"], preserveRowid: true },
+  ]);
+});
 
 test("schema validation refuses unknown tables, including fake derived-table prefixes", () => {
   for (const name of ["future_history", "thought_search_fts_extra"]) fixture(db => {

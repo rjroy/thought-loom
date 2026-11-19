@@ -50,7 +50,7 @@ async function owned(action: (fixture: BackupFixture) => Promise<void>, reviews 
 
 test("current capture/recovery/installation preserve successful review metadata and seal without reviving incomplete work", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-9");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-11");
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger:f.sources.logger});
   try {
@@ -83,7 +83,7 @@ test.each(legacySchemas)("%s restoration verifies additive defaults and preserve
   await mkdir(join(destination,"tables"),{recursive:true,mode:0o700});
   const tables = [];
   for (const shape of shapesForSchema(schema)) {
-    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)),"thoughtloom-logical-9");
+    const current = decodeTable(shape.name,await readFile(join(f.snapshot,"tables",`${shape.name}.json`)));
     const rows: RawRow[] = current.map(row => ({rowid:row.rowid,values:Object.fromEntries(shape.columns.map(name => [name,row.values[name]]))}));
     const bytes = encodeTable(shape,rows), path = `tables/${shape.name}.json`;
     await writeFile(join(destination,path),bytes,{mode:0o600});
@@ -144,14 +144,15 @@ test("logical-8 roundtrip preserves legacy and new review protocols and title wo
   expect(reviewRows(f.db)).toEqual(reviewsBeforeMigration);
   const output = join(f.dir,"mixed-output"); await mkdir(output,{mode:0o700});
   const backup = await captureBackup({databasePath:f.path,mediaDirectory:f.media,outputDirectory:output,logger:f.sources.logger});
-  expect(decodeManifest(await readFile(join(backup.snapshotDirectory,"manifest.json"))).appSchema).toBe("thoughtloom-logical-9");
+  expect(decodeManifest(await readFile(join(backup.snapshotDirectory,"manifest.json"))).appSchema).toBe("thoughtloom-logical-11");
   // Logical-8 has the same review/run shapes, but not the logical-9 local-stop table.
   const logical8 = join(f.dir,"projected-logical-8");
   await cp(backup.snapshotDirectory,logical8,{recursive:true,errorOnExist:true});
   const logical8ManifestPath = join(logical8,"manifest.json"), capturedManifest = decodeManifest(await readFile(logical8ManifestPath));
-  await rm(join(logical8,"tables","local_work_stops.json"));
+  const logical8Names = new Set(shapesForSchema("thoughtloom-logical-8").map(shape => shape.name));
+  for (const entry of capturedManifest.tables) if (!logical8Names.has(entry.name)) await rm(join(logical8,entry.path));
   await writeFile(logical8ManifestPath,encodeManifest({...capturedManifest,appSchema:"thoughtloom-logical-8",
-    tables:capturedManifest.tables.filter(entry => entry.name !== "local_work_stops")}),{mode:0o600});
+    tables:capturedManifest.tables.filter(entry => logical8Names.has(entry.name))}),{mode:0o600});
   const mislabeled = join(f.dir,"mislabeled-logical-7");
   await cp(logical8,mislabeled,{recursive:true,errorOnExist:true});
   const manifestPath = join(mislabeled,"manifest.json"), currentManifest = decodeManifest(await readFile(manifestPath));

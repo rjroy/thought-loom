@@ -1,0 +1,73 @@
+.heading, .heading > div, .actions, .saveHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+.heading, .saveHead { justify-content: space-between; }
+.heading { margin: 0.5rem 0 1.75rem; }
+.selective .heading h1 { margin: 0; }
+.mode { margin: 0; font-size: 1rem; font-weight: 600; color: var(--color-focus); }
+.meta { margin: 0; color: var(--color-muted); font-size: 1rem; overflow-wrap: anywhere; }
+.selective strong, .resume h2, .saveHead h2, .receipt h3, .panel h3 { color: var(--color-text); }
+
+.modeChoice { max-inline-size: 72ch; }
+.modeChoice label, .radio { display: flex; align-items: center; gap: 0.625rem; min-block-size: 2.75rem; }
+.modeChoice label { inline-size: fit-content; font-weight: 650; color: var(--color-text); cursor: pointer; }
+.modeChoice input, .radio input { flex: none; margin: 0; inline-size: 1.125rem; block-size: 1.125rem; accent-color: var(--brand-color-3); }
+.modeChoice .meta { margin-block-start: 0.25rem; }
+.resume h2 { margin: 0 0 0.25rem; font-size: 1.375rem; line-height: 1.25; }
+.resume a { text-decoration: none; }
+.resume a:last-child { text-decoration: underline; }
+.resume .actions { margin-block: 1.25rem 0.25rem; }
+.entryNotice p { margin-block-start: 0; }
+.historyPaging { margin-block-end: 1rem; }
+.savePaging { padding: 0.375rem 1rem; border-block-start: 1px solid var(--color-line); }
+.problem > p { margin: 0.25rem 0; }
+.problem > button + button { margin-inline-start: 1rem; }
+
+.turn + .turn { margin-block-start: 1.5rem; padding-block-start: 1.25rem; border-block-start: 1px solid var(--color-line); }
+.message + .message { margin-block-start: 1.125rem; }
+.byline { margin: 0; font-size: 1rem; }
+.run { margin-block-start: 1rem; }
+.run .actions { margin-block-start: 0.5rem; align-items: center; }
+.saves { margin-block-start: 1.125rem; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-caption); }
+.saveHead { padding: 0.75rem 1rem; }
+.saveHead h2 { margin: 0; font-size: 1.375rem; line-height: 1.25; }
+.saveHead .meta, .receipt .meta { color: var(--color-body); }
+.receipt { padding: 0.75rem 1rem 0.5rem; border-block-start: 1px solid var(--color-line); }
+.receipt h3 { margin: 0.25rem 0; font-size: 1.25rem; line-height: 1.3; overflow-wrap: anywhere; }
+.receiptText { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-inline-size: 72ch; }
+.receiptGrid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 1rem; align-items: start; min-inline-size: 0; }
+
+.composerHelp { margin-block-start: 0.75rem; }
+.panel, .branch { min-inline-size: 0; margin-block: 0.375rem 1rem; padding: 1rem; border: 1px solid var(--color-control-line); border-radius: 0.75rem; background: var(--color-card); }
+.branch { margin-inline: 0; }
+.branch legend { max-inline-size: 100%; font-weight: 650; color: var(--color-text); overflow-wrap: anywhere; }
+.radio { padding: 0.375rem 0.75rem; cursor: pointer; overflow-wrap: anywhere; }
+.radio:has(input:checked) { border-radius: 0.375rem; background: var(--color-caption); }
+.panel h3 { margin: 0 0 0.375rem; font-size: 1.25rem; }
+.panel p:not(.meta, .problem) { margin: 0.25rem 0; }
+.panel label { display: block; color: var(--color-text); font-weight: 650; }
+.panel textarea {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 5rem;
+  margin-block-start: 0.5rem;
+  padding: 0.75rem 1rem;
+  resize: vertical;
+  border: 1px solid var(--color-control-line);
+  border-radius: 0.5rem;
+  background: var(--color-input);
+  color: var(--color-text);
+  font: inherit;
+}
+.panel .quote { color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.panel mark, .message mark { color: var(--color-text); background: var(--color-selection); }
+.panel .actions, .branch .actions { margin-block-start: 0.75rem; }
+.problem { margin: 0.75rem 0 0; color: var(--brand-color-11); overflow-wrap: anywhere; }
+
+@media (max-width: 48rem) {
+  .receiptGrid { grid-template-columns: minmax(0, 1fr); }
+  .receiptGrid > a { justify-self: start; }
+}

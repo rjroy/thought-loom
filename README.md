@@ -25,14 +25,14 @@ Capture rough thoughts, find meaningful connections, and develop ideas through d
 - **Find and browse** your thinking with keyword search, chronological lists and connected maps.
 - **Connect ideas** yourself, or let background AI weaving suggest interpretations and relationships. **Reinterpret** requests a fresh interpretation without replacing earlier work.
 - **Revisit thinking quietly** through configured background title generation and daily connection review, without a separate review screen.
-- **Develop ideas** through Evolve, keeping your contributions, AI developments and Full replies distinct.
+- **Develop ideas** through Classic Evolve, or choose **Save ideas only** to keep dialogue separate and add selected passages and insights to the library.
 - **Import Markdown, images and PDFs.** Markdown wording is preserved; image/PDF originals are retained separately from AI interpretations.
 - **Ask your library** questions in saved search conversations that rediscover existing ideas without adding new thoughts.
 - **Export Markdown**, either directly from an idea's development branches or as an AI-written report across your library.
 - **Control AI use** by rejecting and restoring thoughts or connections. Add installation-wide agent guidance in Settings.
 - **Review background work** from Settings to find unfinished work across your library and deliberately stop local tracking. Read the [recovery warnings](docs/user-guide.md#review-background-work): remote tools may still be running.
 
-Capture, ordinary search, Browse, manual connections and Simple export work without a configured model. Markdown import can use structural grouping without AI; images and PDFs can be retained while interpretation waits. Background weaving stays queued until agents are configured. Evolve, new conversational-search turns and AI report generation require agent configuration by the operator.
+Capture, ordinary search, Browse, manual connections and Simple export work without a configured model. Markdown import can use structural grouping without AI; images and PDFs can be retained while interpretation waits. Background weaving stays queued until agents are configured. Classic Evolve, AI replies in Save ideas only, new conversational-search turns and AI report generation require agent configuration by the operator. Save-ideas-only messages can be recorded without an agent run, and eligible passages can be kept manually.
 
 AI output is a contribution to assess, not a verified conclusion. URL retrieval depends on available tools and source access; linked web pages are not archived. For image/PDF interpretation, Thoughtloom and its agent service must share access to retained originals. See the [user guide](docs/user-guide.md) for workflow details and [agent setup](docs/server-startup.md#agent-configuration) for configuration.
 

@@ -11,6 +11,7 @@ import { createConnection } from "../domain/connection";
 import { assertConnectionOperationRecord, parseConnectionOperationResult, parseStepOperation, stepOperationEnvelope } from "../domain/run-operations";
 import { parseEnvelope, protocolJson } from "../domain/run-protocol";
 import { localStopReceipt } from "../domain/local-work-stop";
+import { validateEvolveBytes, validateEvolveRecords } from "./evolve-records";
 
 export interface CapturedTable { readonly shape: TableShape; readonly rows: readonly RawRow[] }
 export interface SqlSnapshot {
@@ -42,8 +43,10 @@ export function validateRecords(db: Database): void {
     WHERE d.kind='weave' AND substr(d.weave_trigger_id,1,${connectionDiscoveryPrefix.length})='${connectionDiscoveryPrefix}' AND (
       t.kind='media-original' OR NOT EXISTS(SELECT 1 FROM main.runs origin
         WHERE origin.id=substr(d.weave_trigger_id,${connectionDiscoveryPrefix.length + 1}) AND origin.kind IN ('weave','evolve')
-          AND ((origin.kind='evolve' AND origin.input_thought_id=d.weave_subject_id) OR EXISTS(
-            SELECT 1 FROM main.run_issued_thoughts i WHERE i.run_id=origin.id AND i.thought_id=d.weave_subject_id)))
+           AND ((origin.kind='evolve' AND origin.input_thought_id=d.weave_subject_id) OR EXISTS(
+             SELECT 1 FROM main.run_issued_thoughts i WHERE i.run_id=origin.id AND i.thought_id=d.weave_subject_id) OR EXISTS(
+             SELECT 1 FROM main.evolve_saves s JOIN main.evolve_turns t ON t.id=s.turn_id
+             WHERE t.run_id=origin.id AND s.thought_id=d.weave_subject_id AND s.selected_by='ai')))
       OR EXISTS(SELECT 1 FROM main.run_issued_thoughts i WHERE i.run_id=d.id)
       OR EXISTS(SELECT 1 FROM main.run_replies r WHERE r.run_id=d.id AND (r.draft_json IS NOT NULL OR r.response_id IS NOT NULL))) LIMIT 1`);
   noRows(db,`SELECT 1 FROM main.runs d LEFT JOIN main.thoughts t ON t.id=d.weave_subject_id
@@ -51,8 +54,9 @@ export function validateRecords(db: Database): void {
       d.weave_subject_id IS NOT substr(d.weave_trigger_id,${directConnectionDiscoveryPrefix.length + 1}) OR t.parent_id IS NULL
       OR NOT ((t.kind='user-contribution' AND t.author='user' AND t.origin='contribution' AND NOT EXISTS(SELECT 1 FROM main.thought_sources s WHERE s.thought_id=t.id))
         OR (t.kind='developing-idea' AND t.author='ai' AND t.origin='development'))
-      OR EXISTS(SELECT 1 FROM main.runs r WHERE r.input_thought_id=t.id)
-      OR EXISTS(SELECT 1 FROM main.run_issued_thoughts i WHERE i.thought_id=t.id OR i.run_id=d.id)
+       OR EXISTS(SELECT 1 FROM main.runs r WHERE r.input_thought_id=t.id)
+       OR EXISTS(SELECT 1 FROM main.run_issued_thoughts i WHERE i.thought_id=t.id OR i.run_id=d.id)
+       OR EXISTS(SELECT 1 FROM main.evolve_saves s WHERE s.thought_id=t.id AND s.selected_by='ai')
       OR EXISTS(SELECT 1 FROM main.run_replies r WHERE r.run_id=d.id AND (r.draft_json IS NOT NULL OR r.response_id IS NOT NULL))) LIMIT 1`);
   for (const [table, owner] of [["thought_sources", "thought_id"], ["connection_sources", "connection_id"], ["response_thoughts", "response_id"],
     ["run_steps", "run_id"], ["run_issued_thoughts", "run_id"], ["import_document_parts", "document_id"], ["markdown_import_files", "import_id"],
@@ -132,6 +136,7 @@ export function validateRecords(db: Database): void {
     t.open_slot IS NOT (r.status IN ('queued','submitting','running','uncertain')) OR
     NOT EXISTS(SELECT 1 FROM main.search_messages m WHERE m.run_id=t.run_id AND m.role='user') LIMIT 1`);
   noRows(db, `SELECT 1 FROM main.search_discoveries d JOIN main.run_steps s ON s.prompt_id=d.added_prompt_id WHERE s.run_id!=d.added_run_id LIMIT 1`);
+  validateEvolveRecords(db,noRows);
 }
 
 function readTable(db: Database, shape: TableShape): CapturedTable {
@@ -433,7 +438,8 @@ function validateLocalWorkStops(snapshot:SqlSnapshot):void {
 }
 
 /** Shared content checks. Capture calls these only after releasing its live source transaction/connection. */
-export function validateBytes(snapshot: SqlSnapshot, _schema: import("./schema").BackupAppSchema = "thoughtloom-logical-9"): void {
+export function validateBytes(snapshot: SqlSnapshot, schema?: import("./schema").BackupAppSchema): void {
+  validateEvolveBytes(snapshot,schema,{text,integer,table});
   validateApplicationIntegers(snapshot);
   validateLocalWorkStops(snapshot);
   validateConnectionReceipts(snapshot);

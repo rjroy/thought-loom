@@ -68,7 +68,9 @@ function admit(db: Database, sources: WeaveSources, input: WeaveIntent, directCr
       if (purpose === "connection-only" && directSubjectId === null) {
         if (subject.kind === "media-original" || !db.query(`SELECT 1 FROM runs r WHERE r.id=? AND r.kind IN ('weave','evolve')
           AND ((r.kind='evolve' AND r.input_thought_id=?) OR EXISTS(
-            SELECT 1 FROM run_issued_thoughts i WHERE i.run_id=r.id AND i.thought_id=?))`).get(originRunId,intent.subjectId,intent.subjectId)) {
+            SELECT 1 FROM run_issued_thoughts i WHERE i.run_id=r.id AND i.thought_id=?) OR EXISTS(
+            SELECT 1 FROM evolve_saves s JOIN evolve_turns t ON t.id=s.turn_id WHERE t.run_id=r.id AND s.thought_id=? AND s.selected_by='ai'
+          ))`).get(originRunId,intent.subjectId,intent.subjectId,intent.subjectId)) {
           throw new RunConflictError("Connection discovery requires its durable creation origin");
         }
       }

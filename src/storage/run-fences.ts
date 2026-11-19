@@ -8,6 +8,7 @@ import { record } from "../domain/validation";
 import type { Logger } from "../logging";
 import { SqliteSharedResponses } from "./shared-response";
 import { resolveWeavePurpose } from "../domain/weave-scheduling";
+import { selectiveRunOwner } from "./evolve-records";
 
 export type RunVisibility = (ref: ContextRef) => ContextValue | null;
 export type InterruptionReason = "stopped" | "context-invalidated" | "quarantined" | "interrupted-reply";
@@ -71,6 +72,10 @@ export function ordinaryRunContextValid(db: Database, run: RunRecord, visible: R
 export function interruptOrdinaryRun(db: Database, run: RunRecord, _reason: "stopped" | "context-invalidated" | "failed", logger: Logger): void {
   if (!db.inTransaction) throw new RunConflictError("Run interruption requires its owning transaction");
   requireOrdinaryRun(run);
+  if (run.kind === "evolve" && run.inputThoughtId === null && selectiveRunOwner(db,run.id)) {
+    db.run("UPDATE runs SET status='interrupted',generation=generation+1,cancellation_state='pending' WHERE id=?",[run.id]);
+    return; // A private dialogue turn never takes Classic's partial-reply publication path.
+  }
   const row = db.query<{ draft: string | null; responseId: string | null }, [string]>(
     "SELECT draft_json AS draft,response_id AS responseId FROM run_replies WHERE run_id=?").get(run.id);
   const associations = runAssociations(db,run);

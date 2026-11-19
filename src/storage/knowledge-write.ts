@@ -20,8 +20,9 @@ export class SqliteKnowledgeWriter {
       if (thought.kind === "media-original" || thought.author === "source" || thought.kind === "imported-original") throw new ValidationError("Imported originals require the dedicated import writer");
       this.db.transaction(() => {
         // Bun string binding consumes an initial U+FEFF; bind exact UTF-8 bytes and let SQLite cast them to TEXT.
-        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, ?)",
-          [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin, thought.parentId]);
+        this.db.run("INSERT INTO thoughts (id, text, author, kind, created_at, origin, parent_id) VALUES (?, CAST(? AS TEXT), ?, ?, ?, ?, CAST(? AS TEXT))",
+          [thought.id, new TextEncoder().encode(thought.text), thought.author, thought.kind, thought.createdAt, thought.origin,
+            thought.parentId === null ? null : new TextEncoder().encode(thought.parentId)]);
         this.db.run("INSERT INTO thought_titles (thought_id, title, title_author) VALUES (?, ?, ?)",
           [thought.id, thought.title, thought.title === null ? null : thought.titleAuthor ?? thought.author]);
         const insert = this.db.query("INSERT INTO thought_sources (thought_id, position, source_id) VALUES (?, ?, ?)");

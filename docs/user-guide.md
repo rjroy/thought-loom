@@ -65,7 +65,7 @@ If you want to correct or expand saved wording, capture a new thought or develop
 
 Capture, ordinary keyword search, Browse, manual connections and Simple export work without a configured agent. Markdown import can use structural grouping without AI. Image/PDF import can retain the original while interpretation waits.
 
-Evolve, new conversational-search turns and Agentic reports require server-side agent configuration. Settings does not select or enable a model. Ask the person running your installation if these features are unavailable.
+Classic Evolve, AI replies in Save ideas only, new conversational-search turns and Agentic reports require server-side agent configuration. Without it, Save ideas only can record messages without starting a run, and you can manually keep eligible passages. Settings does not select or enable a model. Ask the person running your installation if these features are unavailable.
 
 AI output needs your judgment. A connection is a suggestion, not proof; an interpretation may miss context. URL access also depends on the installation's tools and source permissions. Thoughtloom does not archive fetched web pages, so a saved source link is not a preserved copy of that page.
 
@@ -131,6 +131,10 @@ Automatic Weaver/Evolve work does not add another connection with the same direc
 
 Use Evolve when you want to add a question, challenge or new contribution, rather than replace the original.
 
+### Classic Evolve
+
+Classic is the default. It saves each contribution as a thought and can record AI developments and a separate Full reply.
+
 1. Open an active Idea and choose **Evolve this idea**.
 2. Check **Continuing from** so you know which saved thought you are developing.
 3. Enter **Your contribution**, such as “What would make shared tools easy to return without assigning one person to manage them?”
@@ -142,7 +146,23 @@ Use Evolve when you want to add a question, challenge or new contribution, rathe
 
 Use **Check this run** to refresh known work. **Stop** requests cancellation while retaining saved developments. It also stops pending automatic connection discovery for that Evolve's saved contributions/developments, without undoing connections already created. It cannot guarantee that remote tools have stopped or undo their effects. Leaving the page does not stop the run.
 
-In-app navigation retains the workspace in browser memory. A full reload opens a fresh workspace and loses its draft and local run references without cancelling recorded work. Copy important draft text and displayed run IDs before reloading. If admission is unconfirmed, do not send the same contribution again: this view has no confirmed run to check or stop.
+In-app navigation retains the Classic workspace in browser memory. A full reload opens a fresh Classic workspace and loses its draft and local run references without cancelling recorded work. Copy important draft text and displayed run IDs before reloading. If admission is unconfirmed, do not send the same contribution again: this view has no confirmed run to check or stop.
+
+### Save ideas only
+
+![Save-ideas-only Evolve showing retained dialogue, saved ideas and the continuation point.](images/user-guide/evolve-save-ideas-only.png)
+
+1. Open an active Idea, choose **Evolve this idea**, and select **Save ideas only** before sending. The conversation's mode cannot be switched after it starts.
+2. Check **Continuing from**, enter **Your message**, and choose **Send**. Messages and finalized replies stay in the conversation; they are not themselves library thoughts or Classic Full replies.
+3. Review **Saved ideas** separately from the dialogue. Each confirmed save shows its wording, author, who selected it, and **Developed from**. AI can select exact passages or create AI-authored syntheses; assess each saved idea yourself. A completed reply can save no thoughts. Use **Load earlier turns** or **Load more saved ideas** when offered to see more of the conversation.
+4. To keep words yourself, choose **Select passage** on your message or a finalized AI reply. Select the exact words, choose **Review passage** if offered, check the author and **Save under**, then choose **Keep as thought**. This preserves the selected wording and speaker, with selection attributed to you. It does not start a model run or change the next continuation.
+5. Automatic saves normally set continuation to the latest newly saved thought. Use **Change**, select the starting thought or an eligible saved idea, and choose **Use this thought** to pick where the next message begins. Load earlier turns and more saved ideas to make older saves available as choices. A current continuation can also refer to an older thought outside the displayed turns. **Open idea** only opens a reading view and does not change that selection.
+
+Use **Conversation link** to keep a link to this specific conversation. Opening it offers **Resume** or **Start fresh instead**; resuming reads the recorded dialogue and continuation without sending another message. Starting Evolve from an Idea starts a fresh workspace. When you open an idea for inspection from the conversation and return in the same browser document, the unsent draft is retained. A full reload or opening the link afresh does not restore that draft; copy important wording first.
+
+If a send is unconfirmed, keep the tab and use **Check request** rather than sending again. For an unconfirmed passage save, use **Check save**. A missing receipt does not prove a delayed request cannot commit. If a continuation change is unconfirmed, or another change makes your selection stale, your draft is kept and sending pauses. Use **Check selection**, review the recorded thought, then choose **Use current thought** when offered. An unconfirmed change may still arrive later; checking does not prove it cannot. If request recovery is unavailable in the tab, new messages and saves are paused. If creating a conversation is unconfirmed, the message was not sent; sending again starts a separate conversation.
+
+Use **Check this run** for a known run and check again if **Stop** is unconfirmed. You can request Stop for a known active run even if the conversation refresh failed or a Keep is unconfirmed; wait for any action currently in progress to finish. Stop fences further publication and retains confirmed saves, but cannot prove remote tools stopped or undo their effects. Leaving the page does not stop work. A message recorded without an agent run is not queued for a later automatic reply; send another message explicitly after configuration if you want a reply.
 
 ## Request another interpretation
 
@@ -305,7 +325,8 @@ The important distinction is between a failed read, a confirmed refusal and an u
 | Search or Browse cannot load | Use **Retry search**, the offered loading retry, or **Refresh list**. Keep filters in mind, including authorship and rejected scope. A read failure does not change your library. |
 | Idea unavailable | Check the link and whether deliberate rejected inspection is needed. Use **Try reading again** for a read error. Unavailable does not necessarily mean deleted. |
 | Agent work is queued | Saving may have succeeded even though AI has not started. Check the same run; ask the operator about configuration or service availability. Queued alone does not identify the cause. |
-| Evolve admission unconfirmed | Keep the submitted snapshot and selected-point details. Do not send the contribution again; no run ID is confirmed in this workspace. |
+| Classic Evolve admission unconfirmed | Keep the submitted snapshot and selected-point details. Do not send the contribution again; no run ID is confirmed in this workspace. |
+| Save-ideas-only send or Keep unconfirmed | Keep the same tab and use **Check request** or **Check save** for the original request. A missing receipt does not prove the write failed. |
 | Import or other keyed request unconfirmed | Keep its workspace open and use its specific Check action. An explicit same-request resend, where offered, is different from starting a new import or request. |
 | A known run cannot be checked | Retry its Check action. A failed status read is not evidence the run itself failed; previously confirmed output may still be shown. |
 | Stop is unconfirmed or cleanup remains pending | Check the same run. Use **Settings → Review background work** to find it across the library. Do not treat the request as proof remote work stopped. Saved work remains. |
@@ -316,7 +337,7 @@ The important distinction is between a failed read, a confirmed refusal and an u
 ### Before refreshing or asking for help
 
 1. Copy any important unsaved wording. Most drafts and uncertain-request snapshots live only in browser memory.
-2. Keep the current page link and any displayed run or batch ID. Saved search sessions, import reports and report exports have bookmarkable pages; a bookmark is not a draft backup.
+2. Keep the current page link and any displayed run or batch ID. Save-ideas-only conversations, saved search sessions, import reports and report exports have bookmarkable pages; a bookmark is not a draft backup.
 3. Note the exact message and which action preceded it. Share IDs and error wording rather than private thought text or credentials.
 4. Remember that leaving, refreshing or restarting servers does not prove remote agent work has stopped.
 

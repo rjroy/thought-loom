@@ -5,7 +5,7 @@ import { expectGlyph } from "./explore.runtime";
 import { markdownThought } from "./thought-markdown.runtime";
 
 type Status = "queued" | "running" | "uncertain" | "completed" | "interrupted" | "failed";
-type Attempt = { method: string; path: string; authorization: string | undefined; body: string };
+type Attempt = { method: string; path: string; authorization: string | undefined; body: string; key: string | undefined };
 type Run = { id: string; kind: "evolve"; status: Status; confirmedThoughtIds: string[]; responseId: string | null; contributionId: string; parentId: string };
 const start = { id: "evolve-start", text: "Owned starting thought", title: "Starting thought", titleAuthor: "user", author: "user", kind: "captured-original", createdAt: "2032-01-01T00:00:00Z", origin: "capture", parentId: null, sourceIds: [] };
 const earlier = { ...start, id: "evolve-earlier", text: "Owned earlier thought", title: "Earlier thought" };
@@ -18,6 +18,10 @@ export function evolveDaemon(token: string) {
   const rejected = new Set<string>();
   const fallbackStates = new Map<string, "complete" | "interrupted">();
   let admission: "normal" | "unknown" = "normal", stopFailure = false, resolutionFailure = false, failedResolutionReads = 0, next = 0;
+  let selectiveTurn: { id: string; parentId: string; text: string; status: string; admittedAt: string; runId: string; reply: null; saves: object[] } | null = null;
+  let selectiveKey = "", selectiveStatus = "running", selectiveReadFailure = false;
+  let selectiveKeepUnknown = false;
+  let selectiveContinuation = start.id;
   const reset = () => { runs.clear(); thoughts.clear(); rejected.clear(); fallbackStates.clear(); thoughts.set(start.id, start); thoughts.set(earlier.id, earlier); thoughts.set(imported.id, imported); thoughts.set(markdown.id, markdown); admission = "normal"; stopFailure = false; resolutionFailure = false; failedResolutionReads = 0; next = 0; };
   reset();
   const publicRun = (run: Run) => ({ id: run.id, kind: run.kind, status: run.status, confirmedThoughtIds: run.confirmedThoughtIds, responseId: run.responseId });
@@ -26,6 +30,9 @@ export function evolveDaemon(token: string) {
     setAdmission(value: typeof admission) { admission = value; },
     setStopFailure(value: boolean) { stopFailure = value; },
     setResolutionFailure(value: boolean) { resolutionFailure = value; },
+    resetSelective() { selectiveTurn = null; selectiveKey = ""; selectiveStatus = "running"; selectiveReadFailure = false; selectiveKeepUnknown = false; selectiveContinuation = start.id; },
+    setSelectiveReadFailure(value: boolean) { selectiveReadFailure = value; },
+    setSelectiveKeepUnknown(value: boolean) { selectiveKeepUnknown = value; },
     failedResolutionReads() { return failedResolutionReads; },
     setStatus(id: string, status: Status, options: { outputs?: number; fallback?: "complete" | "interrupted"; outputText?: string } = {}) {
       const run = runs.get(id); assert.ok(run, "fixture needs a known admitted run");
@@ -38,12 +45,60 @@ export function evolveDaemon(token: string) {
     async handler(req: IncomingMessage, res: ServerResponse) {
       let body = ""; for await (const chunk of req) body += String(chunk);
       const path = req.url ?? "", method = req.method ?? "";
-      attempts.push({ method, path, authorization: req.headers.authorization, body });
+      const rawKey = req.headers["idempotency-key"];
+      const key = typeof rawKey === "string" ? rawKey : undefined;
+      attempts.push({ method, path, authorization: req.headers.authorization, body, key });
       if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401).end(); return; }
       const url = new URL(path, "http://fixture.invalid");
       const send = (value: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
       const segments = url.pathname.split("/");
+      if (segments[1] === "evolve-sessions") {
+        const session = { id: "evolve-session-1", anchorThoughtId: start.id, continuationThoughtId: selectiveContinuation, mode: "ideas-only", createdAt: "2032-01-01T00:00:00.000Z" };
+        const run = () => ({ id: "evolve-run-selective", kind: "evolve", status: selectiveStatus, confirmedThoughtIds: ["evolve-confirmed"], responseId: null });
+        const result = () => {
+          const compact = url.searchParams.get("view") === "receipt";
+          return { receipt: { sessionId: session.id, turnId: selectiveTurn?.id, admittedAt: selectiveTurn?.admittedAt },
+            turn: compact && selectiveTurn ? { ...selectiveTurn, reply: null, saves: [] } : selectiveTurn,
+            run: compact ? { ...run(), confirmedThoughtIds: [] } : run() };
+        };
+        const prior = { id: "evolve-turn-prior", parentId: start.id, text: "Owned prior passage to keep.", status: "completed", admittedAt: session.createdAt, runId: "evolve-run-prior", reply: "Owned prior reply.", saves: [] };
+        if (method === "POST" && segments.length === 2) { send({ session: { ...session, continuationThoughtId: start.id } }, 201); return; }
+        if (method === "POST" && segments[3] === "turns" && segments.length === 4) {
+          const payload = JSON.parse(body) as { parentId: string; text: string; expectedContinuationThoughtId?: string };
+          if (payload.expectedContinuationThoughtId !== undefined && payload.expectedContinuationThoughtId !== selectiveContinuation) {
+            send({ code: "stale-continuation" }, 409); return;
+          }
+          selectiveKey = key ?? "";
+          selectiveTurn = { id: "evolve-turn-1", parentId: payload.parentId, text: payload.text, status: "running", admittedAt: session.createdAt, runId: "evolve-run-selective", reply: null, saves: [{ thoughtId: "evolve-confirmed", parentId: start.id, speaker: "user", text: payload.text, selectedBy: "ai", source: "passage", start: 0 }] };
+          thoughts.set("evolve-confirmed", { ...start, id: "evolve-confirmed", text: payload.text, title: "Confirmed idea", kind: "user-contribution", origin: "contribution", parentId: start.id });
+          selectiveContinuation = "evolve-confirmed";
+          send(result(), 201); return;
+        }
+        if (method === "PUT" && segments[3] === "continuation" && segments.length === 4) {
+          const payload = JSON.parse(body) as { thoughtId: string; expectedContinuationThoughtId?: string };
+          if (payload.expectedContinuationThoughtId !== undefined && payload.expectedContinuationThoughtId !== selectiveContinuation) {
+            send({ code: "stale-continuation" }, 409); return;
+          }
+          selectiveContinuation = payload.thoughtId;
+          send({ session: { ...session, continuationThoughtId: selectiveContinuation } }); return;
+        }
+        if (method === "POST" && segments[3] === "turns" && segments[5] === "saves" && segments.length === 6 && selectiveKeepUnknown) { res.writeHead(502).end(); return; }
+        if (method === "GET" && segments[3] === "turns" && segments[4] === "by-key" && segments.length === 6) {
+          if (!selectiveTurn || decodeURIComponent(segments[5] ?? "") !== selectiveKey) { res.writeHead(404).end(); return; }
+          send(result()); return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          if (selectiveReadFailure) { res.writeHead(503).end(); return; }
+          const turns = selectiveTurn ? [...(selectiveKeepUnknown ? [prior] : []), selectiveTurn] : [];
+          send({ session, turns: turns.map(turn => ({ ...turn, savesHasMore: false, savesNextAfter: null })), nextBefore: null }); return;
+        }
+        res.writeHead(404).end(); return;
+      }
       if (segments[1] === "runs") {
+        if (segments[2] === "evolve-run-selective" && selectiveTurn) {
+          if (method === "POST") { selectiveStatus = "interrupted"; selectiveTurn.status = "interrupted"; }
+          send({ id: "evolve-run-selective", kind: "evolve", status: selectiveStatus, confirmedThoughtIds: ["evolve-confirmed"], responseId: null }); return;
+        }
         const run = runs.get(segments[2] ?? "");
         if (!run) { res.writeHead(404).end(); return; }
         if (method === "POST") {
@@ -86,6 +141,76 @@ export function evolveDaemon(token: string) {
   };
 }
 type Fixture = ReturnType<typeof evolveDaemon>;
+export async function checkSelectiveStop(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset(); daemon.resetSelective();
+  const before = daemon.attempts.length;
+  await page.goto(`${origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });
+  await page.getByRole("checkbox", { name: "Save ideas only" }).check();
+  const message = "Owned confirmed selective idea";
+  await page.getByRole("textbox", { name: "Your message" }).fill(message);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Check this run" }).click();
+  await expect(page.getByText(message, { exact: true }).last()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Saved ideas" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.getByText(/interrupted/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Saved ideas" })).toBeVisible();
+  await expect(page.getByText(message, { exact: true }).last()).toBeVisible();
+  const calls = daemon.attempts.slice(before);
+  const sends = calls.filter(call => call.method === "POST" && new URL(call.path, "http://fixture.invalid").pathname === "/evolve-sessions/evolve-session-1/turns");
+  const stops = calls.filter(call => call.method === "POST" && call.path === "/runs/evolve-run-selective/stop");
+  assert.equal(sends.length, 1); assert.ok(sends[0]?.key);
+  assert.equal(stops.length, 1); assert.equal(stops[0]?.body, "{}");
+  assert.ok(calls.every(call => call.authorization === daemon.expectedAuthorization));
+}
+
+export async function checkSelectiveStopWithStaleRead(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset(); daemon.resetSelective();
+  const before = daemon.attempts.length;
+  await page.goto(`${origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });
+  await page.getByRole("checkbox", { name: "Save ideas only" }).check();
+  await page.getByRole("textbox", { name: "Your message" }).fill("Owned stale stop idea");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  daemon.setSelectiveReadFailure(true);
+  try {
+    await page.getByRole("button", { name: "Check this run" }).click();
+    await expect(page.getByText(/could not refresh the conversation/i)).toBeVisible();
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    await expect(stop).toBeEnabled();
+    await stop.click();
+    await expect.poll(() => daemon.attempts.slice(before).filter(call => call.path === "/runs/evolve-run-selective/stop" && call.method === "POST").length).toBe(1);
+    const sends = daemon.attempts.slice(before).filter(call => new URL(call.path, "http://fixture.invalid").pathname === "/evolve-sessions/evolve-session-1/turns" && call.method === "POST");
+    assert.equal(sends.length, 1, "stopping a known run must not resend its message");
+  } finally { daemon.setSelectiveReadFailure(false); }
+}
+
+export async function checkSelectiveStopWithUnknownKeep(page: Page, daemon: Fixture, origin: string): Promise<void> {
+  daemon.reset(); daemon.resetSelective(); daemon.setSelectiveKeepUnknown(true);
+  const before = daemon.attempts.length;
+  await page.goto(`${origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });
+  await page.getByRole("checkbox", { name: "Save ideas only" }).check();
+  await page.getByRole("textbox", { name: "Your message" }).fill("Owned active run while keeping");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("button", { name: "Check this run" }).click();
+  const prior = page.getByRole("region", { name: "Conversation turn", exact: true }).filter({ hasText: "Owned prior passage to keep." });
+  await prior.getByRole("button", { name: /select passage from your message/i }).click();
+  const source = page.getByRole("textbox", { name: /select the exact words to keep/i });
+  await source.evaluate(node => { const field = node as HTMLTextAreaElement; field.setSelectionRange(0, field.value.length); });
+  await page.getByRole("button", { name: "Review passage" }).click();
+  await page.getByRole("button", { name: "Keep as thought" }).click();
+  await expect(page.getByText(/save unconfirmed/i).first()).toBeVisible();
+  const stop = page.getByRole("button", { name: "Stop", exact: true });
+  await expect(stop).toBeEnabled();
+  await stop.click();
+  await expect.poll(() => daemon.attempts.slice(before).filter(call => call.method === "POST" && call.path === "/runs/evolve-run-selective/stop").length).toBe(1);
+  await expect(page.getByText(/interrupted/i).first()).toBeVisible();
+  const calls = daemon.attempts.slice(before);
+  assert.equal(calls.filter(call => call.method === "POST" && call.path === "/runs/evolve-run-selective/stop").length, 1);
+  assert.equal(calls.filter(call => call.method === "POST" && call.path.endsWith("/saves")).length, 1, "Stop must not replay unconfirmed Keep");
+  assert.equal(calls.filter(call => call.method === "POST" && new URL(call.path, "http://fixture.invalid").pathname === "/evolve-sessions/evolve-session-1/turns").length, 1);
+}
 export async function checkEvolveGlyphs(page: Page, daemon: Fixture, origin: string, narrow: boolean): Promise<void> {
   daemon.reset();
   await page.goto(`${origin}/evolve?thoughtId=evolve-start`, { waitUntil: "networkidle" });

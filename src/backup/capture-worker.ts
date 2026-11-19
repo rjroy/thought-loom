@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { uniqueKeys } from "../domain/run-protocol";
 import { mediaFileId } from "../storage/media-file-paths";
 import { encodeManifest, encodeTable, type BackupManifest } from "./format";
-import { BackupSchemaError } from "./schema";
+import { BackupSchemaError, currentBackupSchema } from "./schema";
 import { readSource, table, text, bytes, integer, validateBytes, type SqlSnapshot } from "./capture-source";
 import { absent, BackupCaptureError, canonical, check, childDirectory, empty, fingerprint, newFile, openDirectory, smallFile, sourceGuard,
   unchanged, verifyDirectory, verifyFile, workerFailureCodes, writeFile, type Directory, type Guard } from "./capture-files";
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
       tables.push({ name: value.shape.name, path: `tables/${fileName}`, rowCount: String(value.rows.length), byteLength: String(encoded.length), sha256: digest });
     }
     const originalFiles = await media(snapshot, config.mediaDirectory, stage, guard);
-    const manifest = encodeManifest({ ...originalFiles, tables, sequences: snapshot.sequences, appSchema:"thoughtloom-logical-9" });
+    const manifest = encodeManifest({ ...originalFiles, tables, sequences: snapshot.sequences, appSchema:currentBackupSchema });
     await writeFile(stage, "manifest.json", manifest, guard);
     const verified = await fingerprint(stage, "manifest.json", guard);
     check(verified.sha256 === hash(manifest) && verified.byteLength === String(manifest.length), "storage-failed");

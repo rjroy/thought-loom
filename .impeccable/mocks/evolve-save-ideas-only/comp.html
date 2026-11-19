@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evolve: Save ideas only | Thoughtloom review comp</title>
+  <link rel="stylesheet" href="../../../apps/web/src/app/globals.css">
+  <style>
+    @font-face {
+      font-family: "Source Sans 3";
+      src: url("../../../apps/web/public/fonts/SourceSans3-VariableFont_wght.ttf") format("truetype");
+      font-weight: 200 900;
+      font-display: swap;
+    }
+    :root { --font-source-sans: "Source Sans 3"; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3, strong { color: var(--color-text); }
+    h1 { font-size: 2rem; line-height: 1.2; letter-spacing: -.02em; }
+    h2 { font-size: 1.375rem; line-height: 1.25; }
+    h3 { font-size: 1.25rem; line-height: 1.3; }
+    .review {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0 1.5rem;
+      padding-inline: var(--page-inset);
+      background: var(--color-card);
+      border-block-end: 1px solid var(--color-line);
+      font-size: 1rem;
+    }
+    .review p { color: var(--color-muted); padding-block: .375rem; }
+    .review nav { display: flex; flex-wrap: wrap; gap: 0 1rem; }
+    .review a[aria-current] { color: var(--color-focus); text-decoration-thickness: 2px; }
+    .heading, .continuation, .save-head, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; }
+    .heading, .continuation, .save-head { justify-content: space-between; }
+    .heading { margin: .5rem 0 1.75rem; align-items: baseline; }
+    .title-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .875rem; }
+    .mode { color: var(--color-focus); font-size: 1rem; font-weight: 600; }
+    .columns { display: grid; grid-template-columns: minmax(13rem, 24%) minmax(0, 1fr); gap: 2rem; }
+    .context { min-inline-size: 0; padding-inline-end: 2rem; border-inline-end: 1px solid var(--color-line); }
+    .context summary { color: var(--color-muted); font-size: 1rem; font-weight: 600; list-style: none; }
+    .context summary::-webkit-details-marker { display: none; }
+    .context summary::marker { content: ""; }
+    .context summary svg, .narrow-title { display: none; }
+    .context h2 { margin: 1rem 0 .5rem; font-size: 1.5rem; }
+    .context .byline { margin-block: .5rem; }
+    .context .link { margin-block-start: .5rem; }
+    .working { min-inline-size: 0; }
+    .turn + .turn { margin-block-start: 1.5rem; padding-block-start: 1.25rem; border-block-start: 1px solid var(--color-line); }
+    .message + .message { margin-block-start: 1.125rem; }
+    .byline { display: flex; align-items: center; flex-wrap: wrap; gap: .375rem .5rem; font-size: 1rem; }
+    .you, .ai { font-weight: 650; }
+    .you { color: var(--brand-color-2); }
+    .ai { color: var(--brand-color-13); }
+    .words { max-inline-size: 72ch; color: var(--color-text); font-size: 1.375rem; white-space: pre-wrap; }
+    .words, .continuation, h1, h2, h3, .receipt p { overflow-wrap: anywhere; }
+    .muted { color: var(--color-muted); font-size: 1rem; }
+    .zero { margin-block-start: 1rem; }
+    .saves { margin-block-start: 1.125rem; background: var(--color-caption); border: 1px solid var(--color-line); border-radius: .75rem; }
+    .save-head { padding: .75rem 1rem; }
+    .save-head p { color: var(--color-body); font-size: 1rem; }
+    .receipt { padding: .75rem 1rem .375rem; border-block-start: 1px solid var(--color-line); }
+    .receipt h3 { margin-block: .25rem; }
+    .receipt .parent { font-size: 1rem; }
+    .receipt .link { align-self: start; }
+    .receipt-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 1rem; }
+    .composer { margin-block-start: 1.5rem; padding-block-start: 1rem; border-block-start: 1px solid var(--color-line); }
+    .composer > label, .select-panel label { display: block; color: var(--color-text); font-weight: 650; margin-block-end: .5rem; }
+    .continuation { margin-block-end: .5rem; min-block-size: 2.75rem; }
+    .send-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 1rem; }
+    textarea {
+      display: block; inline-size: 100%; min-block-size: 7rem; padding: .875rem 1rem; resize: vertical;
+      border: 1px solid var(--color-control-line); border-radius: .5rem; background: var(--color-input);
+      color: var(--color-text); font: inherit; caret-color: var(--brand-color-3);
+    }
+    textarea::placeholder { color: var(--color-muted); opacity: 1; }
+    .link, .button { display: inline-flex; align-items: center; justify-content: center; font: inherit; cursor: pointer; }
+    .link { min-block-size: 2.75rem; border: 0; padding: .25rem 0; color: var(--color-link); background: none; text-decoration: underline; text-underline-offset: .2em; }
+    .button { min-block-size: 3rem; padding: .5rem 1.25rem; border: 1px solid var(--color-control-line); border-radius: .5rem; background: var(--color-ground); color: var(--color-text); text-decoration: none; font-weight: 650; }
+    .button:hover { border-color: var(--color-text); }
+    .primary { border-color: var(--brand-color-3); background: var(--brand-color-3); color: var(--color-ground); font-weight: 700; }
+    .primary:hover { border-color: var(--brand-color-11); background: var(--brand-color-11); }
+    .primary:disabled { opacity: .6; cursor: default; }
+    .send-row .primary { min-inline-size: 7.5rem; }
+    .entry { max-inline-size: 72ch; }
+    .mode-choice { display: inline-flex; align-items: center; gap: .625rem; min-block-size: 2.75rem; color: var(--color-text); font-weight: 650; cursor: pointer; }
+    input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-color-3); inline-size: 1.125rem; block-size: 1.125rem; flex: none; margin: 0; }
+    .entry > .muted, .resume > .muted { margin-block-start: .25rem; }
+    .resume .actions { margin-block-start: 1.25rem; }
+    .panel { margin-block: .375rem 1rem; padding: 1rem; border: 1px solid var(--color-control-line); border-radius: .75rem; background: var(--color-card); }
+    .panel .muted { margin-block: .25rem .5rem; }
+    .panel textarea { min-block-size: 5rem; margin-block-end: .5rem; }
+    .panel .actions { margin-block-start: .75rem; }
+    .panel .review-quote { margin-block: .5rem; color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+    mark { background: var(--color-selection); color: var(--color-text); }
+    .choice { display: flex; align-items: center; gap: .625rem; padding-inline: .75rem; min-block-size: 2.75rem; cursor: pointer; overflow-wrap: anywhere; }
+    .choice:has(input:checked) { border-radius: .375rem; background: var(--color-caption); }
+    .policy { margin-block-start: 1rem; }
+    .glyph { display: inline-block; inline-size: 1.25rem; block-size: 1.25rem; }
+    [hidden] { display: none !important; }
+    @media (max-width: 48rem) {
+      .columns { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+      .context { border: 0; padding: 0; }
+      .context summary { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem; min-block-size: 3rem; border: 1px solid var(--color-control-line); border-radius: .5rem; background: var(--color-input); color: var(--color-text); font-size: 1.125rem; cursor: pointer; }
+      .context summary svg { display: block; flex: none; inline-size: 1.25rem; }
+      .context[open] summary svg { transform: rotate(180deg); }
+      .narrow-title { display: inline; }
+      .words { font-size: 1.25rem; }
+      .send-row { gap: .75rem; }
+      .send-row textarea { min-block-size: 8rem; }
+      .send-row .primary { min-inline-size: 5rem; padding-inline: .75rem; }
+      .receipt-grid { grid-template-columns: minmax(0, 1fr); }
+      .receipt-grid .link { justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to content</a>
+  <aside class="review" aria-label="Design review tools">
+    <p>Unapproved design comp · Illustrative data</p>
+    <nav aria-label="Review states">
+      <a class="link" href="?state=start">Start</a>
+      <a class="link" href="?state=zero">No saves</a>
+      <a class="link" href="?state=saves">Saved ideas</a>
+      <a class="link" href="?state=keep">Keep a passage</a>
+      <a class="link" href="?state=resume">Resume</a>
+    </nav>
+  </aside>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <div class="site-header-identity">
+        <span class="contextual-back">
+          <a class="contextual-back-link" href="?state=start" aria-label="Back to idea (sample)" title="Back to idea (sample)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 12H4m7-7-7 7 7 7"/></svg>
+          </a>
+        </span>
+        <div class="brand"><span class="brand-name">thoughtloom</span><p class="brand-tagline">Where ideas take shape.</p></div>
+      </div>
+      <nav class="primary-navigation" aria-label="Primary navigation (inert illustration)">
+        <span class="navigation-link">Explore</span><span class="navigation-link">Browse</span><span class="navigation-link">Capture</span><span class="navigation-link">Settings</span>
+      </nav>
+    </div>
+  </header>
+  <main class="workspace" id="workspace" tabindex="-1">
+    <header class="heading">
+      <div class="title-group"><h1>Evolve</h1><p id="mode" class="mode" hidden>Save ideas only</p></div>
+      <a id="conversation-link" class="link" href="?state=resume#workspace" hidden>Conversation link</a>
+    </header>
+    <div class="columns">
+      <details class="context" id="context" open>
+        <summary><span>Starting thought<span class="narrow-title"> · A community garden</span></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <h2>A community garden</h2>
+        <p class="byline"><span class="you">You</span> · <img class="glyph" src="../../../apps/web/public/glyphs/captured-original.svg" alt=""> Original capture</p>
+        <p>A garden could give neighbors a place to grow food and share what they know.</p>
+        <a class="link" data-inert href="#">Open idea</a>
+      </details>
+      <div class="working">
+        <section class="entry" id="entry" hidden>
+          <p class="words">Add a question, challenge, or new thought.</p>
+          <label class="mode-choice"><input id="opt-in" type="checkbox" aria-describedby="mode-help"> Save ideas only</label>
+          <p class="muted" id="mode-help">Keep the conversation separate from your library. AI can save distinct ideas, and you can keep a passage yourself. You can’t switch modes once the conversation starts.</p>
+        </section>
+        <section class="resume" id="resume" aria-labelledby="resume-title" hidden>
+          <h2 id="resume-title">Resume this conversation?</h2>
+          <p class="muted" id="resume-point">A community garden · Last continued from Five-minute handoff</p>
+          <div class="actions"><a class="button primary" id="resume-action" href="?state=resumed#workspace">Resume</a><a class="link" href="?state=start#workspace">Start fresh instead</a></div>
+          <p class="muted">Resume opens the saved dialogue without sending a message.</p>
+        </section>
+        <section id="transcript" aria-label="Conversation" hidden>
+          <article class="turn" id="zero-turn" aria-label="Completed exchange, no thoughts saved">
+            <div class="message"><p class="byline"><span class="you">You</span></p><p class="words">Before we go further, what do you mean by a low barrier to joining?</p></div>
+            <div class="message"><p class="byline"><span class="ai">AI</span></p><p class="words">I mean anything that makes it harder to take part. Did you mean the time it takes, or something else?</p></div>
+            <p class="zero muted">Completed · No thoughts saved</p>
+          </article>
+          <article class="turn" id="save-turn" aria-label="Exchange with saved ideas" hidden>
+            <div class="message" data-author="you">
+              <p class="byline"><span class="you">You</span></p>
+              <p class="words" id="source-message">For me, success is whether neighbors can return after a long gap. <span id="sample-passage">A first visit should be useful even if it’s the only one.</span></p>
+              <button class="link" id="select-passage" data-select type="button" aria-controls="select-panel keep-panel" aria-expanded="false" aria-label="Select passage from your message">Select passage</button>
+              <div class="panel" id="select-panel" hidden>
+                <label for="passage-source">Select the exact words to keep</label>
+                <p class="muted" id="select-help">Select text here, then review the passage before saving.</p>
+                <textarea readonly id="passage-source" aria-describedby="select-help"></textarea>
+                <div class="actions"><button class="button" id="review-passage" type="button">Review passage</button><button class="link" data-cancel type="button">Cancel</button></div>
+                <p class="muted" id="selection-error" role="status"></p>
+              </div>
+              <div class="panel" id="keep-panel" hidden>
+                <h3 id="keep-title" tabindex="-1">Keep this passage</h3>
+                <p id="keep-quote" class="review-quote"></p>
+                <p class="byline"><span class="you" id="keep-author">You</span> wrote this · Selected by you</p>
+                <p><strong>Save under:</strong> A community garden</p>
+                <p class="muted" id="keep-help">The next message will still continue from Five-minute handoff.</p>
+                <div class="actions"><button class="button primary" id="keep-confirm" type="button">Keep as thought</button><button class="link" data-cancel type="button">Cancel</button></div>
+              </div>
+            </div>
+            <div class="message" data-author="ai">
+              <p class="byline"><span class="ai">AI</span></p><p class="words">Then every shift could begin with a five-minute handoff so returning neighbors can catch up without asking for a recap.</p>
+              <button class="link" data-select type="button" aria-controls="select-panel keep-panel" aria-expanded="false" aria-label="Select passage from the AI reply">Select passage</button>
+            </div>
+            <section class="saves" aria-labelledby="saved-title">
+              <div class="save-head"><h2 id="saved-title">Saved ideas</h2><p id="save-count" role="status">2 added to your library</p></div>
+              <article class="receipt">
+                <p class="byline"><span class="you">You</span> · Selected by AI</p>
+                <div class="receipt-grid"><div><h3>Returning after a gap</h3><p>For me, success is whether neighbors can return after a long gap.</p><p class="parent"><strong>Developed from:</strong> A community garden</p></div><a class="link" data-inert href="#">Open idea</a></div>
+              </article>
+              <article class="receipt">
+                <p class="byline"><span class="ai">AI</span> · Selected by AI</p>
+                <div class="receipt-grid"><div><h3>Five-minute handoff</h3><p>Start each shift with a five-minute handoff so neighbors can rejoin without needing a recap.</p><p class="parent"><strong>Developed from:</strong> Returning after a gap</p></div><a class="link" data-inert href="#">Open idea</a></div>
+              </article>
+              <article class="receipt" id="manual-receipt" hidden>
+                <p class="byline"><span class="you" id="manual-author">You</span> · Selected by you</p>
+                <div class="receipt-grid"><div><h3 id="manual-title"></h3><p id="manual-text"></p><p class="parent"><strong>Developed from:</strong> A community garden</p></div><a class="link" data-inert href="#">Open idea</a></div>
+              </article>
+            </section>
+          </article>
+        </section>
+        <form class="composer" id="composer" hidden>
+          <div class="continuation"><p>Continuing from: <strong id="continuation">A community garden</strong></p><button class="link" type="button" id="change" aria-controls="branch-panel" aria-expanded="false" hidden>Change</button></div>
+          <div class="panel" id="branch-panel" role="group" aria-labelledby="branch-help" hidden>
+            <p id="branch-help">Choose where the next message begins. Opening an idea does not change this choice.</p>
+            <label class="choice"><input type="radio" name="parent" value="A community garden"> A community garden · Starting thought</label>
+            <label class="choice"><input type="radio" name="parent" value="Returning after a gap"> Returning after a gap · You</label>
+            <label class="choice"><input type="radio" name="parent" value="Five-minute handoff" checked> Five-minute handoff · AI</label>
+            <div class="actions"><button class="button" type="button" id="use-parent">Use this thought</button><button class="link" id="close-branch" type="button">Cancel</button></div>
+          </div>
+          <label id="draft-label" for="draft">Your contribution</label>
+          <div class="send-row"><textarea id="draft" placeholder="Add a question, challenge, or new thought"></textarea><button class="button primary" id="send" type="submit" disabled>Send</button></div>
+          <p class="muted policy" id="composer-note"></p>
+        </form>
+      </div>
+    </div>
+  </main>
+  <script>
+    // Review-only sample states. No storage, clipboard access or application calls.
+    const byId = id => document.getElementById(id);
+    const show = (id, visible = true) => { byId(id).hidden = !visible; };
+    const params = new URLSearchParams(location.search);
+    const state = params.get("state");
+    const reviewState = ["zero", "saves", "keep", "resume", "resumed"].includes(state) ? state : "start";
+    const start = reviewState === "start";
+    const resume = reviewState === "resume";
+    const zeroExample = reviewState === "zero" || params.get("example") === "zero";
+    const withSaves = ["saves", "keep", "resumed"].includes(reviewState) && !zeroExample;
+    const root = "A community garden";
+    const latest = "Five-minute handoff";
+    let parent = withSaves ? latest : root;
+    let selectedPassage = "";
+
+    document.querySelectorAll(".review a").forEach(link => {
+      if (link.search === `?state=${reviewState === "resumed" ? "resume" : reviewState}`) link.setAttribute("aria-current", "page");
+    });
+    document.querySelectorAll("[data-inert]").forEach(link => link.addEventListener("click", event => event.preventDefault()));
+    const narrow = matchMedia("(max-width: 48rem)");
+    const syncContext = () => {
+      byId("context").open = !narrow.matches;
+      byId("context").querySelector("summary").tabIndex = narrow.matches ? 0 : -1;
+    };
+    narrow.addEventListener("change", syncContext);
+    byId("context").querySelector("summary").addEventListener("click", event => { if (!narrow.matches) event.preventDefault(); });
+    syncContext();
+    show("entry", start);
+    show("mode", !start);
+    show("conversation-link", !start && !resume);
+    show("resume", resume);
+    show("transcript", !start && !resume);
+    show("save-turn", withSaves);
+    show("composer", !resume);
+    show("change", withSaves);
+    byId("continuation").textContent = parent;
+    if (zeroExample) {
+      byId("conversation-link").href = "?state=resume&example=zero#workspace";
+      byId("resume-action").href = "?state=resumed&example=zero#workspace";
+      byId("resume-point").textContent = "A community garden · No thoughts saved";
+    }
+    const modeCopy = () => {
+      const ideasOnly = !start || byId("opt-in").checked;
+      byId("draft-label").textContent = ideasOnly ? "Your message" : "Your contribution";
+      byId("composer-note").textContent = ideasOnly
+        ? "Messages stay in this conversation. Only saved ideas enter your library."
+        : "Send records your contribution as a new thought.";
+    };
+    byId("opt-in").addEventListener("change", modeCopy);
+    modeCopy();
+    byId("draft").addEventListener("input", () => { byId("send").disabled = !byId("draft").value.trim(); });
+    byId("composer").addEventListener("submit", event => {
+      event.preventDefault();
+      if (start && byId("opt-in").checked) {
+        location.href = "?state=zero#workspace";
+      } else {
+        byId("composer-note").textContent = "This is a design comp. Nothing was sent.";
+      }
+    });
+
+    const toggleBranch = open => {
+      show("branch-panel", open);
+      byId("change").setAttribute("aria-expanded", String(open));
+      if (open) {
+        const choice = [...document.querySelectorAll("[name=parent]")].find(input => input.value === parent);
+        choice.checked = true;
+        choice.focus();
+      } else byId("change").focus();
+    };
+    byId("change").addEventListener("click", () => toggleBranch(byId("branch-panel").hidden));
+    byId("close-branch").addEventListener("click", () => toggleBranch(false));
+    byId("branch-panel").addEventListener("keydown", event => { if (event.key === "Escape") toggleBranch(false); });
+    byId("use-parent").addEventListener("click", () => {
+      parent = document.querySelector("[name=parent]:checked").value;
+      byId("continuation").textContent = parent;
+      byId("keep-help").textContent = `The next message will still continue from ${parent}.`;
+      toggleBranch(false);
+    });
+
+    let activeSelect = byId("select-passage");
+    const currentMessage = () => activeSelect.closest(".message").querySelector(".words");
+    const author = () => activeSelect.closest(".message").dataset.author;
+    const setAttribution = id => {
+      byId(id).className = author();
+      byId(id).textContent = author() === "ai" ? "AI" : "You";
+    };
+    const samplePassage = byId("sample-passage").textContent;
+    const selected = byId("passage-source");
+    const resetHighlight = () => {
+      const highlight = currentMessage().querySelector("mark");
+      if (highlight) highlight.replaceWith(document.createTextNode(highlight.textContent));
+    };
+    const showKeep = (startOffset, endOffset, focus = true) => {
+      const message = currentMessage();
+      const exactSource = message.textContent;
+      selectedPassage = exactSource.slice(startOffset, endOffset);
+      const mark = document.createElement("mark");
+      mark.textContent = selectedPassage;
+      message.replaceChildren(exactSource.slice(0, startOffset), mark, exactSource.slice(endOffset));
+      byId("keep-quote").textContent = selectedPassage;
+      setAttribution("keep-author");
+      show("select-panel", false);
+      show("keep-panel");
+      activeSelect.setAttribute("aria-expanded", "true");
+      if (focus) byId("keep-title").focus();
+    };
+    const closePassage = () => {
+      show("select-panel", false);
+      show("keep-panel", false);
+      resetHighlight();
+      activeSelect.setAttribute("aria-expanded", "false");
+      activeSelect.focus();
+    };
+    document.querySelectorAll("[data-select]").forEach(button => button.addEventListener("click", () => {
+      const sameTrigger = button === activeSelect;
+      if (!byId("keep-panel").hidden || !byId("select-panel").hidden) {
+        closePassage();
+        if (sameTrigger) return;
+      }
+      activeSelect = button;
+      button.after(byId("select-panel"), byId("keep-panel"));
+      const range = getSelection();
+      const message = currentMessage();
+      if (range?.toString().trim() && message.contains(range.anchorNode) && message.contains(range.focusNode)) {
+        const prefix = document.createRange();
+        prefix.selectNodeContents(message);
+        prefix.setEnd(range.getRangeAt(0).startContainer, range.getRangeAt(0).startOffset);
+        const offset = prefix.toString().length;
+        showKeep(offset, offset + range.toString().length);
+        return;
+      }
+      selected.value = message.textContent;
+      byId("selection-error").textContent = "";
+      show("select-panel");
+      activeSelect.setAttribute("aria-expanded", "true");
+      selected.focus();
+      selected.setSelectionRange(0, 0);
+    }));
+    byId("review-passage").addEventListener("click", () => {
+      if (!selected.value.slice(selected.selectionStart, selected.selectionEnd).trim()) {
+        byId("selection-error").textContent = "Select some words from the message first.";
+        selected.focus();
+        return;
+      }
+      showKeep(selected.selectionStart, selected.selectionEnd);
+    });
+    document.querySelectorAll("[data-cancel]").forEach(button => button.addEventListener("click", closePassage));
+    ["select-panel", "keep-panel"].forEach(id => {
+      byId(id).addEventListener("keydown", event => { if (event.key === "Escape") closePassage(); });
+    });
+    byId("keep-confirm").addEventListener("click", () => {
+      byId("manual-title").textContent = selectedPassage.trim().split(/\s+/).slice(0, 5).join(" ");
+      byId("manual-text").textContent = selectedPassage;
+      setAttribution("manual-author");
+      show("manual-receipt");
+      byId("save-count").textContent = "3 added to your library";
+      closePassage();
+    });
+    if (reviewState === "keep" && withSaves) {
+      const source = currentMessage().textContent;
+      showKeep(source.indexOf(samplePassage), source.length, false);
+    }
+  </script>
+</body>
+</html>
