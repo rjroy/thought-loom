@@ -84,6 +84,16 @@ test("manifest decoding requires the complete canonical inventory and exact type
   const current = backupTableShapes.map(table => table.name);
   expect(current.filter(name => logical9.includes(name))).toEqual(logical9);
   expect(current.filter(name => !logical9.includes(name)).length).toBeGreaterThanOrEqual(2);
+  const logical10 = shapesForSchema("thoughtloom-logical-10");
+  expect(logical10.map(table => table.name)).toEqual([...logical9,"evolve_sessions","evolve_turns"].sort());
+  const oldTurn = logical10.find(table => table.name === "evolve_turns");
+  const currentTurn = backupTableShapes.find(table => table.name === "evolve_turns");
+  if (!oldTurn || !currentTurn) throw new Error("Missing Evolve turn inventory");
+  expect(oldTurn.columns).not.toContain("run_id");
+  expect(oldTurn.columns).not.toContain("reply");
+  expect(currentTurn.columns).toContain("run_id");
+  expect(currentTurn.columns).toContain("reply");
+  expect(current.filter(name => !logical10.some(table => table.name === name))).toEqual(["evolve_saves","evolve_turn_history"]);
   const manifest: BackupManifest = { appSchema:"thoughtloom-logical-2", mediaStoreId: null, mediaMarker: null, originals: [],
     tables: tableEntries(currentNames),
     sequences: [{ name: "import_documents", value: 9223372036854775807n }],

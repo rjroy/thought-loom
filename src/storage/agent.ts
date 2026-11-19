@@ -6,6 +6,7 @@ import type { ExportIntent, ExportReport } from "../domain/agentic-export";
 import { SqliteAgenticExports } from "./agentic-export";
 import { createLogger, type Logger } from "../logging";
 import { logCommittedInterruption } from "./run-fences";
+import { evolveRunView } from "./evolve-records";
 
 /** User-only domain service owns access; each returned projection is a consistent SQLite snapshot. */
 export class SqliteAgentRuns implements AgentRunRepository {
@@ -27,6 +28,10 @@ export class SqliteAgentRuns implements AgentRunRepository {
       const file=this.db.query("SELECT id AS fileId,import_id AS importId FROM markdown_import_files WHERE run_id=?").get(id) as {fileId:string;importId:string}|null;
       if (!file) throw new RunConflictError("Import run owner is unavailable");
       return {id:run.id,kind:"import",status:run.status,...file};
+    }
+    if (run.kind === "evolve" && run.inputThoughtId === null) {
+      const selective = evolveRunView(this.db,run.id,run.status);
+      if (selective) return selective;
     }
     const issued = this.db.query("SELECT thought_id AS id FROM run_issued_thoughts WHERE run_id=? ORDER BY position").all(id) as {id:string}[];
     const reply = this.db.query("SELECT response_id AS id FROM run_replies WHERE run_id=?").get(id) as {id:string|null} | null;

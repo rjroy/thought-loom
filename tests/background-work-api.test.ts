@@ -598,7 +598,7 @@ test("next logical capture and staged recovery preserve append-only local-stop f
   await mkdir(output,{mode:0o700}); await mkdir(staging,{mode:0o700});
   const captured = await captureBackup({databasePath:f.dbPath,mediaDirectory:f.mediaDirectory,outputDirectory:output,logger});
   const manifest = decodeManifest(await readFile(join(captured.snapshotDirectory,"manifest.json")));
-  expect(String(manifest.appSchema)).toBe("thoughtloom-logical-10");
+  expect(String(manifest.appSchema)).toBe("thoughtloom-logical-11");
   expect(manifest.tables.find(table => table.name === "local_work_stops")?.rowCount).toBe("2");
   for (const schema of ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4",
     "thoughtloom-logical-5","thoughtloom-logical-6","thoughtloom-logical-7","thoughtloom-logical-8"] as const) {

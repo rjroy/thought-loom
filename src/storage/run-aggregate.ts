@@ -21,6 +21,8 @@ import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { requireDailyReviewMembership } from "./daily-review-authority";
 import { assertRunLocallyTracked } from "./local-work-stop-fence";
+import { selectiveRunOwner } from "./evolve-records";
+import { evolveContextEligible } from "./evolve-context";
 
 type Associations = Pick<SharedResponse, "role" | "thoughtIds">;
 type Visible = RunVisibility;
@@ -92,7 +94,9 @@ export class SqliteRunAggregate {
     const run = this.require(claim.runId);
     if (run.kind === "import") assertImportRunNotRestoreFenced(this.db,run.id);
     if (run.generation !== claim.generation || !["queued","submitting","running","uncertain"].includes(run.status)) throw new RunFenceError();
-    if (run.kind === "evolve" && run.inputThoughtId === null) throw new RunFenceError("Legacy evolve input identity unavailable; cannot resume safely");
+    if (run.kind === "evolve" && run.inputThoughtId === null && selectiveRunOwner(this.db,run.id)?.open !== 1) {
+      throw new RunFenceError("Evolve turn ownership unavailable; cannot resume safely");
+    }
     if (run.kind === "search") requireSearchExecutionOwner(this.db,run);
     // Also fences native binding/submission and already-prepared/replayed media jobs.
     const purpose = this.weavePurpose(run);
@@ -101,7 +105,11 @@ export class SqliteRunAggregate {
   }
   /** Persist the interruption before throwing: throwing inside the transaction would undo the fence. */
   protected guarded<T>(operation: string, claim: Claim, action: (run: RunRecord, visible: Visible) => T): T {
-    return this.guard(operation,claim,requireOrdinaryRun,action);
+    return this.guard(operation,claim,run => this.requireClassicAuthority(run),action);
+  }
+  protected requireClassicAuthority(run: RunRecord): void {
+    requireOrdinaryRun(run);
+    if (run.kind === "evolve" && run.inputThoughtId === null) throw new RunForbiddenError("Classic Evolve capability authority required");
   }
   protected guardedExecution<T>(operation: string, claim: Claim, action: (run: RunRecord, visible: Visible) => T): T {
     return this.guard(operation,claim,requireExecutionRun,action);
@@ -298,17 +306,22 @@ export class SqliteRunAggregate {
   }
   protected contextValid(run: RunRecord, visible: Visible): boolean {
     if (run.kind === "search") return searchExecutionContextValid(this.db,run.id);
+    if (run.kind === "evolve" && run.inputThoughtId === null) {
+      const owner = selectiveRunOwner(this.db,run.id);
+      return owner !== null && evolveContextEligible(this.db,owner.turnId);
+    }
     return ordinaryRunContextValid(this.db,run,visible);
   }
   protected track(id: string, ref: ContextRef, fullRead = false): void {
     // The retained-search INSERT guard deliberately rejects duplicate insertion, even an UPSERT's pre-update path.
-    const existing = this.db.query("SELECT full_read AS fullRead FROM run_context WHERE run_id=? AND kind=? AND ref_id=?")
-      .get(id,ref.kind,ref.id) as { fullRead: number } | null;
+    const refId = new TextEncoder().encode(ref.id);
+    const existing = this.db.query("SELECT full_read AS fullRead FROM run_context WHERE run_id=? AND kind=? AND ref_id=CAST(? AS TEXT)")
+      .get(id,ref.kind,refId) as { fullRead: number } | null;
     if (existing) {
-      if (fullRead && existing.fullRead === 0) this.db.run("UPDATE run_context SET full_read=1 WHERE run_id=? AND kind=? AND ref_id=?",[id,ref.kind,ref.id]);
+      if (fullRead && existing.fullRead === 0) this.db.run("UPDATE run_context SET full_read=1 WHERE run_id=? AND kind=? AND ref_id=CAST(? AS TEXT)",[id,ref.kind,refId]);
       return;
     }
-    this.db.run("INSERT INTO run_context (run_id,kind,ref_id,full_read) VALUES (?,?,?,?)", [id,ref.kind,ref.id,fullRead ? 1 : 0]);
+    this.db.run("INSERT INTO run_context (run_id,kind,ref_id,full_read) VALUES (?,?,CAST(? AS TEXT),?)", [id,ref.kind,refId,fullRead ? 1 : 0]);
   }
   /** IDs in full DTOs are exposures, not evidence that the referenced texts have been read. */
   protected trackThought(runId: string, thought: Thought): void {

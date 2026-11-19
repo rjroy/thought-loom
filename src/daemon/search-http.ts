@@ -31,9 +31,9 @@ export async function bytes(request: Request, limit: number): Promise<Uint8Array
     return result;
   } finally { if (!complete) { try { await reader.cancel(); } catch {} } reader.releaseLock(); }
 }
-export async function object(c: SearchContext, allowed: readonly string[]): Promise<Record<string,unknown>> {
+export async function object(c: SearchContext, allowed: readonly string[], maximumBytes = 4096): Promise<Record<string,unknown>> {
   if (!/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(c.req.header("content-type") ?? "")) throw new SearchHttpError(415,"unsupported-media-type");
-  const input = await bytes(c.req.raw,4096);
+  const input = await bytes(c.req.raw,maximumBytes);
   try {
     const text = new TextDecoder("utf-8",{fatal:true}).decode(input), value: unknown = JSON.parse(text);
     uniqueKeys(text);

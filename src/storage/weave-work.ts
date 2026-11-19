@@ -30,7 +30,8 @@ function subjectWork(db: Database, subjectId: string, creators = true): readonly
         AND s.position=(SELECT MAX(position) FROM run_steps WHERE run_id=r.id) AND s.native_state='completed'))) AS nativePending
      FROM runs r WHERE ${creators ? `r.id IN (
        SELECT id FROM runs WHERE kind='weave' AND weave_subject_id=?1
-       UNION SELECT id FROM runs WHERE kind='evolve' AND input_thought_id=?1
+        UNION SELECT id FROM runs WHERE kind='evolve' AND input_thought_id=?1
+        UNION SELECT t.run_id FROM evolve_turns t JOIN evolve_saves s ON s.turn_id=t.id WHERE s.thought_id=?1 AND s.selected_by='ai'
        UNION SELECT i.run_id FROM run_issued_thoughts i JOIN runs creator ON creator.id=i.run_id
          WHERE i.thought_id=?1 AND creator.kind IN ('weave','evolve'))` : "r.kind='weave' AND r.weave_subject_id=?1"}
      ORDER BY r.rowid`).all(subjectId);

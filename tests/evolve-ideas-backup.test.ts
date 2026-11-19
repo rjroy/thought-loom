@@ -56,8 +56,8 @@ test("empty store captures and restores the new complete logical inventory witho
   await owned(async f => {
     const snapshot = await f.capture("empty-output");
     const manifest = decodeManifest(await readFile(join(snapshot, "manifest.json")));
-    expect(manifest.appSchema).toBe("thoughtloom-logical-10");
-    const legacyNames = new Set(shapesForSchema("thoughtloom-logical-9").map(shape => shape.name));
+    expect(manifest.appSchema).toBe("thoughtloom-logical-11");
+    const legacyNames = new Set(shapesForSchema("thoughtloom-logical-10").map(shape => shape.name));
     const added = manifest.tables.filter(table => !legacyNames.has(table.name));
     expect(added.length).toBeGreaterThanOrEqual(2);
     expect(added.every(table => table.rowCount === "0")).toBe(true);
@@ -83,7 +83,7 @@ test("captured Evolve session and turn receipt survive restore without a duplica
     const original = await admitted.json() as { receipt: unknown; turn: { id: string } };
     const snapshot = await f.capture("conversation-output");
     const manifest = decodeManifest(await readFile(join(snapshot, "manifest.json")));
-    expect(manifest.appSchema).toBe("thoughtloom-logical-10");
+    expect(manifest.appSchema).toBe("thoughtloom-logical-11");
     const previous = new Set(shapesForSchema("thoughtloom-logical-9").map(shape => shape.name));
     expect(manifest.tables.filter(table => !previous.has(table.name) && Number(table.rowCount) > 0).length).toBeGreaterThanOrEqual(2);
     const restored = await restoreBackup({ snapshotDirectory: snapshot, targetDirectory: join(f.dir, "conversation-target"), restoredAt, logger });
@@ -139,7 +139,7 @@ test("repository accepts and restores 4096 UTF-8 bytes and rejects 4097 before a
     const target = new Database(restored.databasePath);
     try {
       const sessions = new SqliteEvolveSessions(target,sources);
-      expect(sessions.byKey(sessionId,"at-limit")).toEqual({ receipt:admitted.receipt, turn:admitted.turn });
+      expect(sessions.byKey(sessionId,"at-limit")).toEqual({ receipt:admitted.receipt, turn:admitted.turn, run:null });
       expect(sessions.byKey(sessionId,"too-large")).toBeNull();
       expect(sessions.read(sessionId).turns).toEqual([admitted.turn]);
     } finally { target.close(); }

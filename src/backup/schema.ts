@@ -190,13 +190,27 @@ const logical9Definitions:readonly Definition[]=[
     run_id:optionalText,import_file_id:optionalText},["target_kind","target_id"],{
     unique:[unique(["run_id"],"run_id IS NOT NULL"),unique(["import_file_id"],"import_file_id IS NOT NULL")]}),
 ];
-const definitions:readonly Definition[]=[
+const logical10Definitions:readonly Definition[]=[
   ...logical9Definitions,
   definition("evolve_sessions",{id:text,anchor_id:text,continuation_id:text,created_at:text},["id"],{
     references:[reference(["anchor_id"],"thoughts",["id"]),reference(["continuation_id"],"thoughts",["id"])]}),
   definition("evolve_turns",{id:text,session_id:text,request_key:text,parent_id:text,text:text,admitted_at:text,status:text,open_slot:integer},["id"],{
     preserveRowid:true,unique:[unique(["session_id","request_key"]),unique(["session_id","open_slot"])],
     references:[reference(["session_id"],"evolve_sessions",["id"]),reference(["parent_id"],"thoughts",["id"])]}),
+];
+const definitions:readonly Definition[]=[
+  ...logical10Definitions.map(table => table.name === "evolve_turns" ? {
+    ...table,columns:{...table.columns,run_id:optionalText,reply:optionalText},
+    unique:[unique(["session_id","request_key"]),unique(["run_id"]),unique(["session_id"],"open_slot=1 AND run_id IS NOT NULL")],
+    references:[...table.references,reference(["run_id"],"runs",["id"])],
+  } : table),
+  definition("evolve_saves",{thought_id:text,turn_id:text,position:integer,speaker:text,selected_by:text,source:text,
+    passage_start:optionalInteger,request_key:optionalText,prompt_id:optionalText,selection_index:optionalInteger,source_turn_id:optionalText},["thought_id"],{
+    unique:[unique(["turn_id","position"]),unique(["turn_id","request_key"]),unique(["prompt_id","selection_index"])],
+    references:[reference(["thought_id"],"thoughts",["id"]),reference(["turn_id"],"evolve_turns",["id"]),reference(["prompt_id"],"run_steps",["prompt_id"]),
+      reference(["source_turn_id"],"evolve_turns",["id"])]}),
+  definition("evolve_turn_history",{turn_id:text,prior_turn_id:text},["turn_id","prior_turn_id"],{
+    references:[reference(["turn_id"],"evolve_turns",["id"]),reference(["prior_turn_id"],"evolve_turns",["id"])]}),
 ];
 
 const spellingRevision = definition("search_revision", { id: integerKey, revision: integer }, ["id"]);
@@ -325,7 +339,14 @@ function tableShapes(items: readonly Definition[]): readonly TableShape[] {
     columns: Object.freeze(Object.keys(table.columns).sort()), primaryKey: Object.freeze([...table.primaryKey]), preserveRowid: table.preserveRowid }))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 }
-export type BackupAppSchema = "thoughtloom-logical-1" | "thoughtloom-logical-2" | "thoughtloom-logical-3" | "thoughtloom-logical-4" | "thoughtloom-logical-5" | "thoughtloom-logical-6" | "thoughtloom-logical-7" | "thoughtloom-logical-8" | "thoughtloom-logical-9" | "thoughtloom-logical-10";
+const backupSchemas = ["thoughtloom-logical-1","thoughtloom-logical-2","thoughtloom-logical-3","thoughtloom-logical-4",
+  "thoughtloom-logical-5","thoughtloom-logical-6","thoughtloom-logical-7","thoughtloom-logical-8","thoughtloom-logical-9",
+  "thoughtloom-logical-10","thoughtloom-logical-11"] as const;
+export type BackupAppSchema = typeof backupSchemas[number];
+export const currentBackupSchema = "thoughtloom-logical-11";
+export function isBackupAppSchema(value: unknown): value is BackupAppSchema {
+  return backupSchemas.some(schema => schema === value);
+}
 export const backupTableShapes = tableShapes(definitions);
 const legacyTableShapes = tableShapes(legacyDefinitions);
 const guidanceTableShapes = tableShapes(guidanceDefinitions);
@@ -336,8 +357,9 @@ const dailyReviewTableShapes = tableShapes(dailyReviewDefinitions);
 const logical7TableShapes = tableShapes(logical7Definitions);
 const logical8TableShapes = tableShapes(logical8Definitions);
 const logical9TableShapes = tableShapes(logical9Definitions);
+const logical10TableShapes = tableShapes(logical10Definitions);
 export function shapesForSchema(schema: BackupAppSchema): readonly TableShape[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : schema === "thoughtloom-logical-4" ? retirementTableShapes : schema === "thoughtloom-logical-5" ? screeningTableShapes : schema === "thoughtloom-logical-6" ? dailyReviewTableShapes : schema === "thoughtloom-logical-7" ? logical7TableShapes : schema === "thoughtloom-logical-8" ? logical8TableShapes : schema === "thoughtloom-logical-9" ? logical9TableShapes : backupTableShapes;
+  return schema === "thoughtloom-logical-1" ? legacyTableShapes : schema === "thoughtloom-logical-2" ? guidanceTableShapes : schema === "thoughtloom-logical-3" ? dispositionTableShapes : schema === "thoughtloom-logical-4" ? retirementTableShapes : schema === "thoughtloom-logical-5" ? screeningTableShapes : schema === "thoughtloom-logical-6" ? dailyReviewTableShapes : schema === "thoughtloom-logical-7" ? logical7TableShapes : schema === "thoughtloom-logical-8" ? logical8TableShapes : schema === "thoughtloom-logical-9" ? logical9TableShapes : schema === "thoughtloom-logical-10" ? logical10TableShapes : backupTableShapes;
 }
 
 /** Effective cell types from the same compiled inventory, not another payload-supplied schema. */
@@ -365,6 +387,7 @@ const dailyReviewTableDefinitions = tableDefinitions(dailyReviewDefinitions,dail
 const logical7TableDefinitions = tableDefinitions(logical7Definitions,logical7TableShapes);
 const logical8TableDefinitions = tableDefinitions(logical8Definitions,logical8TableShapes);
 const logical9TableDefinitions = tableDefinitions(logical9Definitions,logical9TableShapes);
+const logical10TableDefinitions = tableDefinitions(logical10Definitions,logical10TableShapes);
 export function definitionsForSchema(schema: BackupAppSchema): readonly BackupTableDefinition[] {
-  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : schema === "thoughtloom-logical-4" ? retirementTableDefinitions : schema === "thoughtloom-logical-5" ? screeningTableDefinitions : schema === "thoughtloom-logical-6" ? dailyReviewTableDefinitions : schema === "thoughtloom-logical-7" ? logical7TableDefinitions : schema === "thoughtloom-logical-8" ? logical8TableDefinitions : schema === "thoughtloom-logical-9" ? logical9TableDefinitions : backupTableDefinitions;
+  return schema === "thoughtloom-logical-1" ? legacyTableDefinitions : schema === "thoughtloom-logical-2" ? guidanceTableDefinitions : schema === "thoughtloom-logical-3" ? dispositionTableDefinitions : schema === "thoughtloom-logical-4" ? retirementTableDefinitions : schema === "thoughtloom-logical-5" ? screeningTableDefinitions : schema === "thoughtloom-logical-6" ? dailyReviewTableDefinitions : schema === "thoughtloom-logical-7" ? logical7TableDefinitions : schema === "thoughtloom-logical-8" ? logical8TableDefinitions : schema === "thoughtloom-logical-9" ? logical9TableDefinitions : schema === "thoughtloom-logical-10" ? logical10TableDefinitions : backupTableDefinitions;
 }

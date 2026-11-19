@@ -14,7 +14,7 @@ Develop thinking through dialogue. The user can challenge an interpretation, pro
 ## Modes and status
 
 - **Classic Evolve (implemented):** sending admits a user contribution as a library thought. The run may record AI developments and retain a **Full reply** under the existing rules below. Existing trees, retained replies and Classic behavior do not change.
-- **Save ideas only (planned, not implemented):** opt in when starting Evolve from an idea. The mode is fixed for that conversation. Dialogue is retained separately for continuity; only selected ideas enter the library. This is not a global chat or a change to ordinary Search, Export or title editing. The user approved the exact [client comp](../../.impeccable/mocks/evolve-save-ideas-only/README.md) on 2026-11-18. That approval covers the design, not implementation or runtime acceptance.
+- **Save ideas only (daemon implemented; client planned):** opt in when starting Evolve from an idea. The mode is fixed for that conversation. Dialogue is retained separately for continuity; only selected ideas enter the library. This is not a global chat or a change to ordinary Search, Export or title editing. The user approved the exact [client comp](../../.impeccable/mocks/evolve-save-ideas-only/README.md) on 2026-11-18. That approval covers the design, not implementation or runtime acceptance. See the [daemon API](../../docs/daemon-api.md#save-ideas-only-evolve) for current behavior.
 
 ## First appearance
 
@@ -71,7 +71,7 @@ Background findings can be offered separately for inspection. They must not sile
 
 The mockup's repeated **Evolve this idea** button within Evolve is a mistake, not an additional action. That action belongs in Idea, where it opens a new conversation.
 
-## Save ideas only (planned)
+## Save ideas only
 
 ### What stays in the conversation
 
@@ -82,7 +82,7 @@ Instructions, questions, acknowledgments and exploratory chatter normally stay i
 ### What becomes a thought
 
 - Save distinct insights from either speaker, not a quota. Text attributed to the user must be an exact, self-contained passage from that user's stored message. Record that the agent selected it. Do not strip away quoting or doubt to make someone else's claim look endorsed. An AI synthesis is AI-authored, even if it draws on the user's words.
-- **“Remember this”** directs the agent to save an identifiable passage; ask which one if unclear. **Keep as thought** explicitly saves a selected passage from either speaker without a new model run. Preserve the exact words and original authorship, with selection by the user recorded separately from authorship.
+- **“Remember this”** directs the agent to save an identifiable passage from the current exchange or from eligible prior dialogue supplied to the run. Ask which one if unclear or unavailable. Record the earlier source turn separately from the save's parent. **Keep as thought** explicitly saves a selected passage from either speaker without a new model run. Preserve the exact words and original authorship, with selection by the user recorded separately from authorship.
 - Show confirmed saves separately from transcript text. A save links to its actual thought, identifies authorship and who selected it, and has exactly one evolution parent. `Open idea` inspects a saved thought without changing the conversation's continuation.
 - Automatic saves normally use the turn's selected continuation as parent. An AI idea that directly develops a user insight just saved in that turn may be its child; independent ideas are siblings. Default the next turn to the latest confirmed save from the exchange and allow another eligible choice. For a passage from an earlier turn, show its proposed parent before confirming a manual save; that save must not silently move the conversation to a different point.
 

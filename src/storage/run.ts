@@ -84,7 +84,7 @@ export class SqliteRunRepository extends SqliteRunAggregate implements RunReposi
   expose(claim: Claim, ref: ContextRef): ContextValue | null { return this.transaction("expose", claim.runId, () => {
     assertRunNotRestoreFenced(this.db,claim.runId);
     const run = this.require(claim.runId);
-    requireOrdinaryRun(run);
+    this.requireClassicAuthority(run);
     if (run.status === "interrupted" && run.generation !== claim.generation) return null;
     this.active(claim);
     const visible = this.visibility();

@@ -50,7 +50,7 @@ async function owned(action: (fixture: BackupFixture) => Promise<void>, reviews 
 
 test("current capture/recovery/installation preserve successful review metadata and seal without reviving incomplete work", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-10");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-11");
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger:f.sources.logger});
   try {
@@ -144,7 +144,7 @@ test("logical-8 roundtrip preserves legacy and new review protocols and title wo
   expect(reviewRows(f.db)).toEqual(reviewsBeforeMigration);
   const output = join(f.dir,"mixed-output"); await mkdir(output,{mode:0o700});
   const backup = await captureBackup({databasePath:f.path,mediaDirectory:f.media,outputDirectory:output,logger:f.sources.logger});
-  expect(decodeManifest(await readFile(join(backup.snapshotDirectory,"manifest.json"))).appSchema).toBe("thoughtloom-logical-10");
+  expect(decodeManifest(await readFile(join(backup.snapshotDirectory,"manifest.json"))).appSchema).toBe("thoughtloom-logical-11");
   // Logical-8 has the same review/run shapes, but not the logical-9 local-stop table.
   const logical8 = join(f.dir,"projected-logical-8");
   await cp(backup.snapshotDirectory,logical8,{recursive:true,errorOnExist:true});

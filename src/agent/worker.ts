@@ -25,6 +25,8 @@ import type { SearchAdmissionFact, SearchCleanupIdentity, SearchCleanupObservati
 import { SqliteSearchRetention } from "../storage/search-retention";
 import { assertRunNotRestoreFenced, isRunRestoreFenced } from "../storage/restore-fences";
 import { assertRunLocallyTracked, isRunLocallyStopped } from "../storage/local-work-stop-fence";
+import { SqliteEvolveExecution } from "../storage/evolve-execution";
+import { initialIdeasPrompt, ideasResultPrompt } from "./evolve-prompts";
 
 /** Native calls are outside SQLite transactions. Production supplies OpenCodeAdapter. */
 export interface WorkerNative {
@@ -122,6 +124,7 @@ export class RunWorker {
   private readonly searchClock: SqliteSearchPromptClock;
   private readonly state: SqliteRunWorkerState;
   private readonly exports: SqliteAgenticExports;
+  private readonly evolve: SqliteEvolveExecution;
   private readonly owners = new Map<string,Claim>();
   private readonly flights = new Map<string,RunFlight>();
   // Technical cadence only. Durable journals remain authoritative; a new worker reconciles immediately after restart.
@@ -147,6 +150,7 @@ export class RunWorker {
     this.searchCapabilities = new SqliteSearchCapabilityDispatcher(db,dependencies);
     this.state = new SqliteRunWorkerState(db,dependencies,this.searchClock);
     this.exports = new SqliteAgenticExports(db,dependencies);
+    this.evolve = new SqliteEvolveExecution(db,dependencies);
     this.cleanup = new SqliteSearchCleanup(db,dependencies.executionOwner,this.logger);
   }
   tick(runId: string, beforePoll?: () => Promise<void>): Promise<void> {
@@ -231,8 +235,14 @@ export class RunWorker {
       if (run.kind === "export" && this.exports.intent(run.id) === null) throw new RunConflictError("Legacy export request is unavailable; cannot resume safely");
       const step = this.steps.steps(runId).at(-1);
       if (!step) throw new RunConflictError("Run has no current step");
+      const ideasOnly = run.kind === "evolve" && run.inputThoughtId === null; // The active claim required an explicit owner.
       if (step.input === null) {
         stage = "prepare-initial";
+        if (ideasOnly) {
+          this.evolve.prepare(owner,context => initialIdeasPrompt(context,binding));
+          this.bindings.bind(runId,binding,owner);
+          return;
+        }
         const context = run.kind === "search" ? null : this.state.initialContext(owner);
         const paths = context === null || (context.job.kind === "weave" && (context.job.purpose === "media-title-only" || context.job.purpose === "title-only"))
           ? [] : await this.mediaPaths(owner,run.kind,binding,context.thoughts);
@@ -253,7 +263,15 @@ export class RunWorker {
       if (!this.bindings.get(runId)) { this.bindings.bind(runId,binding,owner); return; }
       const prompt = {promptId:step.promptId,input:step.input};
       this.active(owner,prompt);
-      if (step.envelope !== null) { stage = "process-envelope"; await this.process(owner,step,run.kind,binding); return; }
+      if (step.envelope !== null) {
+        stage = "process-envelope";
+        if (ideasOnly) {
+          const result = this.evolve.process(owner,step.promptId,receipt => ideasResultPrompt(receipt,binding));
+          this.logger.info("[evolve] agent result confirmed",{runId,promptId:step.promptId,...result});
+          if (result.completed) this.forget(runId);
+        } else await this.process(owner,step,run.kind,binding);
+        return;
+      }
       if (!this.ensured.has(runId)) {
         stage = "ensure-session";
         if ((await this.call(owner,prompt,"ensure session",() => this.transport().ensureSession(owner,binding))).ok) this.ensured.add(runId);

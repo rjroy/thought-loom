@@ -9,6 +9,7 @@ import { recordMediaSourceRejection, recordSearchEligibilityChange } from "./sea
 import { storedThoughts } from "./media-source";
 import { interruptOrdinaryRun, logCommittedInterruption, type InterruptionDiagnostic } from "./run-fences";
 import { readRun } from "./run-record";
+import { affectedEvolveRuns } from "./evolve-context";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[rejection storage] ${operation} attempt`);
@@ -219,7 +220,15 @@ export class SqliteRejectionRepository implements RejectionRepository {
         diagnostics.push({run,reason:"context-invalidated"}); interruptedScreeningRuns++;
       }
     }
-    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns, interruptedScreeningRuns });
+    const evolveRuns = rejected ? affectedEvolveRuns(this.db,kind,key) : [];
+    for (const {id:runId} of evolveRuns) {
+      const run = readRun(this.db,runId);
+      if (!run) throw new Error("Evolve rejection owner unavailable");
+      interruptOrdinaryRun(this.db,run,"context-invalidated",this.logger);
+      diagnostics.push({run,reason:"context-invalidated"});
+    }
+    this.logger.info(`[rejection storage] ${operation} applied in transaction`, { ...invalidated, interruptedMediaRuns, interruptedScreeningRuns,
+      interruptedEvolveTurns:evolveRuns.length });
   }
 
   transaction<T>(action: (tx: RejectionTransaction) => T): T {

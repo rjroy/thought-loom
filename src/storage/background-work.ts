@@ -15,10 +15,10 @@ type Row = {
 // Project only control metadata. In particular no execution journals, import paths or content leave SQLite.
 const projection = `WITH work AS (
   SELECT 'run' AS type,r.id,r.kind,r.status,r.created_at AS createdAt,
-    CASE WHEN r.kind IN ('weave','evolve') AND COALESCE(r.weave_subject_id,r.input_thought_id) IS NOT NULL THEN 'thought'
+    CASE WHEN r.kind IN ('weave','evolve') AND COALESCE(r.weave_subject_id,r.input_thought_id,et.parent_id) IS NOT NULL THEN 'thought'
       WHEN r.kind='search' THEN 'search-session' WHEN r.kind='import' THEN 'import'
       WHEN r.kind='export' THEN 'export' ELSE 'unknown' END AS ownerType,
-    CASE WHEN r.kind IN ('weave','evolve') THEN COALESCE(r.weave_subject_id,r.input_thought_id)
+    CASE WHEN r.kind IN ('weave','evolve') THEN COALESCE(r.weave_subject_id,r.input_thought_id,et.parent_id)
       WHEN r.kind='search' THEN COALESCE(st.session_id,sc.session_id)
       WHEN r.kind='import' THEN f.import_id WHEN r.kind='export' THEN r.id END AS ownerId,
     CASE WHEN r.kind IN ('weave','evolve') AND rt.thought_id IS NULL THEN tt.title
@@ -36,11 +36,12 @@ const projection = `WITH work AS (
       WHEN sc.state IN ('pending','ownership-conflict') OR r.cancellation_state='pending' OR r.status IN ('uncertain','failed','interrupted') THEN 'needs-attention'
       WHEN r.status IN ('queued','submitting','running') THEN 'in-progress' ELSE NULL END AS view
   FROM runs r
+  LEFT JOIN evolve_turns et ON et.run_id=r.id
   LEFT JOIN search_turns st ON st.run_id=r.id
   LEFT JOIN search_native_cleanup sc ON sc.run_id=r.id
   LEFT JOIN search_sessions ss ON ss.id=COALESCE(st.session_id,sc.session_id)
   LEFT JOIN markdown_import_files f ON f.run_id=r.id
-  LEFT JOIN thought_titles tt ON tt.thought_id=COALESCE(r.weave_subject_id,r.input_thought_id)
+  LEFT JOIN thought_titles tt ON tt.thought_id=COALESCE(r.weave_subject_id,r.input_thought_id,et.parent_id)
   LEFT JOIN rejected_thoughts rt ON rt.thought_id=tt.thought_id
   UNION ALL
   SELECT 'run',sc.run_id,'search',sc.state,NULL,'search-session',sc.session_id,

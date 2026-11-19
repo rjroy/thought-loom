@@ -44,6 +44,8 @@ export function applyRestoreRecovery(db: Database, before: SqlSnapshot, snapshot
   const runWrites: { readonly id: Uint8Array; readonly generation: bigint }[] = [], fileWrites: Uint8Array[] = [], composerWrites: Uint8Array[] = [];
   const changedTurns = new Map<RawRow, RawRow>(), turns = table(before, "search_turns").rows;
   const turnsByRun = new Map(turns.map(row => [text(row, "run_id"), row]));
+  const evolveTurns = table(before,"evolve_turns").rows, changedEvolveTurns = new Map<RawRow,RawRow>();
+  const evolveByRun = new Map(evolveTurns.filter(row => row.values.run_id.storage === "text").map(row => [text(row,"run_id"),row]));
   const runs = table(before, "runs").rows.map(row => {
     guard(); let result = row; const fields: Record<string, RawCell> = Object.create(null);
     if (["queued", "submitting", "running", "uncertain"].includes(text(row, "status"))) {
@@ -56,6 +58,11 @@ export function applyRestoreRecovery(db: Database, before: SqlSnapshot, snapshot
       if (turn && integer(turn, "open_slot") !== 0n) {
         fields["search_turns.open_slot"] = turn.values.open_slot;
         changedTurns.set(turn, { ...turn, values: { ...turn.values, open_slot: integerCell(0n) } });
+      }
+      const evolve = evolveByRun.get(text(row,"id"));
+      if (evolve && integer(evolve,"open_slot") !== 0n) {
+        fields["evolve_turns.open_slot"] = evolve.values.open_slot;
+        changedEvolveTurns.set(evolve,{...evolve,values:{...evolve.values,open_slot:integerCell(0n)}});
       }
     }
     fence("run", row.values.id, fields); return result;
@@ -80,6 +87,7 @@ export function applyRestoreRecovery(db: Database, before: SqlSnapshot, snapshot
     fence("composer", row.values.id, fields); return result;
   });
   const replacements = new Map<string, readonly RawRow[]>([["runs", runs], ["search_turns", turns.map(row => changedTurns.get(row) ?? row)],
+    ["evolve_turns",evolveTurns.map(row => changedEvolveTurns.get(row) ?? row)],
     ["markdown_import_files", files], ["search_composer_contexts", composers], ["restore_fences", [...originalFences, ...added]]]);
   const expected: SqlSnapshot = { ...before, tables: before.tables.map(captured => ({ ...captured, rows: replacements.get(captured.shape.name) ?? captured.rows })),
     rowCount: (BigInt(before.rowCount) + BigInt(added.length)).toString() };

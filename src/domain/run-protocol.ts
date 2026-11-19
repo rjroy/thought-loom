@@ -1,6 +1,7 @@
 import type { Claim } from "./run";
 import { nonEmpty, record, references } from "./validation";
 import { searchString } from "./search-session-guards";
+import { evolveReplyText, ideasSelections, type IdeasSelection } from "./evolve-sessions";
 
 export type CapabilityEnvelope = { readonly version: 1; readonly kind: "request"; readonly request: { readonly capability: string; readonly arguments: Readonly<Record<string, unknown>> } };
 export type ReplyEnvelope = { readonly version: 1; readonly kind: "complete"; readonly reply: string };
@@ -13,7 +14,10 @@ export interface SearchReplyEnvelope {
   readonly version: 1; readonly kind: "search-reply"; readonly reply: string;
   readonly disposition: "awaiting-user" | "done"; readonly sourceThoughtIds: readonly string[];
 }
-export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope | ReportEnvelope | SearchReplyEnvelope | ReviewCompleteEnvelope;
+export interface IdeasReplyEnvelope {
+  readonly version: 1; readonly kind: "ideas-reply"; readonly reply: string; readonly selections: readonly IdeasSelection[];
+}
+export type ProtocolEnvelope = CapabilityEnvelope | ReplyEnvelope | ReportEnvelope | SearchReplyEnvelope | ReviewCompleteEnvelope | IdeasReplyEnvelope;
 export type StepState = "prepared" | "submitting" | "uncertain" | "completed" | "processed";
 export interface RunStep {
   readonly runId: string;
@@ -104,6 +108,10 @@ export function parseEnvelope(input: string): ProtocolEnvelope {
     const data = record(JSON.parse(input));
     uniqueKeys(input);
     if (data.version !== 1) throw new ProtocolValidationError("Unsupported envelope version");
+    if (data.kind === "ideas-reply") {
+      exactKeys(data,["version","kind","reply","selections"]);
+      return Object.freeze({version:1,kind:"ideas-reply",reply:evolveReplyText(data.reply),selections:ideasSelections(data.selections)});
+    }
     if (data.kind === "review-complete") {
       exactKeys(data,["version","kind","titleCheck","connectionCheck"]);
       if (data.titleCheck !== "complete" || data.connectionCheck !== "complete") throw new ProtocolValidationError("Both review checks must be complete");

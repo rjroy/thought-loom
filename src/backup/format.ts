@@ -1,4 +1,4 @@
-import { shapesForSchema, type BackupAppSchema } from "./schema";
+import { isBackupAppSchema, shapesForSchema, type BackupAppSchema } from "./schema";
 
 export interface TableShape {
   readonly name: string;
@@ -164,7 +164,7 @@ function file(entry: { readonly path: string; readonly byteLength: string; reado
 export function encodeManifest(manifest: BackupManifest): Uint8Array {
   closed(manifest, [...(manifest.appSchema === undefined ? [] : ["appSchema"]), "mediaStoreId", "tables", "sequences", "mediaMarker", "originals"]);
   const appSchema = manifest.appSchema ?? "thoughtloom-logical-1";
-  if (appSchema !== "thoughtloom-logical-1" && appSchema !== "thoughtloom-logical-2" && appSchema !== "thoughtloom-logical-3" && appSchema !== "thoughtloom-logical-4" && appSchema !== "thoughtloom-logical-5" && appSchema !== "thoughtloom-logical-6" && appSchema !== "thoughtloom-logical-7" && appSchema !== "thoughtloom-logical-8" && appSchema !== "thoughtloom-logical-9" && appSchema !== "thoughtloom-logical-10") invalid();
+  if (!isBackupAppSchema(appSchema)) invalid();
   dense(manifest.tables); dense(manifest.sequences); dense(manifest.originals);
   const tables = manifest.tables.map(entry => {
     closed(entry, ["name", "path", "rowCount", "byteLength", "sha256"]);

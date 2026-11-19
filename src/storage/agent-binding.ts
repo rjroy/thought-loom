@@ -39,6 +39,9 @@ export class SqliteAgentBindings extends SqliteRunAggregate implements AgentBind
       assertBindingPermissions(run.kind,binding);
       if (run.kind === "search") this.executionOwner?.assertRegistered(this.db);
       if (run.kind === "search" && binding.sessionId !== run.sessionId) throw new AgentBindingError("Search binding must use its allocated native identity");
+      if (run.kind === "evolve" && run.inputThoughtId === null && binding.sessionId !== run.sessionId) {
+        throw new AgentBindingError("Ideas-only binding must use its allocated native identity");
+      }
       if (claim !== undefined && claim.runId !== runId) throw new RunFenceError();
       this.active(claim ?? {runId,generation:run.generation});
       if (!this.contextValid(run,this.visibility())) { this.finalInterrupt(run,"context-invalidated"); return false; }

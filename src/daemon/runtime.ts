@@ -220,7 +220,8 @@ export async function startDaemon(config: DaemonConfig, logger: (event: DaemonEv
         return (expected.type === "import-file" || expected.kind === "import" ? importDriver : runWorker).stopLocalTracking(plan.runId,commit);
       },
     };
-    const app = createApp({ rejection, creation, titles, search, searchSessions, evolveSessions:new SqliteEvolveSessions(db,scheduling), searchAgentsConfigured: valid.agent != null,
+    const app = createApp({ rejection, creation, titles, search, searchSessions, evolveSessions:new SqliteEvolveSessions(db,scheduling,configuredWorker !== undefined),
+      notifyEvolveWork:() => supervisor?.notifyWork(), searchAgentsConfigured: valid.agent != null,
       notifySearchAdmission: () => supervisor?.notifyWork(), searchClockReceipts: receipts, simpleExport, agents, diagnostics, credentials: valid.credentials, logger,
       exportHistory:new ExportHistoryService(new SqliteAgenticExports(db,scheduling)),
       backgroundWork:new SqliteBackgroundWork(db,diagnostics,localStops),localStops,

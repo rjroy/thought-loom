@@ -13,6 +13,7 @@ import { retainedSearchSuccessorClock, type SqliteSearchPromptClock } from "./se
 import { assertRunNotRestoreFenced } from "./restore-fences";
 import { assertImportRunNotRestoreFenced } from "./import-authority";
 import { assertRunLocallyTracked } from "./local-work-stop-fence";
+import { selectiveRunOwner } from "./evolve-records";
 
 /** Extends the existing run aggregate, core migration, transaction and claim fencing; no independent run state. */
 export class SqliteRunProtocolRepository extends SqliteRunAggregate implements RunProtocolRepository {
@@ -55,6 +56,9 @@ export class SqliteRunProtocolRepository extends SqliteRunAggregate implements R
     const kind = this.guardedExecution("complete prompt",claim,run => {
       const step = this.current(run,promptId);
       const value = parseEnvelope(protocolJson(envelope));
+      const ideasOnly = run.kind === "evolve" && run.inputThoughtId === null && selectiveRunOwner(this.db,run.id) !== null;
+      const ideasEnvelope = value.kind === "ideas-reply" || (value.kind === "request" && value.request.capability === "saveIdea");
+      if (ideasOnly !== ideasEnvelope) throw new RunForbiddenError("Envelope does not match Evolve mode");
       const review = run.kind === "weave" && this.weavePurpose(run) === "daily-review";
       if ((value.kind === "review-complete" && !review) || (review && value.kind !== "request" && value.kind !== "review-complete")) {
         throw new RunForbiddenError("Final envelope does not match the weave purpose");

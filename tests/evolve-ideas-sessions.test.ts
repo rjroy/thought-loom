@@ -15,6 +15,8 @@ async function withDaemon(action: (fixture: {
   request: (path: string, options?: { actor?: "user" | "ai" | "none"; method?: string; body?: unknown; key?: string }) => Promise<Response>;
   restart: () => Promise<void>;
 }) => Promise<void>) {
+  // This fixture intentionally omits agent configuration. These cases exercise
+  // durable admission and reads, not evidence that a model run executed.
   const dir = await mkdtemp(join("/tmp/opencode", "thoughtloom-evolve-ideas-"));
   const path = join(dir, "db.sqlite");
   let daemon: RunningDaemon | undefined;
@@ -98,8 +100,9 @@ test("keyed turn admission recovers after restart and never indexes dialogue or 
     expect((await request(`${base}/turns/by-key/turn-1`)).status).toBe(404);
     const admitted = await send(input);
     expect(admitted.status).toBe(201);
-    const original = await admitted.json() as { receipt: unknown; turn: { id: string } };
-    expect(original.turn).toMatchObject(input);
+    const original = await admitted.json() as { receipt: unknown; turn: { id: string }; run: null };
+    expect(original.run).toBeNull();
+    expect(original.turn).toMatchObject({ ...input, runId: null, reply: null, saves: [] });
     expect(original.turn.id).toBeTruthy();
     expect(original.receipt).toBeTruthy();
     const replay = await send(input);

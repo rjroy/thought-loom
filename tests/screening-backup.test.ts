@@ -98,7 +98,7 @@ async function owned(action: (f: Fixture) => Promise<void>): Promise<void> {
 
 test("current capture, staged recovery and offline installation preserve screening history and fence execution", async () => owned(async f => {
   const manifest = decodeManifest(await readFile(join(f.snapshot,"manifest.json")));
-  expect(manifest.appSchema).toBe("thoughtloom-logical-10");
+  expect(manifest.appSchema).toBe("thoughtloom-logical-11");
   expect(manifest.tables.filter(table => table.name.startsWith("run_screening_")).map(table => table.rowCount)).toEqual(["5","5"]);
   const parent = join(f.dir,"stage"); await mkdir(parent,{mode:0o700});
   const stage = await stageRestoreSnapshot({snapshotDirectory:f.snapshot,stagingParentDirectory:parent,logger});

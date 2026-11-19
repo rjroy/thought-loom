@@ -47,6 +47,7 @@ export interface AppOptions {
   readonly search?: SearchService;
   readonly searchSessions?: SearchSessions;
   readonly evolveSessions?: EvolveSessions;
+  readonly notifyEvolveWork?: () => void;
   readonly searchAgentsConfigured?: boolean;
   readonly notifySearchAdmission?: () => void;
   readonly searchClockReceipts?: SearchClockReceipts;
@@ -203,7 +204,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   if (options.backgroundWork) app.route("/",createBackgroundWorkRoutes(options.backgroundWork,options.localStops));
   if (options.media) app.route("/",createMediaRoutes(options.media.commands,options.media.maxBytes,options.media.notify));
   if (options.searchSessions) app.route("/",createSearchSessionRoutes(options.searchSessions,options.searchAgentsConfigured === true,options.notifySearchAdmission,options.searchClockReceipts));
-  if (options.evolveSessions) app.route("/",createEvolveSessionRoutes(options.evolveSessions));
+  if (options.evolveSessions) app.route("/",createEvolveSessionRoutes(options.evolveSessions,options.notifyEvolveWork));
   if (options.reinterpretations) app.route("/",createReinterpretationRoutes(options.reinterpretations.commands,options.reinterpretations.notify,diagnostics,options.reinterpretations.retirement));
 
   if (options.agentInstructions) {

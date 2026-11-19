@@ -31,7 +31,7 @@ import { migrateExportLifecycle } from "./agentic-export-schema";
 import { migrateRunScreening } from "./run-screening-schema";
 import { migrateDailyReview } from "./daily-review-schema";
 import { migrateLocalWorkStops } from "./local-work-stop-schema";
-import { migrateEvolveSessions } from "./evolve-sessions";
+import { migrateEvolveSessions } from "./evolve-schema";
 
 function boundary<T>(logger: Logger, operation: string, action: () => T): T {
   logger.verbose(`[storage] ${operation} attempt`);
