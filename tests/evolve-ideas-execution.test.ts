@@ -138,6 +138,83 @@ test("configured selective send executes once and a zero-save reply survives res
   expect(f.client.prompts.length).toBe(count);
 }));
 
+test("bounded transcript and receipt pages retain large replies and every manual save", async () => fixture(async f => {
+  const { anchor, base } = await setup(f);
+  // JSON expands these valid non-NUL characters sixfold. The page budget must
+  // apply to encoded bytes, not just the number of turns or receipt objects.
+  const reply = "\u0001".repeat(16_384);
+  f.replies.push({ reply, selections: [] });
+  const body = { parentId: anchor, text: "Owned large receipt source." };
+  const first = { admission: await json<Admission>(await f.request(`${base}/turns?view=receipt`, { method: "POST", key: "large-page", body }), 201) };
+  expect(first.admission.turn.saves).toEqual([]);
+  await completed(f, base, first.admission.turn.id);
+  const receiptIds: string[] = [];
+  for (let index = 0; index < 44; index++) {
+    const response = await f.request(`${base}/turns/${first.admission.turn.id}/saves`, {
+      method: "POST", key: `receipt-${index}`, body: { speaker: "ai", text: reply, parentId: anchor },
+    });
+    const value = await json<{ receipt: { thoughtId: string } }>(response, 201);
+    receiptIds.push(value.receipt.thoughtId);
+  }
+  for (const response of [
+    await f.request(`${base}/turns/by-key/large-page?view=receipt`),
+    await f.request(`${base}/turns?view=receipt`, { method: "POST", key: "large-page", body }),
+  ]) {
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    const raw = await response.text();
+    expect(new TextEncoder().encode(raw).length).toBeLessThanOrEqual(256 * 1024);
+    const recovered = JSON.parse(raw) as Admission;
+    expect(recovered.receipt).toEqual(first.admission.receipt);
+    expect(recovered.run.id).toBe(first.admission.run.id);
+    expect(recovered.turn).toMatchObject({ id: first.admission.turn.id, parentId: anchor, text: body.text, saves: [] });
+  }
+  for (const response of [
+    await f.request(`${base}/turns/by-key/large-page`),
+    await f.request(`${base}/turns`, { method: "POST", key: "large-page", body }),
+  ]) {
+    expect(response.status).toBe(200);
+    const raw = await response.text();
+    expect(new TextEncoder().encode(raw).length).toBeGreaterThan(4 * 1024 * 1024);
+    expect((JSON.parse(raw) as Admission).turn.saves.map(save => save.thoughtId)).toEqual(receiptIds);
+  }
+  const bounded = await f.request(`${base}?limit=20`);
+  expect(bounded.status).toBe(200);
+  const wire = await bounded.text();
+  expect(new TextEncoder().encode(wire).length).toBeLessThanOrEqual(256 * 1024);
+  const page = JSON.parse(wire) as { turns: { id: string; reply: string; saves: Save[]; savesNextAfter: string | null; savesHasMore: boolean }[]; nextBefore: string | null };
+  expect(page.turns).toHaveLength(1);
+  expect(page.turns[0]?.reply).toBe(reply);
+  expect(page.turns[0]?.saves.length).toBeLessThan(receiptIds.length);
+  const preview = page.turns[0]?.saves ?? [];
+  expect(preview.map(item => item.thoughtId)).toEqual(receiptIds.slice(0, preview.length));
+  expect(page.turns[0]?.savesHasMore).toBe(true);
+  expect(page.turns[0]?.savesNextAfter).toBe(preview.at(-1)?.thoughtId ?? null);
+  const seen: string[] = [];
+  let after: string | null = null;
+  do {
+    const response = await f.request(`${base}/turns/${first.admission.turn.id}/saves?limit=20${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+    expect(response.status).toBe(200);
+    const raw = await response.text();
+    expect(new TextEncoder().encode(raw).length).toBeLessThanOrEqual(256 * 1024);
+    const result = JSON.parse(raw) as { saves: Save[]; nextAfter: string | null };
+    expect(result.saves.length).toBeGreaterThan(0);
+    expect(result.saves.length).toBeLessThanOrEqual(20);
+    expect(result.saves.every(item => item.text === reply)).toBe(true);
+    seen.push(...result.saves.map(item => item.thoughtId));
+    after = result.nextAfter;
+    expect(seen.length).toBeLessThanOrEqual(receiptIds.length);
+  } while (after !== null);
+  expect(seen).toEqual(receiptIds);
+  expect(new Set(seen).size).toBe(receiptIds.length);
+  expect((await f.request(`${base}/turns/${first.admission.turn.id}/saves?limit=20&after=unknown`)).status).toBeGreaterThanOrEqual(400);
+  expect((await f.request(`${base}/turns/${first.admission.turn.id}/saves?limit=21`)).status).toBeGreaterThanOrEqual(400);
+  const other = await setup(f);
+  expect((await f.request(`${other.base}/turns/${first.admission.turn.id}/saves?limit=20`)).status).toBeGreaterThanOrEqual(400);
+  const legacy = await json<Workspace>(await f.request(base), 200);
+  expect(legacy.turns[0]?.saves.map(save => save.thoughtId)).toEqual(receiptIds);
+}));
+
 test("agent selections preserve exact speaker text, child and sibling ancestry, and selectable continuation", async () => fixture(async f => {
   const { anchor, base } = await setup(f);
   const user = "A shared map makes disagreement easier to examine.";
@@ -170,6 +247,49 @@ test("agent selections preserve exact speaker text, child and sibling ancestry, 
   const branch = await completed(f, base, next.admission.turn.id);
   expect(branch.turn.parentId).toBe(human.thoughtId);
   expect(branch.workspace.session.continuationThoughtId).toBe(human.thoughtId);
+}));
+
+test("continuation CAS refuses stale send and change without writes, while exact send replay wins before CAS", async () => fixture(async f => {
+  const { anchor, base } = await setup(f);
+  const idea = "A reliable handoff makes returning easier.";
+  f.replies.push({ reply: idea, selections: [{ speaker: "ai", text: idea }] });
+  const body = { parentId: anchor, text: "Explore a reliable handoff.", expectedContinuationThoughtId: anchor };
+  const original = await json<Admission>(await f.request(`${base}/turns`, { method: "POST", key: "cas-original", body }), 201);
+  const published = await completed(f, base, original.turn.id);
+  const saved = published.turn.saves[0];
+  if (!saved) throw new Error("missing confirmed continuation");
+  expect(published.workspace.session.continuationThoughtId).toBe(saved.thoughtId);
+  const snapshot = () => {
+    const db = new Database(f.path, { readonly: true });
+    try {
+      return {
+        turns: db.query("SELECT id,run_id,parent_id,text FROM evolve_turns ORDER BY rowid").all(),
+        runs: db.query("SELECT id FROM runs WHERE id IN (SELECT run_id FROM evolve_turns) ORDER BY id").all(),
+        sessions: db.query("SELECT id,continuation_id FROM evolve_sessions ORDER BY id").all(),
+      };
+    } finally { db.close(); }
+  };
+  const before = snapshot();
+  const staleSend = await f.request(`${base}/turns`, { method: "POST", key: "cas-stale", body: {
+    parentId: anchor, text: "Must not be admitted.", expectedContinuationThoughtId: anchor,
+  } });
+  expect(staleSend.status).toBe(409);
+  expect(await staleSend.json()).toMatchObject({ code: "stale-continuation" });
+  const staleChange = await f.request(`${base}/continuation`, { method: "PUT", body: {
+    thoughtId: anchor, expectedContinuationThoughtId: anchor,
+  } });
+  expect(staleChange.status).toBe(409);
+  expect(await staleChange.json()).toMatchObject({ code: "stale-continuation" });
+  expect(snapshot()).toEqual(before);
+  const replay = await json<Admission>(await f.request(`${base}/turns`, { method: "POST", key: "cas-original", body }), 200);
+  expect(replay.receipt).toEqual(original.receipt);
+  expect(replay.turn.id).toBe(original.turn.id);
+  expect(snapshot()).toEqual(before);
+  const change = await f.request(`${base}/continuation`, { method: "PUT", body: {
+    thoughtId: anchor, expectedContinuationThoughtId: saved.thoughtId,
+  } });
+  expect(change.status).toBe(200);
+  expect((await json<Workspace>(await f.request(base), 200)).session.continuationThoughtId).toBe(anchor);
 }));
 
 test("AI synthesis remains AI-authored, while remember-this saves an identifiable user passage and asks when ambiguous", async () => fixture(async f => {

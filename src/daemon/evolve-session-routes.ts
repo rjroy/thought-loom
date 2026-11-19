@@ -1,7 +1,25 @@
 import { Hono } from "hono";
-import { evolveKey, evolveReplyBytes, evolveReplyText, evolveTurnText, evolveValue, EvolveNotFoundError, type EvolveSessions } from "../domain/evolve-sessions";
-import { oneOf } from "../domain/validation";
-import { object, params, SearchHttpError, type SearchEnv } from "./search-http";
+import { evolveKey, evolvePageLimit, evolveReplyBytes, evolveReplyText, evolveTurnText, evolveValue, EvolveNotFoundError,
+  type EvolveAdmissionProjection, type EvolveSessions } from "../domain/evolve-sessions";
+import { oneOf, ValidationError } from "../domain/validation";
+import { object, params, SearchHttpError, type SearchContext, type SearchEnv } from "./search-http";
+
+function pageLimit(query: URLSearchParams): number {
+  const value = query.get("limit");
+  if (value === null || !/^[1-9]\d?$/.test(value)) throw new ValidationError("Invalid page limit");
+  return evolvePageLimit(Number(value));
+}
+
+function expectedContinuation(input: Record<string,unknown>): string | undefined {
+  return input.expectedContinuationThoughtId === undefined ? undefined : evolveValue(input.expectedContinuationThoughtId,"expectedContinuationThoughtId");
+}
+
+function admissionProjection(c: SearchContext): EvolveAdmissionProjection {
+  const view = params(c,["view"]).get("view");
+  if (view === null) return "full";
+  if (view === "receipt") return view;
+  throw new ValidationError("Invalid admission view");
+}
 
 export function createEvolveSessionRoutes(sessions: EvolveSessions, notify?: () => void): Hono<SearchEnv> {
   const app = new Hono<SearchEnv>();
@@ -13,20 +31,26 @@ export function createEvolveSessionRoutes(sessions: EvolveSessions, notify?: () 
     return c.json({session:sessions.create(evolveValue(input.anchorThoughtId,"anchorThoughtId"))},201);
   });
   app.get("/evolve-sessions/:id",c => {
-    params(c,[]);
-    return c.json(sessions.read(evolveValue(c.req.param("id"),"session id")));
+    const query = params(c,["limit","before"]), id = evolveValue(c.req.param("id"),"session id");
+    return c.json(query.size === 0 ? sessions.read(id) : sessions.readPage(id,pageLimit(query),query.get("before") ?? undefined));
   });
   app.post("/evolve-sessions/:id/turns",async c => {
-    params(c,[]);
-    const key = evolveKey(c.req.header("idempotency-key")), input = await object(c,["parentId","text"],4096 * 6 + 4096);
-    const result = sessions.admit(evolveValue(c.req.param("id"),"session id"),key,{parentId:evolveValue(input.parentId,"parentId"),text:evolveTurnText(input.text)});
+    const projection = admissionProjection(c);
+    const key = evolveKey(c.req.header("idempotency-key")), input = await object(c,["parentId","text","expectedContinuationThoughtId"],4096 * 6 + 4096);
+    const expected = expectedContinuation(input);
+    const result = sessions.admit(evolveValue(c.req.param("id"),"session id"),key,
+      {parentId:evolveValue(input.parentId,"parentId"),text:evolveTurnText(input.text),...(expected === undefined ? {} : {expectedContinuationThoughtId:expected})},projection);
     if (!result.replayed && result.run) notify?.();
     return c.json({receipt:result.receipt,turn:result.turn,run:result.run},result.replayed ? 200 : 201);
   });
   app.put("/evolve-sessions/:id/continuation",async c => {
     params(c,[]);
-    const input = await object(c,["thoughtId"]);
-    return c.json({session:sessions.continueAt(c.req.param("id"),evolveValue(input.thoughtId,"thoughtId"))});
+    const input = await object(c,["thoughtId","expectedContinuationThoughtId"]);
+    return c.json({session:sessions.continueAt(c.req.param("id"),evolveValue(input.thoughtId,"thoughtId"),expectedContinuation(input))});
+  });
+  app.get("/evolve-sessions/:id/turns/:turnId/saves",c => {
+    const query = params(c,["limit","after"]);
+    return c.json(sessions.readSaves(c.req.param("id"),c.req.param("turnId"),pageLimit(query),query.get("after") ?? undefined));
   });
   app.post("/evolve-sessions/:id/turns/:turnId/saves",async c => {
     params(c,[]);
@@ -43,8 +67,8 @@ export function createEvolveSessionRoutes(sessions: EvolveSessions, notify?: () 
     return c.json({receipt});
   });
   app.get("/evolve-sessions/:id/turns/by-key/:key",c => {
-    params(c,[]);
-    const result = sessions.byKey(evolveValue(c.req.param("id"),"session id"),evolveKey(c.req.param("key")));
+    const projection = admissionProjection(c);
+    const result = sessions.byKey(evolveValue(c.req.param("id"),"session id"),evolveKey(c.req.param("key")),projection);
     if (!result) throw new EvolveNotFoundError();
     return c.json(result);
   });

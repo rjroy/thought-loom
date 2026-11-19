@@ -28,7 +28,7 @@ import { exportHistoryRequest, type ExportHistoryCursor, type ExportHistoryServi
 import type { BackgroundWorkRepository } from "../domain/background-work";
 import { createBackgroundWorkRoutes } from "./background-work-routes";
 import type { LocalStopController } from "../domain/local-work-stop";
-import { EvolveConflictError, EvolveNotFoundError, type EvolveSessions } from "../domain/evolve-sessions";
+import { EvolveConflictError, EvolveNotFoundError, EvolvePageSizeError, type EvolveSessions } from "../domain/evolve-sessions";
 import { createEvolveSessionRoutes } from "./evolve-session-routes";
 
 export interface BoundaryEvent {
@@ -147,6 +147,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   const browseSign = (value: string) => createHmac("sha256", browseSecret).update(value).digest();
   app.onError((error, c) => {
     const status: ErrorStatus = error instanceof ApiError || error instanceof ImportHttpError || error instanceof SearchHttpError ? error.status :
+      error instanceof EvolvePageSizeError ? 413 :
       error instanceof AgentNotConfiguredError ? 503 :
       error instanceof MediaImportError ? error.code === "invalid-media" ? 422 : 503 :
       error instanceof BranchConfirmationError || error instanceof TitleConflictError || error instanceof RunConflictError || error instanceof RunFenceError || error instanceof ImportConflictError || error instanceof SearchConflictError || error instanceof EvolveConflictError ? 409 :
@@ -169,7 +170,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     if (error instanceof ImportPreservationError && status===422) return c.json({error:"Unsupported source",code:error.message === "Unsupported source content" ? "unsupported-source-content" : "unsupported-source-encoding"},status);
     const path=safePath(new URL(c.req.url).pathname);
     if (path.startsWith("/evolve-sessions")) {
-      const code = error instanceof EvolveConflictError ? error.code : error instanceof SearchHttpError && error.status === 413 ? "request-too-large" :
+      const code = error instanceof EvolveConflictError ? error.code : error instanceof EvolvePageSizeError ? "record-too-large" : error instanceof SearchHttpError && error.status === 413 ? "request-too-large" :
         error instanceof SearchHttpError && error.status === 415 ? "unsupported-media-type" : status === 400 ? "invalid-evolve-request" :
         status === 403 ? "forbidden" : status === 404 ? "not-found" : "evolve-request-failed";
       return c.json({error:status === 400 ? "Bad request" : status === 403 ? "Forbidden" : status === 404 ? "Not found" : status === 409 ? "Conflict" : status === 413 ? "Payload too large" : status === 415 ? "Unsupported media type" : "Internal server error",code},status);

@@ -36,18 +36,46 @@ export interface EvolveSave extends EvolvePassage {
   readonly start: number | null;
 }
 export interface EvolveAdmissionView { readonly receipt: EvolveReceipt; readonly turn: EvolveTurn; readonly run: OrdinaryAgentRunView | null }
+export type EvolveAdmissionProjection = "full" | "receipt";
+export interface EvolveTurnPreview extends EvolveTurn {
+  readonly savesHasMore: boolean;
+  readonly savesNextAfter: string | null;
+}
+export interface EvolveSessionPage {
+  readonly session: EvolveSession;
+  readonly turns: readonly EvolveTurnPreview[];
+  readonly nextBefore: string | null;
+}
+export interface EvolveSavePage {
+  readonly saves: readonly EvolveSave[];
+  readonly nextAfter: string | null;
+}
+export interface EvolveTurnInput {
+  readonly parentId: string;
+  readonly text: string;
+  readonly expectedContinuationThoughtId?: string;
+}
+export const evolvePageMaximum = 20;
+export const evolvePageBytes = 256 * 1024;
+export function evolvePageLimit(limit: number): number {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > evolvePageMaximum) throw new ValidationError("Invalid page limit");
+  return limit;
+}
 export interface EvolveSessions {
   create(anchor: string): EvolveSession;
   read(id: string): { session: EvolveSession; turns: EvolveTurn[] };
-  admit(id: string, key: string, input: { parentId: string; text: string }): EvolveAdmissionView & { replayed: boolean };
-  byKey(id: string, key: string): EvolveAdmissionView | null;
+  readPage(id: string, limit: number, before?: string): EvolveSessionPage;
+  readSaves(id: string, turnId: string, limit: number, after?: string): EvolveSavePage;
+  admit(id: string, key: string, input: EvolveTurnInput, projection?: EvolveAdmissionProjection): EvolveAdmissionView & { replayed: boolean };
+  byKey(id: string, key: string, projection?: EvolveAdmissionProjection): EvolveAdmissionView | null;
   keep(id: string, turnId: string, key: string, input: EvolvePassage): { receipt: EvolveSave; replayed: boolean };
   saveByKey(id: string, turnId: string, key: string): EvolveSave | null;
-  continueAt(id: string, thoughtId: string): EvolveSession;
+  continueAt(id: string, thoughtId: string, expectedContinuationThoughtId?: string): EvolveSession;
 }
 export class EvolveNotFoundError extends Error {}
+export class EvolvePageSizeError extends Error {}
 export class EvolveConflictError extends Error {
-  constructor(readonly code: "idempotency-conflict" | "turn-active" | "invalid-continuation" | "invalid-passage") { super(code); }
+  constructor(readonly code: "idempotency-conflict" | "turn-active" | "invalid-continuation" | "invalid-passage" | "stale-continuation") { super(code); }
 }
 /** Reject values UTF-8 cannot represent exactly before they reach SQLite. */
 export function evolveValue(value: unknown, field: string): string {

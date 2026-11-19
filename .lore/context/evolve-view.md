@@ -1,7 +1,7 @@
 ---
 title: Evolve view
 date: 2026-11-03
-status: implemented baseline and agreed planned extension
+status: implemented baseline
 tags: [thoughtloom, restart, product]
 ---
 
@@ -14,7 +14,7 @@ Develop thinking through dialogue. The user can challenge an interpretation, pro
 ## Modes and status
 
 - **Classic Evolve (implemented):** sending admits a user contribution as a library thought. The run may record AI developments and retain a **Full reply** under the existing rules below. Existing trees, retained replies and Classic behavior do not change.
-- **Save ideas only (daemon implemented; client planned):** opt in when starting Evolve from an idea. The mode is fixed for that conversation. Dialogue is retained separately for continuity; only selected ideas enter the library. This is not a global chat or a change to ordinary Search, Export or title editing. The user approved the exact [client comp](../../.impeccable/mocks/evolve-save-ideas-only/README.md) on 2026-11-18. That approval covers the design, not implementation or runtime acceptance. See the [daemon API](../../docs/daemon-api.md#save-ideas-only-evolve) for current behavior.
+- **Save ideas only (implemented):** opt in when starting Evolve from an idea. The mode is fixed for that conversation. Dialogue is retained separately for continuity; only selected ideas enter the library. This is not a global chat or a change to ordinary Search, Export or title editing. The user approved the [client comp](../../.impeccable/mocks/evolve-save-ideas-only/README.md) on 2026-11-18. See the [user guide](../../docs/user-guide.md#save-ideas-only) and [daemon API](../../docs/daemon-api.md#save-ideas-only-evolve) for current behavior.
 
 ## First appearance
 
@@ -75,7 +75,7 @@ The mockup's repeated **Evolve this idea** button within Evolve is a mistake, no
 
 ### What stays in the conversation
 
-Keep original user and AI messages, each turn's selected parent and outcome, and links to any confirmed saves in a durable conversation anchored to the starting idea. Resume by explicit conversation identity, including after reload. Opening Evolve afresh opens a new workspace, not the last conversation. Resuming restores the recorded discussion and continuation without sending another message or launching another run. Unsent drafts are not implied to survive reload.
+Keep original user and AI messages, each turn's selected parent and outcome, and links to any confirmed saves in a durable conversation anchored to the starting idea. Resume by explicit conversation identity, including after reload. Opening Evolve afresh opens a new workspace, not the last conversation. Resuming reads the recorded discussion and continuation without sending another message or launching another run. The client loads recent turns first and offers **Load earlier turns** and **Load more saved ideas** as needed. An older current parent can remain the continuation even when its save is outside the loaded window. Opening an idea for inspection and returning within the same browser document retains the draft; a full reload does not.
 
 Instructions, questions, acknowledgments and exploratory chatter normally stay in the discussion. A completed turn with no saved thoughts is a valid outcome; it leaves the tree and continuation unchanged. Do not create a stand-in contribution, an addendum or a searchable fallback reply to satisfy the Classic contract. Library search and branch export must not indirectly expose unsaved dialogue; a thought saved from it is a distinct library record.
 
@@ -88,7 +88,9 @@ Instructions, questions, acknowledgments and exploratory chatter normally stay i
 
 ### Recovery and access
 
-Each send has a stable request identity: check an uncertain send rather than running it again. The daemon validates passage and speaker against the stored message, uses finalized AI text for passages from replies, and saves the thought and its source receipt atomically and without replay duplicates. Only actual new thoughts receive ordinary per-thought follow-up. A read failure does not erase confirmed saves or establish that nothing was saved. An interrupted reply remains distinct from completed dialogue; **Stop** does not undo confirmed saves or prove remote cancellation.
+Each send and manual Keep has a stable request identity: check an uncertain request rather than running it again. A missing receipt does not prove that a delayed write cannot commit. The daemon validates passage and speaker against the stored message, uses finalized AI text for passages from replies, and saves the thought and its source receipt atomically and without replay duplicates. Only actual new thoughts receive ordinary per-thought follow-up. A read failure does not erase confirmed saves or establish that nothing was saved. An interrupted reply remains distinct from completed dialogue; **Stop** does not undo confirmed saves or prove remote cancellation.
+
+An uncertain continuation change or stale continuation preserves the draft and pauses sending. The user checks the recorded selection and explicitly chooses **Use current thought**; a delayed change can still arrive after a read. Conditional writes prevent silently sending against a different current parent. Stop for a known active run remains available after a failed conversation refresh or an unconfirmed Keep, independently of recovering that request.
 
 The agent runs afresh for a reply with bounded, scoped previous dialogue. Record what informed retained turns and check eligibility both on reads and before publishing. Subsequent AI context excludes dialogue that depends on now-ineligible material; when that cannot be separated safely, start with fresh eligible context instead. A user-visible retained conversation or save receipt is not authority to supply its text to AI or widen rejected-content access.
 

@@ -1,15 +1,36 @@
 import type { Database } from "bun:sqlite";
 import { createLogger } from "../logging";
-import { evolveKey, evolveReplyText, evolveTurnText, evolveValue, EvolveConflictError, EvolveNotFoundError,
-  type EvolveAdmissionView, type EvolvePassage, type EvolveSave, type EvolveSession, type EvolveSessions, type EvolveTurn } from "../domain/evolve-sessions";
+import { evolveKey, evolvePageBytes, evolvePageLimit, evolvePageMaximum, evolveReplyText, evolveTurnText, evolveValue,
+  EvolveConflictError, EvolveNotFoundError, EvolvePageSizeError, type EvolveAdmissionProjection, type EvolveAdmissionView, type EvolvePassage, type EvolveSave,
+  type EvolveSavePage, type EvolveSession, type EvolveSessionPage, type EvolveSessions, type EvolveTurn, type EvolveTurnInput, type EvolveTurnPreview } from "../domain/evolve-sessions";
 import type { RunRecord, RunSources } from "../domain/run";
-import { oneOf } from "../domain/validation";
-import { evolveOwner, evolveTurnById, evolveSaves, evolveSaveDto, evolveSaveSql, evolveTurnView, evolveTurnSql, evolveRunView, evolveUtf8,
+import { oneOf, ValidationError } from "../domain/validation";
+import { evolveAdmissionSql, evolveOwner, evolveReceiptWindow, evolveRecentTurns, evolveTurnById, evolveSaves, evolveSaveDto, evolveSaveSql, evolveTurnView, evolveTurnSql, evolveRunDto, evolveRunView, evolveUtf8,
   type EvolveSaveRow, type EvolveTurnRow } from "./evolve-records";
 import { insertRun } from "./run-record";
 import { evolveContextEligible, evolveThoughtEligible } from "./evolve-context";
 import { saveEvolveIdea } from "./evolve-save";
 import { immediate } from "./transaction";
+
+const jsonBytes = (value: object | string | boolean | null): number => Buffer.byteLength(JSON.stringify(value),"utf8");
+const cursorBytes = (cursor: string | null): number => jsonBytes(cursor);
+
+/** Fill the fixed JSON shell with an ordered prefix; rows contains at most one count lookahead. */
+function fitPage<T extends object>(rows: readonly T[], limit: number, space: number, id: (row:T) => string,
+  footerBytes: (cursor:string | null, hasMore:boolean) => number = cursorBytes) {
+  const items: T[] = [];
+  const emptyFooter = footerBytes(null,rows.length > 0);
+  let itemBytes = 0, bytes = 0, next: string | null = null;
+  for (const row of rows.slice(0,limit)) {
+    const count = items.length + 1;
+    const nextSize = itemBytes + (count === 1 ? 0 : 1) + jsonBytes(row);
+    const hasMore = count < rows.length, cursor = hasMore ? id(row) : null;
+    const total = nextSize + footerBytes(cursor,hasMore) - emptyFooter;
+    if (total > space) break;
+    items.push(row); itemBytes = nextSize; bytes = total; next = cursor;
+  }
+  return {items,next,bytes,hasMore:items.length < rows.length};
+}
 
 export class SqliteEvolveSessions implements EvolveSessions {
   private readonly logger;
@@ -21,17 +42,24 @@ export class SqliteEvolveSessions implements EvolveSessions {
     if (!owner) throw new EvolveNotFoundError();
     return owner;
   }
-  private turn(sessionId: string, turnId: string): EvolveTurnRow {
-    const turn = evolveTurnById(this.db,evolveValue(turnId,"turn id"));
+  private turn(sessionId: string, turnId: string, projection: EvolveAdmissionProjection = "full"): EvolveTurnRow {
+    const turn = evolveTurnById(this.db,evolveValue(turnId,"turn id"),projection);
     if (!turn || turn.session_id !== sessionId) throw new EvolveNotFoundError();
     return turn;
   }
-  private byRequest(id: string, key: string): EvolveTurnRow | null {
-    return this.db.query<EvolveTurnRow,[Uint8Array,string]>(`${evolveTurnSql} WHERE t.session_id=CAST(? AS TEXT) AND t.request_key=?`).get(evolveUtf8(id),key);
+  private byRequest(id: string, key: string, projection: EvolveAdmissionProjection): EvolveTurnRow | null {
+    return this.db.query<EvolveTurnRow,[Uint8Array,string]>(`${evolveAdmissionSql(projection)} WHERE t.session_id=CAST(? AS TEXT) AND t.request_key=?`).get(evolveUtf8(id),key);
   }
-  private view(row: EvolveTurnRow): EvolveAdmissionView {
-    return {receipt:{sessionId:row.session_id,turnId:row.id,admittedAt:row.admitted_at},
-      turn:evolveTurnView(row,evolveSaves(this.db,row.id)),run:row.run_id && row.runStatus ? evolveRunView(this.db,row.run_id,row.runStatus) : null};
+  private admissionView(row: EvolveTurnRow, projection: EvolveAdmissionProjection): EvolveAdmissionView {
+    const receipt = {sessionId:row.session_id,turnId:row.id,admittedAt:row.admitted_at};
+    if (projection === "receipt") {
+      // Do not read receipt text or even its unbounded list of IDs for control recovery.
+      const view = {receipt,turn:evolveTurnView(row,[]),run:row.run_id && row.runStatus ? evolveRunDto(row.run_id,row.runStatus,[]) : null};
+      if (jsonBytes(view) > evolvePageBytes) throw new EvolvePageSizeError();
+      return view;
+    }
+    return {receipt,turn:evolveTurnView(row,evolveSaves(this.db,row.id)),
+      run:row.run_id && row.runStatus ? evolveRunView(this.db,row.run_id,row.runStatus) : null};
   }
   private requireContinuation(owner: EvolveSession, thoughtId: string): void {
     if (!evolveThoughtEligible(this.db,owner.anchorThoughtId) || !evolveThoughtEligible(this.db,thoughtId)) throw new EvolveNotFoundError();
@@ -70,23 +98,64 @@ export class SqliteEvolveSessions implements EvolveSessions {
       return {session,turns:turns.map(row => evolveTurnView(row,saves.get(row.id) ?? []))};
     })();
   }
-  byKey(id: string, key: string): EvolveAdmissionView | null {
+  readPage(id: string, limit: number, before?: string): EvolveSessionPage {
+    evolvePageLimit(limit);
+    return this.db.transaction(() => {
+      const session = this.session(id);
+      const baseSpace = evolvePageBytes - jsonBytes({session,turns:[],nextBefore:null});
+      if (baseSpace < 0) throw new EvolvePageSizeError();
+      const rows = evolveRecentTurns(this.db,id,limit+1,before).map((row): EvolveTurnPreview => ({
+        ...evolveTurnView(row,[]),savesHasMore:row.hasSaves !== 0,savesNextAfter:null,
+      }));
+      // Reserve room for whole turns before considering receipts, so zero preview can still advance the transcript.
+      const page = fitPage(rows,limit,baseSpace,row => row.id);
+      if (!page.items.length && page.hasMore) throw new EvolvePageSizeError();
+      let space = baseSpace - page.bytes;
+      const turns = page.items.map(turn => {
+        if (!turn.savesHasMore || space === 0) return turn;
+        const candidates = evolveReceiptWindow(this.db,turn.id,evolvePageMaximum+1);
+        const preview = fitPage(candidates,evolvePageMaximum,space,save => save.thoughtId,
+          (next,hasMore) => cursorBytes(next) + jsonBytes(hasMore));
+        space -= preview.bytes;
+        return {...turn,saves:preview.items,savesHasMore:preview.hasMore,savesNextAfter:preview.next};
+      }).reverse();
+      return {session,turns,nextBefore:page.next};
+    })();
+  }
+  readSaves(id: string, turnId: string, limit: number, after?: string): EvolveSavePage {
+    evolvePageLimit(limit);
+    return this.db.transaction(() => {
+      this.session(id);
+      if (!this.db.query(`SELECT 1 FROM evolve_turns WHERE id=CAST(? AS TEXT) AND session_id=CAST(? AS TEXT)`)
+        .get(evolveUtf8(evolveValue(turnId,"turn id")),evolveUtf8(id))) throw new EvolveNotFoundError();
+      const candidates = evolveReceiptWindow(this.db,turnId,limit+1,after);
+      const page = fitPage(candidates,limit,evolvePageBytes-jsonBytes({saves:[],nextAfter:null}),save => save.thoughtId);
+      if (!page.items.length && page.hasMore) throw new EvolvePageSizeError();
+      return {saves:page.items,nextAfter:page.next};
+    })();
+  }
+  byKey(id: string, key: string, projection: EvolveAdmissionProjection = "full"): EvolveAdmissionView | null {
     evolveKey(key);
     return this.db.transaction(() => {
       this.session(id);
-      const row = this.byRequest(id,key);
-      return row ? this.view(row) : null;
+      const row = this.byRequest(id,key,projection);
+      return row ? this.admissionView(row,projection) : null;
     })();
   }
-  admit(id: string, key: string, input: { parentId: string; text: string }): EvolveAdmissionView & { replayed: boolean } {
+  admit(id: string, key: string, input: EvolveTurnInput, projection: EvolveAdmissionProjection = "full"): EvolveAdmissionView & { replayed: boolean } {
     evolveKey(key); evolveValue(input.parentId,"parentId"); evolveTurnText(input.text);
+    const expected = input.expectedContinuationThoughtId;
+    if (expected !== undefined && evolveValue(expected,"expectedContinuationThoughtId") !== input.parentId) {
+      throw new ValidationError("Expected continuation must equal the selected parent");
+    }
     const result = immediate(this.db, () => {
       const owner = this.session(id);
-      const existing = this.byRequest(id,key);
+      const existing = this.byRequest(id,key,projection);
       if (existing) {
         if (existing.parent_id !== input.parentId || existing.text !== input.text) throw new EvolveConflictError("idempotency-conflict");
-        return {...this.view(existing),replayed:true};
+        return {...this.admissionView(existing,projection),replayed:true};
       }
+      if (expected !== undefined && expected !== owner.continuationThoughtId) throw new EvolveConflictError("stale-continuation");
       this.requireContinuation(owner,input.parentId);
       if (this.active(id)) throw new EvolveConflictError("turn-active");
       const turnId = evolveValue(this.sources.id(),"turn id"), at = evolveValue(this.sources.now(),"admittedAt");
@@ -105,15 +174,19 @@ export class SqliteEvolveSessions implements EvolveSessions {
         }
       }
       this.setContinuation(id,input.parentId);
-      return {...this.view(this.turn(id,turnId)),replayed:false};
+      return {...this.admissionView(this.turn(id,turnId,projection),projection),replayed:false};
     });
     this.logger.info("[evolve] turn admission confirmed",{sessionId:id,turnId:result.turn.id,runId:result.turn.runId,replayed:result.replayed});
     return result;
   }
-  continueAt(id: string, thoughtId: string): EvolveSession {
+  continueAt(id: string, thoughtId: string, expectedContinuationThoughtId?: string): EvolveSession {
     evolveValue(thoughtId,"thoughtId");
+    if (expectedContinuationThoughtId !== undefined) evolveValue(expectedContinuationThoughtId,"expectedContinuationThoughtId");
     const session = immediate(this.db,() => {
       const owner = this.session(id);
+      if (expectedContinuationThoughtId !== undefined && expectedContinuationThoughtId !== owner.continuationThoughtId) {
+        throw new EvolveConflictError("stale-continuation");
+      }
       this.requireContinuation(owner,thoughtId);
       if (this.active(id)) throw new EvolveConflictError("turn-active");
       this.setContinuation(id,thoughtId);

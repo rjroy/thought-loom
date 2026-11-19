@@ -38,6 +38,7 @@ export function migrateEvolveSessions(db: Database): void {
     SELECT rowid,id,session_id,request_key,parent_id,text,admitted_at,status,open_slot FROM evolve_turns_legacy ORDER BY rowid;
     DROP TABLE evolve_turns_legacy;`);
   db.exec(`
+    CREATE INDEX IF NOT EXISTS evolve_turns_in_session ON evolve_turns(session_id);
     CREATE TRIGGER IF NOT EXISTS evolve_turns_identity_immutable BEFORE UPDATE OF id,session_id,request_key,parent_id,text,admitted_at,status,run_id ON evolve_turns
       BEGIN SELECT RAISE(ABORT,'evolve turn admission is immutable'); END;
     CREATE TRIGGER IF NOT EXISTS evolve_turns_reply_once BEFORE UPDATE OF reply ON evolve_turns

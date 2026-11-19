@@ -87,6 +87,49 @@ test("idea-anchored sessions are explicit, fresh, durable and do not create know
   });
 });
 
+test("bounded conversation pages walk backwards without gaps, duplicates or foreign cursors", async () => {
+  await withDaemon(async ({ request }) => {
+    const anchor = await root(request);
+    const created = await request("/evolve-sessions", { method: "POST", body: { anchorThoughtId: anchor.id } });
+    const { session } = await created.json() as { session: { id: string } };
+    const base = `/evolve-sessions/${session.id}`;
+    const ids: string[] = [];
+    for (let index = 0; index < 5; index++) {
+      const response = await request(`${base}/turns`, { method: "POST", key: `page-${index}`, body: { parentId: anchor.id, text: `Owned page turn ${index}` } });
+      expect(response.status).toBe(201);
+      ids.push((await response.json() as { turn: { id: string } }).turn.id);
+    }
+    const pages: string[][] = [];
+    let before: string | null = null;
+    do {
+      const response = await request(`${base}?limit=2${before ? `&before=${encodeURIComponent(before)}` : ""}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      const page = await response.json() as { session: { id: string }; turns: { id: string }[]; nextBefore: string | null };
+      expect(page.session.id).toBe(session.id);
+      expect(page.turns.length).toBeGreaterThan(0);
+      expect(page.turns.length).toBeLessThanOrEqual(2);
+      pages.unshift(page.turns.map(turn => turn.id));
+      before = page.nextBefore;
+      expect(pages.length).toBeLessThanOrEqual(3);
+    } while (before !== null);
+    expect(pages.flat()).toEqual(ids);
+    expect(new Set(pages.flat()).size).toBe(ids.length);
+    for (const query of ["limit=0", "limit=999999", "limit=2&limit=1", "limit=2&before=not-a-turn", "before=missing-limit"]) {
+      expect((await request(`${base}?${query}`)).status).toBeGreaterThanOrEqual(400);
+    }
+    const foreignCreate = await request("/evolve-sessions", { method: "POST", body: { anchorThoughtId: anchor.id } });
+    const foreignSession = (await foreignCreate.json() as { session: { id: string } }).session.id;
+    const foreign = await request(`/evolve-sessions/${foreignSession}/turns`, { method: "POST", key: "foreign", body: { parentId: anchor.id, text: "Foreign cursor" } });
+    const foreignTurn = (await foreign.json() as { turn: { id: string } }).turn.id;
+    expect((await request(`${base}?limit=2&before=${encodeURIComponent(foreignTurn)}`)).status).toBeGreaterThanOrEqual(400);
+    expect((await request(`${base}?limit=2`, { actor: "ai" })).status).toBe(403);
+    const legacy = await request(base);
+    expect(legacy.status).toBe(200);
+    expect((await legacy.json() as { turns: { id: string }[] }).turns.map(turn => turn.id)).toEqual(ids);
+  });
+});
+
 test("keyed turn admission recovers after restart and never indexes dialogue or duplicates on replay and conflict", async () => {
   await withDaemon(async ({ path, request, restart }) => {
     const anchor = await root(request);

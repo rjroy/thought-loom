@@ -13,6 +13,8 @@ test("matched session handlers and their authorization errors are private withou
   const sessions: EvolveSessions = {
     create: () => session,
     read: () => ({ session, turns:[turn] }),
+    readPage: () => ({ session, turns:[{ ...turn, savesHasMore:false, savesNextAfter:null }], nextBefore:null }),
+    readSaves: () => ({ saves:[save], nextAfter:null }),
     admit: () => ({ receipt, turn, run:null, replayed:false }),
     byKey: () => ({ receipt, turn, run:null }),
     keep: () => ({ receipt:save, replayed:false }),
@@ -26,12 +28,16 @@ test("matched session handlers and their authorization errors are private withou
   const cases: { path: string; init: RequestInit; status: number }[] = [
     { path:"/evolve-sessions", init:{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({anchorThoughtId:"anchor"})}, status:201 },
     { path:"/evolve-sessions/session", init:{}, status:200 },
+    { path:"/evolve-sessions/session?limit=2", init:{}, status:200 },
+    { path:"/evolve-sessions/session/turns/turn/saves?limit=2", init:{}, status:200 },
     { path:"/evolve-sessions/session/turns", init:{method:"POST",headers:{"content-type":"application/json","Idempotency-Key":"owned-key"},body:JSON.stringify({parentId:"anchor",text:"test-owned text"})}, status:201 },
     { path:"/evolve-sessions/session/turns/by-key/owned-key", init:{}, status:200 },
     { path:"/evolve-sessions/session/continuation", init:{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({thoughtId:"anchor"})}, status:200 },
     { path:"/evolve-sessions/session/turns/turn/saves", init:{method:"POST",headers:{"content-type":"application/json","Idempotency-Key":"save"},body:JSON.stringify({speaker:"user",text:turn.text,parentId:"anchor"})}, status:201 },
     { path:"/evolve-sessions/session/turns/turn/saves/by-key/save", init:{}, status:200 },
     { path:"/evolve-sessions/session", init:{headers:{"x-test-actor":"ai"}}, status:403 },
+    { path:"/evolve-sessions/session?limit=2", init:{headers:{"x-test-actor":"ai"}}, status:403 },
+    { path:"/evolve-sessions/session/turns/turn/saves?limit=2", init:{headers:{"x-test-actor":"ai"}}, status:403 },
   ];
   for (const item of cases) {
     const response = await app.request(item.path,item.init);

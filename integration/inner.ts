@@ -60,6 +60,21 @@ class FixtureClient implements PublicClient {
   async prompt(input: Parameters<PublicClient["prompt"]>[0]): Promise<InboxItem> {
     const history = this.prompts.get(input.sessionID) ?? []; history.push(input.text); this.prompts.set(input.sessionID, history);
     const first = record(JSON.parse(history[0]));
+    if (first.kind === "ideas-job") {
+      const context = record(first.context);
+      const zero = /^(Owned selective question:|Owned paging turn )/.test(string(context.text));
+      const output = zero
+        ? { version: 1, kind: "ideas-reply", reply: "Owned selective clarification only.", selections: [] }
+        : { version: 1, kind: "ideas-reply", reply: "Owned selective AI reply remains dialogue.", selections: [
+          { speaker: "user", text: "A returning neighbor needs a useful first visit." },
+          { speaker: "ai", text: "A brief handoff helps neighbors return.", source: "synthesis", parentSelection: 0 },
+        ] };
+      const messages = this.messages.get(input.sessionID); assert.ok(messages);
+      messages.push({ id: input.id, type: "user", time: { created: 10 }, text: input.text },
+        { id: `assistant-${input.id}`, type: "assistant", time: { created: 11, completed: 12 }, content: [{ type: "text", text: JSON.stringify(output) }], finish: "stop" },
+        { id: `idle-${input.id}`, type: "idle", time: { created: 13 }, outcome: "succeeded" });
+      return { id: input.id, sessionID: input.sessionID, type: "user", payload: { text: input.text }, delivery: "queue", time: { created: 10 } };
+    }
     if (first.kind === "import-job") {
       assert.equal(history.length, 1);
       assert.deepEqual(Object.keys(first).sort(), ["capabilities", "document", "instructions", "kind", "manifest", "version"]);
@@ -288,6 +303,224 @@ async function searchWalkthrough(page: Page, origin: string, daemon: RunningDaem
   } finally { page.off("request", observe); }
 }
 
+// Exercise the approved client flow against real session receipts, not a mocked
+// browser API. Unique dialogue strings let us check search/export isolation.
+async function ideasWalkthrough(page: Page, origin: string, daemon: RunningDaemon, dbPath: string, anchor: string, pulse: () => void): Promise<void> {
+  const question = "Owned selective question: what is the barrier?";
+  const insight = "A returning neighbor needs a useful first visit.";
+  const passage = "Even one visit can be worthwhile.";
+  const message = `${insight} ${passage}`;
+  const aiIdea = "A brief handoff helps neighbors return.";
+  const sessionRows = () => dbRows(dbPath, "SELECT id FROM evolve_sessions ORDER BY rowid").map(record);
+  const turns = (session: string) => dbRows(dbPath, "SELECT id,session_id,run_id,reply FROM evolve_turns ORDER BY rowid").map(record).filter(row => row.session_id === session);
+  const open = async () => {
+    await page.goto(`${origin}/evolve?thoughtId=${encodeURIComponent(anchor)}`, { waitUntil: "networkidle" });
+    const choice = page.getByRole("checkbox", { name: "Save ideas only" });
+    await expect(choice).not.toBeChecked();
+    await expect(page.getByRole("textbox", { name: "Your contribution" })).toBeVisible();
+    await choice.check();
+    await expect(page.getByRole("textbox", { name: "Your message" })).toBeVisible();
+  };
+  const finish = async (session: string, count: number) => {
+    await until("Selective reply", async () => turns(session).length === count && turns(session)[count - 1]?.reply !== null, pulse);
+  };
+  const before = sessionRows().length;
+  await open();
+  await page.getByRole("textbox", { name: "Your message" }).fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await until("Selective session admission", async () => sessionRows().length === before + 1 && turns(string(sessionRows().at(-1)?.id)).length === 1, pulse);
+  const session = string(sessionRows().at(-1)?.id);
+  await finish(session, 1);
+  await expect(page.getByText("Owned selective clarification only.")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/no thoughts saved/i)).toBeVisible();
+  let workspace = record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value);
+  assert.equal(record(workspace.session).continuationThoughtId, anchor);
+  assert.deepEqual(record((workspace.turns as unknown[])[0]).saves, []);
+
+  await page.getByRole("textbox", { name: "Your message" }).fill(message);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await finish(session, 2);
+  await expect(page.getByText("Owned selective AI reply remains dialogue.")).toBeVisible({ timeout: 15000 });
+  const saved = page.getByRole("heading", { name: "Saved ideas" }).locator("..");
+  await expect(saved).toBeVisible();
+  workspace = record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value);
+  assert.ok(Array.isArray(workspace.turns));
+  const turn = record(workspace.turns[1]); assert.ok(Array.isArray(turn.saves));
+  const [human, ai] = turn.saves.map(record);
+  assert.equal(human.text, insight); assert.equal(human.speaker, "user"); assert.equal(human.selectedBy, "ai"); assert.equal(human.parentId, anchor);
+  assert.equal(ai.text, aiIdea); assert.equal(ai.speaker, "ai"); assert.equal(ai.selectedBy, "ai"); assert.equal(ai.parentId, human.thoughtId);
+  assert.equal(record(workspace.session).continuationThoughtId, ai.thoughtId);
+  await expect(page.getByText(insight, { exact: true }).last()).toBeVisible();
+  await expect(page.getByText(aiIdea, { exact: true }).last()).toBeVisible();
+
+  await page.getByRole("button", { name: /select passage from your message/i }).last().click();
+  const source = page.getByRole("textbox", { name: /select the exact words to keep/i });
+  await source.evaluate((node, selected) => {
+    const input = node as HTMLTextAreaElement;
+    const start = input.value.indexOf(selected);
+    if (start < 0) throw new Error("Passage missing from selection source");
+    input.setSelectionRange(start, start + selected.length);
+  }, passage);
+  await page.getByRole("button", { name: "Review passage" }).click();
+  await expect(page.getByText(passage, { exact: true }).last()).toBeVisible();
+  await expect(page.getByText(/next message will still continue/i)).toBeVisible();
+  await page.getByRole("button", { name: "Keep as thought" }).click();
+  await until("Manual save", async () => {
+    const value = record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value);
+    return Array.isArray(value.turns) && Array.isArray(record(value.turns[1]).saves) && (record(value.turns[1]).saves as unknown[]).length === 3;
+  }, pulse);
+  workspace = record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value);
+  const manual = record((record((workspace.turns as unknown[])[1]).saves as unknown[])[2]);
+  assert.equal(manual.text, passage); assert.equal(manual.speaker, "user"); assert.equal(manual.selectedBy, "user"); assert.equal(manual.parentId, anchor);
+  assert.equal(record(workspace.session).continuationThoughtId, ai.thoughtId, "Keep must not retarget continuation");
+
+  const privateDraft = "Owned private next draft stays in this tab.";
+  await page.getByRole("textbox", { name: "Your message" }).fill(privateDraft);
+  const ideaLink = page.getByRole("link", { name: /^Open idea(?::|$)/i })
+    .and(page.locator(`a[href^="/ideas/${encodeURIComponent(string(ai.thoughtId))}"]`));
+  await ideaLink.click();
+  await expect(page).toHaveURL(url => url.pathname === `/ideas/${encodeURIComponent(string(ai.thoughtId))}`);
+  await page.goBack();
+  await expect(page.getByRole("textbox", { name: "Your message" })).toHaveValue(privateDraft);
+  assert.equal(turns(session).length, 2, "opening an idea must not send the private draft");
+
+  await page.getByRole("button", { name: "Change", exact: true }).click();
+  await page.getByRole("radio", { name: new RegExp(insight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).check();
+  await page.getByRole("button", { name: "Use this thought" }).click();
+  await until("Continuation selection", async () => record(record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value).session).continuationThoughtId === human.thoughtId, pulse);
+  const link = page.getByRole("link", { name: "Conversation link" });
+  const href = await link.getAttribute("href"); assert.ok(href);
+  await page.goto(new URL(href, origin).href, { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "Resume this conversation?" })).toBeVisible();
+  const priorTurns = turns(session).length;
+  await page.getByRole("link", { name: "Resume", exact: true }).click();
+  await expect(page.getByText("Owned selective AI reply remains dialogue.")).toBeVisible();
+  assert.equal(turns(session).length, priorTurns, "resuming must not send");
+  assert.equal(record(record((await daemonCall(daemon, `/evolve-sessions/${session}`)).value).session).continuationThoughtId, human.thoughtId);
+  await expect(page.getByRole("textbox", { name: "Your message" })).toHaveValue("");
+
+  // Seed through the real daemon to put the selected parent and its receipt
+  // outside the recent window, without automating 21 identical composer sends.
+  for (let index = 0; index < 21; index++) {
+    const response = await fetch(new URL(`/evolve-sessions/${session}/turns`, daemon.url), {
+      method: "POST", headers: { authorization: `Bearer ${user}`, "content-type": "application/json", "idempotency-key": `owned-page-${index}` },
+      body: JSON.stringify({ parentId: human.thoughtId, text: `Owned paging turn ${index}` }), signal: AbortSignal.timeout(3000),
+    });
+    assert.equal(response.status, 201);
+    await finish(session, index + 3);
+  }
+  await page.goto(new URL(href, origin).href, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Resume", exact: true }).click();
+  await expect(page.getByText("Owned paging turn 20", { exact: true })).toBeVisible();
+  await expect(page.getByText(question, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/continuing from/i).first()).toContainText(insight);
+  await page.getByRole("textbox", { name: "Your message" }).fill("Owned bounded continuation draft");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  const earlier = page.getByRole("button", { name: "Load earlier turns" });
+  const firstTurn = page.getByRole("region", { name: "Conversation", exact: true })
+    .getByRole("region", { name: "Conversation turn", exact: true }).first();
+  const loadEarlierTurns = async () => {
+    for (let count = 0; count < 5 && await earlier.isVisible(); count++) {
+      const previous = await firstTurn.textContent();
+      await earlier.click();
+      await expect.poll(() => firstTurn.textContent(), { message: "Loading earlier turns must advance the visible transcript" }).not.toBe(previous);
+    }
+    await expect(earlier).toHaveCount(0);
+  };
+  await loadEarlierTurns();
+  await expect(page.getByText(question, { exact: true })).toHaveCount(1);
+  for (let index = 0; index < 21; index++) await expect(page.getByText(`Owned paging turn ${index}`, { exact: true })).toHaveCount(1);
+  await expect(page.getByRole("textbox", { name: "Your message" })).toHaveValue("Owned bounded continuation draft");
+
+  await page.goto(`${origin}/explore`, { waitUntil: "networkidle" });
+  await page.getByRole("textbox", { name: /^search thoughts$/i }).fill("clarification only");
+  await page.getByRole("button", { name: /^search$/i }).click();
+  await expect(page.getByText(/no results/i).first()).toBeVisible();
+  await page.goto(`${origin}/export?thoughtId=${encodeURIComponent(anchor)}`, { waitUntil: "networkidle" });
+  const response = page.waitForResponse(value => value.url().endsWith("/api/export/simple") && value.request().method() === "POST" && value.status() === 200);
+  await page.getByRole("button", { name: /create simple export/i }).click();
+  const markdown = await (await response).text();
+  assert.ok(!markdown.includes(question) && !markdown.includes("Owned selective clarification only.") && !markdown.includes("Owned selective AI reply remains dialogue."));
+  assert.ok(markdown.includes(insight) && markdown.includes(aiIdea) && markdown.includes(passage), "confirmed thoughts remain exportable");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "selective workflow must not overflow");
+
+  // Lose the browser-side acknowledgement after the real daemon committed it.
+  // A failed original-key lookup must not trigger a second admission.
+  await open();
+  let posts = 0, lookups = 0, originalKey = "";
+  const intercept = async (route: import("@playwright/test").Route) => {
+    const request = route.request(), url = new URL(request.url());
+    if (request.method() === "POST" && /\/turns$/.test(url.pathname)) {
+      posts++;
+      originalKey = request.headers()["idempotency-key"] ?? "";
+      assert.ok(originalKey, "admission must carry its durable request key");
+      await route.fetch();
+      await route.fulfill({ status: 502, contentType: "application/json", body: "{}" });
+    } else if (request.method() === "GET" && url.pathname.includes("/turns/by-key/")) {
+      lookups++;
+      assert.equal(decodeURIComponent(url.pathname.split("/").at(-1) ?? ""), originalKey, "lookup must use the original admission key");
+      if (lookups === 1) await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+      else await route.continue();
+    } else await route.continue();
+  };
+  await page.route("**/api/**", intercept);
+  try {
+    await page.getByRole("textbox", { name: "Your message" }).fill("Owned selective question: uncertain acknowledgement?");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(page.getByText(/unconfirmed|could not confirm|may have started/i).first()).toBeVisible();
+    await expect(page.getByText(/no thoughts saved/i)).toHaveCount(0);
+    const check = page.getByRole("button", { name: /check.*(?:send|request|admission)/i });
+    await check.click();
+    await expect.poll(() => lookups).toBe(1);
+    await expect(page.getByText(/unconfirmed|could not confirm|may have started/i).first()).toBeVisible();
+    assert.equal(posts, 1, "a failed lookup must not replay the admitted send");
+    await check.click();
+    await expect.poll(() => lookups).toBe(2);
+    assert.equal(posts, 1, "a successful lookup must not replay the admitted send");
+  } finally { await page.unroute("**/api/**", intercept); }
+
+  // The uncertain PUT is delayed before admission. A read of the old parent
+  // is not proof that the delayed write cannot still arrive.
+  await page.goto(new URL(href, origin).href, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Resume", exact: true }).click();
+  await loadEarlierTurns();
+  const draftAfterChange = "Owned draft after uncertain continuation.";
+  await page.getByRole("textbox", { name: "Your message" }).fill(draftAfterChange);
+  let continuationWrites = 0, staleSends = 0;
+  const delayedChange = async (route: import("@playwright/test").Route) => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    if (request.method() === "PUT" && path.endsWith("/continuation")) {
+      continuationWrites++;
+      await route.fulfill({ status: 502, contentType: "application/json", body: "{}" });
+    } else {
+      if (request.method() === "POST" && path.endsWith("/turns")) staleSends++;
+      await route.continue();
+    }
+  };
+  await page.route("**/api/**", delayedChange);
+  try {
+    await page.getByRole("button", { name: "Change", exact: true }).click();
+    await page.getByRole("radio", { name: new RegExp(aiIdea.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).check();
+    await page.getByRole("button", { name: "Use this thought" }).click();
+    await expect(page.getByText(/continuation change unconfirmed/i)).toBeVisible();
+    await page.getByRole("button", { name: "Check selection" }).click();
+    await expect(page.getByRole("textbox", { name: "Your message" })).toHaveValue(draftAfterChange);
+    await page.getByRole("button", { name: /use current (?:selection|thought)|keep current (?:selection|thought)/i }).click();
+    assert.equal(continuationWrites, 1, "recovery must not replay an uncertain selection");
+    const late = await fetch(new URL(`/evolve-sessions/${session}/continuation`, daemon.url), {
+      method: "PUT", headers: { authorization: `Bearer ${user}`, "content-type": "application/json" },
+      body: JSON.stringify({ thoughtId: ai.thoughtId }), signal: AbortSignal.timeout(3000),
+    });
+    assert.equal(late.status, 200);
+    const beforeLateSend = turns(session).length;
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(page.getByText(/continuation.*chang|selection.*chang|check.*selection/i).first()).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Your message" })).toHaveValue(draftAfterChange);
+    assert.ok(staleSends <= 1, "a stale send must not be replayed");
+    assert.equal(turns(session).length, beforeLateSend, "a late continuation write must not admit a stale-parent message");
+  } finally { await page.unroute("**/api/**", delayedChange); }
+}
+
 async function walkthrough(viewport: { width: number; height: number }): Promise<void> {
   const dbPath = resolve(root, `owned-${viewport.width}.sqlite`);
   const fake = new FixtureClient(); let tick: (() => void) | undefined;
@@ -430,6 +663,7 @@ async function walkthrough(viewport: { width: number; height: number }): Promise
     await expect(page.getByText(/title cleared/i).first()).toBeVisible();
     await settleKnowledge(dbPath, pulse);
     await searchWalkthrough(page, origin, running, dbPath, id, content, viewport.width < 600, pulse);
+    await ideasWalkthrough(page, origin, running, dbPath, id, pulse);
     await page.goto(`${origin}/ideas/${encodeURIComponent(id)}`, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: /connect to another thought/i }).click();
     const main = page.locator("main");

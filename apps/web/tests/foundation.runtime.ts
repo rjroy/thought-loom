@@ -16,7 +16,8 @@ import { browseDaemon, checkBrowseBrowser, checkPendingConnectionMap } from "./b
 import { settingsDaemon, checkSettingsRoutes, checkSettingsBrowser } from "./settings.runtime";
 import { backgroundWorkDaemon, checkBackgroundRoutes, checkBackgroundBrowser, checkBackgroundLostAck, checkBackgroundIdentityChange } from "./background-work.runtime";
 import { ideaDaemon, checkIdeaRoute, checkIdeaReinterpretRoute, checkIdeaReinterpretBrowser, checkIdeaBrowser, checkIdeaGlyphs } from "./idea.runtime";
-import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs } from "./evolve.runtime";
+import { evolveDaemon, checkEvolveRoute, checkEvolveBrowser, checkEvolveGlyphs, checkSelectiveStop, checkSelectiveStopWithStaleRead, checkSelectiveStopWithUnknownKeep } from "./evolve.runtime";
+import { checkCompactRecovery, checkOffWindowReceiptOrder, checkOffWindowActiveReceipt, checkBranchInspectionRace, checkOverlappingStopRecovery } from "./evolve-recovery.runtime";
 import { exportDaemon, checkExportRoute, checkExportBrowser, checkExportAdmissionRace } from "./export.runtime";
 import { importDaemon, checkImportEntry, checkImportBrowser, checkLargeImportRoute } from "./import.runtime";
 import { checkMediaImportEntry, checkMediaUploadRecovery, checkMediaSourceStatus, checkMediaSourceGates, checkMediaSourceRetry, checkMediaSourceRejected, checkMediaSourceRestore, checkMediaSourceTitleRace, checkMediaSourceCommandRace, checkMediaExploreSurface, checkMediaEvolveSurface, checkMediaAskSurface, checkMediaExportSurface, checkMediaReinterpretStatusOwner } from "./media-import.runtime";
@@ -55,6 +56,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/app/ideas/[id]/page.tsx", "apps/web/src/components/idea-view.tsx", "apps/web/src/components/idea.module.css", "apps/web/src/components/idea-navigation-provider.tsx",
     "apps/web/src/components/connection-editor.tsx", "apps/web/src/components/connection-thought-picker.tsx", "apps/web/src/components/connection-editor.module.css",
     "apps/web/src/app/evolve/page.tsx", "apps/web/src/components/evolve-view.tsx", "apps/web/src/components/evolve-provider.tsx", "apps/web/src/components/evolve.module.css",
+    "apps/web/src/components/evolve-context.tsx", "apps/web/src/components/evolve-selective.tsx", "apps/web/src/components/evolve-selective-state.ts", "apps/web/src/components/evolve-selective-client.ts", "apps/web/src/components/evolve-selective.module.css",
     "apps/web/src/app/export/page.tsx", "apps/web/src/components/export-view.tsx", "apps/web/src/components/export-provider.tsx", "apps/web/src/components/export.module.css",
     "apps/web/src/app/exports/page.tsx", "apps/web/src/app/exports/new/page.tsx", "apps/web/src/app/exports/[runId]/page.tsx",
     "apps/web/src/components/exports-view.tsx", "apps/web/src/components/exports-detail.tsx", "apps/web/src/components/exports.module.css",
@@ -88,6 +90,7 @@ async function createFixture(temp: string): Promise<string> {
     "apps/web/src/features/idea/location.ts", "apps/web/src/features/idea/types.ts", "apps/web/src/features/idea/validation.ts", "apps/web/src/features/idea/request.ts", "apps/web/src/features/idea/media.ts",
     "apps/web/src/app/api/evolve/thoughts/[id]/route.ts", "apps/web/src/app/api/evolve/thoughts/[id]/responses/[responseId]/route.ts",
     "apps/web/src/app/api/evolve/runs/[id]/route.ts", "apps/web/src/server/evolve.ts",
+    "apps/web/src/app/api/evolve-sessions/[[...path]]/route.ts", "apps/web/src/server/evolve-sessions.ts",
     "apps/web/src/features/evolve/location.ts", "apps/web/src/features/evolve/types.ts", "apps/web/src/features/evolve/validation.ts", "apps/web/src/features/evolve/request.ts",
     "apps/web/src/app/api/export/simple/route.ts", "apps/web/src/app/api/export/agentic/route.ts", "apps/web/src/app/api/export/agentic/[id]/route.ts",
     "apps/web/src/app/api/export/runs/[id]/route.ts", "apps/web/src/app/api/export/thoughts/[id]/route.ts", "apps/web/src/server/export.ts",
@@ -288,7 +291,7 @@ async function main(): Promise<void> {
     else if (request.url?.startsWith("/search-sessions") || request.url?.startsWith("/runs/owned-search-") || request.url?.startsWith("/thoughts/owned-thought-1")) void fixtureAgenticSearch.handler(request, response);
     else if (request.url?.startsWith("/imports/") || request.url?.startsWith("/import-") || request.url?.startsWith("/runs/import-")) void fixtureImport.handler(request, response);
     else if (request.url?.startsWith("/exports/") || request.url?.startsWith("/runs/export-") || request.url?.startsWith("/thoughts/export-")) void fixtureExport.handler(request, response);
-    else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-")) void fixtureEvolve.handler(request, response);
+    else if (request.url?.startsWith("/thoughts/evolve-") || request.url?.startsWith("/runs/evolve-") || request.url?.startsWith("/evolve-sessions")) void fixtureEvolve.handler(request, response);
     else if (request.url === "/connections" || request.url?.startsWith("/thoughts/idea-") || request.url?.startsWith("/connections/idea-") || request.url?.startsWith("/runs/owned-weave-") || /^\/thoughts\/thought-1(?:\/|\?scope=normal(?:&|$))/.test(request.url ?? "")) void fixtureIdea.handler(request, response);
     else if (request.url?.startsWith("/search?") || request.url?.startsWith("/thoughts/")) void fixtureSearch.handler(request, response);
     else void fixtureDaemon.handler(request, response);
@@ -350,6 +353,16 @@ async function main(): Promise<void> {
       await delay(100);
     }
     assert.ok(ready, `Owned Next server did not become ready:\n${output()}`);
+    if (process.env.THOUGHTLOOM_TEST_EVOLVE_RECOVERY === "1") {
+      const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+      try {
+        for (const check of [checkCompactRecovery, checkOffWindowReceiptOrder, checkOffWindowActiveReceipt, checkBranchInspectionRace, checkOverlappingStopRecovery]) {
+          const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+          try { fixtureEvolve.reset(); await check(page, origin); } finally { await page.close(); }
+        }
+      } finally { await browser.close(); }
+      return;
+    }
     if (process.env.THOUGHTLOOM_TEST_THOUGHT_MARKDOWN === "1") {
       const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
       try {
@@ -680,6 +693,9 @@ async function main(): Promise<void> {
           await expect.poll(async () => Math.abs(await page.evaluate(() => window.scrollY) - ideaScroll), { timeout: 5000 }).toBeLessThanOrEqual(2);
           await checkIdeaBrowser(page, fixtureIdea, fixtureSearch, { origin, narrow: viewport.width < 500 });
           await checkEvolveBrowser(page, fixtureEvolve, { origin, narrow: viewport.width < 500 });
+          await checkSelectiveStop(page, fixtureEvolve, origin);
+          await checkSelectiveStopWithStaleRead(page, fixtureEvolve, origin);
+          await checkSelectiveStopWithUnknownKeep(page, fixtureEvolve, origin);
           await checkExportBrowser(page, fixtureExport, { origin, daemonOrigin, token, narrow: viewport.width < 500 });
           await page.evaluate(() => document.fonts.ready);
           assert.ok(await page.evaluate(() => Array.from(document.fonts).some(font => font.status === "loaded" && font.family.toLowerCase().includes("source"))), "local Source Sans font should load");
